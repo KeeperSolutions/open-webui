@@ -951,7 +951,8 @@ export const getBackendConfig = async () => {
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
-			return res.json();
+			const config = await res.json();
+			return { ...config, name: APP_NAME };
 		})
 		.catch((err) => {
 			console.log(err);
