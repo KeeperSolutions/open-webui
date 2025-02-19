@@ -183,6 +183,13 @@
 							}}
 						>
 							<div class="mb-1">
+								<div class="flex justify-center mb-4">
+									<img
+										src="{WEBUI_BASE_URL}/static/logo.png"
+										alt="Keeper Logo"
+										class="w-24"
+									/>
+								</div>
 								<div class=" text-2xl font-medium">
 									{#if $config?.onboarding ?? false}
 										{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
