@@ -185,7 +185,7 @@
 							<div class="mb-1">
 								<div class="flex justify-center mb-4">
 									<img
-										src="{WEBUI_BASE_URL}/static/logo.png"
+										src="{WEBUI_BASE_URL}/static/generic-org-logo.png"
 										alt="Keeper Logo"
 										class="w-24"
 									/>
