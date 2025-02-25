@@ -8,6 +8,7 @@ on:
 
 jobs:
   release:
+    if: false  # This condition will prevent the workflow from running
     runs-on: ubuntu-latest
     environment:
       name: pypi
