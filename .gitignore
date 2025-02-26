@@ -313,3 +313,6 @@ cypress/screenshots
 
 # VSCode workspace settings
 backend/.vscode/
+
+# webui-secret-key
+.webui_secret_key
