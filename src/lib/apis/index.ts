@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
+=======
+import { APP_NAME, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+>>>>>>> f4f684379 (Add rebase from main:)
 import { getOpenAIModelsDirect } from './openai';
 
 import { parse } from 'yaml';
@@ -1173,7 +1177,9 @@ export const getPipelineValves = async (token: string, pipeline_id: string, urlI
 	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
-			return res.json();
+			const config = await res.json();
+			// Keep the frontend APP_NAME instead of backend name
+			return { ...config, name: APP_NAME };
 		})
 		.catch((err) => {
 			console.error(err);
@@ -1283,7 +1289,8 @@ export const getBackendConfig = async () => {
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
-			return res.json();
+			const config = await res.json();
+			return { ...config, name: APP_NAME };
 		})
 		.catch((err) => {
 			console.error(err);
