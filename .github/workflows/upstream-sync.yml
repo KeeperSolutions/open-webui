@@ -1,0 +1,65 @@
+name: Sync with Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at midnight
+  workflow_dispatch:      # Allows manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: main
+    
+    - name: Configure Git
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+    
+    - name: Add upstream remote
+      run: git remote add upstream https://github.com/open-webui/open-webui.git
+    
+    - name: Fetch upstream
+      run: |
+        git fetch upstream
+        git checkout main
+    
+    - name: Merge upstream
+      run: |
+        git merge upstream/main
+        git push origin main
+    
+    - name: Attempt deploy branch rebase
+      continue-on-error: true
+      run: |
+        git fetch origin deploy
+        git checkout deploy
+        git rebase main
+        git push --force-with-lease origin deploy
+    
+    - name: Create conflict notification issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const issue = await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.name,
+            title: '🔄 Merge Conflict: Manual Resolution Required',
+            body: `The automated sync with upstream has resulted in conflicts that need manual resolution.
+                   
+                   Please follow these steps:
+                   1. \`git checkout main\`
+                   2. \`git pull origin main\`
+                   3. \`git checkout deploy\`
+                   4. \`git rebase main\`
+                   5. Resolve conflicts
+                   6. \`git push -f origin deploy\`
+                   
+                   Common conflict resolution tips are in CONTRIBUTING.md`
+          });

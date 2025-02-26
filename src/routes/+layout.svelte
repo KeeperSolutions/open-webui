@@ -178,6 +178,15 @@
 				console.log('Additional details:', details);
 			}
 		});
+
+		_socket.on('user-list', (data) => {
+			activeUserIds.set(data.user_ids);
+		});
+
+		_socket.on('usage', (data) => {
+			console.log('usage', data);
+			USAGE_POOL.set(data['models']);
+		});
 	};
 
 	const executePythonAsWorker = async (id, code, cb) => {
@@ -744,7 +753,6 @@
 		let backendConfig = null;
 		try {
 			backendConfig = await getBackendConfig();
-			console.log('Backend config:', backendConfig);
 		} catch (error) {
 			console.error('Error loading backend config:', error);
 		}
