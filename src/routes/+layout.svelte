@@ -105,7 +105,6 @@
 		});
 
 		_socket.on('user-list', (data) => {
-			console.log('user-list', data);
 			activeUserIds.set(data.user_ids);
 		});
 
@@ -556,7 +555,6 @@
 		let backendConfig = null;
 		try {
 			backendConfig = await getBackendConfig();
-			console.log('Backend config:', backendConfig);
 		} catch (error) {
 			console.error('Error loading backend config:', error);
 		}
