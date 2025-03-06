@@ -1,30 +1,25 @@
-import logging
-import uuid
-import jwt
 import base64
-import hmac
 import hashlib
-import requests
+import hmac
+import logging
 import os
-
-
+import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Optional, Union, List, Dict
+from typing import Dict, List, Optional, Union
 
-from open_webui.models.users import Users
-
-from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import (
-    WEBUI_SECRET_KEY,
-    TRUSTED_SIGNATURE_KEY,
-    STATIC_DIR,
-    SRC_LOG_LEVELS,
-)
-
+import jwt
+import requests
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.env import (
+    SRC_LOG_LEVELS,
+    STATIC_DIR,
+    TRUSTED_SIGNATURE_KEY,
+    WEBUI_SECRET_KEY,
+)
+from open_webui.models.users import Users
 from passlib.context import CryptContext
-
 
 logging.getLogger("passlib").setLevel(logging.ERROR)
 
@@ -72,7 +67,7 @@ def get_license_data(app, key):
     if key:
         try:
             res = requests.post(
-                "https://api.openwebui.com/api/v1/license",
+                "https://api.openwebui.com/api/v1/license/",
                 json={"key": key, "version": "1"},
                 timeout=5,
             )
@@ -104,9 +99,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password, hashed_password):
-    return (
-        pwd_context.verify(plain_password, hashed_password) if hashed_password else None
-    )
+    if not hashed_password:
+        return None
+
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password):
