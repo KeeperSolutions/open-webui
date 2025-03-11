@@ -1,4 +1,6 @@
 <script>
+	import { PUBLIC_DEMO_ENVIRONMENT } from '$env/static/public';
+
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext, tick } from 'svelte';
@@ -219,7 +221,9 @@
 							<div class="mb-1">
 								<div class="flex justify-center mb-4">
 									<img
-										src="{WEBUI_BASE_URL}/static/logo.png"
+										src={PUBLIC_DEMO_ENVIRONMENT === 'enabled'
+											? `${WEBUI_BASE_URL}/static/generic-org-logo.png`
+											: `${WEBUI_BASE_URL}/static/logo.png`}
 										alt="Keeper Logo"
 										class="w-24"
 									/>
