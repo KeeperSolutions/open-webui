@@ -1,9 +1,5 @@
-<<<<<<< HEAD
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
-=======
-import { APP_NAME, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
->>>>>>> f4f684379 (Add rebase from main:)
 import { getOpenAIModelsDirect } from './openai';
 
 import { parse } from 'yaml';
