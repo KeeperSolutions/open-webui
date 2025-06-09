@@ -54,7 +54,10 @@
 	let DB = null;
 	let localDBChats = [];
 
-	let version;
+	let version = {
+		current: WEBUI_VERSION,
+		latest: WEBUI_VERSION
+	};
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
@@ -250,12 +253,13 @@
 			};
 		});
 	};
+
 </script>
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
 
-{#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
+{#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast !== false) && $user?.role === 'admin'}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
 		<UpdateInfoToast
 			{version}
@@ -266,6 +270,10 @@
 		/>
 	</div>
 {/if}
+
+
+
+
 
 {#if $user}
 	<div class="app relative">
