@@ -47,9 +47,34 @@ pip install open-webui
 #sh setup-locally.sh
 
 # to start Open WebUI run in the terminal:
-# Create a virtual environment
-#python3 -m venv venv
+# Create a virtual environment with Python 3.11 exclusively
+#python3.11 -m venv venv
 # Activate the virtual environment
 #source venv/bin/activate
-# go to backend dir and run sh dev.sh in virutal environment
+# install dependencies
+# pip install -r requirements.txt
+# go to backend dir and run sh dev.sh in virtual environment
 #sh dev.sh
+
+
+# Troubleshooting the dependency installation:
+# Deactivate current venv
+#deactivate
+
+# Remove the problematic venv
+#rm -rf venv
+
+# Create new venv with explicit Python 3.11
+#python3.11 -m venv venv
+
+# Activate the new venv
+#source venv/bin/activate
+
+# Verify it's using Python 3.11
+#python --version
+#pip --version
+
+# Now install requirements
+#pip install -r requirements.txt
+#or
+#pip install --no-cache-dir -r requirements.txt
