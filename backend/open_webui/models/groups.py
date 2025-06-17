@@ -245,5 +245,11 @@ class GroupTable:
                 log.exception(e)
                 return False
 
+    def get_group_by_name(self, name: str) -> Optional[GroupModel]:
+        """Get a group by its name."""
+        with get_db() as db:
+            group = db.query(Group).filter(func.lower(Group.name) == name.lower()).first()
+            return GroupModel.model_validate(group) if group else None
+
 
 Groups = GroupTable()
