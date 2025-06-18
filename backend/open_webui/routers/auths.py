@@ -19,7 +19,7 @@ from open_webui.models.auths import (
     UserResponse,
 )
 from open_webui.models.users import Users
-from open_webui.models.groups import Groups
+from open_webui.models.groups import Groups, GroupUpdateForm
 
 from open_webui.constants import ERROR_MESSAGES, WEBHOOK_MESSAGES
 from open_webui.env import (
@@ -554,9 +554,87 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
 ############################
 
 
+def assign_user_to_domain_group(email: str, user_id: str, target_group_name: str):
+    """Assign user to a specific group if their email domain is in the allowed list."""
+    try:
+        # List of allowed domains
+        ALLOWED_DOMAINS = [
+            "attenda.io",
+            "bigspark.dev",
+            "confidios.com",
+            "creode.co.uk",
+            "hibernia-labs.com",
+            "lenvi.com",
+            "manchester.ac.uk",
+            "mennagroup.com",
+            "morganstanley.com",
+            "suresite.co.uk",
+            "whitecapconsulting.co.uk",
+        ]
+
+        domain = email.split('@')[-1].lower()
+
+        # Check if domain is in allowed list
+        if domain in [d.lower() for d in ALLOWED_DOMAINS]:
+            # Get the target group
+            target_group = Groups.get_group_by_name(target_group_name)
+
+            # If group exists, add user to it
+            if target_group:
+                if user_id not in target_group.user_ids:
+                    target_group.user_ids.append(user_id)
+
+                    # Ensure group has proper permissions
+                    if not target_group.permissions:
+                        target_group.permissions = {
+                            "workspace": {
+                                "models": True,
+                                "knowledge": True,
+                                "prompts": True,
+                                "tools": True
+                            },
+                            "sharing": {
+                                "public_models": False,
+                                "public_knowledge": False,
+                                "public_prompts": False,
+                                "public_tools": False
+                            },
+                            "chat": {
+                                "controls": True,
+                                "file_upload": True,
+                                "delete": True,
+                                "edit": True,
+                                "share": True,
+                                "export": True,
+                                "stt": True,
+                                "tts": True,
+                                "call": True,
+                                "multiple_models": True,
+                                "temporary": True,
+                                "temporary_enforced": False
+                            },
+                            "features": {
+                                "direct_tool_servers": False,
+                                "web_search": True,
+                                "image_generation": True,
+                                "code_interpreter": True,
+                                "notes": True
+                            }
+                        }
+
+                    update_form = GroupUpdateForm(
+                        name=target_group.name,
+                        description=target_group.description,
+                        permissions=target_group.permissions,
+                        user_ids=target_group.user_ids,
+                    )
+                    Groups.update_group_by_id(id=target_group.id, form_data=update_form)
+                    log.info(f"Added user {user_id} to group {target_group_name} based on domain {domain}")
+    except Exception as e:
+        log.error(f"Error assigning user to domain group: {e}")
+
 @router.post("/signup", response_model=SessionUserResponse)
 async def signup(request: Request, response: Response, form_data: SignupForm):
-
     if WEBUI_AUTH:
         if (
             not request.app.state.config.ENABLE_SIGNUP
@@ -602,6 +680,9 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         )
 
         if user:
+            # Assign user to domain group if their email domain matches
+            assign_user_to_domain_group(form_data.email.lower(), user.id, "Manchester Roundtable")
+
             expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
             expires_at = None
             if expires_delta:
