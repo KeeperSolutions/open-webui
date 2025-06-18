@@ -441,7 +441,6 @@ class GroupTable:
     def create_groups_by_group_names(
         self, user_id: str, group_names: list[str], db: Optional[Session] = None
     ) -> list[GroupModel]:
-
         # check for existing groups
         existing_groups = self.get_all_groups(db=db)
         existing_group_names = {group.name for group in existing_groups}
@@ -604,6 +603,14 @@ class GroupTable:
         except Exception as e:
             log.exception(e)
             return None
+
+    def get_group_by_name(self, name: str) -> Optional[GroupModel]:
+        """Get a group by its name."""
+        with get_db() as db:
+            group = (
+                db.query(Group).filter(func.lower(Group.name) == name.lower()).first()
+            )
+            return GroupModel.model_validate(group) if group else None
 
 
 Groups = GroupTable()
