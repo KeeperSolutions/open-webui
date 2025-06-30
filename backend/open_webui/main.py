@@ -4,27 +4,21 @@ import json
 import logging
 import mimetypes
 import os
+import random
 import shutil
 import sys
 import time
-import random
+from contextlib import asynccontextmanager
+from typing import Optional
+from urllib.parse import parse_qs, urlencode, urlparse
 from uuid import uuid4
 
-
-from contextlib import asynccontextmanager
-from urllib.parse import urlencode, parse_qs, urlparse
-from pydantic import BaseModel
-from sqlalchemy import text
-
-from typing import Optional
-from aiocache import cached
 import aiohttp
 import anyio.to_thread
 import requests
-from redis import Redis
-
-
+from aiocache import cached
 from fastapi import (
+    BackgroundTasks,
     Depends,
     FastAPI,
     File,
@@ -32,430 +26,391 @@ from fastapi import (
     HTTPException,
     Request,
     UploadFile,
-    status,
     applications,
-    BackgroundTasks,
+    status,
 )
-
-from fastapi.openapi.docs import get_swagger_ui_html
-
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-
-from starlette_compress import CompressMiddleware
-
+from pydantic import BaseModel
+from redis import Redis
+from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response, StreamingResponse
+from starlette_compress import CompressMiddleware
 
-
-from open_webui.utils import logger
-from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
-from open_webui.utils.logger import start_logger
-from open_webui.socket.main import (
-    app as socket_app,
-    periodic_usage_pool_cleanup,
-    get_models_in_use,
-    get_active_user_ids,
-)
-from open_webui.routers import (
-    audio,
-    images,
-    ollama,
-    openai,
-    retrieval,
-    pipelines,
-    tasks,
-    auths,
-    channels,
-    chats,
-    notes,
-    folders,
-    configs,
-    groups,
-    files,
-    functions,
-    memories,
-    models,
-    knowledge,
-    prompts,
-    evaluations,
-    tools,
-    users,
-    utils,
-)
-
-from open_webui.routers.retrieval import (
-    get_embedding_function,
-    get_ef,
-    get_rf,
-)
-
-from open_webui.internal.db import Session, engine
-
-from open_webui.models.functions import Functions
-from open_webui.models.models import Models
-from open_webui.models.users import UserModel, Users
-from open_webui.models.chats import Chats
-
-from open_webui.config import (
-    LICENSE_KEY,
-    # Ollama
-    ENABLE_OLLAMA_API,
-    OLLAMA_BASE_URLS,
-    OLLAMA_API_CONFIGS,
-    # OpenAI
-    ENABLE_OPENAI_API,
-    ONEDRIVE_CLIENT_ID,
-    ONEDRIVE_SHAREPOINT_URL,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
-    OPENAI_API_BASE_URLS,
-    OPENAI_API_KEYS,
-    OPENAI_API_CONFIGS,
-    # Direct Connections
-    ENABLE_DIRECT_CONNECTIONS,
-    # Thread pool size for FastAPI/AnyIO
-    THREAD_POOL_SIZE,
-    # Tool Server Configs
-    TOOL_SERVER_CONNECTIONS,
-    # Code Execution
-    ENABLE_CODE_EXECUTION,
-    CODE_EXECUTION_ENGINE,
-    CODE_EXECUTION_JUPYTER_URL,
-    CODE_EXECUTION_JUPYTER_AUTH,
-    CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-    CODE_EXECUTION_JUPYTER_TIMEOUT,
-    ENABLE_CODE_INTERPRETER,
-    CODE_INTERPRETER_ENGINE,
-    CODE_INTERPRETER_PROMPT_TEMPLATE,
-    CODE_INTERPRETER_JUPYTER_URL,
-    CODE_INTERPRETER_JUPYTER_AUTH,
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-    CODE_INTERPRETER_JUPYTER_TIMEOUT,
-    # Image
-    AUTOMATIC1111_API_AUTH,
-    AUTOMATIC1111_BASE_URL,
-    AUTOMATIC1111_CFG_SCALE,
-    AUTOMATIC1111_SAMPLER,
-    AUTOMATIC1111_SCHEDULER,
-    COMFYUI_BASE_URL,
-    COMFYUI_API_KEY,
-    COMFYUI_WORKFLOW,
-    COMFYUI_WORKFLOW_NODES,
-    ENABLE_IMAGE_GENERATION,
-    ENABLE_IMAGE_PROMPT_GENERATION,
-    IMAGE_GENERATION_ENGINE,
-    IMAGE_GENERATION_MODEL,
-    IMAGE_SIZE,
-    IMAGE_STEPS,
-    IMAGES_OPENAI_API_BASE_URL,
-    IMAGES_OPENAI_API_KEY,
-    IMAGES_GEMINI_API_BASE_URL,
-    IMAGES_GEMINI_API_KEY,
-    # Audio
+from open_webui.config import (  # Ollama; OpenAI; Direct Connections; Thread pool size for FastAPI/AnyIO; Tool Server Configs; Code Execution; Image; Audio; Retrieval; Retrieval (Web Search); WebUI; WebUI (OAuth); WebUI (LDAP); LDAP Group Management; Misc; Admin; Tasks
+    ADMIN_EMAIL,
+    API_KEY_ALLOWED_ENDPOINTS,
+    AUDIO_STT_AZURE_API_KEY,
+    AUDIO_STT_AZURE_BASE_URL,
+    AUDIO_STT_AZURE_LOCALES,
+    AUDIO_STT_AZURE_MAX_SPEAKERS,
+    AUDIO_STT_AZURE_REGION,
     AUDIO_STT_ENGINE,
     AUDIO_STT_MODEL,
-    AUDIO_STT_SUPPORTED_CONTENT_TYPES,
     AUDIO_STT_OPENAI_API_BASE_URL,
     AUDIO_STT_OPENAI_API_KEY,
-    AUDIO_STT_AZURE_API_KEY,
-    AUDIO_STT_AZURE_REGION,
-    AUDIO_STT_AZURE_LOCALES,
-    AUDIO_STT_AZURE_BASE_URL,
-    AUDIO_STT_AZURE_MAX_SPEAKERS,
+    AUDIO_STT_SUPPORTED_CONTENT_TYPES,
     AUDIO_TTS_API_KEY,
+    AUDIO_TTS_AZURE_SPEECH_BASE_URL,
+    AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
+    AUDIO_TTS_AZURE_SPEECH_REGION,
     AUDIO_TTS_ENGINE,
     AUDIO_TTS_MODEL,
     AUDIO_TTS_OPENAI_API_BASE_URL,
     AUDIO_TTS_OPENAI_API_KEY,
     AUDIO_TTS_SPLIT_ON,
     AUDIO_TTS_VOICE,
-    AUDIO_TTS_AZURE_SPEECH_REGION,
-    AUDIO_TTS_AZURE_SPEECH_BASE_URL,
-    AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
-    PLAYWRIGHT_WS_URL,
-    PLAYWRIGHT_TIMEOUT,
+    AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
+    AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
+    AUTOMATIC1111_API_AUTH,
+    AUTOMATIC1111_BASE_URL,
+    AUTOMATIC1111_CFG_SCALE,
+    AUTOMATIC1111_SAMPLER,
+    AUTOMATIC1111_SCHEDULER,
+    BING_SEARCH_V7_ENDPOINT,
+    BING_SEARCH_V7_SUBSCRIPTION_KEY,
+    BOCHA_SEARCH_API_KEY,
+    BRAVE_SEARCH_API_KEY,
+    BYPASS_EMBEDDING_AND_RETRIEVAL,
+    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
+    BYPASS_WEB_SEARCH_WEB_LOADER,
+    CACHE_DIR,
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    CODE_EXECUTION_ENGINE,
+    CODE_EXECUTION_JUPYTER_AUTH,
+    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
+    CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
+    CODE_EXECUTION_JUPYTER_TIMEOUT,
+    CODE_EXECUTION_JUPYTER_URL,
+    CODE_INTERPRETER_ENGINE,
+    CODE_INTERPRETER_JUPYTER_AUTH,
+    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
+    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
+    CODE_INTERPRETER_JUPYTER_TIMEOUT,
+    CODE_INTERPRETER_JUPYTER_URL,
+    CODE_INTERPRETER_PROMPT_TEMPLATE,
+    COMFYUI_API_KEY,
+    COMFYUI_BASE_URL,
+    COMFYUI_WORKFLOW,
+    COMFYUI_WORKFLOW_NODES,
+    CONTENT_EXTRACTION_ENGINE,
+    CORS_ALLOW_ORIGIN,
+    DATALAB_MARKER_API_KEY,
+    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+    DATALAB_MARKER_FORCE_OCR,
+    DATALAB_MARKER_LANGS,
+    DATALAB_MARKER_OUTPUT_FORMAT,
+    DATALAB_MARKER_PAGINATE,
+    DATALAB_MARKER_SKIP_CACHE,
+    DATALAB_MARKER_STRIP_EXISTING_OCR,
+    DATALAB_MARKER_USE_LLM,
+    DEEPGRAM_API_KEY,
+    DEFAULT_ARENA_MODEL,
+    DEFAULT_LOCALE,
+    DEFAULT_MODELS,
+    DEFAULT_PROMPT_SUGGESTIONS,
+    DEFAULT_RAG_TEMPLATE,
+    DEFAULT_USER_ROLE,
+    DOCLING_DO_PICTURE_DESCRIPTION,
+    DOCLING_OCR_ENGINE,
+    DOCLING_OCR_LANG,
+    DOCLING_PICTURE_DESCRIPTION_API,
+    DOCLING_PICTURE_DESCRIPTION_LOCAL,
+    DOCLING_PICTURE_DESCRIPTION_MODE,
+    DOCLING_SERVER_URL,
+    DOCUMENT_INTELLIGENCE_ENDPOINT,
+    DOCUMENT_INTELLIGENCE_KEY,
+    ENABLE_ADMIN_CHAT_ACCESS,
+    ENABLE_ADMIN_EXPORT,
+    ENABLE_API_KEY,
+    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
+    ENABLE_AUTOCOMPLETE_GENERATION,
+    ENABLE_CHANNELS,
+    ENABLE_CODE_EXECUTION,
+    ENABLE_CODE_INTERPRETER,
+    ENABLE_COMMUNITY_SHARING,
+    ENABLE_DIRECT_CONNECTIONS,
+    ENABLE_EVALUATION_ARENA_MODELS,
+    ENABLE_FOLLOW_UP_GENERATION,
+    ENABLE_GOOGLE_DRIVE_INTEGRATION,
+    ENABLE_IMAGE_GENERATION,
+    ENABLE_IMAGE_PROMPT_GENERATION,
+    ENABLE_LDAP,
+    ENABLE_LDAP_GROUP_CREATION,
+    ENABLE_LDAP_GROUP_MANAGEMENT,
+    ENABLE_LOGIN_FORM,
+    ENABLE_MESSAGE_RATING,
+    ENABLE_NOTES,
+    ENABLE_OAUTH_ROLE_MANAGEMENT,
+    ENABLE_OLLAMA_API,
+    ENABLE_ONEDRIVE_INTEGRATION,
+    ENABLE_OPENAI_API,
+    ENABLE_RAG_HYBRID_SEARCH,
+    ENABLE_RAG_LOCAL_WEB_FETCH,
+    ENABLE_RETRIEVAL_QUERY_GENERATION,
+    ENABLE_SEARCH_QUERY_GENERATION,
+    ENABLE_SIGNUP,
+    ENABLE_TAGS_GENERATION,
+    ENABLE_TITLE_GENERATION,
+    ENABLE_USER_WEBHOOKS,
+    ENABLE_WEB_LOADER_SSL_VERIFICATION,
+    ENABLE_WEB_SEARCH,
+    ENV,
+    EVALUATION_ARENA_MODELS,
+    EXA_API_KEY,
+    EXTERNAL_DOCUMENT_LOADER_API_KEY,
+    EXTERNAL_DOCUMENT_LOADER_URL,
+    EXTERNAL_WEB_LOADER_API_KEY,
+    EXTERNAL_WEB_LOADER_URL,
+    EXTERNAL_WEB_SEARCH_API_KEY,
+    EXTERNAL_WEB_SEARCH_URL,
+    FILE_IMAGE_COMPRESSION_HEIGHT,
+    FILE_IMAGE_COMPRESSION_WIDTH,
     FIRECRAWL_API_BASE_URL,
     FIRECRAWL_API_KEY,
-    WEB_LOADER_ENGINE,
-    WHISPER_MODEL,
-    WHISPER_VAD_FILTER,
-    WHISPER_LANGUAGE,
-    DEEPGRAM_API_KEY,
-    WHISPER_MODEL_AUTO_UPDATE,
-    WHISPER_MODEL_DIR,
-    # Retrieval
-    RAG_TEMPLATE,
-    DEFAULT_RAG_TEMPLATE,
-    RAG_FULL_CONTEXT,
-    BYPASS_EMBEDDING_AND_RETRIEVAL,
+    FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
+    FRONTEND_BUILD_DIR,
+    GOOGLE_DRIVE_API_KEY,
+    GOOGLE_DRIVE_CLIENT_ID,
+    GOOGLE_PSE_API_KEY,
+    GOOGLE_PSE_ENGINE_ID,
+    IMAGE_GENERATION_ENGINE,
+    IMAGE_GENERATION_MODEL,
+    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
+    IMAGE_SIZE,
+    IMAGE_STEPS,
+    IMAGES_GEMINI_API_BASE_URL,
+    IMAGES_GEMINI_API_KEY,
+    IMAGES_OPENAI_API_BASE_URL,
+    IMAGES_OPENAI_API_KEY,
+    JINA_API_KEY,
+    JWT_EXPIRES_IN,
+    KAGI_SEARCH_API_KEY,
+    LDAP_APP_DN,
+    LDAP_APP_PASSWORD,
+    LDAP_ATTRIBUTE_FOR_GROUPS,
+    LDAP_ATTRIBUTE_FOR_MAIL,
+    LDAP_ATTRIBUTE_FOR_USERNAME,
+    LDAP_CA_CERT_FILE,
+    LDAP_CIPHERS,
+    LDAP_SEARCH_BASE,
+    LDAP_SEARCH_FILTERS,
+    LDAP_SERVER_HOST,
+    LDAP_SERVER_LABEL,
+    LDAP_SERVER_PORT,
+    LDAP_USE_TLS,
+    LDAP_VALIDATE_CERT,
+    LICENSE_KEY,
+    MISTRAL_OCR_API_KEY,
+    MODEL_ORDER_LIST,
+    MOJEEK_SEARCH_API_KEY,
+    OAUTH_ADMIN_ROLES,
+    OAUTH_ALLOWED_ROLES,
+    OAUTH_EMAIL_CLAIM,
+    OAUTH_PICTURE_CLAIM,
+    OAUTH_PROVIDERS,
+    OAUTH_ROLES_CLAIM,
+    OAUTH_USERNAME_CLAIM,
+    OLLAMA_API_CONFIGS,
+    OLLAMA_BASE_URLS,
+    ONEDRIVE_CLIENT_ID,
+    ONEDRIVE_SHAREPOINT_TENANT_ID,
+    ONEDRIVE_SHAREPOINT_URL,
+    OPENAI_API_BASE_URLS,
+    OPENAI_API_CONFIGS,
+    OPENAI_API_KEYS,
+    PDF_EXTRACT_IMAGES,
+    PENDING_USER_OVERLAY_CONTENT,
+    PENDING_USER_OVERLAY_TITLE,
+    PERPLEXITY_API_KEY,
+    PERPLEXITY_MODEL,
+    PERPLEXITY_SEARCH_CONTEXT_USAGE,
+    PLAYWRIGHT_TIMEOUT,
+    PLAYWRIGHT_WS_URL,
+    QUERY_GENERATION_PROMPT_TEMPLATE,
+    RAG_ALLOWED_FILE_EXTENSIONS,
+    RAG_AZURE_OPENAI_API_KEY,
+    RAG_AZURE_OPENAI_API_VERSION,
+    RAG_AZURE_OPENAI_BASE_URL,
+    RAG_EMBEDDING_BATCH_SIZE,
+    RAG_EMBEDDING_ENGINE,
     RAG_EMBEDDING_MODEL,
     RAG_EMBEDDING_MODEL_AUTO_UPDATE,
     RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-    RAG_RERANKING_ENGINE,
-    RAG_RERANKING_MODEL,
-    RAG_EXTERNAL_RERANKER_URL,
     RAG_EXTERNAL_RERANKER_API_KEY,
-    RAG_RERANKING_MODEL_AUTO_UPDATE,
-    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
-    RAG_EMBEDDING_ENGINE,
-    RAG_EMBEDDING_BATCH_SIZE,
-    RAG_TOP_K,
-    RAG_TOP_K_RERANKER,
-    RAG_RELEVANCE_THRESHOLD,
-    RAG_HYBRID_BM25_WEIGHT,
-    RAG_ALLOWED_FILE_EXTENSIONS,
+    RAG_EXTERNAL_RERANKER_URL,
     RAG_FILE_MAX_COUNT,
     RAG_FILE_MAX_SIZE,
-    FILE_IMAGE_COMPRESSION_WIDTH,
-    FILE_IMAGE_COMPRESSION_HEIGHT,
+    RAG_FULL_CONTEXT,
+    RAG_HYBRID_BM25_WEIGHT,
+    RAG_OLLAMA_API_KEY,
+    RAG_OLLAMA_BASE_URL,
     RAG_OPENAI_API_BASE_URL,
     RAG_OPENAI_API_KEY,
-    RAG_AZURE_OPENAI_BASE_URL,
-    RAG_AZURE_OPENAI_API_KEY,
-    RAG_AZURE_OPENAI_API_VERSION,
-    RAG_OLLAMA_BASE_URL,
-    RAG_OLLAMA_API_KEY,
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    CONTENT_EXTRACTION_ENGINE,
-    DATALAB_MARKER_API_KEY,
-    DATALAB_MARKER_LANGS,
-    DATALAB_MARKER_SKIP_CACHE,
-    DATALAB_MARKER_FORCE_OCR,
-    DATALAB_MARKER_PAGINATE,
-    DATALAB_MARKER_STRIP_EXISTING_OCR,
-    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-    DATALAB_MARKER_OUTPUT_FORMAT,
-    DATALAB_MARKER_USE_LLM,
-    EXTERNAL_DOCUMENT_LOADER_URL,
-    EXTERNAL_DOCUMENT_LOADER_API_KEY,
-    TIKA_SERVER_URL,
-    DOCLING_SERVER_URL,
-    DOCLING_OCR_ENGINE,
-    DOCLING_OCR_LANG,
-    DOCLING_DO_PICTURE_DESCRIPTION,
-    DOCLING_PICTURE_DESCRIPTION_MODE,
-    DOCLING_PICTURE_DESCRIPTION_LOCAL,
-    DOCLING_PICTURE_DESCRIPTION_API,
-    DOCUMENT_INTELLIGENCE_ENDPOINT,
-    DOCUMENT_INTELLIGENCE_KEY,
-    MISTRAL_OCR_API_KEY,
+    RAG_RELEVANCE_THRESHOLD,
+    RAG_RERANKING_ENGINE,
+    RAG_RERANKING_MODEL,
+    RAG_RERANKING_MODEL_AUTO_UPDATE,
+    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
+    RAG_TEMPLATE,
     RAG_TEXT_SPLITTER,
-    TIKTOKEN_ENCODING_NAME,
-    PDF_EXTRACT_IMAGES,
-    YOUTUBE_LOADER_LANGUAGE,
-    YOUTUBE_LOADER_PROXY_URL,
-    # Retrieval (Web Search)
-    ENABLE_WEB_SEARCH,
-    WEB_SEARCH_ENGINE,
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-    BYPASS_WEB_SEARCH_WEB_LOADER,
-    WEB_SEARCH_RESULT_COUNT,
-    WEB_SEARCH_CONCURRENT_REQUESTS,
-    WEB_SEARCH_TRUST_ENV,
-    WEB_SEARCH_DOMAIN_FILTER_LIST,
-    JINA_API_KEY,
+    RAG_TOP_K,
+    RAG_TOP_K_RERANKER,
+    RESPONSE_WATERMARK,
     SEARCHAPI_API_KEY,
     SEARCHAPI_ENGINE,
+    SEARXNG_QUERY_URL,
     SERPAPI_API_KEY,
     SERPAPI_ENGINE,
-    SEARXNG_QUERY_URL,
-    YACY_QUERY_URL,
-    YACY_USERNAME,
-    YACY_PASSWORD,
     SERPER_API_KEY,
     SERPLY_API_KEY,
     SERPSTACK_API_KEY,
     SERPSTACK_HTTPS,
-    TAVILY_API_KEY,
-    TAVILY_EXTRACT_DEPTH,
-    BING_SEARCH_V7_ENDPOINT,
-    BING_SEARCH_V7_SUBSCRIPTION_KEY,
-    BRAVE_SEARCH_API_KEY,
-    EXA_API_KEY,
-    PERPLEXITY_API_KEY,
-    PERPLEXITY_MODEL,
-    PERPLEXITY_SEARCH_CONTEXT_USAGE,
+    SHOW_ADMIN_DETAILS,
     SOUGOU_API_SID,
     SOUGOU_API_SK,
-    KAGI_SEARCH_API_KEY,
-    MOJEEK_SEARCH_API_KEY,
-    BOCHA_SEARCH_API_KEY,
-    GOOGLE_PSE_API_KEY,
-    GOOGLE_PSE_ENGINE_ID,
-    GOOGLE_DRIVE_CLIENT_ID,
-    GOOGLE_DRIVE_API_KEY,
-    ONEDRIVE_CLIENT_ID,
-    ONEDRIVE_SHAREPOINT_URL,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
-    ENABLE_RAG_HYBRID_SEARCH,
-    ENABLE_RAG_LOCAL_WEB_FETCH,
-    ENABLE_WEB_LOADER_SSL_VERIFICATION,
-    ENABLE_GOOGLE_DRIVE_INTEGRATION,
-    ENABLE_ONEDRIVE_INTEGRATION,
-    UPLOAD_DIR,
-    EXTERNAL_WEB_SEARCH_URL,
-    EXTERNAL_WEB_SEARCH_API_KEY,
-    EXTERNAL_WEB_LOADER_URL,
-    EXTERNAL_WEB_LOADER_API_KEY,
-    # WebUI
-    WEBUI_AUTH,
-    WEBUI_NAME,
-    WEBUI_BANNERS,
-    WEBHOOK_URL,
-    ADMIN_EMAIL,
-    SHOW_ADMIN_DETAILS,
-    JWT_EXPIRES_IN,
-    ENABLE_SIGNUP,
-    ENABLE_LOGIN_FORM,
-    ENABLE_API_KEY,
-    ENABLE_API_KEY_ENDPOINT_RESTRICTIONS,
-    API_KEY_ALLOWED_ENDPOINTS,
-    ENABLE_CHANNELS,
-    ENABLE_NOTES,
-    ENABLE_COMMUNITY_SHARING,
-    ENABLE_MESSAGE_RATING,
-    ENABLE_USER_WEBHOOKS,
-    ENABLE_EVALUATION_ARENA_MODELS,
-    USER_PERMISSIONS,
-    DEFAULT_USER_ROLE,
-    PENDING_USER_OVERLAY_CONTENT,
-    PENDING_USER_OVERLAY_TITLE,
-    DEFAULT_PROMPT_SUGGESTIONS,
-    DEFAULT_MODELS,
-    DEFAULT_ARENA_MODEL,
-    MODEL_ORDER_LIST,
-    EVALUATION_ARENA_MODELS,
-    # WebUI (OAuth)
-    ENABLE_OAUTH_ROLE_MANAGEMENT,
-    OAUTH_ROLES_CLAIM,
-    OAUTH_EMAIL_CLAIM,
-    OAUTH_PICTURE_CLAIM,
-    OAUTH_USERNAME_CLAIM,
-    OAUTH_ALLOWED_ROLES,
-    OAUTH_ADMIN_ROLES,
-    # WebUI (LDAP)
-    ENABLE_LDAP,
-    LDAP_SERVER_LABEL,
-    LDAP_SERVER_HOST,
-    LDAP_SERVER_PORT,
-    LDAP_ATTRIBUTE_FOR_MAIL,
-    LDAP_ATTRIBUTE_FOR_USERNAME,
-    LDAP_SEARCH_FILTERS,
-    LDAP_SEARCH_BASE,
-    LDAP_APP_DN,
-    LDAP_APP_PASSWORD,
-    LDAP_USE_TLS,
-    LDAP_CA_CERT_FILE,
-    LDAP_VALIDATE_CERT,
-    LDAP_CIPHERS,
-    # LDAP Group Management
-    ENABLE_LDAP_GROUP_MANAGEMENT,
-    ENABLE_LDAP_GROUP_CREATION,
-    LDAP_ATTRIBUTE_FOR_GROUPS,
-    # Misc
-    ENV,
-    CACHE_DIR,
     STATIC_DIR,
-    FRONTEND_BUILD_DIR,
-    CORS_ALLOW_ORIGIN,
-    DEFAULT_LOCALE,
-    OAUTH_PROVIDERS,
-    WEBUI_URL,
-    RESPONSE_WATERMARK,
-    # Admin
-    ENABLE_ADMIN_CHAT_ACCESS,
-    ENABLE_ADMIN_EXPORT,
-    # Tasks
+    TAGS_GENERATION_PROMPT_TEMPLATE,
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
-    ENABLE_TAGS_GENERATION,
-    ENABLE_TITLE_GENERATION,
-    ENABLE_FOLLOW_UP_GENERATION,
-    ENABLE_SEARCH_QUERY_GENERATION,
-    ENABLE_RETRIEVAL_QUERY_GENERATION,
-    ENABLE_AUTOCOMPLETE_GENERATION,
+    TAVILY_API_KEY,
+    TAVILY_EXTRACT_DEPTH,
+    THREAD_POOL_SIZE,
+    TIKA_SERVER_URL,
+    TIKTOKEN_ENCODING_NAME,
     TITLE_GENERATION_PROMPT_TEMPLATE,
-    FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
-    TAGS_GENERATION_PROMPT_TEMPLATE,
-    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
+    TOOL_SERVER_CONNECTIONS,
     TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
-    QUERY_GENERATION_PROMPT_TEMPLATE,
-    AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
-    AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
+    UPLOAD_DIR,
+    USER_PERMISSIONS,
+    WEB_LOADER_ENGINE,
+    WEB_SEARCH_CONCURRENT_REQUESTS,
+    WEB_SEARCH_DOMAIN_FILTER_LIST,
+    WEB_SEARCH_ENGINE,
+    WEB_SEARCH_RESULT_COUNT,
+    WEB_SEARCH_TRUST_ENV,
+    WEBHOOK_URL,
+    WEBUI_AUTH,
+    WEBUI_BANNERS,
+    WEBUI_NAME,
+    WEBUI_URL,
+    WHISPER_LANGUAGE,
+    WHISPER_MODEL,
+    WHISPER_MODEL_AUTO_UPDATE,
+    WHISPER_MODEL_DIR,
+    WHISPER_VAD_FILTER,
+    YACY_PASSWORD,
+    YACY_QUERY_URL,
+    YACY_USERNAME,
+    YOUTUBE_LOADER_LANGUAGE,
+    YOUTUBE_LOADER_PROXY_URL,
     AppConfig,
     reset_config,
 )
 from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
     AUDIT_EXCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
+    BYPASS_MODEL_ACCESS_CONTROL,
     CHANGELOG,
-    REDIS_URL,
+    ENABLE_OTEL,
+    ENABLE_WEBSOCKET_SUPPORT,
+    EXTERNAL_PWA_MANIFEST_URL,
+    GLOBAL_LOG_LEVEL,
+    INSTANCE_ID,
+    MAX_BODY_LOG_SIZE,
+    OFFLINE_MODE,
     REDIS_SENTINEL_HOSTS,
     REDIS_SENTINEL_PORT,
-    GLOBAL_LOG_LEVEL,
-    MAX_BODY_LOG_SIZE,
+    REDIS_URL,
+    RESET_CONFIG_ON_START,
     SAFE_MODE,
     SRC_LOG_LEVELS,
     VERSION,
-    INSTANCE_ID,
+    WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
+    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
+    WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
     WEBUI_SESSION_COOKIE_SECURE,
-    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
-    WEBUI_AUTH_TRUSTED_NAME_HEADER,
-    WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
-    ENABLE_WEBSOCKET_SUPPORT,
-    BYPASS_MODEL_ACCESS_CONTROL,
-    RESET_CONFIG_ON_START,
-    OFFLINE_MODE,
-    ENABLE_OTEL,
-    EXTERNAL_PWA_MANIFEST_URL,
-    AIOHTTP_CLIENT_SESSION_SSL,
 )
-
-
-from open_webui.utils.models import (
-    get_all_models,
-    get_all_base_models,
-    check_model_access,
+from open_webui.internal.db import Session, engine
+from open_webui.models.chats import Chats
+from open_webui.models.functions import Functions
+from open_webui.models.models import Models
+from open_webui.models.users import UserModel, Users
+from open_webui.routers import (
+    audio,
+    auths,
+    channels,
+    chats,
+    configs,
+    evaluations,
+    files,
+    folders,
+    functions,
+    groups,
+    images,
+    knowledge,
+    memories,
+    models,
+    notes,
+    ollama,
+    openai,
+    pipelines,
+    prompts,
+    retrieval,
+    tasks,
+    tools,
+    users,
+    utils,
 )
-from open_webui.utils.chat import (
-    generate_chat_completion as chat_completion_handler,
-    chat_completed as chat_completed_handler,
-    chat_action as chat_action_handler,
+from open_webui.routers.confidios import auths as confidios_auth
+from open_webui.routers.retrieval import get_ef, get_embedding_function, get_rf
+from open_webui.socket.main import app as socket_app
+from open_webui.socket.main import (
+    get_active_user_ids,
+    get_models_in_use,
+    periodic_usage_pool_cleanup,
 )
-from open_webui.utils.embeddings import generate_embeddings
-from open_webui.utils.middleware import process_chat_payload, process_chat_response
+from open_webui.tasks import (  # Import from tasks.py
+    list_task_ids_by_chat_id,
+    list_tasks,
+    redis_task_command_listener,
+    stop_task,
+)
+from open_webui.utils import logger
 from open_webui.utils.access_control import has_access
-
+from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
-    get_license_data,
-    get_http_authorization_cred,
     decode_token,
     get_admin_user,
+    get_http_authorization_cred,
+    get_license_data,
     get_verified_user,
 )
-from open_webui.utils.plugin import install_tool_and_function_dependencies
+from open_webui.utils.chat import chat_action as chat_action_handler
+from open_webui.utils.chat import chat_completed as chat_completed_handler
+from open_webui.utils.chat import generate_chat_completion as chat_completion_handler
+from open_webui.utils.embeddings import generate_embeddings
+from open_webui.utils.logger import start_logger
+from open_webui.utils.middleware import process_chat_payload, process_chat_response
+from open_webui.utils.models import (
+    check_model_access,
+    get_all_base_models,
+    get_all_models,
+)
 from open_webui.utils.oauth import OAuthManager
+from open_webui.utils.plugin import install_tool_and_function_dependencies
+from open_webui.utils.redis import get_redis_connection, get_sentinels_from_env
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.redis import get_redis_connection
-
-from open_webui.tasks import (
-    redis_task_command_listener,
-    list_task_ids_by_chat_id,
-    stop_task,
-    list_tasks,
-)  # Import from tasks.py
-
-from open_webui.utils.redis import get_sentinels_from_env
-
 
 if SAFE_MODE:
     print("SAFE MODE ENABLED")
@@ -1165,6 +1120,16 @@ app.include_router(
     evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
 )
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+
+########################################
+#
+# CONFIDIOS
+#
+########################################
+
+app.include_router(
+    confidios_auth.router, prefix="/api/v1/confidios", tags=["confidios"]
+)
 
 
 try:
