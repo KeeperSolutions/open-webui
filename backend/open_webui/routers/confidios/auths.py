@@ -7,18 +7,6 @@ from pydantic import BaseModel
 router = APIRouter()
 
 
-# class YourFeatureModel(BaseModel):
-#     name: str
-#     description: Optional[str] = None
-
-
-# @router.get("/auth/login")
-# async def get_features(user=Depends(get_verified_user)):
-#     # Your authenticated endpoint logic here
-#     return {"features": []}
-
-# todo: now only logged in admin users can access this endpoint
-
 
 @router.post("/auths/login")
 async def confidios_admin_login(user=Depends(get_verified_user)):
