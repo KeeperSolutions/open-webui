@@ -11,6 +11,7 @@ router = APIRouter()
 
 
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
+CONFIDIOS_PASSWORD = os.getenv("CONFIDIOS_PASSWORD")  # Default password if not set
 
 
 # Add response model
@@ -32,22 +33,28 @@ async def confidios_admin_login(user=Depends(get_verified_user)):
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{CONFIDIOS_BASE_URL}/login/keeper",
-                json={"password": "keeper"},  # Add payload here
+                json={"password": CONFIDIOS_PASSWORD},
             ) as response:
-                if response.status != 200:
-                    error_detail = (
-                        "Failed to login to Confidios service"  # Updated error message
+                if response.status == 401:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid credentials for Confidios service",
                     )
+                elif response.status == 403:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied by Confidios service",
+                    )
+                elif response.status != 200:
+                    error_detail = "Failed to login to Confidios service"
                     try:
                         error_body = await response.json()
-                        error_detail = f"Status {response.status}: {error_body.get('detail', error_detail)}"
+                        error_detail = f"{error_body.get('detail', error_detail)}"
                     except Exception:
-                        error_detail = (
-                            f"Status {response.status}: {await response.text()}"
-                        )
+                        error_detail = await response.text()
 
                     raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        status_code=status.HTTP_400_BAD_REQUEST,
                         detail=error_detail,
                     )
 
