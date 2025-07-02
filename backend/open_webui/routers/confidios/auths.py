@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from open_webui.internal.db import get_db
 from open_webui.models.confidios.models import ConfidiosSession
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.confidios.utils import get_confidios_session
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -110,3 +111,13 @@ async def confidios_admin_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Could not connect to Confidios service: {str(e)}",
         )
+
+
+@router.get("/status")
+async def get_confidios_status(confidios_session=Depends(get_confidios_session)):
+    return {
+        "confidios_user": confidios_session.confidios_user,
+        "confidios_session_id": confidios_session.session_id,
+        "balance": confidios_session.balance,
+        "is_logged_in": confidios_session.is_logged_in,
+    }
