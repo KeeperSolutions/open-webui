@@ -1,17 +1,21 @@
 import os
+from uuid import uuid4
 
 import aiohttp
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
+from open_webui.internal.db import get_db
+from open_webui.models.confidios.models import ConfidiosSession
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 load_dotenv()
 router = APIRouter()
 
 
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
-CONFIDIOS_PASSWORD = os.getenv("CONFIDIOS_PASSWORD")  # Default password if not set
+CONFIDIOS_PASSWORD = os.getenv("CONFIDIOS_PASSWORD")
 
 
 # Add response model
@@ -22,7 +26,9 @@ class ConfidiosLoginResponse(BaseModel):
 
 
 @router.post("/auths/login")
-async def confidios_admin_login(user=Depends(get_verified_user)):
+async def confidios_admin_login(
+    user=Depends(get_verified_user), db: Session = Depends(get_db)
+):
     if user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -70,15 +76,34 @@ async def confidios_admin_login(user=Depends(get_verified_user)):
                         detail=f"Expected JSON response, got {content_type}",
                     )
 
-                return {
-                    "status": f"Confidios feature accessed by user: {user.email}",
-                    "user_id": user.id,
-                    "role": user.role,
-                    "confidios_user": confidios_resp.u,
-                    "confidios_balance": confidios_resp.balance,
-                    "confidios_session_id": confidios_resp.sid,
-                    "confidios_is_logged_in": True,
-                }
+            # After successful response, before return statement:
+            confidios_session = ConfidiosSession(
+                id=str(uuid4()),
+                user_id=user.id,
+                session_id=confidios_resp.sid,
+                confidios_user=confidios_resp.u,
+                balance=confidios_resp.balance,
+                is_logged_in=True,
+            )
+
+            # Delete any existing sessions for this user
+            db.query(ConfidiosSession).filter(
+                ConfidiosSession.user_id == user.id
+            ).delete()
+
+            # Add new session
+            db.add(confidios_session)
+            db.commit()
+
+        return {
+            "status": f"Confidios feature accessed by user: {user.email}",
+            "user_id": user.id,
+            "role": user.role,
+            "confidios_user": confidios_resp.u,
+            "confidios_balance": confidios_resp.balance,
+            "confidios_session_id": confidios_resp.sid,
+            "confidios_is_logged_in": True,
+        }
 
     except aiohttp.ClientError as e:
         raise HTTPException(
