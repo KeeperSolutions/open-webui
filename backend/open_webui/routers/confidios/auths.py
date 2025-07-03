@@ -1,22 +1,22 @@
 import os
-from uuid import uuid4
+from typing import Dict
 
 import aiohttp
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
-from open_webui.internal.db import get_db
-from open_webui.models.confidios.models import ConfidiosSession
 from open_webui.utils.auth import get_verified_user
-from open_webui.utils.confidios.utils import get_confidios_session
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 load_dotenv()
 router = APIRouter()
 
 
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
-CONFIDIOS_PASSWORD = os.getenv("CONFIDIOS_PASSWORD")
+CONFIDIOS_ADMIN_IDENTITY = os.getenv("CONFIDIOS_ADMIN_IDENTITY")
+CONFIDIOS_ADMIN_PASSWORD = os.getenv("CONFIDIOS_ADMIN_PASSWORD")
+
+# SAVE CONFIDIOS SESSIONS IN MEMORY, POC PURPOSES ONLY
+confidios_sessions: Dict[str, dict] = {}
 
 
 # Add response model
@@ -28,7 +28,7 @@ class ConfidiosLoginResponse(BaseModel):
 
 @router.post("/auths/login")
 async def confidios_admin_login(
-    user=Depends(get_verified_user), db: Session = Depends(get_db)
+    user=Depends(get_verified_user),
 ):
     if user.role != "admin":
         raise HTTPException(
@@ -39,8 +39,11 @@ async def confidios_admin_login(
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{CONFIDIOS_BASE_URL}/login/keeper",
-                json={"password": CONFIDIOS_PASSWORD},
+                f"{CONFIDIOS_BASE_URL}/login",
+                json={
+                    "identity": CONFIDIOS_ADMIN_IDENTITY,
+                    "password": CONFIDIOS_ADMIN_PASSWORD,
+                },
             ) as response:
                 if response.status == 401:
                     raise HTTPException(
@@ -77,24 +80,13 @@ async def confidios_admin_login(
                         detail=f"Expected JSON response, got {content_type}",
                     )
 
-            # After successful response, before return statement:
-            confidios_session = ConfidiosSession(
-                id=str(uuid4()),
-                user_id=user.id,
-                session_id=confidios_resp.sid,
-                confidios_user=confidios_resp.u,
-                balance=confidios_resp.balance,
-                is_logged_in=True,
-            )
-
-            # Delete any existing sessions for this user
-            db.query(ConfidiosSession).filter(
-                ConfidiosSession.user_id == user.id
-            ).delete()
-
-            # Add new session
-            db.add(confidios_session)
-            db.commit()
+                # After successful response, before return statement:
+                confidios_sessions[user.id] = {
+                    "confidios_user": confidios_resp.u,
+                    "confidios_session_id": confidios_resp.sid,
+                    "balance": confidios_resp.balance,
+                    "is_logged_in": True,
+                }
 
         return {
             "status": f"Confidios feature accessed by user: {user.email}",
@@ -114,10 +106,11 @@ async def confidios_admin_login(
 
 
 @router.get("/status")
-async def get_confidios_status(confidios_session=Depends(get_confidios_session)):
-    return {
-        "confidios_user": confidios_session.confidios_user,
-        "confidios_session_id": confidios_session.session_id,
-        "balance": confidios_session.balance,
-        "is_logged_in": confidios_session.is_logged_in,
-    }
+async def get_confidios_status(user=Depends(get_verified_user)):
+    if user.id not in confidios_sessions:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No active Confidios session found. Please login first.",
+        )
+
+    return confidios_sessions[user.id]

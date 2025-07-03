@@ -43,7 +43,7 @@
     async function handleGetStatus() {
         try {
             isLoadingStatus = true;
-            const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/integrations/confidios/status`, {
+            const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/status`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.token}`
                 }
