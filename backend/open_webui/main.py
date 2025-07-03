@@ -373,6 +373,7 @@ from open_webui.routers import (
     utils,
 )
 from open_webui.routers.confidios import auths as confidios_auth
+from open_webui.routers.confidios import users as confidios_users
 from open_webui.routers.retrieval import get_ef, get_embedding_function, get_rf
 from open_webui.socket.main import app as socket_app
 from open_webui.socket.main import (
@@ -1130,8 +1131,11 @@ app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 app.include_router(
     confidios_auth.router, prefix="/api/v1/confidios", tags=["confidios"]
 )
+app.include_router(
+    confidios_users.router, prefix="/api/v1/confidios/users", tags=["confidios"]
+)
 
-
+##################################
 try:
     audit_level = AuditLevel(AUDIT_LOG_LEVEL)
 except ValueError as e:

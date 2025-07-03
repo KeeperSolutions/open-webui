@@ -18,9 +18,17 @@
 
 	const i18n = getContext('i18n');
 
+	interface User {
+		id: string;
+		name: string;
+		email: string;
+		role: string;
+		profile_image_url: string;
+	}
+
 	let page = 1;
-	let users = null;
-	let total = null;
+	let users: User[] | null = null;
+	let total: number | null = null;
 	let query = '';
 	let orderBy = 'created_at';
 	let direction = 'asc';
@@ -51,13 +59,46 @@
 			console.error(err);
 		}
 	};
+	// Reactively fetch user list when page, query, orderBy, or direction changes
+	$: getUserList();
 
-	$: if (page) {
-		getUserList();
-	}
+	let loadingStates: { [key: string]: boolean } = {};
 
-	$: if (query !== null && orderBy && direction) {
-		getUserList();
+	async function handleCreateConfidiosUser(user: User) {
+		try {
+			// Set loading state for this specific user
+			loadingStates[user.id] = true;
+
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/create`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${localStorage.token}`
+				},
+				body: JSON.stringify({
+					user_id: user.id,
+					name: user.name,
+					email: user.email,
+					role: user.role,
+					profile_image_url: user.profile_image_url
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to create Confidios user');
+			}
+
+			const data = await response.json();
+			console.log('Response:', data);
+			toast.success($i18n.t('User created successfully'));
+			getUserList(); // Refresh the table
+		} catch (error) {
+			console.error('Error:', error);
+			toast.error($i18n.t('Failed to create user'));
+		} finally {
+			// Reset loading state
+			loadingStates[user.id] = false;
+		}
 	}
 </script>
 
@@ -211,10 +252,36 @@
 							{:else}
 								<div class="flex justify-end items-center">
 									<button
-										class="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-										on:click={() => handleCreateConfidiosUser(user.id)}
+										class="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 flex items-center gap-2 min-w-[90px] justify-center"
+										on:click={() => {
+											console.log('User object:', user);
+											handleCreateConfidiosUser(user);
+										}}
+										disabled={loadingStates[user.id]}
 									>
-										{$i18n.t('Create User')}
+										{#if loadingStates[user.id]}
+											<svg
+												class="animate-spin h-4 w-4"
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+											>
+												<circle
+													class="opacity-25"
+													cx="12"
+													cy="12"
+													r="10"
+													stroke="currentColor"
+													stroke-width="4"
+												></circle>
+												<path
+													class="opacity-75"
+													fill="currentColor"
+													d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+												></path>
+											</svg>
+										{/if}
+										{loadingStates[user.id] ? $i18n.t('Creating...') : $i18n.t('Create User')}
 									</button>
 								</div>
 							{/if}
