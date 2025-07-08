@@ -4,6 +4,7 @@ from open_webui.utils.auth import get_verified_user
 from .auths import confidios_sessions, CONFIDIOS_BASE_URL
 import aiohttp
 import json
+import re
 
 router = APIRouter()
 
@@ -17,8 +18,13 @@ class UserCreateRequest(BaseModel):
 
 
 def clean_username(username: str) -> str:
-    """Remove spaces and convert to lowercase for Confidios identity."""
-    return username.replace(" ", "").lower()
+    """Convert valid email to username-at-domain format."""
+    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+
+    if re.match(email_pattern, username.strip()):
+        return username.strip().replace("@", "-at-").lower()
+    else:
+        raise ValueError(f"Invalid email format: {username}")
 
 
 @router.post("/create")
@@ -39,6 +45,11 @@ async def create_confidios_user(
             detail="No active Confidios session found. Please login first.",
         )
 
+    try:
+        identity = clean_username(user_data.email)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     # Get session data
     session_data = confidios_sessions[current_user.id]
     session_header = {
@@ -55,7 +66,7 @@ async def create_confidios_user(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "identity": clean_username(user_data.name),
+                    "identity": identity,
                     "password": "test-password",
                 },  # Placeholder password
             ) as response:
