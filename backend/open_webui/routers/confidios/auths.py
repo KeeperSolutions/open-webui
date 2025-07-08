@@ -1,7 +1,8 @@
 import os
-from typing import Dict
-
+from typing import Dict, Optional
+import sqlite3
 import json
+from datetime import datetime
 
 import aiohttp
 from dotenv import load_dotenv
@@ -12,12 +13,11 @@ from pydantic import BaseModel
 load_dotenv()
 router = APIRouter()
 
-
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
 CONFIDIOS_ADMIN_IDENTITY = os.getenv("CONFIDIOS_ADMIN_IDENTITY")
 CONFIDIOS_ADMIN_PASSWORD = os.getenv("CONFIDIOS_ADMIN_PASSWORD")
 
-# SAVE CONFIDIOS SESSIONS IN MEMORY, POC PURPOSES ONLY
+# In-memory cache for performance (optional, but recommended)
 confidios_sessions: Dict[str, dict] = {}
 
 
@@ -26,6 +26,79 @@ class ConfidiosLoginResponse(BaseModel):
     balance: str
     sid: str
     u: str
+
+
+# Database helper functions
+async def save_confidios_session(user_id: str, session_data: dict):
+    """Save Confidios session to database"""
+    timestamp = int(datetime.now().timestamp())
+
+    # Update this path to match your database location
+    with sqlite3.connect("data/webui.db") as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO confidios_session
+            (user_id, confidios_user, confidios_session_id, balance, is_logged_in, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                user_id,
+                session_data["confidios_user"],
+                session_data["confidios_session_id"],
+                session_data["balance"],
+                session_data["is_logged_in"],
+                timestamp,
+                timestamp,
+            ),
+        )
+        conn.commit()
+
+
+async def get_confidios_session(user_id: str) -> Optional[dict]:
+    """Get Confidios session from database"""
+    with sqlite3.connect("data/webui.db") as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT * FROM confidios_session WHERE user_id = ? AND is_logged_in = 1",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+
+        if row:
+            return {
+                "confidios_user": row["confidios_user"],
+                "confidios_session_id": row["confidios_session_id"],
+                "balance": row["balance"],
+                "is_logged_in": bool(row["is_logged_in"]),
+            }
+        return None
+
+
+async def update_confidios_session_logout(user_id: str):
+    """Mark user as logged out in database"""
+    timestamp = int(datetime.now().timestamp())
+
+    with sqlite3.connect("data/webui.db") as conn:
+        conn.execute(
+            """
+            UPDATE confidios_session
+            SET confidios_user = NULL,
+                confidios_session_id = NULL,
+                balance = NULL,
+                is_logged_in = 0,
+                updated_at = ?
+            WHERE user_id = ?
+        """,
+            (timestamp, user_id),
+        )
+        conn.commit()
+
+
+async def delete_confidios_session(user_id: str):
+    """Delete Confidios session from database"""
+    with sqlite3.connect("data/webui.db") as conn:
+        conn.execute("DELETE FROM confidios_session WHERE user_id = ?", (user_id,))
+        conn.commit()
 
 
 @router.post("/auths/login")
@@ -82,13 +155,17 @@ async def confidios_admin_login(
                         detail=f"Expected JSON response, got {content_type}",
                     )
 
-                # After successful response, before return statement:
-                confidios_sessions[user.id] = {
+                # Save session data
+                session_data = {
                     "confidios_user": confidios_resp.u,
                     "confidios_session_id": confidios_resp.sid,
                     "balance": confidios_resp.balance,
                     "is_logged_in": True,
                 }
+
+                # Save to both memory cache and database
+                confidios_sessions[user.id] = session_data
+                await save_confidios_session(user.id, session_data)
 
         return {
             "status": f"Confidios feature accessed by user: {user.email}",
@@ -117,15 +194,19 @@ async def confidios_admin_logout(
             detail="Only admin users can access this endpoint",
         )
 
-    # Check if user has active Confidios session
-    if user.id not in confidios_sessions:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No active Confidios session found",
-        )
+    # Check if user has active Confidios session (memory first, then database)
+    session_data = None
+    if user.id in confidios_sessions:
+        session_data = confidios_sessions[user.id]
+    else:
+        session_data = await get_confidios_session(user.id)
+        if not session_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No active Confidios session found",
+            )
 
     # Get session data for logout request
-    session_data = confidios_sessions[user.id]
     session_header = {
         "u": session_data["confidios_user"],
         "sid": session_data["confidios_session_id"],
@@ -153,13 +234,16 @@ async def confidios_admin_logout(
                         detail=error_detail,
                     )
 
-                # Successfully logged out from Confidios, now update local session
-                confidios_sessions[user.id] = {
+                # Successfully logged out from Confidios, update both memory and database
+                logout_data = {
                     "confidios_user": None,
                     "confidios_session_id": None,
                     "balance": None,
                     "is_logged_in": False,
                 }
+
+                confidios_sessions[user.id] = logout_data
+                await update_confidios_session_logout(user.id)
 
                 return {
                     "status": "Successfully logged out from Confidios service",
@@ -181,10 +265,20 @@ async def confidios_admin_logout(
 
 @router.get("/status")
 async def get_confidios_status(user=Depends(get_verified_user)):
-    if user.id not in confidios_sessions:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No active Confidios session found. Please login first.",
-        )
+    # Check memory cache first
+    if user.id in confidios_sessions:
+        session_data = confidios_sessions[user.id]
+        if session_data["is_logged_in"]:
+            return session_data
 
-    return confidios_sessions[user.id]
+    # Check database if not in memory or not logged in
+    session_data = await get_confidios_session(user.id)
+    if session_data and session_data["is_logged_in"]:
+        # Cache in memory for future requests
+        confidios_sessions[user.id] = session_data
+        return session_data
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No active Confidios session found. Please login first.",
+    )
