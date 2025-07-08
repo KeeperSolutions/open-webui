@@ -2,6 +2,7 @@
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { user } from '$lib/stores';
 	import { getUsers } from '$lib/apis/users';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -12,6 +13,8 @@
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+
+	import { confidiosStore } from '$lib/stores/integrations/';
 
 	dayjs.extend(relativeTime);
 	dayjs.extend(localizedFormat);
@@ -24,6 +27,7 @@
 		email: string;
 		role: string;
 		profile_image_url: string;
+		confidios_balance?: string; // Add optional balance field
 	}
 
 	let page = 1;
@@ -32,6 +36,11 @@
 	let query = '';
 	let orderBy = 'created_at';
 	let direction = 'asc';
+
+	// Add the reactive declarations here
+	$: currentUser = $user;
+	$: isCurrentUser = (userId: string) => currentUser?.id === userId;
+	$: isAdminLoggedIn = $confidiosStore.isAdminLoggedIn;
 
 	const setSortKey = (key) => {
 		if (orderBy === key) {
@@ -66,7 +75,6 @@
 
 	async function handleCreateConfidiosUser(user: User) {
 		try {
-			// Set loading state for this specific user
 			loadingStates[user.id] = true;
 
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/create`, {
@@ -84,19 +92,25 @@
 				})
 			});
 
+			const data = await response.json();
+
 			if (!response.ok) {
-				throw new Error('Failed to create Confidios user');
+				throw new Error(data.detail || 'Failed to create user');
 			}
 
-			const data = await response.json();
+			if (data.confidios_user?.balance) {
+				user.confidios_balance = data.confidios_user.balance;
+			}
+
 			console.log('Response:', data);
 			toast.success($i18n.t('User created successfully'));
-			getUserList(); // Refresh the table
+			if (users) {
+				users = [...users];
+			}
 		} catch (error) {
 			console.error('Error:', error);
-			toast.error($i18n.t('Failed to create user'));
+			toast.error(error.message);
 		} finally {
-			// Reset loading state
 			loadingStates[user.id] = false;
 		}
 	}
@@ -220,6 +234,11 @@
 							{$i18n.t('Confidios Status')}
 						</div>
 					</th>
+					<th scope="col" class="px-3 py-1.5">
+						<div class="flex gap-1.5 items-center justify-end">
+							{$i18n.t('Balance')}
+						</div>
+					</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -252,12 +271,18 @@
 							{:else}
 								<div class="flex justify-end items-center">
 									<button
-										class="px-2 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 flex items-center gap-2 min-w-[90px] justify-center"
-										on:click={() => {
-											console.log('User object:', user);
-											handleCreateConfidiosUser(user);
-										}}
-										disabled={loadingStates[user.id]}
+										class={`px-2 py-1 text-xs font-medium text-white rounded hover:opacity-90 flex items-center gap-2 min-w-[90px] justify-center disabled:opacity-50 ${
+											user.confidios_balance
+												? 'bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600'
+												: 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600'
+										}`}
+										on:click={() => handleCreateConfidiosUser(user)}
+										disabled={loadingStates[user.id] || isCurrentUser(user.id) || !isAdminLoggedIn}
+										title={isCurrentUser(user.id)
+											? $i18n.t('Cannot create Confidios account for yourself')
+											: !isAdminLoggedIn
+												? $i18n.t('Please login to Confidios first')
+												: ''}
 									>
 										{#if loadingStates[user.id]}
 											<svg
@@ -281,9 +306,24 @@
 												></path>
 											</svg>
 										{/if}
-										{loadingStates[user.id] ? $i18n.t('Creating...') : $i18n.t('Create User')}
+										{#if isCurrentUser(user.id)}
+											{$i18n.t('Cannot create for self')}
+										{:else if user.confidios_balance}
+											{$i18n.t('User created')}
+										{:else}
+											{loadingStates[user.id] ? $i18n.t('Creating...') : $i18n.t('Create User')}
+										{/if}
 									</button>
 								</div>
+							{/if}
+						</td>
+						<td class="px-3 py-1 text-right">
+							{#if user.confidios_balance}
+								<span class="font-medium">
+									{Number(user.confidios_balance).toFixed(8)}
+								</span>
+							{:else}
+								<span class="text-gray-400">-</span>
 							{/if}
 						</td>
 					</tr>

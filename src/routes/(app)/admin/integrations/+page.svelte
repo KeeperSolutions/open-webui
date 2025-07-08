@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import ConfidiosUsersTable from '$lib/components/tables/ConfidiosUsersTable.svelte';
+	import { confidiosStore } from '$lib/stores/integrations';
 
 	const i18n = getContext('i18n');
 
@@ -41,6 +42,11 @@
 			const data = await response.json();
 			toast.success(data.status);
 			isLoggedIn = data.confidios_is_logged_in;
+
+			confidiosStore.update((state) => ({
+				...state,
+				isAdminLoggedIn: true
+			}));
 		} catch (error) {
 			toast.error($i18n.t('Failed to login to Confidios. Please try again.'));
 		} finally {
@@ -170,7 +176,7 @@
 			{/if}
 		</div>
 	</div>
-	{#if isLoggedIn === false}
+	{#if isLoggedIn === true}
 		<div class="p-4 rounded-lg border border-gray-200 dark:border-gray-700">
 			<ConfidiosUsersTable bind:users bind:total bind:page />
 		</div>
