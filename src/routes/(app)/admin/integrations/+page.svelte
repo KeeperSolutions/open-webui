@@ -54,6 +54,39 @@
 		}
 	}
 
+	async function handleConfidiosLogout() {
+		try {
+			isLoading = true;
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/auths/logout`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${localStorage.token}`
+				}
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to logout');
+			}
+
+			const data = await response.json();
+			toast.success(data.status);
+			isLoggedIn = false;
+			confidiosStatus = null; // Clear status data
+
+			confidiosStore.update((state) => ({
+				...state,
+				isAdminLoggedIn: false
+			}));
+
+			console.log('Logout clicked');
+		} catch (error) {
+			toast.error($i18n.t('Failed to logout from Confidios. Please try again.'));
+		} finally {
+			isLoading = false;
+		}
+	}
+
 	async function handleGetStatus() {
 		try {
 			isLoadingStatus = true;
@@ -104,8 +137,10 @@
 					{/if}
 				</div>
 				<button
-					class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 flex items-center gap-2"
-					on:click={handleConfidiosLogin}
+					class="px-4 py-2 {isLoggedIn
+						? 'bg-red-500 hover:bg-red-600'
+						: 'bg-blue-500 hover:bg-blue-600'} text-white rounded disabled:opacity-50 flex items-center gap-2"
+					on:click={isLoggedIn ? handleConfidiosLogout : handleConfidiosLogin}
 					disabled={isLoading}
 				>
 					{#if isLoading}
@@ -125,11 +160,11 @@
 							></path>
 						</svg>
 					{/if}
-					{isLoading ? 'Loading...' : 'Admin Login'}
+					{isLoading ? 'Loading...' : isLoggedIn ? 'Log out' : 'Admin Login'}
 				</button>
 			</div>
 
-			<!-- Add Status Button below the login button -->
+			<!-- Status Button -->
 			{#if isLoggedIn}
 				<div class="mt-4 border-t pt-4">
 					<button
