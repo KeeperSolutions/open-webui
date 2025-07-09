@@ -265,3 +265,38 @@ async def get_confidios_users(current_user=Depends(get_verified_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get users: {str(e)}",
         )
+
+
+@router.get("/me")
+async def get_my_confidios_status(current_user=Depends(get_verified_user)):
+    """Get Confidios status for the currently logged in user"""
+    try:
+        with sqlite3.connect("data/webui.db") as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT cu.confidios_username, cu.balance, cu.created_at, cu.updated_at
+                FROM confidios_user cu
+                WHERE cu.user_id = ?
+            """,
+                (current_user.id,),
+            )
+
+            row = cursor.fetchone()
+
+            if row:
+                return {
+                    "is_confidios_user": True,
+                    "confidios_username": row["confidios_username"],
+                    "balance": row["balance"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+
+            return {"is_confidios_user": False}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get Confidios status: {str(e)}",
+        )

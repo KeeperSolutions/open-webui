@@ -9,7 +9,10 @@
 	import { getUsage } from '$lib/apis';
 	import { userSignOut } from '$lib/apis/auths';
 
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+
 	import { showSettings, mobile, showSidebar, user } from '$lib/stores';
+	import { confidiosStore } from '$lib/stores/integrations';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
@@ -31,6 +34,25 @@
 
 	let showShortcuts = false;
 
+	$: {
+		if ($user) {
+			console.log('Current user:', {
+				id: $user.id,
+				name: $user.name,
+				email: $user.email,
+				role: $user.role
+			});
+		}
+	}
+
+	$: {
+		console.log('Confidios store state:', {
+			isAdminLoggedIn: $confidiosStore.isAdminLoggedIn,
+			currentUserStatus: $confidiosStore.currentUserStatus
+			// balance: $confidiosStore.balance
+		});
+	}
+
 	const dispatch = createEventDispatcher();
 
 	let usage = null;
@@ -49,6 +71,47 @@
 	$: if (show) {
 		getUsageInfo();
 	}
+
+	async function getMyConfidiosStatus() {
+		try {
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/me`, {
+				headers: {
+					Authorization: `Bearer ${localStorage.token}`
+				}
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to get Confidios status');
+			}
+
+			const data = await response.json();
+			console.log('My Confidios status:', data);
+
+			// Update the Confidios store with the user's status
+			confidiosStore.update((state) => ({
+				...state,
+				currentUserStatus: {
+					isConfidiosUser: data.is_confidios_user,
+					username: data.confidios_username,
+					balance: data.balance
+				}
+			}));
+
+			return data;
+		} catch (error) {
+			console.error('Error getting Confidios status:', error);
+			// Reset user status on error
+			confidiosStore.update((state) => ({
+				...state,
+				currentUserStatus: undefined
+			}));
+			return null;
+		}
+	}
+
+	onMount(async () => {
+		await getMyConfidiosStatus();
+	});
 </script>
 
 <ShortcutsModal bind:show={showShortcuts} />
