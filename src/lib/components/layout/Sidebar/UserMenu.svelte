@@ -14,6 +14,8 @@
 	import { showSettings, mobile, showSidebar, user } from '$lib/stores';
 	import { confidiosStore } from '$lib/stores/integrations';
 
+	import { toast } from 'svelte-sonner';
+
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
@@ -72,6 +74,45 @@
 		getUsageInfo();
 	}
 
+	// async function getMyConfidiosStatus() {
+	// 	try {
+	// 		const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/me`, {
+	// 			headers: {
+	// 				Authorization: `Bearer ${localStorage.token}`
+	// 			}
+	// 		});
+
+	// 		if (!response.ok) {
+	// 			throw new Error('Failed to get Confidios status');
+	// 		}
+
+	// 		const data = await response.json();
+	// 		console.log('My Confidios status:', data);
+
+	// 		// Update the Confidios store with the user's status
+	// 		confidiosStore.update((state) => ({
+	// 			...state,
+	// 			currentUserStatus: {
+	// 				isConfidiosUser: data.is_confidios_user,
+	// 				isLoggedInConfidios: data.is_logged_in, // New field from backend
+	// 				username: data.confidios_username,
+	// 				balance: data.balance
+	// 			}
+	// 		}));
+
+	// 		return data;
+	// 	} catch (error) {
+	// 		console.error('Error getting Confidios status:', error);
+	// 		// Reset user status on error
+	// 		confidiosStore.update((state) => ({
+	// 			...state,
+	// 			currentUserStatus: undefined
+	// 		}));
+	// 		return null;
+	// 	}
+	// }
+
+	// Also update the getMyConfidiosStatus function to be more robust
 	async function getMyConfidiosStatus() {
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/me`, {
@@ -92,6 +133,7 @@
 				...state,
 				currentUserStatus: {
 					isConfidiosUser: data.is_confidios_user,
+					isLoggedInConfidios: data.is_logged_in,
 					username: data.confidios_username,
 					balance: data.balance
 				}
@@ -103,7 +145,12 @@
 			// Reset user status on error
 			confidiosStore.update((state) => ({
 				...state,
-				currentUserStatus: undefined
+				currentUserStatus: {
+					isConfidiosUser: false,
+					isLoggedInConfidios: false,
+					username: '',
+					balance: undefined
+				}
 			}));
 			return null;
 		}
@@ -112,6 +159,96 @@
 	onMount(async () => {
 		await getMyConfidiosStatus();
 	});
+
+	// Add loading state variable
+	let isConfidiosLoading = false;
+
+	async function handleConfidiosLogin() {
+		try {
+			isConfidiosLoading = true;
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/auths/user/login`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${localStorage.token}`
+				},
+				body: JSON.stringify({
+					confidios_username: $user.email.replace('@', '-at-').toLowerCase()
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to login to Confidios');
+			}
+
+			const data = await response.json();
+			console.log('Confidios login response:', data);
+
+			// Show success toast
+			toast.success(data.status || $i18n.t('Successfully logged in to Confidios'));
+
+			confidiosStore.update((state) => ({
+				...state,
+				currentUserStatus: {
+					isConfidiosUser: true,
+					isLoggedInConfidios: true,
+					username: data.confidios_user,
+					balance: data.confidios_balance
+				}
+			}));
+		} catch (error) {
+			console.error('Error logging into Confidios:', error);
+			// Show error toast
+			toast.error($i18n.t('Failed to login to Confidios. Please try again.'));
+
+			confidiosStore.update((state) => ({
+				...state,
+				currentUserStatus: {
+					...state.currentUserStatus,
+					isLoggedInConfidios: false
+				}
+			}));
+		} finally {
+			isConfidiosLoading = false;
+		}
+	}
+
+	async function handleConfidiosLogout() {
+		try {
+			isConfidiosLoading = true;
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/auths/user/logout`, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${localStorage.token}`
+				}
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to logout from Confidios');
+			}
+
+			const data = await response.json();
+			console.log('Confidios logout response:', data);
+
+			// Show success toast
+			toast.success(data.status || $i18n.t('Successfully logged out from Confidios'));
+
+			confidiosStore.update((state) => ({
+				...state,
+				currentUserStatus: {
+					...state.currentUserStatus,
+					isLoggedInConfidios: false,
+					balance: undefined
+				}
+			}));
+		} catch (error) {
+			console.error('Error logging out from Confidios:', error);
+			// Show error toast
+			toast.error($i18n.t('Failed to logout from Confidios. Please try again.'));
+		} finally {
+			isConfidiosLoading = false;
+		}
+	}
 </script>
 
 <ShortcutsModal bind:show={showShortcuts} />
@@ -247,6 +384,59 @@
 				</DropdownMenu.Item>
 			{/if}
 
+			{#if $confidiosStore.currentUserStatus?.isConfidiosUser && role !== 'admin'}
+				<hr class="border-gray-100 dark:border-gray-800 my-1 p-0" />
+				<button
+					class="flex rounded-md py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+					on:click={$confidiosStore.currentUserStatus?.isLoggedInConfidios
+						? handleConfidiosLogout
+						: handleConfidiosLogin}
+					disabled={isConfidiosLoading}
+				>
+					<div class="self-center mr-3">
+						{#if isConfidiosLoading}
+							<svg
+								class="animate-spin h-5 w-5"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+							>
+								<circle
+									class="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									stroke-width="4"
+								></circle>
+								<path
+									class="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								></path>
+							</svg>
+						{:else}
+							<Code className="w-5 h-5" />
+						{/if}
+					</div>
+					<div class="self-center truncate">
+						{#if isConfidiosLoading}
+							{$i18n.t(
+								$confidiosStore.currentUserStatus?.isLoggedInConfidios
+									? 'Logging out...'
+									: 'Logging in...'
+							)}
+						{:else}
+							{$i18n.t(
+								$confidiosStore.currentUserStatus?.isLoggedInConfidios
+									? 'Logout from Confidios'
+									: 'Login to Confidios'
+							)}
+						{/if}
+					</div>
+				</button>
+			{/if}
+
 			<hr class=" border-gray-100 dark:border-gray-800 my-1 p-0" />
 
 			<button
@@ -261,7 +451,7 @@
 				}}
 			>
 				<div class=" self-center mr-3">
-					<SignOut className="w-5 h-5" strokeWidth="1.5" />
+					<SignOut className="w-5 h-5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 			</button>

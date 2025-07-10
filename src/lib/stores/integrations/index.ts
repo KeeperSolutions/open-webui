@@ -4,9 +4,9 @@ export const apiSpec = writable<string | null>(null);
 
 interface ConfidiosState {
 	isAdminLoggedIn: boolean;
-	// balance?: string;
 	currentUserStatus?: {
-		isConfidiosUser: boolean;
+		isConfidiosUser: boolean; // Has Confidios account
+		isLoggedInConfidios: boolean; // Currently logged in
 		username?: string;
 		balance?: string;
 	};
