@@ -36,25 +36,6 @@
 
 	let showShortcuts = false;
 
-	$: {
-		if ($user) {
-			console.log('Current user:', {
-				id: $user.id,
-				name: $user.name,
-				email: $user.email,
-				role: $user.role
-			});
-		}
-	}
-
-	$: {
-		console.log('Confidios store state:', {
-			isAdminLoggedIn: $confidiosStore.isAdminLoggedIn,
-			currentUserStatus: $confidiosStore.currentUserStatus
-			// balance: $confidiosStore.balance
-		});
-	}
-
 	const dispatch = createEventDispatcher();
 
 	let usage = null;
@@ -74,45 +55,6 @@
 		getUsageInfo();
 	}
 
-	// async function getMyConfidiosStatus() {
-	// 	try {
-	// 		const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/me`, {
-	// 			headers: {
-	// 				Authorization: `Bearer ${localStorage.token}`
-	// 			}
-	// 		});
-
-	// 		if (!response.ok) {
-	// 			throw new Error('Failed to get Confidios status');
-	// 		}
-
-	// 		const data = await response.json();
-	// 		console.log('My Confidios status:', data);
-
-	// 		// Update the Confidios store with the user's status
-	// 		confidiosStore.update((state) => ({
-	// 			...state,
-	// 			currentUserStatus: {
-	// 				isConfidiosUser: data.is_confidios_user,
-	// 				isLoggedInConfidios: data.is_logged_in, // New field from backend
-	// 				username: data.confidios_username,
-	// 				balance: data.balance
-	// 			}
-	// 		}));
-
-	// 		return data;
-	// 	} catch (error) {
-	// 		console.error('Error getting Confidios status:', error);
-	// 		// Reset user status on error
-	// 		confidiosStore.update((state) => ({
-	// 			...state,
-	// 			currentUserStatus: undefined
-	// 		}));
-	// 		return null;
-	// 	}
-	// }
-
-	// Also update the getMyConfidiosStatus function to be more robust
 	async function getMyConfidiosStatus() {
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/users/me`, {
@@ -122,35 +64,36 @@
 			});
 
 			if (!response.ok) {
-				throw new Error('Failed to get Confidios status');
+				const errorText = await response.text();
+
+				throw new Error(`Failed to get Confidios status: ${response.status}`);
 			}
 
 			const data = await response.json();
-			console.log('My Confidios status:', data);
 
 			// Update the Confidios store with the user's status
-			confidiosStore.update((state) => ({
-				...state,
-				currentUserStatus: {
-					isConfidiosUser: data.is_confidios_user,
-					isLoggedInConfidios: data.is_logged_in,
-					username: data.confidios_username,
-					balance: data.balance
-				}
-			}));
+			const newStatus = {
+				isConfidiosUser: data.is_confidios_user,
+				isLoggedInConfidios: data.is_logged_in,
+				username: data.confidios_username,
+				balance: data.balance
+			};
+
+			confidiosStore.update((state) => {
+				const newState = {
+					...state,
+					currentUserStatus: newStatus
+				};
+
+				return newState;
+			});
 
 			return data;
 		} catch (error) {
-			console.error('Error getting Confidios status:', error);
 			// Reset user status on error
 			confidiosStore.update((state) => ({
 				...state,
-				currentUserStatus: {
-					isConfidiosUser: false,
-					isLoggedInConfidios: false,
-					username: '',
-					balance: undefined
-				}
+				currentUserStatus: undefined
 			}));
 			return null;
 		}
@@ -492,10 +435,6 @@
 					</Tooltip>
 				{/if}
 			{/if}
-
-			<!-- <DropdownMenu.Item class="flex items-center py-1.5 px-3 text-sm ">
-				<div class="flex items-center">Profile</div>
-			</DropdownMenu.Item> -->
 		</DropdownMenu.Content>
 	</slot>
 </DropdownMenu.Root>

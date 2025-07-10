@@ -41,7 +41,7 @@
 			if (response.ok) {
 				// User is logged in
 				confidiosStatus = await response.json();
-				isLoggedIn = confidiosStatus.is_logged_in;
+				isLoggedIn = confidiosStatus?.is_logged_in ?? false;
 
 				confidiosStore.update((state) => ({
 					...state,

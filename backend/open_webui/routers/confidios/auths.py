@@ -10,6 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from open_webui.utils.auth import get_verified_user
 from pydantic import BaseModel
 
+from .confidios_db import (
+    get_confidios_user,
+    update_confidios_user_session,
+    clear_confidios_user_session,
+)
+
 load_dotenv()
 router = APIRouter()
 
@@ -107,6 +113,60 @@ async def delete_confidios_session(user_id: str):
     with sqlite3.connect("data/webui.db") as conn:
         conn.execute("DELETE FROM confidios_session WHERE user_id = ?", (user_id,))
         conn.commit()
+
+
+async def update_confidios_user_session(user_id: str, session_data: dict):
+    """Update user's session data in confidios_user table"""
+    timestamp = int(datetime.now().timestamp())
+
+    try:
+        confidios_username = session_data.get("u")
+        balance = session_data.get("balance")
+        session_id = session_data.get("sid")
+
+        print(f"🔧 update_confidios_user_session called:")
+        print(f"   - user_id: {user_id}")
+        print(f"   - confidios_username: {confidios_username}")
+        print(f"   - balance: {balance}")
+        print(f"   - session_id: {session_id}")
+        print(f"   - timestamp: {timestamp}")
+
+        with sqlite3.connect("data/webui.db") as conn:
+            cursor = conn.cursor()
+
+            # Debug: Check current state before update
+            cursor.execute("SELECT * FROM confidios_user WHERE user_id = ?", (user_id,))
+            before_update = cursor.fetchone()
+            print(f"📊 Before update: {before_update}")
+
+            # Perform the update
+            cursor.execute(
+                """
+                UPDATE confidios_user
+                SET confidios_session_id = ?, balance = ?, is_session_active = ?, updated_at = ?
+                WHERE user_id = ?
+            """,
+                (session_id, balance, session_id is not None, timestamp, user_id),
+            )
+
+            rows_affected = cursor.rowcount
+            print(f"📝 Rows affected by update: {rows_affected}")
+
+            conn.commit()
+
+            # Debug: Check state after update
+            cursor.execute("SELECT * FROM confidios_user WHERE user_id = ?", (user_id,))
+            after_update = cursor.fetchone()
+            print(f"📊 After update: {after_update}")
+
+            print(f"✅ Session update completed for user {user_id}")
+
+    except Exception as e:
+        print(f"💥 Session update error: {e}")
+        import traceback
+
+        print(f"📚 Traceback: {traceback.format_exc()}")
+        raise
 
 
 @router.post("/auths/login")
@@ -294,21 +354,30 @@ async def get_confidios_status(user=Depends(get_verified_user)):
 
 @router.post("/auths/user/login")
 async def confidios_user_login(
-    request: UserLoginRequest,
     user=Depends(get_verified_user),
 ):
-    """Login endpoint for regular users"""
+    """Login endpoint for regular users - matches your frontend call"""
+
+    # Check if user exists in Confidios
+    user_data = await get_confidios_user(user.id)
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found in Confidios. Please contact admin to create your account.",
+        )
+
+    # Use the confidios_username from database
+    confidios_username = user_data["confidios_username"]
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with (
-                session.post(
-                    f"{CONFIDIOS_BASE_URL}/login",
-                    json={
-                        "identity": request.confidios_username,  # Use provided username instead of email
-                        "password": CONFIDIOS_USER_PASSWORD,
-                    },
-                ) as response
-            ):
+            async with session.post(
+                f"{CONFIDIOS_BASE_URL}/login",
+                json={
+                    "identity": confidios_username,
+                    "password": CONFIDIOS_USER_PASSWORD,
+                },
+            ) as response:
                 if response.status == 401:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -333,20 +402,12 @@ async def confidios_user_login(
                     )
 
                 resp = await response.json()
+
+                # Validate response structure
                 confidios_resp = ConfidiosLoginResponse(**resp)
-                print(f"Confidios response: {confidios_resp}")
 
-                # Save session data
-                session_data = {
-                    "confidios_user": confidios_resp.u,
-                    "confidios_session_id": confidios_resp.sid,
-                    "balance": confidios_resp.balance,
-                    "is_logged_in": True,
-                }
-
-                # Save to both memory cache and database
-                confidios_sessions[user.id] = session_data
-                await save_confidios_session(user.id, session_data)
+                # Update session data in confidios_user table
+                await update_confidios_user_session(user.id, resp)
 
                 return {
                     "status": "Successfully logged in to Confidios service",
@@ -361,77 +422,76 @@ async def confidios_user_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Could not connect to Confidios service: {str(e)}",
         )
+    except Exception as e:
+        print(f"Login error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to login: {str(e)}",
+        )
 
 
 @router.post("/auths/user/logout")
 async def confidios_user_logout(
     user=Depends(get_verified_user),
 ):
-    """Logout endpoint for regular users"""
-    # Check if user has active Confidios session (memory first, then database)
-    session_data = None
-    if user.id in confidios_sessions:
-        session_data = confidios_sessions[user.id]
-    else:
-        session_data = await get_confidios_session(user.id)
-        if not session_data:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No active Confidios session found",
-            )
-
-    # Get session data for logout request
-    session_header = {
-        "u": session_data["confidios_user"],
-        "sid": session_data["confidios_session_id"],
-    }
+    """Logout endpoint for regular users - always clears local session"""
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{CONFIDIOS_BASE_URL}/logout",
-                headers={
-                    "X-Confidios-Session-Id": json.dumps(session_header),
-                    "Content-Type": "application/json",
-                },
-            ) as response:
-                if response.status != 200:
-                    error_detail = "Failed to logout from Confidios service"
-                    try:
-                        error_body = await response.json()
-                        error_detail = f"{error_body.get('detail', error_detail)}"
-                    except Exception:
-                        error_detail = await response.text()
+        # Get user data first
+        user_data = await get_confidios_user(user.id)
+        if not user_data:
+            return {
+                "status": "User not found, assuming already logged out",
+                "user_id": user.id,
+                "confidios_is_logged_in": False,
+            }
 
-                    raise HTTPException(
-                        status_code=response.status,
-                        detail=error_detail,
-                    )
+        # ALWAYS clear the local session first
+        await clear_confidios_user_session(user.id)
 
-                # Successfully logged out from Confidios, update both memory and database
-                logout_data = {
-                    "confidios_user": None,
-                    "confidios_session_id": None,
-                    "balance": None,
-                    "is_logged_in": False,
-                }
+        # Then try to notify Confidios API (but don't fail if this doesn't work)
+        if user_data.get("confidios_session_id") and user_data.get("is_session_active"):
+            session_header = {
+                "u": user_data["confidios_username"],
+                "sid": user_data["confidios_session_id"],
+            }
 
-                confidios_sessions[user.id] = logout_data
-                await update_confidios_session_logout(user.id)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{CONFIDIOS_BASE_URL}/logout",
+                        headers={
+                            "X-Confidios-Session-Id": json.dumps(session_header),
+                            "Content-Type": "application/json",
+                        },
+                        timeout=aiohttp.ClientTimeout(total=5),  # Short timeout
+                    ) as response:
+                        # API response logged only if there's an issue
+                        if response.status != 200:
+                            print(f"Confidios API logout returned {response.status}")
 
-                return {
-                    "status": "Successfully logged out from Confidios service",
-                    "user_id": user.id,
-                    "confidios_is_logged_in": False,
-                }
+            except Exception as api_error:
+                print(f"Confidios API logout failed: {api_error}")
 
-    except aiohttp.ClientError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Could not connect to Confidios service: {str(e)}",
-        )
+        return {
+            "status": "Successfully logged out",
+            "user_id": user.id,
+            "confidios_is_logged_in": False,
+        }
+
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to logout: {str(e)}",
-        )
+        print(f"Error during logout: {e}")
+
+        # Even if there's an error, try to clear the session
+        try:
+            await clear_confidios_user_session(user.id)
+        except Exception as clear_error:
+            print(f"Failed to clear session: {clear_error}")
+
+        # Don't raise an HTTP exception - just return success
+        # The important thing is that we tried to clear the local session
+        return {
+            "status": "Logout completed (with errors)",
+            "user_id": user.id,
+            "confidios_is_logged_in": False,
+        }

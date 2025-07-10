@@ -9,6 +9,12 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
+from .confidios_db import (
+    get_confidios_user,
+    save_confidios_user,
+    update_confidios_user_balance,
+)
+
 router = APIRouter()
 
 
@@ -28,93 +34,6 @@ def clean_username(username: str) -> str:
         return username.strip().replace("@", "-at-").lower()
     else:
         raise ValueError(f"Invalid email format: {username}")
-
-
-async def save_confidios_user(user_id: str, confidios_data: dict):
-    """Save Confidios user data to database"""
-    print(f"Attempting to save user data: {confidios_data}")
-
-    timestamp = int(datetime.now().timestamp())
-
-    try:
-        # Extract values with error checking
-        confidios_username = confidios_data.get("u")
-        balance = confidios_data.get("balance")
-        session_id = confidios_data.get("sid")  # Could be None
-
-        if not confidios_username:
-            raise ValueError(
-                f"Missing 'u' field in response. Available keys: {list(confidios_data.keys())}"
-            )
-        if not balance:
-            raise ValueError(
-                f"Missing 'balance' field in response. Available keys: {list(confidios_data.keys())}"
-            )
-
-        print(
-            f"Extracted values - u: {confidios_username}, balance: {balance}, sid: {session_id or 'None'}"
-        )
-
-        with sqlite3.connect("data/webui.db") as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO confidios_user
-                (user_id, confidios_username, confidios_session_id, balance, is_session_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    user_id,
-                    confidios_username,
-                    session_id,
-                    balance,
-                    session_id is not None,  # True if they have an active session
-                    timestamp,
-                    timestamp,
-                ),
-            )
-            conn.commit()
-            print("Successfully saved user to database")
-
-    except Exception as e:
-        print(f"Database save error: {e}")
-        raise
-
-
-async def get_confidios_user(user_id: str) -> Optional[dict]:
-    """Get Confidios user data from database"""
-    with sqlite3.connect("data/webui.db") as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(
-            "SELECT * FROM confidios_user WHERE user_id = ?", (user_id,)
-        )
-        row = cursor.fetchone()
-
-        if row:
-            return {
-                "user_id": row["user_id"],
-                "confidios_username": row["confidios_username"],
-                "confidios_session_id": row["confidios_session_id"],
-                "balance": row["balance"],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-        return None
-
-
-async def update_confidios_user_balance(user_id: str, new_balance: str):
-    """Update user's balance in database"""
-    timestamp = int(datetime.now().timestamp())
-
-    with sqlite3.connect("data/webui.db") as conn:
-        conn.execute(
-            """
-            UPDATE confidios_user
-            SET balance = ?, updated_at = ?
-            WHERE user_id = ?
-        """,
-            (new_balance, timestamp, user_id),
-        )
-        conn.commit()
 
 
 @router.post("/create")
@@ -267,6 +186,41 @@ async def get_confidios_users(current_user=Depends(get_verified_user)):
         )
 
 
+# @router.get("/me")
+# async def get_my_confidios_status(current_user=Depends(get_verified_user)):
+#     """Get Confidios status for the currently logged in user"""
+#     try:
+#         with sqlite3.connect("data/webui.db") as conn:
+#             conn.row_factory = sqlite3.Row
+#             cursor = conn.execute(
+#                 """
+#                 SELECT cu.confidios_username, cu.balance, cu.created_at, cu.updated_at
+#                 FROM confidios_user cu
+#                 WHERE cu.user_id = ?
+#             """,
+#                 (current_user.id,),
+#             )
+
+#             row = cursor.fetchone()
+
+#             if row:
+#                 return {
+#                     "is_confidios_user": True,
+#                     "confidios_username": row["confidios_username"],
+#                     "balance": row["balance"],
+#                     "created_at": row["created_at"],
+#                     "updated_at": row["updated_at"],
+#                 }
+
+#             return {"is_confidios_user": False}
+
+#     except Exception as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to get Confidios status: {str(e)}",
+#         )
+
+
 @router.get("/me")
 async def get_my_confidios_status(current_user=Depends(get_verified_user)):
     """Get Confidios status for the currently logged in user"""
@@ -275,7 +229,7 @@ async def get_my_confidios_status(current_user=Depends(get_verified_user)):
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT cu.confidios_username, cu.balance, cu.created_at, cu.updated_at
+                SELECT cu.confidios_username, cu.balance, cu.is_session_active, cu.created_at, cu.updated_at
                 FROM confidios_user cu
                 WHERE cu.user_id = ?
             """,
@@ -285,17 +239,26 @@ async def get_my_confidios_status(current_user=Depends(get_verified_user)):
             row = cursor.fetchone()
 
             if row:
+                # Debug logging
+                # print(f"User {current_user.id} found in confidios_user table")
+                # print(f"is_session_active: {row['is_session_active']}")
+                # print(f"confidios_username: {row['confidios_username']}")
+                # print(f"balance: {row['balance']}")
+
                 return {
                     "is_confidios_user": True,
+                    "is_logged_in": bool(row["is_session_active"]),  # THIS IS THE KEY!
                     "confidios_username": row["confidios_username"],
                     "balance": row["balance"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                 }
 
-            return {"is_confidios_user": False}
+            print(f"User {current_user.id} NOT found in confidios_user table")
+            return {"is_confidios_user": False, "is_logged_in": False}
 
     except Exception as e:
+        print(f"Error in /users/me endpoint: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get Confidios status: {str(e)}",
