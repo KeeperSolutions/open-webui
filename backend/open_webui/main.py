@@ -374,6 +374,9 @@ from open_webui.routers import (
 )
 from open_webui.routers.confidios import auths as confidios_auth
 from open_webui.routers.confidios import users as confidios_users
+from open_webui.routers.confidios import (
+    filesystem_operations as confidios_filesystem_operations,
+)
 from open_webui.routers.retrieval import get_ef, get_embedding_function, get_rf
 from open_webui.socket.main import app as socket_app
 from open_webui.socket.main import (
@@ -1134,6 +1137,13 @@ app.include_router(
 app.include_router(
     confidios_users.router, prefix="/api/v1/confidios/users", tags=["confidios"]
 )
+
+app.include_router(
+    confidios_filesystem_operations.router,
+    prefix="/api/v1/confidios/fs",
+    tags=["confidios"],
+)
+
 
 ##################################
 try:

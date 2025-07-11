@@ -2,6 +2,8 @@
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+
 	import { goto } from '$app/navigation';
 	import {
 		user,
@@ -392,6 +394,35 @@
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 	});
+
+	async function handleListFiles() {
+		try {
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/ls`, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${localStorage.token}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					path: 'home/data'
+				})
+			});
+
+			if (!response.ok) {
+				const error = await response.text();
+				throw new Error(error);
+			}
+
+			const data = await response.json();
+			console.log('Files list:', data.files);
+
+			toast.success($i18n.t('Files retrieved successfully'));
+			return data.files;
+		} catch (error) {
+			console.error('Error fetching files:', error);
+			toast.error($i18n.t('Failed to fetch files. Please try again.'));
+		}
+	}
 </script>
 
 <ArchivedChatsModal
@@ -941,6 +972,37 @@
 				</div>
 			</Folder>
 		</div>
+
+		<!-- FILE LIST SECTION -->
+		<div class="px-2">
+			<div class="flex flex-col">
+				<button
+					class="flex rounded-md py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+					on:click={handleListFiles}
+				>
+					<div class="self-center mr-3">
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+							stroke="currentColor"
+							class="w-5 h-5"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+							/>
+						</svg>
+					</div>
+					<div class="self-center truncate font-medium text-sm">
+						{$i18n.t('Show Files')}
+					</div>
+				</button>
+			</div>
+		</div>
+		<!-- FILE LIST SECTION END -->
 
 		<div class="px-2">
 			<div class="flex flex-col font-primary">
