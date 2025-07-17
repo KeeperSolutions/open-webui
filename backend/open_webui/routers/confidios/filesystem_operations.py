@@ -15,6 +15,7 @@ load_dotenv()
 router = APIRouter()
 
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
+CONFIDIOS_BASE_USER_FOLDER = os.getenv("CONFIDIOS_BASE_USER_FOLDER")
 
 
 # Add request model
