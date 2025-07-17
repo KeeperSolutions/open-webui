@@ -4,13 +4,18 @@
 	const i18n = getContext('i18n');
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-	let files: string[] = [];
+	interface FileItem {
+		kind: 'file' | 'directory';
+		path: string;
+	}
+
+	let files: FileItem[] = [];
 	let currentPath = 'home/data';
 	let isLoading = false;
 	let error: string | null = null;
 
 	// Helper function to determine if item is a file
-	const isFile = (name: string) => name.includes('.');
+	const isFile = (item: FileItem) => item.kind === 'file';
 
 	async function handleListFiles() {
 		isLoading = true;
@@ -34,7 +39,8 @@
 			}
 
 			const data = await response.json();
-			files = data.files.filter((f: string) => f !== '.' && f !== '..');
+			// Filter out current and parent directory entries
+			files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
 			toast.success($i18n.t('Files retrieved successfully'));
 		} catch (err) {
 			console.error('Error fetching files:', err);
@@ -42,6 +48,13 @@
 			toast.error($i18n.t('Failed to fetch files. Please try again.'));
 		} finally {
 			isLoading = false;
+		}
+	}
+
+	function handleFolderClick(item: FileItem) {
+		if (!isFile(item)) {
+			currentPath = `${currentPath}/${item.path}`;
+			handleListFiles();
 		}
 	}
 
@@ -94,6 +107,21 @@
 						{$i18n.t('Refresh')}
 					{/if}
 				</button>
+
+				<!-- Back button for navigation -->
+				{#if currentPath !== 'home/data'}
+					<button
+						on:click={() => {
+							const pathParts = currentPath.split('/');
+							pathParts.pop();
+							currentPath = pathParts.join('/') || 'home/data';
+							handleListFiles();
+						}}
+						class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
+					>
+						← {$i18n.t('Back')}
+					</button>
+				{/if}
 			</div>
 
 			{#if error}
@@ -123,17 +151,14 @@
 			{:else}
 				<div class="grid gap-2">
 					{#each files as item}
-						<div
-							class="flex items-center p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
-							on:click={() => {
-								if (!isFile(item)) {
-									currentPath = `${currentPath}/${item}`;
-									handleListFiles();
-								}
-							}}
-						>
-							<div class="mr-3">
-								{#if isFile(item)}
+						{#if isFile(item)}
+							<!-- Non-interactive file item -->
+							<div
+								class="flex items-center p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+								role="listitem"
+								aria-label="File: {item.path}"
+							>
+								<div class="mr-3">
 									<!-- File Icon -->
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -141,6 +166,7 @@
 										fill="none"
 										viewBox="0 0 24 24"
 										stroke="currentColor"
+										aria-hidden="true"
 									>
 										<path
 											stroke-linecap="round"
@@ -149,7 +175,28 @@
 											d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
 										/>
 									</svg>
-								{:else}
+								</div>
+								<div class="flex-1">
+									<span class="text-gray-700 dark:text-gray-200">{item.path}</span>
+									<div class="text-xs text-gray-500 dark:text-gray-400">File</div>
+								</div>
+							</div>
+						{:else}
+							<!-- Interactive folder item -->
+							<div
+								class="flex items-center p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+								role="button"
+								tabindex="0"
+								aria-label="Open folder: {item.path}"
+								on:click={() => handleFolderClick(item)}
+								on:keydown={(event) => {
+									if (event.key === 'Enter' || event.key === ' ') {
+										event.preventDefault();
+										handleFolderClick(item);
+									}
+								}}
+							>
+								<div class="mr-3">
 									<!-- Folder Icon -->
 									<svg
 										xmlns="http://www.w3.org/2000/svg"
@@ -157,6 +204,7 @@
 										fill="none"
 										viewBox="0 0 24 24"
 										stroke="currentColor"
+										aria-hidden="true"
 									>
 										<path
 											stroke-linecap="round"
@@ -165,10 +213,13 @@
 											d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
 										/>
 									</svg>
-								{/if}
+								</div>
+								<div class="flex-1">
+									<span class="text-gray-700 dark:text-gray-200">{item.path}</span>
+									<div class="text-xs text-gray-500 dark:text-gray-400">Directory</div>
+								</div>
 							</div>
-							<span class="text-gray-700 dark:text-gray-200">{item}</span>
-						</div>
+						{/if}
 					{/each}
 				</div>
 			{/if}

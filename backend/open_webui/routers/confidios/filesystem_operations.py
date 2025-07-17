@@ -49,7 +49,7 @@ async def list_files(request: ListFilesRequest, user=Depends(get_verified_user))
                     "X-Confidios-Session-Id": json.dumps(session_header),
                     "Content-Type": "application/json",
                 },
-                json={"path": "home/data"},  # Add request body
+                json={"path": request.path},  # Add request body
             ) as response:
                 if response.status != 200:
                     error_detail = "Failed to list files"

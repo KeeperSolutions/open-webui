@@ -253,89 +253,6 @@ async def confidios_admin_login(
         )
 
 
-# @router.post("/auths/logout")
-# async def confidios_admin_logout(
-#     user=Depends(get_verified_user),
-# ):
-#     if user.role != "admin":
-#         raise HTTPException(
-#             status_code=status.HTTP_403_FORBIDDEN,
-#             detail="Only admin users can access this endpoint",
-#         )
-
-#     # Check if user has active Confidios session (memory first, then database)
-#     session_data = None
-#     if user.id in confidios_sessions:
-#         session_data = confidios_sessions[user.id]
-#     else:
-#         session_data = await get_confidios_session(user.id)
-#         if not session_data:
-#             raise HTTPException(
-#                 status_code=status.HTTP_401_UNAUTHORIZED,
-#                 detail="No active Confidios session found",
-#             )
-
-#     # Get session data for logout request
-#     session_header = {
-#         "u": session_data["confidios_user"],
-#         "sid": session_data["confidios_session_id"],
-#     }
-
-#     try:
-#         async with aiohttp.ClientSession() as session:
-#             async with session.post(
-#                 f"{CONFIDIOS_BASE_URL}/logout",
-#                 headers={
-#                     "X-Confidios-Session-Id": json.dumps(session_header),
-#                     "Content-Type": "application/json",
-#                 },
-#             ) as response:
-#                 if response.status != 200:
-#                     error_detail = "Failed to logout from Confidios service"
-#                     try:
-#                         error_body = await response.json()
-#                         error_detail = f"{error_body.get('detail', error_detail)}"
-#                     except Exception:
-#                         error_detail = await response.text()
-
-#                     raise HTTPException(
-#                         status_code=response.status,
-#                         detail=error_detail,
-#                     )
-
-#                 # Successfully logged out from Confidios, update both memory and database
-#                 logout_data = {
-#                     "confidios_user": None,
-#                     "confidios_session_id": None,
-#                     "balance": None,
-#                     "is_logged_in": False,
-#                 }
-
-#                 confidios_sessions[user.id] = logout_data
-#                 await update_confidios_session_logout(user.id)
-
-#                 return {
-#                     "status": "Successfully logged out from Confidios service",
-#                     "user_id": user.id,
-#                     "confidios_is_logged_in": False,
-#                 }
-
-#     except aiohttp.ClientError as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-#             detail=f"Could not connect to Confidios service: {str(e)}",
-#         )
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail=f"Failed to logout: {str(e)}",
-#         )
-
-# LOGGING
-# Set up logger
-logger = logging.getLogger(__name__)
-
-
 @router.post("/auths/logout")
 async def confidios_admin_logout(
     user=Depends(get_verified_user),
@@ -373,31 +290,14 @@ async def confidios_admin_logout(
                     "Content-Type": "application/json",
                 },
             ) as response:
-                # Log the response details
-                logger.info(f"Confidios logout response status: {response.status}")
-                logger.info(
-                    f"Confidios logout response headers: {dict(response.headers)}"
-                )
-
-                # Get response body for logging
-                response_text = await response.text()
-                logger.info(f"Confidios logout response body: {response_text}")
-
                 if response.status != 200:
                     error_detail = "Failed to logout from Confidios service"
                     try:
-                        error_body = json.loads(response_text)
+                        error_body = await response.json()
                         error_detail = f"{error_body.get('detail', error_detail)}"
-                        logger.error(
-                            f"Confidios logout error body parsed: {error_body}"
-                        )
-                    except Exception as parse_error:
-                        error_detail = response_text
-                        logger.error(f"Failed to parse error response: {parse_error}")
+                    except Exception:
+                        error_detail = await response.text()
 
-                    logger.error(
-                        f"Confidios logout failed with status {response.status}: {error_detail}"
-                    )
                     raise HTTPException(
                         status_code=response.status,
                         detail=error_detail,
@@ -414,48 +314,149 @@ async def confidios_admin_logout(
                 confidios_sessions[user.id] = logout_data
                 await update_confidios_session_logout(user.id)
 
-                success_response = {
+                return {
                     "status": "Successfully logged out from Confidios service",
                     "user_id": user.id,
                     "confidios_is_logged_in": False,
                 }
 
-                logger.info(f"Successful logout response: {success_response}")
-                return success_response
-
     except aiohttp.ClientError as e:
-        # Log the full aiohttp error object
-        logger.error(f"aiohttp.ClientError occurred: {type(e).__name__}")
-        logger.error(f"Error message: {str(e)}")
-        logger.error(f"Error args: {e.args}")
-
-        # Log additional error attributes if available
-        if hasattr(e, "status"):
-            logger.error(f"Error status: {e.status}")
-        if hasattr(e, "message"):
-            logger.error(f"Error message attr: {e.message}")
-        if hasattr(e, "headers"):
-            logger.error(f"Error headers: {e.headers}")
-
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Could not connect to Confidios service: {str(e)}",
         )
     except Exception as e:
-        # Log the full exception object
-        logger.error(f"Unexpected error occurred: {type(e).__name__}")
-        logger.error(f"Error message: {str(e)}")
-        logger.error(f"Error args: {e.args}")
-
-        # Log the full traceback for debugging
-        import traceback
-
-        logger.error(f"Full traceback: {traceback.format_exc()}")
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to logout: {str(e)}",
         )
+
+
+# LOGGING
+# Set up logger
+logger = logging.getLogger(__name__)
+
+# LOGGER FOR TROUBLESHOOTING
+# @router.post("/auths/logout")
+# async def confidios_admin_logout(
+#     user=Depends(get_verified_user),
+# ):
+#     if user.role != "admin":
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Only admin users can access this endpoint",
+#         )
+
+#     # Check if user has active Confidios session (memory first, then database)
+#     session_data = None
+#     if user.id in confidios_sessions:
+#         session_data = confidios_sessions[user.id]
+#     else:
+#         session_data = await get_confidios_session(user.id)
+#         if not session_data:
+#             raise HTTPException(
+#                 status_code=status.HTTP_401_UNAUTHORIZED,
+#                 detail="No active Confidios session found",
+#             )
+
+#     # Get session data for logout request
+#     session_header = {
+#         "u": session_data["confidios_user"],
+#         "sid": session_data["confidios_session_id"],
+#     }
+
+#     try:
+#         async with aiohttp.ClientSession() as session:
+#             async with session.post(
+#                 f"{CONFIDIOS_BASE_URL}/logout",
+#                 headers={
+#                     "X-Confidios-Session-Id": json.dumps(session_header),
+#                     "Content-Type": "application/json",
+#                 },
+#             ) as response:
+#                 # Log the response details
+#                 logger.info(f"Confidios logout response status: {response.status}")
+#                 logger.info(
+#                     f"Confidios logout response headers: {dict(response.headers)}"
+#                 )
+
+#                 # Get response body for logging
+#                 response_text = await response.text()
+#                 logger.info(f"Confidios logout response body: {response_text}")
+
+#                 if response.status != 200:
+#                     error_detail = "Failed to logout from Confidios service"
+#                     try:
+#                         error_body = json.loads(response_text)
+#                         error_detail = f"{error_body.get('detail', error_detail)}"
+#                         logger.error(
+#                             f"Confidios logout error body parsed: {error_body}"
+#                         )
+#                     except Exception as parse_error:
+#                         error_detail = response_text
+#                         logger.error(f"Failed to parse error response: {parse_error}")
+
+#                     logger.error(
+#                         f"Confidios logout failed with status {response.status}: {error_detail}"
+#                     )
+#                     raise HTTPException(
+#                         status_code=response.status,
+#                         detail=error_detail,
+#                     )
+
+#                 # Successfully logged out from Confidios, update both memory and database
+#                 logout_data = {
+#                     "confidios_user": None,
+#                     "confidios_session_id": None,
+#                     "balance": None,
+#                     "is_logged_in": False,
+#                 }
+
+#                 confidios_sessions[user.id] = logout_data
+#                 await update_confidios_session_logout(user.id)
+
+#                 success_response = {
+#                     "status": "Successfully logged out from Confidios service",
+#                     "user_id": user.id,
+#                     "confidios_is_logged_in": False,
+#                 }
+
+#                 logger.info(f"Successful logout response: {success_response}")
+#                 return success_response
+
+#     except aiohttp.ClientError as e:
+#         # Log the full aiohttp error object
+#         logger.error(f"aiohttp.ClientError occurred: {type(e).__name__}")
+#         logger.error(f"Error message: {str(e)}")
+#         logger.error(f"Error args: {e.args}")
+
+#         # Log additional error attributes if available
+#         if hasattr(e, "status"):
+#             logger.error(f"Error status: {e.status}")
+#         if hasattr(e, "message"):
+#             logger.error(f"Error message attr: {e.message}")
+#         if hasattr(e, "headers"):
+#             logger.error(f"Error headers: {e.headers}")
+
+#         raise HTTPException(
+#             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+#             detail=f"Could not connect to Confidios service: {str(e)}",
+#         )
+#     except Exception as e:
+#         # Log the full exception object
+#         logger.error(f"Unexpected error occurred: {type(e).__name__}")
+#         logger.error(f"Error message: {str(e)}")
+#         logger.error(f"Error args: {e.args}")
+
+#         # Log the full traceback for debugging
+#         import traceback
+
+#         logger.error(f"Full traceback: {traceback.format_exc()}")
+
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"Failed to logout: {str(e)}",
+#         )
 
 
 @router.get("/status")
