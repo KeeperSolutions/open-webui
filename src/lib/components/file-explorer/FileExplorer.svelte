@@ -16,6 +16,11 @@
 	let selectedFile: FileItem | null = null;
 	let isDownloading = false;
 
+	// Add new state variables
+	let isCreateFolderModalOpen = false;
+	let newFolderName = '';
+	let isCreatingFolder = false;
+
 	// Helper function to determine if item is a file
 	const isFile = (item: FileItem) => item.kind === 'file';
 
@@ -170,6 +175,51 @@
 		handleListFiles();
 	}
 
+	function openCreateFolderModal() {
+		newFolderName = '';
+		isCreateFolderModalOpen = true;
+	}
+
+	function closeCreateFolderModal() {
+		isCreateFolderModalOpen = false;
+		newFolderName = '';
+	}
+
+	async function handleCreateFolder() {
+		if (!newFolderName.trim()) return;
+
+		isCreatingFolder = true;
+		try {
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/mkdir`, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${localStorage.token}`,
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					path: `${currentPath}/${newFolderName}`
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				// Extract the specific error message from the API response
+				const errorMessage = errorData.detail?.[0]?.msg || 'Failed to create folder';
+				throw new Error(errorMessage);
+			}
+
+			await response.json();
+			toast.success($i18n.t('Folder created successfully'));
+			closeCreateFolderModal();
+			handleListFiles(); // Refresh the file list
+		} catch (err) {
+			console.error('Error creating folder:', err);
+			toast.error(err.message); // Display the specific error message
+		} finally {
+			isCreatingFolder = false;
+		}
+	}
+
 	onMount(() => {
 		handleListFiles();
 	});
@@ -302,6 +352,28 @@
 						</span>
 					</button>
 				{/if}
+
+				<!-- New Folder button -->
+				<button
+					on:click={openCreateFolderModal}
+					class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition flex items-center gap-2"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+						/>
+					</svg>
+					{$i18n.t('New Folder')}
+				</button>
 			</div>
 
 			{#if error}
@@ -471,3 +543,79 @@
 		</div>
 	</div>
 </div>
+
+<!-- Add the modal -->
+{#if isCreateFolderModalOpen}
+	<div class="fixed inset-0 bg-black/10 backdrop-blur-sm flex items-center justify-center z-50">
+		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+			<h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+				{$i18n.t('Create New Folder')}
+			</h3>
+
+			<div class="mb-4">
+				<label
+					for="folderName"
+					class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+				>
+					{$i18n.t('Folder Name')}
+				</label>
+				<input
+					type="text"
+					id="folderName"
+					bind:value={newFolderName}
+					maxlength="24"
+					class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md
+						   focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-700
+						   dark:text-white"
+					placeholder={$i18n.t('Enter folder name')}
+					disabled={isCreatingFolder}
+				/>
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+					{newFolderName.length}/24 {$i18n.t('characters')}
+				</p>
+			</div>
+
+			<div class="flex justify-end gap-3">
+				<button
+					on:click={closeCreateFolderModal}
+					class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100
+						   dark:hover:bg-gray-700 rounded transition"
+					disabled={isCreatingFolder}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					on:click={handleCreateFolder}
+					disabled={!newFolderName.trim() || isCreatingFolder}
+					class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700
+						   transition disabled:opacity-50 disabled:cursor-not-allowed
+						   flex items-center gap-2"
+				>
+					{#if isCreatingFolder}
+						<svg
+							class="animate-spin h-4 w-4"
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+						>
+							<circle
+								class="opacity-25"
+								cx="12"
+								cy="12"
+								r="10"
+								stroke="currentColor"
+								stroke-width="4"
+							></circle>
+							<path
+								class="opacity-75"
+								fill="currentColor"
+								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							></path>
+						</svg>
+					{/if}
+					{isCreatingFolder ? $i18n.t('Creating...') : $i18n.t('Create')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
