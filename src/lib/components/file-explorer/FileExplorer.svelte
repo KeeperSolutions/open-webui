@@ -21,6 +21,9 @@
 	let newFolderName = '';
 	let isCreatingFolder = false;
 
+	// Add root path state to track which view we're in
+	let isGroupView = false;
+
 	// Helper function to determine if item is a file
 	const isFile = (item: FileItem) => item.kind === 'file';
 
@@ -63,7 +66,9 @@
 	async function handleGroupFiles() {
 		isLoading = true;
 		error = null;
-		selectedFile = null; // Clear selection when navigating
+		selectedFile = null;
+		isGroupView = true; // Set group view state
+		currentPath = 'home/group'; // Update current path
 
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/ls`, {
@@ -102,7 +107,12 @@
 		} else {
 			// Navigate to folder
 			selectedFile = null; // Clear selection
-			currentPath = `${currentPath}/${item.path}`;
+			// Use the correct base path based on the view
+			if (currentPath === 'home/data' || currentPath.startsWith('home/data/')) {
+				currentPath = `${currentPath}/${item.path}`;
+			} else if (currentPath === 'home/group' || currentPath.startsWith('home/group/')) {
+				currentPath = `${currentPath}/${item.path}`;
+			}
 			handleListFiles();
 		}
 	}
@@ -291,7 +301,44 @@
 						d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
 					/>
 				</svg>
-				<p class="text-sm text-gray-600 dark:text-gray-400">{currentPath}</p>
+				<!-- Path display with clickable segments -->
+				<p class="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-1">
+					{#if isGroupView}
+						{#if currentPath === 'home/group'}
+							<span>home/group</span>
+						{:else}
+							<button
+								class="hover:text-blue-500 hover:underline"
+								on:click={() => {
+									currentPath = 'home/group';
+									handleListFiles();
+								}}
+							>
+								home/group
+							</button>
+							{#each currentPath.slice(10).split('/').filter(Boolean) as segment}
+								<span class="text-gray-400">/</span>
+								<span>{segment}</span>
+							{/each}
+						{/if}
+					{:else if currentPath === 'home/data'}
+						<span>home/data</span>
+					{:else}
+						<button
+							class="hover:text-blue-500 hover:underline"
+							on:click={() => {
+								currentPath = 'home/data';
+								handleListFiles();
+							}}
+						>
+							home/data
+						</button>
+						{#each currentPath.slice(9).split('/').filter(Boolean) as segment}
+							<span class="text-gray-400">/</span>
+							<span>{segment}</span>
+						{/each}
+					{/if}
+				</p>
 			</div>
 		</div>
 
@@ -302,6 +349,7 @@
 					<!-- Home button -->
 					<button
 						on:click={() => {
+							isGroupView = false;
 							currentPath = 'home/data';
 							handleListFiles();
 						}}
@@ -413,7 +461,7 @@
 								d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
 							/>
 						</svg>
-						{$i18n.t('Groups')}
+						{$i18n.t('Group')}
 					</button>
 				</div>
 			</div>

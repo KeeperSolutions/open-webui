@@ -19,6 +19,11 @@ router = APIRouter()
 CONFIDIOS_BASE_URL = os.getenv("CONFIDIOS_BASE_URL")
 CONFIDIOS_BASE_USER_FOLDER = os.getenv("CONFIDIOS_BASE_USER_FOLDER", "home/data")
 
+# Update the constants
+CONFIDIOS_BASE_DATA_FOLDER = "home/data"
+CONFIDIOS_BASE_GROUP_FOLDER = "home/group"
+VALID_BASE_FOLDERS = [CONFIDIOS_BASE_DATA_FOLDER, CONFIDIOS_BASE_GROUP_FOLDER]
+
 
 # Add request model
 class ListFilesRequest(BaseModel):
@@ -161,9 +166,11 @@ class MakeDirectoryRequest(BaseModel):
     @field_validator("path")
     @classmethod
     def validate_path(cls, v: str) -> str:
-        # Check if path starts with base folder
-        if not v.startswith(CONFIDIOS_BASE_USER_FOLDER):
-            raise ValueError(f"Path must start with {CONFIDIOS_BASE_USER_FOLDER}")
+        # Check if path starts with any valid base folder
+        if not any(v.startswith(base) for base in VALID_BASE_FOLDERS):
+            raise ValueError(
+                f"Path must start with either {CONFIDIOS_BASE_DATA_FOLDER} or {CONFIDIOS_BASE_GROUP_FOLDER}"
+            )
 
         # Get the folder name (last part of the path)
         folder_name = v.split("/")[-1]
