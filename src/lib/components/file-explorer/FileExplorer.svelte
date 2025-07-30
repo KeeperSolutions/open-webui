@@ -491,7 +491,7 @@
 						</Tooltip>
 
 						<!-- New Folder button -->
-						<Tooltip content={$i18n.t('New Folder')}>
+						<Tooltip content={$i18n.t('New Secure Folder')}>
 							<button
 								on:click={openCreateFolderModal}
 								class="p-2 border border-orange-500 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition"
