@@ -27,6 +27,8 @@
 	import UserGroup from '$lib/components/icons/UserGroup.svelte';
 	import SignOut from '$lib/components/icons/SignOut.svelte';
 
+	import { handleConfidiosLogin, handleConfidiosLogout } from '$lib/utils/integrations/confidios';
+
 	const i18n = getContext('i18n');
 
 	export let show = false;
@@ -106,88 +108,19 @@
 	// Add loading state variable
 	let isConfidiosLoading = false;
 
-	async function handleConfidiosLogin() {
+	async function handleLogin() {
+		isConfidiosLoading = true;
 		try {
-			isConfidiosLoading = true;
-			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/auths/user/login`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${localStorage.token}`
-				},
-				body: JSON.stringify({
-					confidios_username: $user.email.replace('@', '-at-').toLowerCase()
-				})
-			});
-
-			if (!response.ok) {
-				throw new Error('Failed to login to Confidios');
-			}
-
-			const data = await response.json();
-			console.log('Confidios login response:', data);
-
-			// Show success toast
-			toast.success(data.status || $i18n.t('Successfully logged in to Confidios'));
-
-			confidiosStore.update((state) => ({
-				...state,
-				currentUserStatus: {
-					isConfidiosUser: true,
-					isLoggedInConfidios: true,
-					username: data.confidios_user,
-					balance: data.confidios_balance
-				}
-			}));
-		} catch (error) {
-			console.error('Error logging into Confidios:', error);
-			// Show error toast
-			toast.error($i18n.t('Failed to login to Confidios. Please try again.'));
-
-			confidiosStore.update((state) => ({
-				...state,
-				currentUserStatus: {
-					...state.currentUserStatus,
-					isLoggedInConfidios: false
-				}
-			}));
+			await handleConfidiosLogin();
 		} finally {
 			isConfidiosLoading = false;
 		}
 	}
 
-	async function handleConfidiosLogout() {
+	async function handleLogout() {
+		isConfidiosLoading = true;
 		try {
-			isConfidiosLoading = true;
-			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/auths/user/logout`, {
-				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${localStorage.token}`
-				}
-			});
-
-			if (!response.ok) {
-				throw new Error('Failed to logout from Confidios');
-			}
-
-			const data = await response.json();
-			console.log('Confidios logout response:', data);
-
-			// Show success toast
-			toast.success(data.status || $i18n.t('Successfully logged out from Confidios'));
-
-			confidiosStore.update((state) => ({
-				...state,
-				currentUserStatus: {
-					...state.currentUserStatus,
-					isLoggedInConfidios: false,
-					balance: undefined
-				}
-			}));
-		} catch (error) {
-			console.error('Error logging out from Confidios:', error);
-			// Show error toast
-			toast.error($i18n.t('Failed to logout from Confidios. Please try again.'));
+			await handleConfidiosLogout();
 		} finally {
 			isConfidiosLoading = false;
 		}
@@ -332,8 +265,8 @@
 				<button
 					class="flex rounded-md py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 					on:click={$confidiosStore.currentUserStatus?.isLoggedInConfidios
-						? handleConfidiosLogout
-						: handleConfidiosLogin}
+						? handleLogout
+						: handleLogin}
 					disabled={isConfidiosLoading}
 				>
 					<div class="self-center mr-3">

@@ -1,8 +1,15 @@
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
+	import { getContext, onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	const i18n = getContext('i18n');
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+
+	import 'tippy.js/dist/tippy.css';
+	import 'tippy.js/themes/light.css';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { confidiosStore } from '$lib/stores/integrations';
+	import { handleConfidiosLogin, handleConfidiosLogout } from '$lib/utils/integrations/confidios';
+	import { debounce } from 'lodash';
 
 	interface FileItem {
 		kind: 'file' | 'directory';
@@ -15,6 +22,7 @@
 	let error: string | null = null;
 	let selectedFile: FileItem | null = null;
 	let isDownloading = false;
+	let isConfidiosLoading = false;
 
 	// Add new state variables
 	let isCreateFolderModalOpen = false;
@@ -27,7 +35,35 @@
 	// Helper function to determine if item is a file
 	const isFile = (item: FileItem) => item.kind === 'file';
 
+	// Handle login action
+	async function handleLogin() {
+		isConfidiosLoading = true;
+		try {
+			const success = await handleConfidiosLogin();
+			if (success) {
+				// User is logged in, proceed with file listing
+				await handleListFiles();
+			}
+		} finally {
+			isConfidiosLoading = false;
+		}
+	}
+
+	let currentRequest: AbortController | null = null;
+
 	async function handleListFiles() {
+		// Check if user is logged in before trying to fetch files
+		if (!$confidiosStore.currentUserStatus?.isLoggedInConfidios) {
+			files = [];
+			return;
+		}
+
+		// Cancel previous request if exists
+		if (currentRequest) {
+			currentRequest.abort();
+		}
+		currentRequest = new AbortController();
+
 		isLoading = true;
 		error = null;
 		selectedFile = null; // Clear selection when navigating
@@ -41,7 +77,8 @@
 				},
 				body: JSON.stringify({
 					path: currentPath
-				})
+				}),
+				signal: currentRequest.signal
 			});
 
 			if (!response.ok) {
@@ -54,11 +91,15 @@
 			files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
 			toast.success($i18n.t('Files retrieved successfully'));
 		} catch (err) {
+			if (err.name === 'AbortError') {
+				return;
+			}
 			console.error('Error fetching files:', err);
 			error = err.message;
 			toast.error($i18n.t('Failed to fetch files. Please try again.'));
 		} finally {
 			isLoading = false;
+			currentRequest = null;
 		}
 	}
 
@@ -100,6 +141,14 @@
 		}
 	}
 
+	// Debounce the list files function
+	const debouncedListFiles = debounce(handleListFiles, 300);
+
+	// Clear selection when path changes
+	$: if (currentPath) {
+		selectedFile = null;
+	}
+
 	function handleItemClick(item: FileItem) {
 		if (isFile(item)) {
 			// Select file
@@ -113,7 +162,7 @@
 			} else if (currentPath === 'home/group' || currentPath.startsWith('home/group/')) {
 				currentPath = `${currentPath}/${item.path}`;
 			}
-			handleListFiles();
+			debouncedListFiles();
 		}
 	}
 
@@ -266,8 +315,26 @@
 		}
 	}
 
+	let initialMount = true;
+
+	$: if ($confidiosStore.currentUserStatus?.isLoggedInConfidios) {
+		if (!initialMount) {
+			handleListFiles();
+		}
+	}
+
 	onMount(() => {
-		handleListFiles();
+		if ($confidiosStore.currentUserStatus?.isLoggedInConfidios) {
+			handleListFiles();
+		}
+		initialMount = false;
+	});
+
+	onDestroy(() => {
+		if (currentRequest) {
+			currentRequest.abort();
+		}
+		debouncedListFiles.cancel();
 	});
 </script>
 
@@ -281,7 +348,7 @@
 					class="h-7 w-auto object-contain"
 				/>
 				<h2 class="text-lg font-semibold text-gray-800 dark:text-white">
-					{$i18n.t('File Explorer')}
+					{$i18n.t('Secure File Explorer')}
 				</h2>
 			</div>
 			<div class="mr-3 flex items-center gap-2">
@@ -343,42 +410,148 @@
 		</div>
 
 		<div class="p-4">
-			<div class="flex items-center gap-4 mb-4">
-				<!-- Left side buttons -->
-				<div class="flex items-center gap-4">
-					<!-- Home button -->
-					<button
-						on:click={() => {
-							isGroupView = false;
-							currentPath = 'home/data';
-							handleListFiles();
-						}}
-						class="px-4 py-2 border border-gray-500 text-gray-500 rounded hover:bg-gray-500 hover:text-white transition flex items-center gap-2"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-							/>
-						</svg>
-						{$i18n.t('Home')}
-					</button>
+			<!-- Update the main action buttons -->
+			<div class="flex items-center justify-between gap-4 mb-4">
+				<!-- Only show action buttons if logged in -->
+				{#if $confidiosStore.currentUserStatus?.isLoggedInConfidios}
+					<!-- Left side buttons -->
+					<div class="flex items-center gap-4">
+						<!-- Home button -->
+						<Tooltip content={$i18n.t('Home')}>
+							<button
+								on:click={() => {
+									isGroupView = false;
+									currentPath = 'home/data';
+									handleListFiles();
+								}}
+								class="p-2 border border-gray-500 text-gray-500 rounded hover:bg-gray-500 hover:text-white transition"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="h-5 w-5"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke="currentColor"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+									/>
+								</svg>
+							</button>
+						</Tooltip>
 
-					<!-- Refresh button -->
+						<!-- Refresh button -->
+						<Tooltip content={isLoading ? $i18n.t('Loading...') : $i18n.t('Refresh')}>
+							<button
+								on:click={handleListFiles}
+								disabled={isLoading}
+								class="p-2 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-white transition disabled:opacity-50"
+							>
+								{#if isLoading}
+									<svg
+										class="animate-spin h-5 w-5"
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+									>
+										<circle
+											class="opacity-25"
+											cx="12"
+											cy="12"
+											r="10"
+											stroke="currentColor"
+											stroke-width="4"
+										></circle>
+										<path
+											class="opacity-75"
+											fill="currentColor"
+											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+										></path>
+									</svg>
+								{:else}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-5 w-5"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+										/>
+									</svg>
+								{/if}
+							</button>
+						</Tooltip>
+
+						<!-- New Folder button -->
+						<Tooltip content={$i18n.t('New Folder')}>
+							<button
+								on:click={openCreateFolderModal}
+								class="p-2 border border-orange-500 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="h-5 w-5"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke="currentColor"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+									/>
+								</svg>
+							</button>
+						</Tooltip>
+					</div>
+
+					<!-- Right-aligned group button -->
+					<div>
+						<Tooltip content={$i18n.t('Groups')}>
+							<button
+								on:click={handleGroupFiles}
+								class="p-2 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-white transition"
+							>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="h-5 w-5"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke="currentColor"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+									/>
+								</svg>
+							</button>
+						</Tooltip>
+					</div>
+				{/if}
+			</div>
+
+			{#if !$confidiosStore.currentUserStatus?.isLoggedInConfidios}
+				<div class="text-center py-8">
+					<p class="text-gray-600 dark:text-gray-400 mb-4">
+						{$i18n.t('Please log in to access your files')}
+					</p>
 					<button
-						on:click={handleListFiles}
-						class="px-4 py-2 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-white transition disabled:opacity-50 flex items-center gap-2"
-						disabled={isLoading}
+						on:click={handleLogin}
+						disabled={isConfidiosLoading}
+						class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2 mx-auto"
 					>
-						{#if isLoading}
+						{#if isConfidiosLoading}
 							<svg
 								class="animate-spin h-5 w-5"
 								xmlns="http://www.w3.org/2000/svg"
@@ -400,151 +573,21 @@
 								></path>
 							</svg>
 						{:else}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								class="h-5 w-5"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke="currentColor"
-							>
+							<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
 									stroke-width="2"
-									d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+									d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"
 								/>
 							</svg>
 						{/if}
-						{isLoading ? $i18n.t('Loading...') : $i18n.t('Refresh')}
-					</button>
-
-					<!-- New Folder button -->
-					<button
-						on:click={openCreateFolderModal}
-						class="px-4 py-2 border border-orange-500 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition flex items-center gap-2"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
+						<span
+							>{isConfidiosLoading ? $i18n.t('Logging in...') : $i18n.t('Login to Confidios')}</span
 						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-							/>
-						</svg>
-						{$i18n.t('New Folder')}
 					</button>
 				</div>
-
-				<!-- Right-aligned group button -->
-				<div class="flex-1 flex justify-end">
-					<button
-						on:click={handleGroupFiles}
-						class="px-4 py-2 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-white transition flex items-center gap-2"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-5 w-5"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-							/>
-						</svg>
-						{$i18n.t('Group')}
-					</button>
-				</div>
-			</div>
-
-			{#if error}
-				<div
-					class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-md"
-				>
-					<p class="text-sm">{error}</p>
-					<button
-						class="text-sm underline mt-1 hover:text-red-700 dark:hover:text-red-300"
-						on:click={handleListFiles}
-					>
-						{$i18n.t('Try again')}
-					</button>
-				</div>
-			{/if}
-
-			{#if selectedFile}
-				<div class="mb-4">
-					<div class="flex items-center gap-8">
-						<!-- Selected file notification -->
-						<div
-							class="flex-1 min-w-0 p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-md"
-						>
-							<p class="text-sm truncate">
-								📄 {$i18n.t('Selected')}: <span class="font-medium">{selectedFile.path}</span>
-							</p>
-						</div>
-
-						<!-- Download button -->
-						<button
-							on:click={handleDownload}
-							disabled={isDownloading}
-							class="px-4 py-2 border border-green-500 text-green-500 rounded
-								   hover:bg-green-500 hover:text-white transition
-								   disabled:opacity-50 disabled:cursor-not-allowed
-								   flex items-center justify-center gap-2 whitespace-nowrap"
-						>
-							{#if isDownloading}
-								<svg
-									class="animate-spin h-5 w-5"
-									xmlns="http://www.w3.org/2000/svg"
-									fill="none"
-									viewBox="0 0 24 24"
-								>
-									<circle
-										class="opacity-25"
-										cx="12"
-										cy="12"
-										r="10"
-										stroke="currentColor"
-										stroke-width="4"
-									></circle>
-									<path
-										class="opacity-75"
-										fill="currentColor"
-										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-									></path>
-								</svg>
-							{:else}
-								<svg
-									xmlns="http://www.w3.org/2000/svg"
-									class="h-5 w-5"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-									/>
-								</svg>
-							{/if}
-							{isDownloading ? $i18n.t('Downloading...') : $i18n.t('Download')}
-						</button>
-					</div>
-				</div>
-			{/if}
-
-			{#if isLoading}
+			{:else if isLoading}
 				<div class="flex justify-center py-8">
 					<div class="animate-pulse text-gray-400 dark:text-gray-600">
 						{$i18n.t('Loading files...')}
@@ -693,7 +736,7 @@
 	<div class="fixed inset-0 bg-black/10 backdrop-blur-sm flex items-center justify-center z-50">
 		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
 			<h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
-				{$i18n.t('Create New Folder')}
+				{$i18n.t('Create New Secure Folder')}
 			</h3>
 
 			<div class="mb-4">
@@ -701,7 +744,7 @@
 					for="folderName"
 					class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
 				>
-					{$i18n.t('Folder Name')}
+					{$i18n.t('Secure Folder Name')}
 				</label>
 				<input
 					type="text"
