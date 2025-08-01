@@ -216,13 +216,21 @@
 								submitHandler();
 							}}
 						>
-							<div class="mb-1">
+							<div class="mb-1 flex flex-col items-center gap-2">
 								<div class="flex justify-center mb-4">
-									<img
-										src="{WEBUI_BASE_URL}/static/logo.png"
-										alt="Keeper Logo"
-										class="w-24"
-									/>
+									<img src="{WEBUI_BASE_URL}/static/logo.png" alt="Keeper Logo" class="w-24" />
+								</div>
+								<div class="flex flex-col items-center mb-4 bg-slate-700 p-4 rounded-lg w-75">
+									<p class="text-sm font-semibold text-slate-100 mb-2 tracking-wide">
+										Self-Sovereign Data powered by
+									</p>
+									<a href="https://www.confidios.com" target="_blank" rel="noopener noreferrer">
+										<img
+											src="{WEBUI_BASE_URL}/static/confidios-logo.png"
+											alt="Confidios Logo"
+											class="w-48 h-auto"
+										/>
+									</a>
 								</div>
 								<div class=" text-2xl font-medium">
 									{#if $config?.onboarding ?? false}
