@@ -7,6 +7,8 @@
 	import 'tippy.js/dist/tippy.css';
 	import 'tippy.js/themes/light.css';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import FileList from './FileList.svelte';
+	import CreateFolderModal from './CreateFolderModal.svelte';
 	import { confidiosStore } from '$lib/stores/integrations';
 	import { handleConfidiosLogin, handleConfidiosLogout } from '$lib/utils/integrations/confidios';
 	import { debounce } from 'lodash';
@@ -32,24 +34,32 @@
 	// Add root path state to track which view we're in
 	let isGroupView = false;
 
+	// Request tracking for race condition prevention
+	let currentListRequest: AbortController | null = null;
+	let currentDownloadRequest: AbortController | null = null;
+	let requestCounter = 0; // Track request order
+	let isMounted = true; // Track component mount state
+
 	// Helper function to determine if item is a file
 	const isFile = (item: FileItem) => item.kind === 'file';
 
 	// Handle login action
 	async function handleLogin() {
+		if (!isMounted) return;
+
 		isConfidiosLoading = true;
 		try {
 			const success = await handleConfidiosLogin();
-			if (success) {
+			if (success && isMounted) {
 				// User is logged in, proceed with file listing
 				await handleListFiles();
 			}
 		} finally {
-			isConfidiosLoading = false;
+			if (isMounted) {
+				isConfidiosLoading = false;
+			}
 		}
 	}
-
-	let currentRequest: AbortController | null = null;
 
 	async function handleListFiles() {
 		// Check if user is logged in before trying to fetch files
@@ -59,14 +69,19 @@
 		}
 
 		// Cancel previous request if exists
-		if (currentRequest) {
-			currentRequest.abort();
+		if (currentListRequest) {
+			currentListRequest.abort();
 		}
-		currentRequest = new AbortController();
 
-		isLoading = true;
-		error = null;
-		selectedFile = null; // Clear selection when navigating
+		// Create new abort controller and increment counter
+		currentListRequest = new AbortController();
+		const thisRequestId = ++requestCounter;
+
+		if (isMounted) {
+			isLoading = true;
+			error = null;
+			selectedFile = null; // Clear selection when navigating
+		}
 
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/ls`, {
@@ -78,8 +93,13 @@
 				body: JSON.stringify({
 					path: currentPath
 				}),
-				signal: currentRequest.signal
+				signal: currentListRequest.signal
 			});
+
+			// Check if this is still the latest request
+			if (thisRequestId !== requestCounter || !isMounted) {
+				return;
+			}
 
 			if (!response.ok) {
 				const errorData = await response.text();
@@ -87,29 +107,55 @@
 			}
 
 			const data = await response.json();
-			// Filter out current and parent directory entries
-			files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
-			toast.success($i18n.t('Files retrieved successfully'));
+
+			// Double-check before updating state
+			if (thisRequestId === requestCounter && isMounted) {
+				// Filter out current and parent directory entries
+				files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
+				toast.success($i18n.t('Files retrieved successfully'));
+			}
 		} catch (err) {
 			if (err.name === 'AbortError') {
+				// Request was aborted, ignore
 				return;
 			}
-			console.error('Error fetching files:', err);
-			error = err.message;
-			toast.error($i18n.t('Failed to fetch files. Please try again.'));
+
+			// Only handle error if this is still the latest request
+			if (thisRequestId === requestCounter && isMounted) {
+				console.error('Error fetching files:', err);
+				error = err.message;
+				toast.error($i18n.t('Failed to fetch files. Please try again.'));
+			}
 		} finally {
-			isLoading = false;
-			currentRequest = null;
+			// Only update loading state if this is the latest request
+			if (thisRequestId === requestCounter && isMounted) {
+				isLoading = false;
+			}
+
+			// Clear the controller if it matches the current one
+			if (currentListRequest?.signal === currentListRequest?.signal) {
+				currentListRequest = null;
+			}
 		}
 	}
 
 	//GET GROUPS
 	async function handleGroupFiles() {
-		isLoading = true;
-		error = null;
-		selectedFile = null;
-		isGroupView = true; // Set group view state
-		currentPath = 'home/group'; // Update current path
+		// Cancel any pending list requests
+		if (currentListRequest) {
+			currentListRequest.abort();
+		}
+
+		currentListRequest = new AbortController();
+		const thisRequestId = ++requestCounter;
+
+		if (isMounted) {
+			isLoading = true;
+			error = null;
+			selectedFile = null;
+			isGroupView = true; // Set group view state
+			currentPath = 'home/group'; // Update current path
+		}
 
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/ls`, {
@@ -120,8 +166,14 @@
 				},
 				body: JSON.stringify({
 					path: 'home/group'
-				})
+				}),
+				signal: currentListRequest.signal
 			});
+
+			// Check if this is still the latest request
+			if (thisRequestId !== requestCounter || !isMounted) {
+				return;
+			}
 
 			if (!response.ok) {
 				const errorData = await response.text();
@@ -129,27 +181,49 @@
 			}
 
 			const data = await response.json();
-			// Filter out current and parent directory entries
-			files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
-			toast.success($i18n.t('Files retrieved successfully'));
+
+			// Double-check before updating state
+			if (thisRequestId === requestCounter && isMounted) {
+				// Filter out current and parent directory entries
+				files = data.files.filter((f: FileItem) => f.path !== '.' && f.path !== '..');
+				toast.success($i18n.t('Files retrieved successfully'));
+			}
 		} catch (err) {
-			console.error('Error fetching files:', err);
-			error = err.message;
-			toast.error($i18n.t('Failed to fetch files. Please try again.'));
+			if (err.name === 'AbortError') {
+				return;
+			}
+
+			if (thisRequestId === requestCounter && isMounted) {
+				console.error('Error fetching files:', err);
+				error = err.message;
+				toast.error($i18n.t('Failed to fetch files. Please try again.'));
+			}
 		} finally {
-			isLoading = false;
+			if (thisRequestId === requestCounter && isMounted) {
+				isLoading = false;
+			}
+
+			if (currentListRequest?.signal === currentListRequest?.signal) {
+				currentListRequest = null;
+			}
 		}
 	}
 
-	// Debounce the list files function
-	const debouncedListFiles = debounce(handleListFiles, 300);
+	// Create a debounced version with proper cleanup
+	const debouncedListFiles = debounce(() => {
+		if (isMounted) {
+			handleListFiles();
+		}
+	}, 300);
 
-	// Clear selection when path changes
-	$: if (currentPath) {
+	// Clear selection when path changes (with mount check)
+	$: if (currentPath && isMounted) {
 		selectedFile = null;
 	}
 
 	function handleItemClick(item: FileItem) {
+		if (!isMounted) return;
+
 		if (isFile(item)) {
 			// Select file
 			selectedFile = selectedFile?.path === item.path ? null : item; // Toggle selection
@@ -166,7 +240,6 @@
 		}
 	}
 
-	// Add this helper function at the top of your script section
 	function getMimeType(filename: string): string {
 		const extension = filename.split('.').pop()?.toLowerCase() || '';
 		const mimeTypes: Record<string, string> = {
@@ -208,10 +281,19 @@
 	}
 
 	async function handleDownload() {
-		if (!selectedFile) return;
+		if (!selectedFile || !isMounted) return;
 
+		// Cancel any pending download
+		if (currentDownloadRequest) {
+			currentDownloadRequest.abort();
+		}
+
+		currentDownloadRequest = new AbortController();
 		const fullPath = `${currentPath}/${selectedFile.path}`;
-		isDownloading = true;
+
+		if (isMounted) {
+			isDownloading = true;
+		}
 
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/cat`, {
@@ -222,8 +304,11 @@
 				},
 				body: JSON.stringify({
 					path: fullPath
-				})
+				}),
+				signal: currentDownloadRequest.signal
 			});
+
+			if (!isMounted) return;
 
 			if (!response.ok) {
 				throw new Error('Download failed');
@@ -254,16 +339,29 @@
 			window.URL.revokeObjectURL(url);
 			document.body.removeChild(a);
 
-			toast.success(`Downloaded: ${selectedFile.path}`);
+			if (isMounted) {
+				toast.success(`Downloaded: ${selectedFile.path}`);
+			}
 		} catch (err) {
-			console.error('Download error:', err);
-			toast.error(`Download failed: ${err.message}`);
+			if (err.name === 'AbortError') {
+				return;
+			}
+
+			if (isMounted) {
+				console.error('Download error:', err);
+				toast.error(`Download failed: ${err.message}`);
+			}
 		} finally {
-			isDownloading = false;
+			if (isMounted) {
+				isDownloading = false;
+			}
+			currentDownloadRequest = null;
 		}
 	}
 
 	function handleBackNavigation() {
+		if (!isMounted) return;
+
 		const pathParts = currentPath.split('/');
 		pathParts.pop();
 		currentPath = pathParts.join('/') || 'home/data';
@@ -271,19 +369,27 @@
 	}
 
 	function openCreateFolderModal() {
+		if (!isMounted) return;
+
 		newFolderName = '';
 		isCreateFolderModalOpen = true;
 	}
 
 	function closeCreateFolderModal() {
+		if (!isMounted) return;
+
 		isCreateFolderModalOpen = false;
 		newFolderName = '';
 	}
 
 	async function handleCreateFolder() {
-		if (!newFolderName.trim()) return;
+		if (!newFolderName.trim() || !isMounted) return;
 
 		isCreatingFolder = true;
+
+		// Use AbortController for folder creation too
+		const createController = new AbortController();
+
 		try {
 			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/mkdir`, {
 				method: 'POST',
@@ -293,8 +399,11 @@
 				},
 				body: JSON.stringify({
 					path: `${currentPath}/${newFolderName}`
-				})
+				}),
+				signal: createController.signal
 			});
+
+			if (!isMounted) return;
 
 			if (!response.ok) {
 				const errorData = await response.json();
@@ -304,37 +413,69 @@
 			}
 
 			await response.json();
-			toast.success($i18n.t('Folder created successfully'));
-			closeCreateFolderModal();
-			handleListFiles(); // Refresh the file list
+
+			if (isMounted) {
+				toast.success($i18n.t('Folder created successfully'));
+				closeCreateFolderModal();
+				handleListFiles(); // Refresh the file list
+			}
 		} catch (err) {
-			console.error('Error creating folder:', err);
-			toast.error(err.message); // Display the specific error message
+			if (err.name === 'AbortError') {
+				return;
+			}
+
+			if (isMounted) {
+				console.error('Error creating folder:', err);
+				toast.error(err.message); // Display the specific error message
+			}
 		} finally {
-			isCreatingFolder = false;
+			if (isMounted) {
+				isCreatingFolder = false;
+			}
 		}
 	}
 
 	let initialMount = true;
 
-	$: if ($confidiosStore.currentUserStatus?.isLoggedInConfidios) {
+	// Reactive statement with mount check
+	$: if ($confidiosStore.currentUserStatus?.isLoggedInConfidios && isMounted) {
 		if (!initialMount) {
 			handleListFiles();
 		}
 	}
 
 	onMount(() => {
+		isMounted = true;
 		if ($confidiosStore.currentUserStatus?.isLoggedInConfidios) {
 			handleListFiles();
 		}
 		initialMount = false;
+
+		// Return cleanup function
+		return () => {
+			isMounted = false;
+		};
 	});
 
 	onDestroy(() => {
-		if (currentRequest) {
-			currentRequest.abort();
+		isMounted = false;
+
+		// Cancel all pending requests
+		if (currentListRequest) {
+			currentListRequest.abort();
+			currentListRequest = null;
 		}
+
+		if (currentDownloadRequest) {
+			currentDownloadRequest.abort();
+			currentDownloadRequest = null;
+		}
+
+		// Cancel debounced function
 		debouncedListFiles.cancel();
+
+		// Reset request counter
+		requestCounter = 0;
 	});
 </script>
 
@@ -383,9 +524,25 @@
 							>
 								home/group
 							</button>
-							{#each currentPath.slice(10).split('/').filter(Boolean) as segment}
+							{#each currentPath.slice(10).split('/').filter(Boolean) as segment, idx}
 								<span class="text-gray-400">/</span>
-								<span>{segment}</span>
+								{#if idx === currentPath.slice(10).split('/').filter(Boolean).length - 1}
+									<!-- Last segment is not clickable -->
+									<span>{segment}</span>
+								{:else}
+									<!-- Make intermediate segments clickable -->
+									<button
+										class="hover:text-blue-500 hover:underline"
+										on:click={() => {
+											const segments = currentPath.slice(10).split('/').filter(Boolean);
+											const newPath = 'home/group/' + segments.slice(0, idx + 1).join('/');
+											currentPath = newPath;
+											handleListFiles();
+										}}
+									>
+										{segment}
+									</button>
+								{/if}
 							{/each}
 						{/if}
 					{:else if currentPath === 'home/data'}
@@ -400,9 +557,25 @@
 						>
 							home/data
 						</button>
-						{#each currentPath.slice(9).split('/').filter(Boolean) as segment}
+						{#each currentPath.slice(9).split('/').filter(Boolean) as segment, idx}
 							<span class="text-gray-400">/</span>
-							<span>{segment}</span>
+							{#if idx === currentPath.slice(9).split('/').filter(Boolean).length - 1}
+								<!-- Last segment is not clickable -->
+								<span>{segment}</span>
+							{:else}
+								<!-- Make intermediate segments clickable -->
+								<button
+									class="hover:text-blue-500 hover:underline"
+									on:click={() => {
+										const segments = currentPath.slice(9).split('/').filter(Boolean);
+										const newPath = 'home/data/' + segments.slice(0, idx + 1).join('/');
+										currentPath = newPath;
+										handleListFiles();
+									}}
+								>
+									{segment}
+								</button>
+							{/if}
 						{/each}
 					{/if}
 				</p>
@@ -490,11 +663,60 @@
 							</button>
 						</Tooltip>
 
+						<!-- Download button - only show when a file is selected -->
+						<Tooltip content={isDownloading ? $i18n.t('Downloading...') : $i18n.t('Download')}>
+							<button
+								on:click={handleDownload}
+								disabled={!selectedFile || isDownloading || !isFile(selectedFile)}
+								class="p-2 border border-green-500 text-green-500 rounded hover:bg-green-500 hover:text-white transition disabled:opacity-50"
+							>
+								{#if isDownloading}
+									<svg
+										class="animate-spin h-5 w-5"
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+									>
+										<circle
+											class="opacity-25"
+											cx="12"
+											cy="12"
+											r="10"
+											stroke="currentColor"
+											stroke-width="4"
+										></circle>
+										<path
+											class="opacity-75"
+											fill="currentColor"
+											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+										></path>
+									</svg>
+								{:else}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-5 w-5"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+										/>
+									</svg>
+								{/if}
+							</button>
+						</Tooltip>
+
+						<!-- New Folder button -->
 						<!-- New Folder button -->
 						<Tooltip content={$i18n.t('New Secure Folder')}>
 							<button
 								on:click={openCreateFolderModal}
-								class="p-2 border border-orange-500 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition"
+								class="p-2 border border-orange-500 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+								disabled={isLoading || isCreatingFolder}
 							>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -519,7 +741,10 @@
 						<Tooltip content={$i18n.t('Groups')}>
 							<button
 								on:click={handleGroupFiles}
-								class="p-2 border border-blue-500 text-blue-500 rounded hover:bg-blue-500 hover:text-white transition"
+								class="p-2 border border-blue-500 rounded transition
+				{isGroupView || currentPath.startsWith('home/group')
+									? 'bg-blue-500 text-white hover:bg-blue-600'
+									: 'text-blue-500 hover:bg-blue-500 hover:text-white'}"
 							>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -541,268 +766,22 @@
 				{/if}
 			</div>
 
-			{#if !$confidiosStore.currentUserStatus?.isLoggedInConfidios}
-				<div class="text-center py-8">
-					<p class="text-gray-600 dark:text-gray-400 mb-4">
-						{$i18n.t('Please log in to access your files')}
-					</p>
-					<button
-						on:click={handleLogin}
-						disabled={isConfidiosLoading}
-						class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2 mx-auto"
-					>
-						{#if isConfidiosLoading}
-							<svg
-								class="animate-spin h-5 w-5"
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-							>
-								<circle
-									class="opacity-25"
-									cx="12"
-									cy="12"
-									r="10"
-									stroke="currentColor"
-									stroke-width="4"
-								></circle>
-								<path
-									class="opacity-75"
-									fill="currentColor"
-									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-								></path>
-							</svg>
-						{:else}
-							<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"
-								/>
-							</svg>
-						{/if}
-						<span
-							>{isConfidiosLoading ? $i18n.t('Logging in...') : $i18n.t('Login to Confidios')}</span
-						>
-					</button>
-				</div>
-			{:else if isLoading}
-				<div class="flex justify-center py-8">
-					<div class="animate-pulse text-gray-400 dark:text-gray-600">
-						{$i18n.t('Loading files...')}
-					</div>
-				</div>
-			{:else if files.length === 0 && !error}
-				<div class="text-center py-8 text-gray-500 dark:text-gray-400">
-					{$i18n.t('No files found')}
-				</div>
-			{:else}
-				<div class="grid gap-2">
-					{#each files as item}
-						{#if isFile(item)}
-							<!-- Interactive file item with selection -->
-							<div
-								class="flex items-center p-2 rounded transition-colors cursor-pointer
-									{selectedFile?.path === item.path
-									? 'bg-blue-100 dark:bg-blue-900/30 border-2 border-blue-300 dark:border-blue-600'
-									: 'hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'}"
-								role="button"
-								tabindex="0"
-								aria-label="Select file: {item.path}"
-								on:click={() => handleItemClick(item)}
-								on:keydown={(event) => {
-									if (event.key === 'Enter' || event.key === ' ') {
-										event.preventDefault();
-										handleItemClick(item);
-									}
-								}}
-							>
-								<div class="mr-3">
-									<!-- File Icon -->
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-5 w-5 {selectedFile?.path === item.path
-											? 'text-blue-600'
-											: 'text-gray-500'}"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-										aria-hidden="true"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-										/>
-									</svg>
-								</div>
-								<div class="flex-1">
-									<span
-										class="text-gray-700 dark:text-gray-200 {selectedFile?.path === item.path
-											? 'font-medium'
-											: ''}">{item.path}</span
-									>
-									<div class="text-xs text-gray-500 dark:text-gray-400">
-										File {selectedFile?.path === item.path ? '• Selected' : ''}
-									</div>
-								</div>
-								{#if selectedFile?.path === item.path}
-									<div class="ml-2">
-										<!-- Selection indicator -->
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											class="h-5 w-5 text-blue-600"
-											fill="none"
-											viewBox="0 0 24 24"
-											stroke="currentColor"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M5 13l4 4L19 7"
-											/>
-										</svg>
-									</div>
-								{/if}
-							</div>
-						{:else}
-							<!-- Interactive folder item -->
-							<div
-								class="flex items-center p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-2 border-transparent"
-								role="button"
-								tabindex="0"
-								aria-label="Open folder: {item.path}"
-								on:click={() => handleItemClick(item)}
-								on:keydown={(event) => {
-									if (event.key === 'Enter' || event.key === ' ') {
-										event.preventDefault();
-										handleItemClick(item);
-									}
-								}}
-							>
-								<div class="mr-3">
-									<!-- Folder Icon -->
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-5 w-5 text-yellow-500"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-										aria-hidden="true"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-										/>
-									</svg>
-								</div>
-								<div class="flex-1">
-									<span class="text-gray-700 dark:text-gray-200">{item.path}</span>
-									<div class="text-xs text-gray-500 dark:text-gray-400">Directory</div>
-								</div>
-								<div class="ml-2">
-									<!-- Arrow indicator -->
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4 text-gray-400"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 5l7 7-7 7"
-										/>
-									</svg>
-								</div>
-							</div>
-						{/if}
-					{/each}
-				</div>
-			{/if}
+			<FileList
+				{files}
+				{selectedFile}
+				{isLoading}
+				{error}
+				on:select={({ detail }) => handleItemClick(detail.item)}
+			/>
 		</div>
 	</div>
 </div>
 
 <!-- Add the modal -->
-{#if isCreateFolderModalOpen}
-	<div class="fixed inset-0 bg-black/10 backdrop-blur-sm flex items-center justify-center z-50">
-		<div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
-			<h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
-				{$i18n.t('Create New Secure Folder')}
-			</h3>
-
-			<div class="mb-4">
-				<label
-					for="folderName"
-					class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-				>
-					{$i18n.t('Secure Folder Name')}
-				</label>
-				<input
-					type="text"
-					id="folderName"
-					bind:value={newFolderName}
-					maxlength="24"
-					class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md
-						   focus:outline-none focus:ring-2 focus:ring-orange-500 dark:bg-gray-700
-						   dark:text-white"
-					placeholder={$i18n.t('Enter folder name')}
-					disabled={isCreatingFolder}
-				/>
-				<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-					{newFolderName.length}/24 {$i18n.t('characters')}
-				</p>
-			</div>
-
-			<div class="flex justify-end gap-3">
-				<button
-					on:click={closeCreateFolderModal}
-					class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100
-						   dark:hover:bg-gray-700 rounded transition"
-					disabled={isCreatingFolder}
-				>
-					{$i18n.t('Cancel')}
-				</button>
-				<button
-					on:click={handleCreateFolder}
-					disabled={!newFolderName.trim() || isCreatingFolder}
-					class="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700
-						   transition disabled:opacity-50 disabled:cursor-not-allowed
-						   flex items-center gap-2"
-				>
-					{#if isCreatingFolder}
-						<svg
-							class="animate-spin h-4 w-4"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-						>
-							<circle
-								class="opacity-25"
-								cx="12"
-								cy="12"
-								r="10"
-								stroke="currentColor"
-								stroke-width="4"
-							></circle>
-							<path
-								class="opacity-75"
-								fill="currentColor"
-								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-							></path>
-						</svg>
-					{/if}
-					{isCreatingFolder ? $i18n.t('Creating...') : $i18n.t('Create')}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<CreateFolderModal
+	isOpen={isCreateFolderModalOpen}
+	isCreating={isCreatingFolder}
+	bind:folderName={newFolderName}
+	on:close={closeCreateFolderModal}
+	on:create={({ detail }) => handleCreateFolder()}
+/>
