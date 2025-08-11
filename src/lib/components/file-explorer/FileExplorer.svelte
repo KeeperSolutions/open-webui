@@ -9,6 +9,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import FileList from './FileList.svelte';
 	import CreateFolderModal from './CreateFolderModal.svelte';
+	import FileUploadModal from './FileUploadModal.svelte';
 	import { confidiosStore } from '$lib/stores/integrations';
 	import { handleConfidiosLogin, handleConfidiosLogout } from '$lib/utils/integrations/confidios';
 	import { debounce } from 'lodash';
@@ -30,6 +31,19 @@
 	let isCreateFolderModalOpen = false;
 	let newFolderName = '';
 	let isCreatingFolder = false;
+
+	let isFileUploadModalOpen = false;
+	let isUploading = false;
+
+	function openFileUploadModal() {
+		if (!isMounted) return;
+		isFileUploadModalOpen = true;
+	}
+
+	function closeFileUploadModal() {
+		if (!isMounted) return;
+		isFileUploadModalOpen = false;
+	}
 
 	// Add root path state to track which view we're in
 	let isGroupView = false;
@@ -359,6 +373,152 @@
 		}
 	}
 
+	// Add upload controller
+	let currentUploadController: AbortController | null = null;
+
+	async function handleUpload({ detail }: CustomEvent<{ file: File }>) {
+		if (!isMounted) return;
+
+		// Cancel any existing upload
+		if (currentUploadController) {
+			currentUploadController.abort();
+		}
+
+		currentUploadController = new AbortController();
+		isUploading = true;
+
+		try {
+			// Convert file to base64 using FileReader
+			const base64Data = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+
+				reader.onload = () => {
+					try {
+						const result = reader.result as string;
+
+						// Validate we got a data URL
+						if (!result || !result.startsWith('data:')) {
+							reject(new Error('Invalid file data format'));
+							return;
+						}
+
+						// Extract just the base64 part (after the comma)
+						const commaIndex = result.indexOf(',');
+						if (commaIndex === -1) {
+							reject(new Error('Invalid data URL format'));
+							return;
+						}
+
+						const base64Content = result.substring(commaIndex + 1);
+
+						// Validate the base64 content
+						if (!base64Content || base64Content.length === 0) {
+							reject(new Error('Empty base64 content'));
+							return;
+						}
+
+						// Clean any potential whitespace
+						const cleanBase64 = base64Content.replace(/\s/g, '');
+
+						// Basic base64 validation
+						if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleanBase64)) {
+							reject(new Error('Invalid base64 format generated'));
+							return;
+						}
+
+						console.log('Upload - File size:', detail.file.size);
+						console.log('Upload - Base64 length:', cleanBase64.length);
+						console.log('Upload - Base64 starts:', cleanBase64.substring(0, 20));
+
+						resolve(cleanBase64);
+					} catch (error) {
+						reject(error);
+					}
+				};
+
+				reader.onerror = () => {
+					reject(new Error('Failed to read file'));
+				};
+
+				reader.onabort = () => {
+					reject(new Error('File reading aborted'));
+				};
+
+				// Add abort handler for upload cancellation
+				currentUploadController?.signal.addEventListener('abort', () => {
+					reader.abort();
+					reject(new Error('Upload cancelled'));
+				});
+
+				// Use readAsDataURL to get the file as base64
+				reader.readAsDataURL(detail.file);
+			});
+
+			// Send to server
+			const response = await fetch(`${WEBUI_API_BASE_URL}/confidios/fs/cp`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${localStorage.token}`
+				},
+				body: JSON.stringify({
+					path: `${currentPath}/${detail.file.name}`,
+					data: base64Data
+				}),
+				signal: currentUploadController.signal
+			});
+
+			if (response.ok) {
+				await response.json();
+				if (isMounted) {
+					toast.success($i18n.t('File uploaded successfully'));
+					// Reset states and cleanup
+					selectedFile = null;
+					isUploading = false;
+					currentUploadController = null;
+					// Close modal and refresh list
+					closeFileUploadModal();
+					await handleListFiles();
+				}
+			} else {
+				throw new Error('Upload failed');
+			}
+		} catch (err) {
+			if (err.name === 'AbortError' || err.message === 'Upload cancelled') {
+				toast.info($i18n.t('Upload cancelled'));
+				return;
+			}
+
+			console.error('Error uploading file:', err);
+			console.error('File details:', {
+				name: detail.file.name,
+				size: detail.file.size,
+				type: detail.file.type
+			});
+
+			toast.error($i18n.t('Failed to upload file. Please try again.'));
+			handleListFiles();
+		} finally {
+			if (isMounted) {
+				isUploading = false;
+				currentUploadController = null;
+				// Ensure modal closes even on error
+				closeFileUploadModal();
+			}
+		}
+	}
+
+	function handleUploadCancel() {
+		if (currentUploadController) {
+			currentUploadController.abort();
+			currentUploadController = null;
+			// Close the modal after cancellation
+			closeFileUploadModal();
+			// Reset upload state
+			isUploading = false;
+		}
+	}
+
 	function handleBackNavigation() {
 		if (!isMounted) return;
 
@@ -469,6 +629,11 @@
 		if (currentDownloadRequest) {
 			currentDownloadRequest.abort();
 			currentDownloadRequest = null;
+		}
+
+		if (currentUploadController) {
+			currentUploadController.abort();
+			currentUploadController = null;
 		}
 
 		// Cancel debounced function
@@ -663,7 +828,7 @@
 							</button>
 						</Tooltip>
 
-						<!-- Download button - only show when a file is selected -->
+						<!-- Download button -->
 						<Tooltip content={isDownloading ? $i18n.t('Downloading...') : $i18n.t('Download')}>
 							<button
 								on:click={handleDownload}
@@ -710,7 +875,53 @@
 							</button>
 						</Tooltip>
 
-						<!-- New Folder button -->
+						<!-- Upload button -->
+						<Tooltip content={isUploading ? $i18n.t('Uploading...') : $i18n.t('Upload')}>
+							<button
+								on:click={openFileUploadModal}
+								disabled={isUploading || isLoading}
+								class="p-2 border border-purple-500 text-purple-500 rounded hover:bg-purple-500 hover:text-white transition disabled:opacity-50"
+							>
+								{#if isUploading}
+									<svg
+										class="animate-spin h-5 w-5"
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+									>
+										<circle
+											class="opacity-25"
+											cx="12"
+											cy="12"
+											r="10"
+											stroke="currentColor"
+											stroke-width="4"
+										></circle>
+										<path
+											class="opacity-75"
+											fill="currentColor"
+											d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+										></path>
+									</svg>
+								{:else}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-5 w-5"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+										/>
+									</svg>
+								{/if}
+							</button>
+						</Tooltip>
+
 						<!-- New Folder button -->
 						<Tooltip content={$i18n.t('New Secure Folder')}>
 							<button
@@ -777,11 +988,20 @@
 	</div>
 </div>
 
-<!-- Add the modal -->
+<!-- Add Create folder modal -->
 <CreateFolderModal
 	isOpen={isCreateFolderModalOpen}
 	isCreating={isCreatingFolder}
 	bind:folderName={newFolderName}
 	on:close={closeCreateFolderModal}
 	on:create={({ detail }) => handleCreateFolder()}
+/>
+
+<!-- Add File Upload Modal -->
+<FileUploadModal
+	isOpen={isFileUploadModalOpen}
+	{isUploading}
+	on:close={closeFileUploadModal}
+	on:upload={handleUpload}
+	on:cancel={handleUploadCancel}
 />
