@@ -159,6 +159,97 @@ async def read_file(request: ListFilesRequest, user=Depends(get_verified_user)):
         )
 
 
+class CpRequest(BaseModel):
+    path: str
+    data: str
+
+
+@router.post("/cp")
+async def create_file(request: CpRequest, user=Depends(get_verified_user)):
+    """Create/upload file to Confidios - requires active session"""
+    log.info(f"Create file endpoint called for path: {request.path}")
+    try:
+        # Get user's Confidios data to check session
+        user_data = await get_confidios_user(user.id)
+        if not user_data or not user_data.get("is_session_active"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No active Confidios session found. Please login first.",
+            )
+
+        # Prepare session header
+        session_header = {
+            "u": user_data["confidios_username"],
+            "sid": user_data["confidios_session_id"],
+        }
+
+        # Prepare request payload
+        payload = {
+            "path": request.path,
+            "data": request.data,
+            # Add any other required fields from your CpRequest model
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{CONFIDIOS_BASE_URL}/cp",
+                headers={
+                    "X-Confidios-Session-Id": json.dumps(session_header),
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            ) as response:
+                if response.status not in [
+                    200,
+                    201,
+                ]:  # Accept both 200 and 201 for success
+                    error_detail = "Failed to create file"
+                    try:
+                        error_body = await response.json()
+                        error_detail = error_body.get("detail", error_detail)
+                    except Exception:
+                        error_detail = await response.text()
+
+                    raise HTTPException(
+                        status_code=response.status, detail=error_detail
+                    )
+
+                # Handle successful response
+                if response.status == 201:
+                    try:
+                        response_data = await response.json()
+                        return {
+                            "status": "success",
+                            "message": "File created successfully",
+                            "data": response_data,
+                        }
+                    except json.JSONDecodeError:
+                        # If response is not JSON, just return success
+                        return {
+                            "status": "success",
+                            "message": "File created successfully",
+                        }
+
+    except aiohttp.ClientError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not connect to Confidios service: {str(e)}",
+        )
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse response content: {str(e)}",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error creating file: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create file: {str(e)}",
+        )
+
+
 class MakeDirectoryRequest(BaseModel):
     FOLDER_NAME_MAX_LENGTH: ClassVar[int] = 24
     path: str
