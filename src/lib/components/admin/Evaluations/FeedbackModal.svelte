@@ -28,8 +28,6 @@
 			feedbackData = await getFeedbackById(localStorage.token, selectedFeedback.id).catch((err) => {
 				return null;
 			});
-
-			console.log('Feedback Data:', selectedFeedback, feedbackData);
 		}
 		loaded = true;
 	};

@@ -217,8 +217,6 @@
 					.filter((m) => !m?.preset && !(m?.arena ?? false))
 					.find((m) => [model.base_model_id, `${model.base_model_id}:latest`].includes(m.id));
 
-				console.log('base_model', base_model);
-
 				if (base_model) {
 					model.base_model_id = base_model.id;
 				} else {
@@ -264,9 +262,6 @@
 				accessControl = {};
 			}
 
-			console.log(model?.access_control);
-			console.log(accessControl);
-
 			info = {
 				...info,
 				...JSON.parse(
@@ -280,8 +275,6 @@
 					)
 				)
 			};
-
-			console.log(model);
 		}
 
 		loaded = true;
@@ -377,7 +370,7 @@
 				) {
 					reader.readAsDataURL(inputFiles[0]);
 				} else {
-					console.log(`Unsupported File Type '${inputFiles[0]['type']}'.`);
+					toast.error(`Unsupported File Type '${inputFiles[0]['type']}'.`);
 					inputFiles = null;
 				}
 			}}
@@ -410,7 +403,7 @@
 								/>
 							{:else}
 								<img
-									src="{WEBUI_BASE_URL}/static/favicon.png"
+									src="/static/favicon.png"
 									alt="model profile"
 									class=" rounded-xl size-72 md:size-60 object-cover shrink-0"
 								/>
