@@ -310,4 +310,10 @@ dist
 cypress/videos
 cypress/screenshots
 .vscode/settings.json
+<<<<<<< HEAD
 backend/.vscode
+=======
+
+# VSCode workspace settings
+backend/.vscode/
+>>>>>>> 503c97934 (Bump tiptap components to 3.0.7; bump node do 22.x or higher)

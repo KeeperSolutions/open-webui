@@ -65,11 +65,19 @@
 		"@sveltejs/adapter-node": "^2.0.0",
 		"@sveltejs/svelte-virtual-list": "^3.0.1",
 		"@tiptap/core": "^3.0.7",
+<<<<<<< HEAD
 		"@tiptap/extension-bubble-menu": "^3.0.7",
 		"@tiptap/extension-code-block-lowlight": "^3.0.7",
 		"@tiptap/extension-drag-handle": "^3.4.5",
 		"@tiptap/extension-file-handler": "^3.0.7",
 		"@tiptap/extension-floating-menu": "^3.0.7",
+=======
+		"@tiptap/extension-bubble-menu": "3.0.7",
+		"@tiptap/extension-code-block-lowlight": "^3.0.7",
+		"@tiptap/extension-drag-handle": "^3.4.5",
+		"@tiptap/extension-file-handler": "^3.0.7",
+		"@tiptap/extension-floating-menu": "3.0.7",
+>>>>>>> 503c97934 (Bump tiptap components to 3.0.7; bump node do 22.x or higher)
 		"@tiptap/extension-highlight": "^3.3.0",
 		"@tiptap/extension-image": "^3.0.7",
 		"@tiptap/extension-link": "^3.0.7",
@@ -148,7 +156,7 @@
 		"yjs": "^13.6.27"
 	},
 	"engines": {
-		"node": ">=18.13.0 <=22.x.x",
+		"node": ">=22.12.0 <=22.x.x || >=23.0.0",
 		"npm": ">=6.0.0"
 	}
 }
