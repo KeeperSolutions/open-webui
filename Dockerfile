@@ -38,6 +38,7 @@ RUN apk add --no-cache git
 
 COPY package.json package-lock.json ./
 RUN npm install --force
+RUN npm install --force --no-save @rollup/rollup-linux-x64-musl @tailwindcss/oxide-linux-x64-musl lightningcss-linux-x64-musl
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
