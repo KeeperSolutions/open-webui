@@ -1101,7 +1101,6 @@
 									</div>
 								</Folder>
 							</div>
-						</div>
 					{/if}
 
 					<div class=" flex-1 flex flex-col overflow-y-auto scrollbar-hidden">
