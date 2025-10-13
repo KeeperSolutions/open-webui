@@ -791,12 +791,12 @@ async def signup(
             not request.app.state.config.ENABLE_SIGNUP
             or not request.app.state.config.ENABLE_LOGIN_FORM
         ):
-            if has_users or not ENABLE_INITIAL_ADMIN_SIGNUP:
+            if Users.has_users() or not ENABLE_INITIAL_ADMIN_SIGNUP:
                 raise HTTPException(
                     status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
                 )
     else:
-        if has_users:
+        if Users.has_users():
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
             )
@@ -814,6 +814,13 @@ async def signup(
             validate_password(form_data.password)
         except Exception as e:
             raise HTTPException(400, detail=str(e))
+
+        # The password passed to bcrypt must be 72 bytes or fewer. If it is longer, it will be truncated before hashing.
+        if len(form_data.password.encode("utf-8")) > 72:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.PASSWORD_TOO_LONG,
+            )
 
         hashed = get_password_hash(form_data.password)
 
@@ -875,7 +882,7 @@ async def signup(
                 user.id, request.app.state.config.USER_PERMISSIONS, db=db
             )
 
-            if not has_users:
+            if not Users.has_users():
                 # Disable signup after the first user is created
                 request.app.state.config.ENABLE_SIGNUP = False
 
