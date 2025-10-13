@@ -625,26 +625,38 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
-        await get_all_models(
-            Request(
-                # Creating a mock request object to pass to get_all_models
-                {
-                    "type": "http",
-                    "asgi.version": "3.0",
-                    "asgi.spec_version": "2.0",
-                    "method": "GET",
-                    "path": "/internal",
-                    "query_string": b"",
-                    "headers": Headers({}).raw,
-                    "client": ("127.0.0.1", 12345),
-                    "server": ("127.0.0.1", 80),
-                    "scheme": "http",
-                    "app": app,
-                }
-            ),
-            None,
-        )
+        log.info("Pre-loading base models cache...")
+        try:
+            # Add timeout to prevent startup hanging in Cloud Run or other environments
+            await asyncio.wait_for(
+                get_all_models(
+                    Request(
+                        # Creating a mock request object to pass to get_all_models
+                        {
+                            "type": "http",
+                            "asgi.version": "3.0",
+                            "asgi.spec_version": "2.0",
+                            "method": "GET",
+                            "path": "/internal",
+                            "query_string": b"",
+                            "headers": Headers({}).raw,
+                            "client": ("127.0.0.1", 12345),
+                            "server": ("127.0.0.1", 80),
+                            "scheme": "http",
+                            "app": app,
+                        }
+                    ),
+                    None,
+                ),
+                timeout=30.0  # 30 second timeout for model loading
+            )
+            log.info("Base models cache pre-loaded successfully")
+        except asyncio.TimeoutError:
+            log.warning("Base models cache pre-loading timed out after 30 seconds. Models will load on first request.")
+        except Exception as e:
+            log.warning(f"Failed to pre-load base models cache: {e}. Models will load on first request.")
 
+    log.info("Application startup complete - ready to serve requests")
     yield
 
     if hasattr(app.state, "redis_task_command_listener"):
