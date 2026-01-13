@@ -65,6 +65,50 @@ export const unarchiveAllChats = async (token: string) => {
 	return res;
 };
 
+export const importChat = async (
+	token: string,
+	chat: object,
+	meta: object | null,
+	pinned?: boolean,
+	folderId?: string | null,
+	createdAt: number | null = null,
+	updatedAt: number | null = null
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/import`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			chat: chat,
+			meta: meta ?? {},
+			pinned: pinned,
+			folder_id: folderId,
+			created_at: createdAt ?? null,
+			updated_at: updatedAt ?? null
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const importChats = async (token: string, chats: object[]) => {
 	let error = null;
 
