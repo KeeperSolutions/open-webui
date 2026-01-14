@@ -171,6 +171,7 @@ RUN if [ "$USE_OLLAMA" = "true" ]; then \
 # COPY --from=build /app/onnx /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx
 
 # copy built frontend files
+# Cache bust: 2026-01-14 - Force rebuild to pick up correct version from package.json
 COPY --chown=$UID:$GID --from=build /app/build /app/build
 COPY --chown=$UID:$GID --from=build /app/CHANGELOG.md /app/CHANGELOG.md
 COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
