@@ -173,7 +173,13 @@
 	};
 
 	const initChannels = async () => {
-		await channels.set(await getChannels(localStorage.token));
+		try {
+			await channels.set(await getChannels(localStorage.token));
+		} catch (error) {
+			// Channels feature may not be enabled, continue without them
+			console.log('Channels not available:', error);
+			await channels.set([]);
+		}
 	};
 
 	const initChatList = async () => {
