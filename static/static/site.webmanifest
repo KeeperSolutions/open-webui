@@ -21,8 +21,8 @@
   "display": "standalone"
 }
 =======
-	"name": "Keeper AI Model Hub",
-	"short_name": "Keeper AI Model Hub",
+	"name": "Keeper AI Gateway",
+	"short_name": "Keeper AI Gateway",
 	"icons": [
 		{
 			"src": "/favicon/web-app-manifest-192x192.png",
