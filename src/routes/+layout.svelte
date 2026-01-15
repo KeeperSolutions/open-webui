@@ -785,8 +785,8 @@
 
 				if (localStorage.token) {
 					// Get Session User Info
-					const sessionUser = await getSessionUser(localStorage.token).catch((error) => {
-						toast.error(`${error}`);
+					const sessionUser = await getSessionUser(localStorage.token).catch(() => {
+						// Silently handle invalid/expired tokens - user will be redirected to auth
 						return null;
 					});
 
