@@ -966,8 +966,10 @@
 					name={$i18n.t('Chats')}
 					chevron={false}
 					on:change={async (e) => {
-						selectedFolder.set(null);
-						await goto('/');
+						// Only clear selectedFolder, don't navigate away from current chat
+						if ($selectedFolder !== null) {
+							selectedFolder.set(null);
+						}
 					}}
 					on:import={(e) => {
 						importChatHandler(e.detail);
