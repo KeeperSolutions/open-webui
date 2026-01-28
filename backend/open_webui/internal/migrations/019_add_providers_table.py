@@ -47,6 +47,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         logo_dark_url = pw.TextField(null=True)
         logo_url = pw.TextField(null=True)
         model_id_patterns = pw.TextField()  # JSON stored as text
+        model_patterns = pw.TextField(null=True)  # JSON: Model-specific logo overrides
         priority = pw.IntegerField(default=0)
         is_active = pw.BooleanField(default=True)
         created_at = pw.BigIntegerField()
@@ -78,6 +79,13 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
             'logo_dark_url': '/providers/anthropic-dark.svg',
             'logo_url': '/providers/anthropic-light.svg',
             'model_id_patterns': json.dumps(["^claude-"]),
+            'model_patterns': json.dumps([{
+                'name': 'claude',
+                'patterns': ['^claude-3', '^claude-instant'],
+                'logo_url': '/providers/models/claude-light.svg',
+                'logo_light_url': '/providers/models/claude-light.svg',
+                'logo_dark_url': '/providers/models/claude-dark.svg',
+            }]),
             'priority': 100,
             'is_active': True,
             'created_at': now,
@@ -90,6 +98,13 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
             'logo_dark_url': '/providers/google-dark.svg',
             'logo_url': '/providers/google-light.svg',
             'model_id_patterns': json.dumps(["^gemini-", "^gemini:", "^palm-", "^gemma:", "^gemma[0-9]"]),
+            'model_patterns': json.dumps([{
+                'name': 'gemini',
+                'patterns': ['^gemini-', '^gemini:'],
+                'logo_url': '/providers/models/gemini-light.svg',
+                'logo_light_url': '/providers/models/gemini-light.svg',
+                'logo_dark_url': '/providers/models/gemini-dark.svg',
+            }]),
             'priority': 100,
             'is_active': True,
             'created_at': now,
@@ -126,8 +141,8 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
         """Seed default provider data."""
         for provider in providers:
             database.execute_sql(
-                "INSERT INTO provider (id, name, logo_light_url, logo_dark_url, logo_url, model_id_patterns, priority, is_active, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO provider (id, name, logo_light_url, logo_dark_url, logo_url, model_id_patterns, model_patterns, priority, is_active, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     provider['id'],
                     provider['name'],
@@ -135,6 +150,7 @@ def migrate(migrator: Migrator, database: pw.Database, *, fake=False):
                     provider['logo_dark_url'],
                     provider['logo_url'],
                     provider['model_id_patterns'],
+                    provider.get('model_patterns'),
                     provider['priority'],
                     provider['is_active'],
                     provider['created_at'],

@@ -20,8 +20,42 @@
 	let formLogoLightUrl = '';
 	let formLogoDarkUrl = '';
 	let formPatterns = '';
+	let formModelPatterns = '';
 	let formPriority = 50;
 	let formIsActive = true;
+
+	// JSON editor state
+	let jsonValidationError = '';
+	let jsonLineCount = 1;
+	let jsonTextareaElement = null;
+	let lineNumbersElement = null;
+
+	// Sync scroll between textarea and line numbers
+	const syncScroll = () => {
+		if (jsonTextareaElement && lineNumbersElement) {
+			lineNumbersElement.scrollTop = jsonTextareaElement.scrollTop;
+		}
+	};
+
+	// Reactive JSON validation
+	$: {
+		if (formModelPatterns.trim()) {
+			try {
+				const parsed = JSON.parse(formModelPatterns);
+				if (!Array.isArray(parsed)) {
+					jsonValidationError = 'Must be a JSON array';
+				} else {
+					jsonValidationError = '';
+				}
+			} catch (error) {
+				jsonValidationError = error.message;
+			}
+		} else {
+			jsonValidationError = '';
+		}
+		// Update line count
+		jsonLineCount = formModelPatterns.split('\n').length;
+	}
 
 	onMount(async () => {
 		await loadProviders();
@@ -45,7 +79,6 @@
 			providers = await res.json();
 		} catch (error) {
 			toast.error($i18n.t('Failed to load providers'));
-			console.error('Error loading providers:', error);
 		} finally {
 			loading = false;
 		}
@@ -61,6 +94,18 @@
 			formLogoLightUrl = provider.logo_light_url || '';
 			formLogoDarkUrl = provider.logo_dark_url || '';
 			formPatterns = provider.model_id_patterns.join(', ');
+
+			// Handle model_patterns - it might be a string or already parsed
+			if (provider.model_patterns) {
+				if (typeof provider.model_patterns === 'string') {
+					formModelPatterns = provider.model_patterns;
+				} else {
+					formModelPatterns = JSON.stringify(provider.model_patterns, null, 2);
+				}
+			} else {
+				formModelPatterns = '';
+			}
+
 			formPriority = provider.priority;
 			formIsActive = provider.is_active;
 		} else {
@@ -72,6 +117,7 @@
 			formLogoLightUrl = '';
 			formLogoDarkUrl = '';
 			formPatterns = '';
+			formModelPatterns = '';
 			formPriority = 50;
 			formIsActive = true;
 		}
@@ -89,6 +135,21 @@
 			.map((p) => p.trim())
 			.filter((p) => p.length > 0);
 
+		let modelPatterns = null;
+		if (formModelPatterns.trim()) {
+			try {
+				modelPatterns = JSON.parse(formModelPatterns);
+				// Validate it's an array
+				if (!Array.isArray(modelPatterns)) {
+					toast.error($i18n.t('Model patterns must be a JSON array'));
+					return;
+				}
+			} catch (error) {
+				toast.error($i18n.t('Invalid JSON') + ': ' + error.message);
+				return;
+			}
+		}
+
 		const providerData = {
 			id: formId,
 			name: formName,
@@ -96,6 +157,7 @@
 			logo_light_url: formLogoLightUrl || null,
 			logo_dark_url: formLogoDarkUrl || null,
 			model_id_patterns: patterns,
+			model_patterns: modelPatterns,
 			priority: formPriority,
 			is_active: formIsActive
 		};
@@ -124,7 +186,6 @@
 			await loadProviders();
 		} catch (error) {
 			toast.error(error.message);
-			console.error('Error saving provider:', error);
 		}
 	};
 
@@ -149,7 +210,6 @@
 			await loadProviders();
 		} catch (error) {
 			toast.error($i18n.t('Failed to delete provider'));
-			console.error('Error deleting provider:', error);
 		}
 	};
 </script>
@@ -186,7 +246,7 @@
 					<div
 						class="border dark:border-gray-800 rounded-lg p-3 flex items-start gap-3 hover:bg-gray-50 dark:hover:bg-gray-900 transition"
 					>
-						<div class="flex-shrink-0 pt-1">
+						<div class="shrink-0 pt-1">
 							{#if provider.logo_url || provider.logo_light_url || provider.logo_dark_url}
 								{#key $theme}
 									{@const logoUrl = resolveTheme($theme) === 'dark' && provider.logo_dark_url ? provider.logo_dark_url : (resolveTheme($theme) === 'light' && provider.logo_light_url ? provider.logo_light_url : provider.logo_url)}
@@ -280,6 +340,7 @@
 					{editingProvider ? $i18n.t('Edit Provider') : $i18n.t('Add Provider')}
 				</h2>
 
+				{#key editingProvider?.id || 'new'}
 				<form
 					on:submit|preventDefault={saveProvider}
 					class="space-y-4"
@@ -378,6 +439,62 @@
 						</p>
 					</div>
 
+					<div>
+						<label class="block text-sm font-medium mb-1">
+							{$i18n.t('Model-Specific Logos')} <span class="text-gray-500 text-xs font-normal">({$i18n.t('Optional')})</span>
+						</label>
+
+						<!-- JSON Editor with line numbers -->
+						<div class="json-editor-container flex border {jsonValidationError ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-gray-700'} rounded-lg bg-white dark:bg-gray-800 overflow-hidden resize-y min-h-[12rem]" style="resize: vertical;">
+							<!-- Line numbers (scrolls with textarea) -->
+							<div
+								bind:this={lineNumbersElement}
+								class="w-10 bg-gray-100 dark:bg-gray-900 border-r border-gray-300 dark:border-gray-700 select-none shrink-0"
+								style="overflow-y: scroll; overflow-x: hidden; scrollbar-width: none; -ms-overflow-style: none;"
+							>
+								<style>
+									.json-editor-container::-webkit-scrollbar,
+									div::-webkit-scrollbar {
+										display: none;
+									}
+								</style>
+								<div class="py-2 px-2 text-right text-xs text-gray-500 dark:text-gray-500 font-mono leading-[1.5rem] pointer-events-none">
+									{#each Array(Math.max(jsonLineCount, 8)) as _, i}
+										<div>{i + 1}</div>
+									{/each}
+								</div>
+							</div>
+
+							<!-- Textarea -->
+							<textarea
+								bind:value={formModelPatterns}
+								bind:this={jsonTextareaElement}
+								on:scroll={syncScroll}
+								placeholder={`[\n  {\n    "name": "model-name",\n    "patterns": ["^pattern1-", "^pattern2:"],\n    "logo_url": "/providers/models/model-light.svg",\n    "logo_light_url": "/providers/models/model-light.svg",\n    "logo_dark_url": "/providers/models/model-dark.svg"\n  }\n]`}
+								rows="8"
+								class="flex-1 px-3 py-2 bg-transparent font-mono text-xs focus:outline-none"
+								style="line-height: 1.5rem; resize: none;"
+								spellcheck="false"
+								autocomplete="off"
+							></textarea>
+						</div>
+
+						<!-- Validation feedback -->
+						{#if jsonValidationError}
+							<p class="text-xs text-red-600 dark:text-red-400 mt-1 font-mono">
+								<span class="font-semibold">JSON Error:</span> {jsonValidationError}
+							</p>
+						{:else if formModelPatterns.trim()}
+							<p class="text-xs text-green-600 dark:text-green-400 mt-1">
+								✓ Valid JSON
+							</p>
+						{/if}
+
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+							{$i18n.t('JSON array of model-specific logo overrides. Leave empty to use provider logo for all models.')}
+						</p>
+					</div>
+
 					<div class="grid grid-cols-2 gap-4">
 						<div>
 							<label class="block text-sm font-medium mb-1">
@@ -428,6 +545,7 @@
 						</button>
 					</div>
 				</form>
+			{/key}
 			</div>
 		</div>
 	</div>

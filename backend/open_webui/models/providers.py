@@ -18,10 +18,20 @@ class Provider(Base):
     logo_dark_url = Column(Text, nullable=True)
     logo_url = Column(Text, nullable=True)
     model_id_patterns = Column(JSONField, nullable=False)
+    model_patterns = Column(JSONField, nullable=True)  # Model-specific logo overrides
     priority = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
+
+
+class ModelPattern(BaseModel):
+    """Model-specific logo configuration within a provider."""
+    name: str
+    patterns: list[str]
+    logo_url: Optional[str] = None
+    logo_light_url: Optional[str] = None
+    logo_dark_url: Optional[str] = None
 
 
 class ProviderModel(BaseModel):
@@ -33,6 +43,7 @@ class ProviderModel(BaseModel):
     logo_dark_url: Optional[str] = None
     logo_url: Optional[str] = None
     model_id_patterns: list[str]
+    model_patterns: Optional[list[ModelPattern]] = None
     priority: int = 0
     is_active: bool = True
     created_at: int
@@ -46,6 +57,7 @@ class ProviderForm(BaseModel):
     logo_dark_url: Optional[str] = None
     logo_url: Optional[str] = None
     model_id_patterns: list[str]
+    model_patterns: Optional[list[ModelPattern]] = None
     priority: int = 0
     is_active: bool = True
 
@@ -143,7 +155,12 @@ class Providers:
     @staticmethod
     def detect_provider_logo(model_id: str, owned_by: str, theme: str = "light", db=None):
         """
-        Detect provider logo based on model ID patterns.
+        Detect provider logo based on model ID patterns with model-specific overrides.
+
+        Priority hierarchy:
+        1. Model-specific patterns (e.g., "claude" within Anthropic)
+        2. Provider-level patterns (e.g., all Claude models → Anthropic)
+        3. Ollama fallback
 
         Args:
             model_id: The model identifier (e.g., "gpt-4", "claude-3-opus")
@@ -160,24 +177,37 @@ class Providers:
 
         providers = Providers.get_active_providers(db)
 
-        # First pass: Check pattern matching for all providers (respects priority order)
+        # First pass: Check model-specific patterns (highest priority)
         for provider in providers:
-            # Skip Ollama in first pass - it's a fallback provider
             if provider.id == "ollama":
                 continue
 
-            # Pattern matching for providers with patterns
+            if provider.model_patterns:
+                for model_pattern in provider.model_patterns:
+                    for pattern in model_pattern.patterns:
+                        try:
+                            if re.match(pattern, model_id, re.IGNORECASE):
+                                log.debug(f"Model '{model_id}' matched model-specific pattern '{pattern}' in provider '{provider.id}'")
+                                return Providers._get_model_logo_for_theme(model_pattern, theme)
+                        except re.error as e:
+                            log.warning(f"Invalid regex pattern '{pattern}' for model '{model_pattern.name}': {e}")
+                            continue
+
+        # Second pass: Check provider-level patterns
+        for provider in providers:
+            if provider.id == "ollama":
+                continue
+
             for pattern in provider.model_id_patterns:
                 try:
                     if re.match(pattern, model_id, re.IGNORECASE):
                         log.debug(f"Model '{model_id}' matched provider '{provider.id}' with pattern '{pattern}'")
                         return Providers._get_logo_for_theme(provider, theme)
                 except re.error as e:
-                    # Skip invalid regex patterns
                     log.warning(f"Invalid regex pattern '{pattern}' for provider '{provider.id}': {e}")
                     continue
 
-        # Second pass: Ollama fallback for models served via Ollama with no pattern match
+        # Third pass: Ollama fallback for models served via Ollama with no pattern match
         if owned_by == "ollama":
             ollama_provider = next((p for p in providers if p.id == "ollama"), None)
             if ollama_provider:
@@ -195,3 +225,13 @@ class Providers:
             return provider.logo_light_url
         else:
             return provider.logo_url
+
+    @staticmethod
+    def _get_model_logo_for_theme(model_pattern: ModelPattern, theme: str) -> Optional[str]:
+        """Get appropriate model-specific logo URL for given theme."""
+        if theme == "dark" and model_pattern.logo_dark_url:
+            return model_pattern.logo_dark_url
+        elif theme == "light" and model_pattern.logo_light_url:
+            return model_pattern.logo_light_url
+        else:
+            return model_pattern.logo_url
