@@ -109,6 +109,7 @@
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
+	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -149,6 +150,8 @@
 	export let onQueueSendNow: (id: string) => void = () => {};
 	export let onQueueEdit: (id: string) => void = () => {};
 	export let onQueueDelete: (id: string) => void = () => {};
+
+	export let chatTasks = [];
 
 	let inputContent = null;
 
@@ -1228,6 +1231,13 @@
 							aria-label="Generate message pair"
 							on:click={() => createMessagePair(prompt)}
 						></button>
+
+						<!-- Task list display -->
+						{#if chatTasks.length > 0}
+							<div class="mx-1">
+								<TaskList tasks={chatTasks} />
+							</div>
+						{/if}
 
 						<!-- Queued messages display -->
 						{#if messageQueue.length > 0}
