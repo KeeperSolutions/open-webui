@@ -381,7 +381,7 @@
 		return { toolServer, toolServerData, token };
 	};
 
-	const executeTool = async (data, cb) => {
+	const executeTool = async (data, cb, chatId) => {
 		const { toolServer, toolServerData, token } = resolveToolServer(data.server?.url);
 
 		console.log('executeTool', data, toolServer);
@@ -392,7 +392,8 @@
 				toolServer.url,
 				data?.name,
 				data?.params,
-				toolServerData
+				toolServerData,
+				chatId
 			);
 
 			console.log('executeToolServer', res);
@@ -491,7 +492,7 @@
 				executePythonAsWorker(data.id, data.code, cb, data.files || []);
 			} else if (type === 'execute:tool') {
 				console.log('execute:tool', data);
-				executeTool(data, cb);
+				executeTool(data, cb, event.chat_id);
 			} else if (type === 'request:chat:completion') {
 				console.log(data, $socket.id);
 				const { session_id, channel, form_data, model } = data;
