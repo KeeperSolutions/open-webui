@@ -234,6 +234,7 @@ type Settings = {
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 	renderMarkdownInPreviews?: boolean;
+	recentEmojis?: string[];
 
 	pipelines?: {
 		valves?: Record<string, Record<string, unknown>>;
