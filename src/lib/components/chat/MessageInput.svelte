@@ -132,6 +132,8 @@
 	export let history;
 	export let taskIds = null;
 
+	$: isActive = (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating;
+
 	export let prompt = '';
 	export let files = [];
 
@@ -1252,9 +1254,9 @@
 						></button>
 
 						<!-- Task list display -->
-						{#if chatTasks.length > 0}
+						{#if isActive && chatTasks.length > 0}
 							<div class="mx-1">
-								<TaskList tasks={chatTasks} done={!generating} />
+								<TaskList tasks={chatTasks} />
 							</div>
 						{/if}
 
@@ -1878,7 +1880,7 @@
 								</div>
 
 								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
-									{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating}
+									{#if isActive}
 										<Tooltip content={$i18n.t('Stop')}>
 											<button
 												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
