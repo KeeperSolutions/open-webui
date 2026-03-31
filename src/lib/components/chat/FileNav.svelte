@@ -304,7 +304,6 @@
 	// ── File preview management ──────────────────────────────────────────
 	const clearFilePreview = () => {
 		fileContent = null;
-		filePreviewRef?.disposePanzoom();
 		if (fileImageUrl) {
 			URL.revokeObjectURL(fileImageUrl);
 			fileImageUrl = null;
