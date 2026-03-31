@@ -3704,6 +3704,16 @@ async def streaming_chat_response_handler(response, ctx):
                                                 f"model={model_id} "
                                                 f"error={error}"
                                             )
+                                            try:
+                                                Chats.upsert_message_to_chat_by_id_and_message_id(
+                                                    metadata["chat_id"],
+                                                    metadata["message_id"],
+                                                    {
+                                                        "error": {"content": error},
+                                                    },
+                                                )
+                                            except Exception:
+                                                pass
                                             await event_emitter(
                                                 {
                                                     'type': 'chat:completion',
