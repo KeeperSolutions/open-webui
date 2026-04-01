@@ -689,6 +689,8 @@
 							id={chat.id}
 							title={chat.title}
 							createdAt={chat.created_at}
+							updatedAt={chat.updated_at}
+							lastReadAt={chat.last_read_at}
 							{shiftKey}
 							on:change={(e) => {
 								dispatch('change', e.detail);

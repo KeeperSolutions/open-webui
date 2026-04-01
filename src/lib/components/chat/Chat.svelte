@@ -207,6 +207,11 @@
 			window.setTimeout(() => scrollToBottom(), 0);
 
 			await tick();
+			
+			// Mark chat read when initially loading it
+			if (chatIdProp && !$temporaryChatEnabled) {
+				updateLastReadAt(chatIdProp);
+			}
 
 			// Process any queued requests if the chat is idle
 			const lastMessage = history.currentId ? history.messages[history.currentId] : null;
@@ -409,6 +414,13 @@
 		await tick();
 
 		saveChatHandler(_chatId, history);
+	};
+
+	const updateLastReadAt = (id) => {
+		$socket?.emit('events:chat', {
+			chat_id: id,
+			data: { type: 'last_read_at' }
+		});
 	};
 
 	const terminalEventHandler = (type: string, data: any) => {
@@ -790,6 +802,9 @@
 
 		return () => {
 			try {
+				if (chatIdProp && !$temporaryChatEnabled) {
+					updateLastReadAt(chatIdProp);
+				}
 				pageSubscribe();
 				showControlsSubscribe();
 				selectedFolderSubscribe();
