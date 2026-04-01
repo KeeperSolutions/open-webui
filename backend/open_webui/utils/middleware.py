@@ -4720,6 +4720,7 @@ async def streaming_chat_response_handler(response, ctx):
                     'content': serialize_output(output),
                     'output': output,
                     'title': title,
+                    **({'usage': usage} if usage else {}),
                 }
 
                 if not ENABLE_REALTIME_CHAT_SAVE:
