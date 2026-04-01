@@ -1883,7 +1883,7 @@
 								</div>
 
 								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
-									{#if isActive}
+									{#if isActive && prompt === '' && files.length === 0}
 										<Tooltip content={$i18n.t('Stop')}>
 											<button
 												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
