@@ -681,6 +681,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_ledger_poller())
 
     from open_webui.utils.automations import automation_worker_loop
+
     asyncio.create_task(automation_worker_loop(app))
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
