@@ -101,6 +101,7 @@ from open_webui.routers import (
     billing,
     model_classes,
     terminals,
+    automations,
 )
 
 from open_webui.routers.retrieval import (
@@ -678,6 +679,9 @@ async def lifespan(app: FastAPI):
     from open_webui.tasks.billing import periodic_nightly_deep_rescan, periodic_ledger_poller
     asyncio.create_task(periodic_nightly_deep_rescan())
     asyncio.create_task(periodic_ledger_poller())
+
+    from open_webui.utils.automations import automation_worker_loop
+    asyncio.create_task(automation_worker_loop(app))
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
     if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
@@ -1567,6 +1571,7 @@ app.include_router(langfuse.router, prefix='/api/v1/langfuse', tags=['langfuse']
 app.include_router(billing.router, prefix='/api/v1/billing', tags=['billing'])
 app.include_router(model_classes.router, prefix='/api/v1/model-classes', tags=['model-classes'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
+app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
 
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
