@@ -90,6 +90,18 @@
 		}
 	};
 
+	let lastChatUpdate: string | null = null;
+	let usageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$: {
+		const latest = ($chats as any[])?.[0]?.updated_at ?? null;
+		if (latest && latest !== lastChatUpdate) {
+			lastChatUpdate = latest;
+			if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
+			usageRefreshTimer = setTimeout(loadMyUsage, 5000);
+		}
+	}
+
 	$: myUsageTooltip = myUsage
 		? (() => {
 				const monthName = new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', {
@@ -458,6 +470,8 @@
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
+
+		if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
 	});
 
 	const newChatHandler = async () => {
