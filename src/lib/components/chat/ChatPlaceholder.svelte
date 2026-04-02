@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	import { config, user, models as _models, temporaryChatEnabled, theme } from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
@@ -97,11 +98,11 @@
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
-							{@html marked.parse(
+							{@html DOMPurify.sanitize(marked.parse(
 								sanitizeResponseContent(
 									models[selectedModelIdx]?.info?.meta?.description
 								).replaceAll('\n', '<br>')
-							)}
+							))}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}
 							<div class="mt-0.5 text-sm font-normal text-gray-400 dark:text-gray-500">
