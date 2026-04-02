@@ -800,6 +800,8 @@
 	"Export Prompts": "",
 	"Export Tools": "",
 	"Export Users": "",
+	"Export as CSV": "",
+	"Export as JSON": "",
 	"Export chat (.json)": "",
 	"Export to CSV": "",
 	"External": "",

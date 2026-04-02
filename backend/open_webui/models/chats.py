@@ -826,9 +826,7 @@ class ChatTable:
             else:
                 query = query.order_by(Chat.updated_at.desc(), Chat.id)
 
-            query = query.with_entities(
-                Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at
-            )
+            query = query.with_entities(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
 
             if skip:
                 query = query.offset(skip)
@@ -1225,9 +1223,7 @@ class ChatTable:
 
             query = query.order_by(Chat.updated_at.desc(), Chat.id)
 
-            query = query.with_entities(
-                Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at
-            )
+            query = query.with_entities(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
 
             if skip:
                 query = query.offset(skip)
@@ -1310,9 +1306,7 @@ class ChatTable:
 
             query = query.order_by(Chat.updated_at.desc(), Chat.id)
 
-            query = query.with_entities(
-                Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at
-            )
+            query = query.with_entities(Chat.id, Chat.title, Chat.updated_at, Chat.created_at, Chat.last_read_at)
 
             if skip:
                 query = query.offset(skip)

@@ -1361,9 +1361,8 @@ class OAuthManager:
         client = self.get_client(provider)
         if client is None:
             raise HTTPException(404)
-        redirect_uri = (
-            (client.server_metadata or {}).get('redirect_uri')
-            or request.url_for('oauth_login_callback', provider=provider)
+        redirect_uri = (client.server_metadata or {}).get('redirect_uri') or request.url_for(
+            'oauth_login_callback', provider=provider
         )
 
         kwargs = {}

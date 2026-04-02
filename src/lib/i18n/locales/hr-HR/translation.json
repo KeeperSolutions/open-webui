@@ -795,6 +795,8 @@
 	"Export Prompts": "",
 	"Export Tools": "",
 	"Export Users": "",
+	"Export as CSV": "",
+	"Export as JSON": "",
 	"Export chat (.json)": "Izvoz četa (.json)",
 	"Export to CSV": "",
 	"External": "",
