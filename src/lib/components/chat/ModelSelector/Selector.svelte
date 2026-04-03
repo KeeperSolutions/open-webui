@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
+	import { marked } from 'marked';
 	import Fuse from 'fuse.js';
 
 	import dayjs from '$lib/dayjs';
@@ -530,7 +531,10 @@
 		aria-label={selectedModel
 			? $i18n.t('Selected model: {{modelName}}', { modelName: selectedModel.label })
 			: placeholder}
+		aria-haspopup="listbox"
+		aria-expanded={show}
 		id="model-selector-{id}-button"
+		type="button"
 	>
 		<div
 			class="flex w-full items-center justify-between gap-2 px-3 py-2 rounded-hg-md border border-hg-border-subtle dark:border-gray-800 bg-transparent text-left truncate {triggerClassName}"
@@ -749,6 +753,7 @@
 							{value}
 							{pinModelHandler}
 							{unloadModelHandler}
+							{deleteModelHandler}
 							onClick={() => {
 								value = entry.model_id;
 								selectedModelIdx = index;
@@ -807,6 +812,7 @@
 								{value}
 								{pinModelHandler}
 								{unloadModelHandler}
+								{deleteModelHandler}
 								onClick={() => {
 									value = item.value;
 									selectedModelIdx = index;
@@ -873,7 +879,7 @@
 							<Tooltip content={$i18n.t('Cancel')}>
 								<button
 									class="text-gray-800 dark:text-gray-100"
-									aria-label={$i18n.t('Cancel')}
+									aria-label={$i18n.t('Cancel download of {{model}}', { model: model })}
 									on:click={() => {
 										cancelModelPullHandler(model);
 									}}
