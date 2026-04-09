@@ -1225,7 +1225,19 @@
 			const { query, files: eventFiles } = $desktopEvent;
 			desktopEvent.set(null);
 
-			// TODO: handle eventFiles (attach to chat)
+			// Attach screenshot images from desktop (e.g. Spotlight region capture)
+			if (eventFiles?.length) {
+				for (const ef of eventFiles) {
+					files = [
+						...files,
+						{
+							type: 'image',
+							url: ef.dataUrl,
+							name: ef.name
+						}
+					];
+				}
+			}
 
 			if (query) {
 				messageInput?.setText(query);
