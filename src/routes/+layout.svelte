@@ -36,7 +36,8 @@
 		showControls,
 		showFileNavPath,
 		showFileNavDir,
-		pyodideWorker
+		pyodideWorker,
+		desktopEvent
 	} from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
 	import { goto } from '$app/navigation';
@@ -717,7 +718,8 @@
 			return;
 		}
 		if (event.type === 'query' && event.data?.query) {
-			await goto(`/?q=${encodeURIComponent(event.data.query)}`);
+			desktopEvent.set({ query: event.data.query });
+			await goto('/');
 			return;
 		}
 		if (event.type === 'theme:update' && event.data?.theme) {
