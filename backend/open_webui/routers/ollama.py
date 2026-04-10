@@ -53,6 +53,7 @@ from open_webui.utils.payload import (
     apply_system_prompt_to_body,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.routers.billing import check_billing_access
 from open_webui.utils.access_control import has_access
 
 
@@ -1254,7 +1255,7 @@ async def generate_chat_completion(
     request: Request,
     form_data: dict,
     url_idx: Optional[int] = None,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
     bypass_filter: Optional[bool] = False,
     bypass_system_prompt: bool = False,
     db: Session = Depends(get_session),
@@ -1461,7 +1462,7 @@ async def generate_openai_chat_completion(
     request: Request,
     form_data: dict,
     url_idx: Optional[int] = None,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
     db: Session = Depends(get_session),
 ):
     metadata = form_data.pop("metadata", None)
