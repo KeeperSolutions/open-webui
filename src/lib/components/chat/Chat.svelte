@@ -1239,10 +1239,12 @@
 				}
 			}
 
-			if (query) {
-				messageInput?.setText(query);
+			if (query || eventFiles?.length) {
+				if (query) {
+					messageInput?.setText(query);
+				}
 				await tick();
-				submitHandler(query);
+				submitHandler(query || '');
 			}
 		} else if ($page.url.searchParams.get('q')) {
 			const q = $page.url.searchParams.get('q') ?? '';

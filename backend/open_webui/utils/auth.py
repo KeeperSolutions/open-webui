@@ -19,7 +19,6 @@ import pytz
 from pytz import UTC
 from typing import Optional, Union, List, Dict
 
-from opentelemetry import trace
 
 
 from open_webui.utils.access_control import has_permission
@@ -30,6 +29,7 @@ from open_webui.models.auths import Auths
 from open_webui.constants import ERROR_MESSAGES
 
 from open_webui.env import (
+    ENABLE_OTEL,
     ENABLE_PASSWORD_VALIDATION,
     OFFLINE_MODE,
     LICENSE_BLOB,
@@ -327,12 +327,15 @@ async def get_current_user(
         user = get_current_user_by_api_key(request, token)
 
         # Add user info to current span
-        current_span = trace.get_current_span()
-        if current_span:
-            current_span.set_attribute('client.user.id', user.id)
-            current_span.set_attribute('client.user.email', user.email)
-            current_span.set_attribute('client.user.role', user.role)
-            current_span.set_attribute('client.auth.type', 'api_key')
+        if ENABLE_OTEL:
+            from opentelemetry import trace
+
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_attribute('client.user.id', user.id)
+                current_span.set_attribute('client.user.email', user.email)
+                current_span.set_attribute('client.user.role', user.role)
+                current_span.set_attribute('client.auth.type', 'api_key')
 
         return user
 
@@ -369,12 +372,15 @@ async def get_current_user(
                         )
 
                 # Add user info to current span
-                current_span = trace.get_current_span()
-                if current_span:
-                    current_span.set_attribute('client.user.id', user.id)
-                    current_span.set_attribute('client.user.email', user.email)
-                    current_span.set_attribute('client.user.role', user.role)
-                    current_span.set_attribute('client.auth.type', 'jwt')
+                if ENABLE_OTEL:
+                    from opentelemetry import trace
+
+                    current_span = trace.get_current_span()
+                    if current_span:
+                        current_span.set_attribute('client.user.id', user.id)
+                        current_span.set_attribute('client.user.email', user.email)
+                        current_span.set_attribute('client.user.role', user.role)
+                        current_span.set_attribute('client.auth.type', 'jwt')
 
                 # Refresh the user's last active timestamp asynchronously
                 # to prevent blocking the request
@@ -422,12 +428,15 @@ def get_current_user_by_api_key(request, api_key: str):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
 
     # Add user info to current span
-    current_span = trace.get_current_span()
-    if current_span:
-        current_span.set_attribute('client.user.id', user.id)
-        current_span.set_attribute('client.user.email', user.email)
-        current_span.set_attribute('client.user.role', user.role)
-        current_span.set_attribute('client.auth.type', 'api_key')
+    if ENABLE_OTEL:
+        from opentelemetry import trace
+
+        current_span = trace.get_current_span()
+        if current_span:
+            current_span.set_attribute('client.user.id', user.id)
+            current_span.set_attribute('client.user.email', user.email)
+            current_span.set_attribute('client.user.role', user.role)
+            current_span.set_attribute('client.auth.type', 'api_key')
 
     Users.update_last_active_by_id(user.id)
     return user
