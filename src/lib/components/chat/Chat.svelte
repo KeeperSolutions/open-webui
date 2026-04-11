@@ -1220,31 +1220,39 @@
 			showControls.set(true);
 		}
 
-		// Consume one-shot desktop event (e.g. Spotlight query + attachments)
+		// Consume one-shot desktop event (e.g. Spotlight query, call shortcut)
 		if ($desktopEvent) {
-			const { query, files: eventFiles } = $desktopEvent;
+			const event = $desktopEvent;
 			desktopEvent.set(null);
 
-			// Attach screenshot images from desktop (e.g. Spotlight region capture)
-			if (eventFiles?.length) {
-				for (const ef of eventFiles) {
-					files = [
-						...files,
-						{
-							type: 'image',
-							url: ef.dataUrl,
-							name: ef.name
-						}
-					];
-				}
-			}
+			if (event.type === 'call') {
+				showCallOverlay.set(true);
+				showControls.set(true);
+			} else if (event.type === 'query') {
+				const query = event.data?.query;
+				const eventFiles = event.data?.files;
 
-			if (query || eventFiles?.length) {
-				if (query) {
-					messageInput?.setText(query);
+				// Attach screenshot images from desktop (e.g. Spotlight region capture)
+				if (eventFiles?.length) {
+					for (const ef of eventFiles) {
+						files = [
+							...files,
+							{
+								type: 'image',
+								url: ef.dataUrl,
+								name: ef.name
+							}
+						];
+					}
 				}
-				await tick();
-				submitHandler(query || '');
+
+				if (query || eventFiles?.length) {
+					if (query) {
+						messageInput?.setText(query);
+					}
+					await tick();
+					submitHandler(query || '');
+				}
 			}
 		} else if ($page.url.searchParams.get('q')) {
 			const q = $page.url.searchParams.get('q') ?? '';
