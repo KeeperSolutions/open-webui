@@ -1026,6 +1026,14 @@
 						} catch (error) {
 							console.error('Error refreshing backend config:', error);
 						}
+
+					// Relay auth token to desktop app for API access
+					if (window.electronAPI?.send) {
+						window.electronAPI.send({
+							type: 'token:update',
+							token: localStorage.token
+						}).catch(() => {});
+					}
 					} else {
 						// Redirect Invalid Session User to landing page
 						localStorage.removeItem('token');
