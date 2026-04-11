@@ -143,6 +143,10 @@ class AutomationTable:
             db.refresh(row)
             return AutomationModel.model_validate(row)
 
+    def count_by_user(self, user_id: str, db: Optional[Session] = None) -> int:
+        with get_db_context(db) as db:
+            return db.query(Automation).filter_by(user_id=user_id).count()
+
     def get_by_id(self, id: str, db: Optional[Session] = None) -> Optional[AutomationModel]:
         with get_db_context(db) as db:
             row = db.get(Automation, id)

@@ -1050,6 +1050,8 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         'ENABLE_MESSAGE_RATING': request.app.state.config.ENABLE_MESSAGE_RATING,
         'ENABLE_FOLDERS': request.app.state.config.ENABLE_FOLDERS,
         'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
+        'AUTOMATION_MAX_COUNT': request.app.state.config.AUTOMATION_MAX_COUNT,
+        'AUTOMATION_MIN_INTERVAL': request.app.state.config.AUTOMATION_MIN_INTERVAL,
         'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
         'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
         'ENABLE_NOTES': request.app.state.config.ENABLE_NOTES,
@@ -1076,6 +1078,8 @@ class AdminConfig(BaseModel):
     ENABLE_MESSAGE_RATING: bool
     ENABLE_FOLDERS: bool
     FOLDER_MAX_FILE_COUNT: Optional[int | str] = None
+    AUTOMATION_MAX_COUNT: Optional[int | str] = None
+    AUTOMATION_MIN_INTERVAL: Optional[int | str] = None
     ENABLE_CHANNELS: bool
     ENABLE_MEMORIES: bool
     ENABLE_NOTES: bool
@@ -1100,6 +1104,12 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     request.app.state.config.ENABLE_FOLDERS = form_data.ENABLE_FOLDERS
     request.app.state.config.FOLDER_MAX_FILE_COUNT = (
         int(form_data.FOLDER_MAX_FILE_COUNT) if form_data.FOLDER_MAX_FILE_COUNT else ''
+    )
+    request.app.state.config.AUTOMATION_MAX_COUNT = (
+        int(form_data.AUTOMATION_MAX_COUNT) if form_data.AUTOMATION_MAX_COUNT else ''
+    )
+    request.app.state.config.AUTOMATION_MIN_INTERVAL = (
+        int(form_data.AUTOMATION_MIN_INTERVAL) if form_data.AUTOMATION_MIN_INTERVAL else ''
     )
     request.app.state.config.ENABLE_CHANNELS = form_data.ENABLE_CHANNELS
     request.app.state.config.ENABLE_MEMORIES = form_data.ENABLE_MEMORIES
@@ -1142,6 +1152,8 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
         'ENABLE_MESSAGE_RATING': request.app.state.config.ENABLE_MESSAGE_RATING,
         'ENABLE_FOLDERS': request.app.state.config.ENABLE_FOLDERS,
         'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
+        'AUTOMATION_MAX_COUNT': request.app.state.config.AUTOMATION_MAX_COUNT,
+        'AUTOMATION_MIN_INTERVAL': request.app.state.config.AUTOMATION_MIN_INTERVAL,
         'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
         'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
         'ENABLE_NOTES': request.app.state.config.ENABLE_NOTES,

@@ -1559,6 +1559,18 @@ ENABLE_CHANNELS = PersistentConfig(
     os.environ.get('ENABLE_CHANNELS', 'False').lower() == 'true',
 )
 
+AUTOMATION_MAX_COUNT = PersistentConfig(
+    'AUTOMATION_MAX_COUNT',
+    'automations.max_count',
+    os.environ.get('AUTOMATION_MAX_COUNT', ''),
+)
+
+AUTOMATION_MIN_INTERVAL = PersistentConfig(
+    'AUTOMATION_MIN_INTERVAL',
+    'automations.min_interval',
+    os.environ.get('AUTOMATION_MIN_INTERVAL', ''),
+)
+
 ENABLE_NOTES = PersistentConfig(
     'ENABLE_NOTES',
     'notes.enable',
