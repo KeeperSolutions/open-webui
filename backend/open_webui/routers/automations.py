@@ -61,6 +61,7 @@ def check_automation_access(automation, user):
 
 
 def enrich_automation(automation: AutomationModel, db: Session, tz: str = None) -> AutomationResponse:
+    """Full enrichment for single-item views (includes next_runs computation)."""
     last_run = AutomationRuns.get_latest(automation.id, db=db)
     return AutomationResponse(
         **automation.model_dump(),
@@ -97,8 +98,18 @@ async def get_automation_items(
         db=db,
     )
 
+    # Batch-fetch latest runs in a single query instead of N+1
+    ids = [item.id for item in result.items]
+    latest_runs = AutomationRuns.get_latest_batch(ids, db=db) if ids else {}
+
     return {
-        'items': [enrich_automation(item, db, tz=user.timezone) for item in result.items],
+        'items': [
+            AutomationResponse(
+                **item.model_dump(),
+                last_run=latest_runs.get(item.id),
+            )
+            for item in result.items
+        ],
         'total': result.total,
     }
 
