@@ -1162,10 +1162,11 @@ async def get_channel_message(
     if message.channel_id != id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT())
 
+    message_user = Users.get_user_by_id(message.user_id, db=db)
     return MessageResponse(
         **{
             **message.model_dump(),
-            'user': UserNameResponse(**Users.get_user_by_id(message.user_id, db=db).model_dump()),
+            'user': UserNameResponse(**message_user.model_dump()) if message_user else None,
         }
     )
 
@@ -1245,10 +1246,11 @@ async def pin_channel_message(
     try:
         Messages.update_is_pinned_by_id(message_id, form_data.is_pinned, user.id, db=db)
         message = Messages.get_message_by_id(message_id, db=db)
+        message_user = Users.get_user_by_id(message.user_id, db=db)
         return MessageUserResponse(
             **{
                 **message.model_dump(),
-                'user': UserNameResponse(**Users.get_user_by_id(message.user_id, db=db).model_dump()),
+                'user': UserNameResponse(**message_user.model_dump()) if message_user else None,
             }
         )
     except Exception as e:
