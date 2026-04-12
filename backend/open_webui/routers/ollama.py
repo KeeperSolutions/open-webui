@@ -47,6 +47,7 @@ from open_webui.internal.db import get_session
 from open_webui.models.models import Models
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
+from open_webui.utils.access_control import check_model_access
 from open_webui.utils.misc import (
     calculate_sha256,
     cleanup_response,
@@ -1105,29 +1106,9 @@ async def generate_chat_completion(
             if not bypass_system_prompt:
                 payload = apply_system_prompt_to_body(system, payload, metadata, user)
 
-        # Check if user has access to the model
-        if not bypass_filter and user.role == 'user':
-            user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
-            if not (
-                user.id == model_info.user_id
-                or AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='model',
-                    resource_id=model_info.id,
-                    permission='read',
-                    user_group_ids=user_group_ids,
-                )
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail='Model not found',
-                )
-    elif not bypass_filter:
-        if user.role != 'admin':
-            raise HTTPException(
-                status_code=403,
-                detail='Model not found',
-            )
+        check_model_access(user, model_info, bypass_filter)
+    else:
+        check_model_access(user, None, bypass_filter)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1214,29 +1195,9 @@ async def generate_openai_completion(
         if params:
             payload = apply_model_params_to_body_openai(params, payload)
 
-        # Check if user has access to the model
-        if user.role == 'user':
-            user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
-            if not (
-                user.id == model_info.user_id
-                or AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='model',
-                    resource_id=model_info.id,
-                    permission='read',
-                    user_group_ids=user_group_ids,
-                )
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail='Model not found',
-                )
+        check_model_access(user, model_info)
     else:
-        if user.role != 'admin':
-            raise HTTPException(
-                status_code=403,
-                detail='Model not found',
-            )
+        check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1300,29 +1261,9 @@ async def generate_openai_chat_completion(
             payload = apply_model_params_to_body_openai(params, payload)
             payload = apply_system_prompt_to_body(system, payload, metadata, user)
 
-        # Check if user has access to the model
-        if user.role == 'user':
-            user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
-            if not (
-                user.id == model_info.user_id
-                or AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='model',
-                    resource_id=model_info.id,
-                    permission='read',
-                    user_group_ids=user_group_ids,
-                )
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail='Model not found',
-                )
+        check_model_access(user, model_info)
     else:
-        if user.role != 'admin':
-            raise HTTPException(
-                status_code=403,
-                detail='Model not found',
-            )
+        check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1372,29 +1313,9 @@ async def generate_anthropic_messages(
         if model_info.base_model_id:
             payload['model'] = model_info.base_model_id
 
-        # Check if user has access to the model
-        if user.role == 'user':
-            user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
-            if not (
-                user.id == model_info.user_id
-                or AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='model',
-                    resource_id=model_info.id,
-                    permission='read',
-                    user_group_ids=user_group_ids,
-                )
-            ):
-                raise HTTPException(
-                    status_code=403,
-                    detail='Model not found',
-                )
+        check_model_access(user, model_info)
     else:
-        if user.role != 'admin':
-            raise HTTPException(
-                status_code=403,
-                detail='Model not found',
-            )
+        check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
