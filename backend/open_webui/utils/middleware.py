@@ -4132,32 +4132,33 @@ async def streaming_chat_response_handler(response, ctx):
                         if responses_api_tool_calls:
                             tool_calls.append(_split_tool_calls(responses_api_tool_calls))
 
+                try:
+                    try:
+                        await stream_body_handler(response, form_data)
+                    except asyncio.TimeoutError:
+                        _timeout_error = (
+                            "Stream timed out — the model stopped responding. "
+                            "Please try again."
+                        )
+                        log.warning(
+                            f"[stream] Upstream idle timeout (sock_read) after "
+                            f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
+                            f"chat_id={metadata.get('chat_id')} model={model_id}"
+                        )
+                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata["chat_id"],
+                            metadata["message_id"],
+                            {"error": {"content": _timeout_error}},
+                        )
+                        await event_emitter(
+                            {
+                                "type": "chat:message:error",
+                                "data": {"error": {"content": _timeout_error}},
+                            }
+                        )
+                finally:
                     if response.background:
                         await response.background()
-
-                try:
-                    await stream_body_handler(response, form_data)
-                except asyncio.TimeoutError:
-                    _timeout_error = (
-                        "Stream timed out — the model stopped responding. "
-                        "Please try again."
-                    )
-                    log.warning(
-                        f"[stream] Upstream idle timeout (sock_read) after "
-                        f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
-                        f"chat_id={metadata.get('chat_id')} model={model_id}"
-                    )
-                    Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata["chat_id"],
-                        metadata["message_id"],
-                        {"error": {"content": _timeout_error}},
-                    )
-                    await event_emitter(
-                        {
-                            "type": "chat:message:error",
-                            "data": {"error": {"content": _timeout_error}},
-                        }
-                    )
 
                 tool_call_retries = 0
                 tool_call_sources = []  # Track citation sources from tool results

@@ -759,6 +759,10 @@ async def lifespan(app: FastAPI):
     log.info("Application startup complete - ready to serve requests")
     yield
 
+    # Shutdown: clean up shared resources
+    from open_webui.utils.session_pool import close_session
+    await close_session()
+
     if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
 
