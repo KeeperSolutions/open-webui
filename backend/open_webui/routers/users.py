@@ -273,7 +273,9 @@ async def update_default_user_permissions(request: Request, form_data: UserPermi
 
 
 @router.get('/user/settings', response_model=Optional[UserSettings])
-async def get_user_settings_by_session_user(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_settings_by_session_user(
+    user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     user = await Users.get_user_by_id(user.id, db=db)
     if user:
         return user.settings
@@ -468,7 +470,9 @@ async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSe
 
 
 @router.get('/{user_id}/info', response_model=UserInfoResponse)
-async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_info_by_id(
+    user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     user = await Users.get_user_by_id(user_id, db=db)
     if user:
         groups = await Groups.get_groups_by_member_id(user_id, db=db)
@@ -487,7 +491,9 @@ async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db:
 
 
 @router.get('/{user_id}/oauth/sessions')
-async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_oauth_sessions_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
         return sessions
@@ -708,5 +714,7 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: Asyn
 
 
 @router.get('/{user_id}/groups')
-async def get_user_groups_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_groups_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     return await Groups.get_groups_by_member_id(user_id, db=db)

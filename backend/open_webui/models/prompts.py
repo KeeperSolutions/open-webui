@@ -213,11 +213,13 @@ class PromptsTable:
                 prompts.append(
                     PromptUserResponse.model_validate(
                         {
-                            **(await self._to_prompt_model(
-                                prompt,
-                                access_grants=grants_map.get(prompt.id, []),
-                                db=db,
-                            )).model_dump(),
+                            **(
+                                await self._to_prompt_model(
+                                    prompt,
+                                    access_grants=grants_map.get(prompt.id, []),
+                                    db=db,
+                                )
+                            ).model_dump(),
                             'user': user.model_dump() if user else None,
                         }
                     )
@@ -319,9 +321,7 @@ class PromptsTable:
                 stmt = stmt.order_by(Prompt.updated_at.desc())
 
             # Count BEFORE pagination
-            count_result = await db.execute(
-                select(func.count()).select_from(stmt.subquery())
-            )
+            count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
 
             if skip:
@@ -339,11 +339,13 @@ class PromptsTable:
             for prompt, user in items:
                 prompts.append(
                     PromptUserResponse(
-                        **(await self._to_prompt_model(
-                            prompt,
-                            access_grants=grants_map.get(prompt.id, []),
-                            db=db,
-                        )).model_dump(),
+                        **(
+                            await self._to_prompt_model(
+                                prompt,
+                                access_grants=grants_map.get(prompt.id, []),
+                                db=db,
+                            )
+                        ).model_dump(),
                         user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                     )
                 )

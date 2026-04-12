@@ -373,7 +373,9 @@ async def delete_function_by_id(
 
 
 @router.get('/id/{id}/valves', response_model=Optional[dict])
-async def get_function_valves_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_function_valves_by_id(
+    id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     function = await Functions.get_function_by_id(id, db=db)
     if function:
         try:
@@ -473,7 +475,9 @@ async def update_function_valves_by_id(
 
 
 @router.get('/id/{id}/valves/user', response_model=Optional[dict])
-async def get_function_user_valves_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_function_user_valves_by_id(
+    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     function = await Functions.get_function_by_id(id, db=db)
     if function:
         try:

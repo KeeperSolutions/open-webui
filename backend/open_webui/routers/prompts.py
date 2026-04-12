@@ -198,7 +198,9 @@ async def create_new_prompt(
 
 
 @router.get('/command/{command}', response_model=Optional[PromptAccessResponse])
-async def get_prompt_by_command(command: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_prompt_by_command(
+    command: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     prompt = await Prompts.get_prompt_by_command(command, db=db)
 
     if prompt:
@@ -240,7 +242,9 @@ async def get_prompt_by_command(command: str, user=Depends(get_verified_user), d
 
 
 @router.get('/id/{prompt_id}', response_model=Optional[PromptAccessResponse])
-async def get_prompt_by_id(prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def get_prompt_by_id(
+    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
     if prompt:
@@ -388,7 +392,9 @@ async def update_prompt_metadata(
                 detail=f"Command '/{form_data.command}' is already in use",
             )
 
-    updated_prompt = await Prompts.update_prompt_metadata(prompt.id, form_data.name, form_data.command, form_data.tags, db=db)
+    updated_prompt = await Prompts.update_prompt_metadata(
+        prompt.id, form_data.name, form_data.command, form_data.tags, db=db
+    )
     if updated_prompt:
         return updated_prompt
     else:
@@ -497,7 +503,9 @@ async def update_prompt_access_by_id(
 
 
 @router.post('/id/{prompt_id}/toggle', response_model=Optional[PromptModel])
-async def toggle_prompt_active(prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def toggle_prompt_active(
+    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
     if not prompt:
@@ -537,7 +545,9 @@ async def toggle_prompt_active(prompt_id: str, user=Depends(get_verified_user), 
 
 
 @router.delete('/id/{prompt_id}/delete', response_model=bool)
-async def delete_prompt_by_id(prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_prompt_by_id(
+    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
     if not prompt:

@@ -200,7 +200,8 @@ class ModelsTable:
             model_ids = [model.id for model in all_models]
             grants_map = await AccessGrants.get_grants_by_resources('model', model_ids, db=db)
             return [
-                await self._to_model_model(model, access_grants=grants_map.get(model.id, []), db=db) for model in all_models
+                await self._to_model_model(model, access_grants=grants_map.get(model.id, []), db=db)
+                for model in all_models
             ]
 
     async def get_models(self, db: Optional[AsyncSession] = None) -> list[ModelUserResponse]:
@@ -221,11 +222,13 @@ class ModelsTable:
                 models.append(
                     ModelUserResponse.model_validate(
                         {
-                            **(await self._to_model_model(
-                                model,
-                                access_grants=grants_map.get(model.id, []),
-                                db=db,
-                            )).model_dump(),
+                            **(
+                                await self._to_model_model(
+                                    model,
+                                    access_grants=grants_map.get(model.id, []),
+                                    db=db,
+                                )
+                            ).model_dump(),
                             'user': user.model_dump() if user else None,
                         }
                     )
@@ -239,7 +242,8 @@ class ModelsTable:
             model_ids = [model.id for model in all_models]
             grants_map = await AccessGrants.get_grants_by_resources('model', model_ids, db=db)
             return [
-                await self._to_model_model(model, access_grants=grants_map.get(model.id, []), db=db) for model in all_models
+                await self._to_model_model(model, access_grants=grants_map.get(model.id, []), db=db)
+                for model in all_models
             ]
 
     async def get_models_by_user_id(
@@ -342,9 +346,7 @@ class ModelsTable:
                 stmt = stmt.order_by(Model.created_at.desc())
 
             # Count BEFORE pagination
-            count_result = await db.execute(
-                select(func.count()).select_from(stmt.subquery())
-            )
+            count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
 
             if skip:
@@ -362,11 +364,13 @@ class ModelsTable:
             for model, user in items:
                 models.append(
                     ModelUserResponse(
-                        **(await self._to_model_model(
-                            model,
-                            access_grants=grants_map.get(model.id, []),
-                            db=db,
-                        )).model_dump(),
+                        **(
+                            await self._to_model_model(
+                                model,
+                                access_grants=grants_map.get(model.id, []),
+                                db=db,
+                            )
+                        ).model_dump(),
                         user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                     )
                 )
@@ -416,7 +420,9 @@ class ModelsTable:
             except Exception:
                 return None
 
-    async def update_model_by_id(self, id: str, model: ModelForm, db: Optional[AsyncSession] = None) -> Optional[ModelModel]:
+    async def update_model_by_id(
+        self, id: str, model: ModelForm, db: Optional[AsyncSession] = None
+    ) -> Optional[ModelModel]:
         try:
             async with get_async_db_context(db) as db:
                 # update only the fields that are present in the model
@@ -473,7 +479,9 @@ class ModelsTable:
         except Exception:
             return False
 
-    async def sync_models(self, user_id: str, models: list[ModelModel], db: Optional[AsyncSession] = None) -> list[ModelModel]:
+    async def sync_models(
+        self, user_id: str, models: list[ModelModel], db: Optional[AsyncSession] = None
+    ) -> list[ModelModel]:
         try:
             async with get_async_db_context(db) as db:
                 # Get existing models
@@ -488,7 +496,9 @@ class ModelsTable:
                 for model in models:
                     if model.id in existing_ids:
                         await db.execute(
-                            update(Model).filter_by(id=model.id).values(
+                            update(Model)
+                            .filter_by(id=model.id)
+                            .values(
                                 **model.model_dump(exclude={'access_grants'}),
                                 user_id=user_id,
                                 updated_at=int(time.time()),

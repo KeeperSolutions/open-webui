@@ -330,7 +330,9 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.tts', request.app.state.config.USER_PERMISSIONS):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'chat.tts', request.app.state.config.USER_PERMISSIONS
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -629,6 +631,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
                 status_code=status_code,
                 detail=detail,
             )
+
 
 def transcription_handler(request, file_path, metadata, user=None):
     filename = os.path.basename(file_path)
@@ -1214,7 +1217,9 @@ async def transcription(
     language: Optional[str] = Form(None),
     user=Depends(get_verified_user),
 ):
-    if user.role != 'admin' and not await has_permission(user.id, 'chat.stt', request.app.state.config.USER_PERMISSIONS):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'chat.stt', request.app.state.config.USER_PERMISSIONS
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

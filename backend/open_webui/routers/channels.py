@@ -94,7 +94,9 @@ async def channel_has_access(
     return False
 
 
-async def get_channel_users_with_access(channel: ChannelModel, permission: str = 'read', db: Optional[AsyncSession] = None):
+async def get_channel_users_with_access(
+    channel: ChannelModel, permission: str = 'read', db: Optional[AsyncSession] = None
+):
     return await AccessGrants.get_users_with_access(
         resource_type='channel',
         resource_id=channel.id,
@@ -893,11 +895,13 @@ async def model_response_handler(request, channel, message, user, db=None):
         if model:
             try:
                 # reverse to get in chronological order
-                thread_messages = (await Messages.get_messages_by_parent_id(
-                    channel.id,
-                    message.parent_id if message.parent_id else message.id,
-                    db=db,
-                ))[::-1]
+                thread_messages = (
+                    await Messages.get_messages_by_parent_id(
+                        channel.id,
+                        message.parent_id if message.parent_id else message.id,
+                        db=db,
+                    )
+                )[::-1]
 
                 response_message, channel = await new_message_handler(
                     request,
@@ -1120,7 +1124,9 @@ async def post_new_message(
         try:
             if files := message.data.get('files', []):
                 for file in files:
-                    await Channels.set_file_message_id_in_channel_by_id(channel.id, file.get('id', ''), message.id, db=db)
+                    await Channels.set_file_message_id_in_channel_by_id(
+                        channel.id, file.get('id', ''), message.id, db=db
+                    )
         except Exception as e:
             log.debug(e)
 

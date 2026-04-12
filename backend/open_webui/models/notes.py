@@ -113,7 +113,9 @@ class NoteTable:
             permission=permission,
         )
 
-    async def insert_new_note(self, user_id: str, form_data: NoteForm, db: Optional[AsyncSession] = None) -> Optional[NoteModel]:
+    async def insert_new_note(
+        self, user_id: str, form_data: NoteForm, db: Optional[AsyncSession] = None
+    ) -> Optional[NoteModel]:
         async with get_async_db_context(db) as db:
             note = NoteModel(
                 **{
@@ -216,9 +218,7 @@ class NoteTable:
                 stmt = stmt.order_by(Note.updated_at.desc())
 
             # Count BEFORE pagination
-            count_result = await db.execute(
-                select(func.count()).select_from(stmt.subquery())
-            )
+            count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
 
             if skip:
@@ -236,11 +236,13 @@ class NoteTable:
             for note, user in items:
                 notes.append(
                     NoteUserResponse(
-                        **(await self._to_note_model(
-                            note,
-                            access_grants=grants_map.get(note.id, []),
-                            db=db,
-                        )).model_dump(),
+                        **(
+                            await self._to_note_model(
+                                note,
+                                access_grants=grants_map.get(note.id, []),
+                                db=db,
+                            )
+                        ).model_dump(),
                         user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                     )
                 )

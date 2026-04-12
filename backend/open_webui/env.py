@@ -429,9 +429,7 @@ except ValueError:
 # enabled, the kernel sends TCP keepalive probes on idle connections so
 # half-closed sockets (e.g. after a silent firewall/LB reset or a NIC
 # flap) are detected before the next command lands on them.
-REDIS_SOCKET_KEEPALIVE = (
-    os.environ.get('REDIS_SOCKET_KEEPALIVE', 'False').lower() == 'true'
-)
+REDIS_SOCKET_KEEPALIVE = os.environ.get('REDIS_SOCKET_KEEPALIVE', 'False').lower() == 'true'
 
 # How often (in seconds) redis-py should PING an idle pooled connection
 # before reusing it. Opt-in: defaults to unset (empty string) so behavior

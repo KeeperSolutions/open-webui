@@ -101,7 +101,9 @@ log = logging.getLogger(__name__)
 
 # Let no function be called without need, and let what
 # it yields justify the cost of running it.
-async def get_async_tool_function_and_apply_extra_params(function: Callable, extra_params: dict) -> Callable[..., Awaitable]:
+async def get_async_tool_function_and_apply_extra_params(
+    function: Callable, extra_params: dict
+) -> Callable[..., Awaitable]:
     sig = inspect.signature(function)
     extra_params = {k: v for k, v in extra_params.items() if k in sig.parameters}
     partial_func = partial(function, **extra_params)
@@ -544,7 +546,9 @@ async def get_builtin_tools(
 
     # Automation tools - create and manage scheduled automations from chat
     if is_builtin_tool_enabled('automations') and await has_user_permission('automations'):
-        builtin_functions.extend([create_automation, update_automation, list_automations, toggle_automation, delete_automation])
+        builtin_functions.extend(
+            [create_automation, update_automation, list_automations, toggle_automation, delete_automation]
+        )
 
     for func in builtin_functions:
         callable = await get_async_tool_function_and_apply_extra_params(

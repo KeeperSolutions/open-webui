@@ -64,8 +64,7 @@ async def get_session() -> aiohttp.ClientSession:
             trust_env=True,
         )
         log.info(
-            'Created shared aiohttp session pool '
-            '(limit=%s, per_host=%s, dns_ttl=%d)',
+            'Created shared aiohttp session pool (limit=%s, per_host=%s, dns_ttl=%d)',
             AIOHTTP_POOL_CONNECTIONS or 'unlimited',
             AIOHTTP_POOL_CONNECTIONS_PER_HOST or 'unlimited',
             AIOHTTP_POOL_DNS_TTL,

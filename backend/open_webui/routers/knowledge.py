@@ -858,7 +858,9 @@ async def remove_file_from_knowledge_by_id(
 
 
 @router.delete('/{id}/delete', response_model=bool)
-async def delete_knowledge_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_knowledge_by_id(
+    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge:
         raise HTTPException(
@@ -931,7 +933,9 @@ async def delete_knowledge_by_id(id: str, user=Depends(get_verified_user), db: A
 
 
 @router.post('/{id}/reset', response_model=Optional[KnowledgeResponse])
-async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+async def reset_knowledge_by_id(
+    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
     knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge:
         raise HTTPException(

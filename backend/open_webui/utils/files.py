@@ -88,7 +88,7 @@ async def convert_markdown_base64_images(request, content: str, metadata, user):
     last_end = 0
 
     for match in MARKDOWN_IMAGE_URL_PATTERN.finditer(content):
-        result_parts.append(content[last_end:match.start()])
+        result_parts.append(content[last_end : match.start()])
         base64_string = match.group(2)
         if len(base64_string) > MIN_REPLACEMENT_URL_LENGTH:
             url = await get_image_url_from_base64(request, base64_string, metadata, user)

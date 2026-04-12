@@ -763,6 +763,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: clean up shared resources
     from open_webui.utils.session_pool import close_session
+
     await close_session()
 
     if hasattr(app.state, 'redis_task_command_listener'):
@@ -1438,7 +1439,6 @@ app.add_middleware(RedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
-
 @app.middleware('http')
 async def commit_session_after_request(request: Request, call_next):
     response = await call_next(request)
@@ -2039,7 +2039,7 @@ async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
 @app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     if chat_id.startswith('local:'):
-        socket_id = chat_id[len('local:'):]
+        socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             return {'task_ids': []}
@@ -2057,7 +2057,7 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     if chat_id.startswith('local:'):
-        socket_id = chat_id[len('local:'):]
+        socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
