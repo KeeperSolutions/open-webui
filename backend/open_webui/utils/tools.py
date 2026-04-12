@@ -86,7 +86,8 @@ from open_webui.tools.builtin import (
     view_file,
     view_knowledge_file,
     view_skill,
-    tasks,
+    create_tasks,
+    update_task,
     create_automation,
     update_automation,
     list_automations,
@@ -543,7 +544,7 @@ async def get_builtin_tools(
 
     # Task management - break down complex work into trackable steps
     if is_builtin_tool_enabled('tasks'):
-        builtin_functions.append(tasks)
+        builtin_functions.extend([create_tasks, update_task])
 
     # Automation tools - create and manage scheduled automations from chat
     if is_builtin_tool_enabled('automations') and await has_user_permission('automations'):
