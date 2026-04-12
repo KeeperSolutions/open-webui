@@ -22,7 +22,7 @@ from fastapi import (
 
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import get_async_session, SessionLocal
+from open_webui.internal.db import get_async_session, get_async_db_context
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
@@ -113,7 +113,7 @@ async def process_uploaded_file(
                     file_path_processed = Storage.get_file(file_path)
                     result = transcribe(request, file_path_processed, file_metadata, user)
 
-                    process_file(
+                    await process_file(
                         request,
                         ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
                         user=user,
@@ -122,7 +122,7 @@ async def process_uploaded_file(
                 elif (not content_type.startswith(('image/', 'video/'))) or (
                     request.app.state.config.CONTENT_EXTRACTION_ENGINE == 'external'
                 ):
-                    process_file(
+                    await process_file(
                         request,
                         ProcessFileForm(file_id=file_item.id),
                         user=user,
@@ -132,7 +132,7 @@ async def process_uploaded_file(
                     raise Exception(f'File type {content_type} is not supported for processing')
             else:
                 log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
-                process_file(
+                await process_file(
                     request,
                     ProcessFileForm(file_id=file_item.id),
                     user=user,
@@ -151,10 +151,10 @@ async def process_uploaded_file(
             )
 
     if db:
-        _process_handler(db)
+        await _process_handler(db)
     else:
-        with SessionLocal() as db_session:
-            _process_handler(db_session)
+        async with get_async_db_context() as db_session:
+            await _process_handler(db_session)
 
 
 @router.post('/', response_model=FileModelResponse)
@@ -540,7 +540,7 @@ async def update_file_data_content_by_id(
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
         try:
-            process_file(
+            await process_file(
                 request,
                 ProcessFileForm(file_id=id, content=form_data.content),
                 user=user,
@@ -560,7 +560,7 @@ async def update_file_data_content_by_id(
                 # Remove old embeddings for this file from the KB collection
                 VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': id})
                 # Re-add from the now-updated file-{file_id} collection
-                process_file(
+                await process_file(
                     request,
                     ProcessFileForm(file_id=id, collection_name=knowledge.id),
                     user=user,
