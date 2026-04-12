@@ -734,20 +734,31 @@ def get_tool_specs(tool_module: object) -> list[dict]:
     return specs
 
 
-def resolve_schema(schema, components):
+def resolve_schema(schema, components, resolved_schemas=None):
     """
     Recursively resolves a JSON schema using OpenAPI components.
     """
     if not schema:
         return {}
 
+    if resolved_schemas is None:
+        resolved_schemas = set()
+
     if '$ref' in schema:
         ref_path = schema['$ref']
+        schema_name = ref_path.split('/')[-1]
+
+        if schema_name in resolved_schemas:
+            # Avoid infinite recursion on circular references
+            return {}
+
+        resolved_schemas.add(schema_name)
+
         ref_parts = ref_path.strip('#/').split('/')
         resolved = components
         for part in ref_parts[1:]:  # Skip the initial 'components'
             resolved = resolved.get(part, {})
-        return resolve_schema(resolved, components)
+        return resolve_schema(resolved, components, resolved_schemas)
 
     resolved_schema = copy.deepcopy(schema)
 
