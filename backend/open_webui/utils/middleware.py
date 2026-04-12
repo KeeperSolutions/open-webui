@@ -3135,6 +3135,8 @@ async def non_streaming_chat_response_handler(response, ctx):
                 else:
                     error = str(error)
 
+                log.error('Provider returned error (non-streaming): %s', error)
+
                 await Chats.upsert_message_to_chat_by_id_and_message_id(
                     metadata['chat_id'],
                     metadata['message_id'],
@@ -3711,7 +3713,7 @@ async def streaming_chat_response_handler(response, ctx):
                                     if not choices:
                                         error = data.get('error', {})
                                         if error:
-                                            log.warning(
+                                            log.error(
                                                 f"[stream] Upstream error in SSE body: "
                                                 f"chat_id={metadata.get('chat_id')} "
                                                 f"model={model_id} "

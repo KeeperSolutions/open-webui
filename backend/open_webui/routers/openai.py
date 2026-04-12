@@ -1363,6 +1363,11 @@ async def generate_chat_completion(
                     response = await r.text()
 
                 if r.status >= 400:
+                    log.error(
+                        "Provider returned HTTP %d: %s",
+                        r.status,
+                        str(response)[:1000],
+                    )
                     if isinstance(response, (dict, list)):
                         return JSONResponse(status_code=r.status, content=response)
                     else:
