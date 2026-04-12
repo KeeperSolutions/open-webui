@@ -378,6 +378,11 @@
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 				}
 			}
+
+			// Set Default Terminal
+			if (model?.info?.meta?.terminalId) {
+				selectedTerminalId.set(model.info.meta.terminalId);
+			}
 		}
 	};
 
