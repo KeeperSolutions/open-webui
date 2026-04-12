@@ -160,30 +160,29 @@ async def get_tools(
         return tools
     else:
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
-        tools = [
-            tool
-            for tool in tools
-            if tool.user_id == user.id
-            or (
-                has_access(
+        filtered_tools = []
+        for tool in tools:
+            if tool.user_id == user.id:
+                filtered_tools.append(tool)
+            elif str(tool.id).startswith('server:'):
+                if await has_access(
                     user.id,
                     'read',
                     server_access_grants.get(str(tool.id), []),
                     user_group_ids,
                     db=db,
-                )
-                if str(tool.id).startswith('server:')
-                else await AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='tool',
-                    resource_id=tool.id,
-                    permission='read',
-                    user_group_ids=user_group_ids,
-                    db=db,
-                )
-            )
-        ]
-        return tools
+                ):
+                    filtered_tools.append(tool)
+            elif await AccessGrants.has_access(
+                user_id=user.id,
+                resource_type='tool',
+                resource_id=tool.id,
+                permission='read',
+                user_group_ids=user_group_ids,
+                db=db,
+            ):
+                filtered_tools.append(tool)
+        return filtered_tools
 
 
 ############################
