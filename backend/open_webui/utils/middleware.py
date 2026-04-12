@@ -893,10 +893,14 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
             if source_id not in source_ids:
                 source_ids[source_id] = len(source_ids) + 1
             src_name = source.get('source', {}).get('name')
+            src_type = source.get('source', {}).get('type')
+            src_rid = source.get('source', {}).get('id')
             body = doc if include_content else ''
             context_string += (
                 f'<source id="{source_ids[source_id]}"'
                 + (f' name="{src_name}"' if src_name else '')
+                + (f' resource-type="{src_type}"' if src_type else '')
+                + (f' resource-id="{src_rid}"' if src_rid else '')
                 + f'>{body}</source>\n'
             )
     return context_string
