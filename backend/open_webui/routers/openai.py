@@ -23,9 +23,9 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel, ConfigDict
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import get_session
+from open_webui.internal.db import get_async_session
 
 from open_webui.models.models import Models
 from open_webui.models.access_grants import AccessGrants
@@ -513,11 +513,11 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 async def get_filtered_models(models, user, db=None):
     # Filter models based on user access control
     model_ids = [model['id'] for model in models.get('data', [])]
-    model_infos = {model_info.id: model_info for model_info in Models.get_models_by_ids(model_ids, db=db)}
-    user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id, db=db)}
+    model_infos = {model_info.id: model_info for model_info in await Models.get_models_by_ids(model_ids, db=db)}
+    user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
 
     # Batch-fetch accessible resource IDs in a single query instead of N has_access calls
-    accessible_model_ids = AccessGrants.get_accessible_resource_ids(
+    accessible_model_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
         resource_type='model',
         resource_ids=list(model_infos.keys()),
@@ -1089,7 +1089,7 @@ async def generate_chat_completion(
     bypass_filter: Optional[bool] = False,
     bypass_system_prompt: bool = False,
 ):
-    # NOTE: We intentionally do NOT use Depends(get_session) here.
+    # NOTE: We intentionally do NOT use Depends(get_async_session) here.
     # Database operations (get_model_by_id, AccessGrants.has_access) manage their own short-lived sessions.
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
     # which would exhaust the connection pool under concurrent load.
@@ -1107,7 +1107,7 @@ async def generate_chat_completion(
     metadata = payload.pop('metadata', None)
 
     model_id = form_data.get('model')
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
 
     # Check model info and override the payload
     if model_info:
@@ -1127,9 +1127,9 @@ async def generate_chat_completion(
             if not bypass_system_prompt:
                 payload = apply_system_prompt_to_body(system, payload, metadata, user)
 
-        check_model_access(user, model_info, bypass_filter)
+        await check_model_access(user, model_info, bypass_filter)
     else:
-        check_model_access(user, None, bypass_filter)
+        await check_model_access(user, None, bypass_filter)
 
     # Check if model is already in app state cache to avoid expensive get_all_models() call
     models = request.app.state.OPENAI_MODELS
@@ -1534,7 +1534,7 @@ async def responses(
     model_id = form_data.model
 
     # Enforce per-model access control
-    check_model_access(user, Models.get_model_by_id(model_id), BYPASS_MODEL_ACCESS_CONTROL)
+    await check_model_access(user, await Models.get_model_by_id(model_id), BYPASS_MODEL_ACCESS_CONTROL)
 
     body = json.dumps(payload)
 

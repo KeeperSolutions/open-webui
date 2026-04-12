@@ -38,10 +38,10 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, model_validator
-from starlette.background import BackgroundTask
-from sqlalchemy.orm import Session
 
-from open_webui.internal.db import get_session
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from open_webui.internal.db import get_async_session
 
 
 from open_webui.models.models import Models
@@ -404,11 +404,11 @@ async def get_all_models(request: Request, user: UserModel = None):
 async def get_filtered_models(models, user, db=None):
     # Filter models based on user access control
     model_ids = [model['model'] for model in models.get('models', [])]
-    model_infos = {model_info.id: model_info for model_info in Models.get_models_by_ids(model_ids, db=db)}
-    user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id, db=db)}
+    model_infos = {model_info.id: model_info for model_info in await Models.get_models_by_ids(model_ids, db=db)}
+    user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
 
     # Batch-fetch accessible resource IDs in a single query instead of N has_access calls
-    accessible_model_ids = AccessGrants.get_accessible_resource_ids(
+    accessible_model_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
         resource_type='model',
         resource_ids=list(model_infos.keys()),
@@ -806,7 +806,7 @@ async def show_model_info(request: Request, form_data: ModelNameForm, user=Depen
     model = form_data.get('model')
 
     # Enforce per-model access control
-    check_model_access(user, Models.get_model_by_id(model), BYPASS_MODEL_ACCESS_CONTROL)
+    await check_model_access(user, await Models.get_model_by_id(model), BYPASS_MODEL_ACCESS_CONTROL)
 
     await get_all_models(request, user=user)
     models = request.app.state.OLLAMA_MODELS
@@ -856,7 +856,7 @@ async def embed(
     log.info(f'generate_ollama_batch_embeddings {form_data}')
 
     # Enforce per-model access control
-    check_model_access(user, Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
 
     if url_idx is None:
         model = form_data.model
@@ -915,7 +915,7 @@ async def embeddings(
     log.info(f'generate_ollama_embeddings {form_data}')
 
     # Enforce per-model access control
-    check_model_access(user, Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
 
     if url_idx is None:
         model = form_data.model
@@ -980,7 +980,7 @@ async def generate_completion(
         raise HTTPException(status_code=503, detail='Ollama API is disabled')
 
     # Enforce per-model access control
-    check_model_access(user, Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
 
     if url_idx is None:
         await get_all_models(request, user=user)
@@ -1072,7 +1072,7 @@ async def generate_chat_completion(
     if not request.app.state.config.ENABLE_OLLAMA_API:
         raise HTTPException(status_code=503, detail='Ollama API is disabled')
 
-    # NOTE: We intentionally do NOT use Depends(get_session) here.
+    # NOTE: We intentionally do NOT use Depends(get_async_session) here.
     # Database operations (get_model_by_id, AccessGrants.has_access) manage their own short-lived sessions.
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
     # which would exhaust the connection pool under concurrent load.
@@ -1101,7 +1101,7 @@ async def generate_chat_completion(
         del payload['metadata']
 
     model_id = payload['model']
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
 
     if model_info:
         if model_info.base_model_id:
@@ -1119,9 +1119,9 @@ async def generate_chat_completion(
             if not bypass_system_prompt:
                 payload = apply_system_prompt_to_body(system, payload, metadata, user)
 
-        check_model_access(user, model_info, bypass_filter)
+        await check_model_access(user, model_info, bypass_filter)
     else:
-        check_model_access(user, None, bypass_filter)
+        await check_model_access(user, None, bypass_filter)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1179,7 +1179,7 @@ async def generate_openai_completion(
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
 ):
-    # NOTE: We intentionally do NOT use Depends(get_session) here.
+    # NOTE: We intentionally do NOT use Depends(get_async_session) here.
     # Database operations (get_model_by_id, AccessGrants.has_access) manage their own short-lived sessions.
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
     # which would exhaust the connection pool under concurrent load.
@@ -1199,7 +1199,7 @@ async def generate_openai_completion(
         del payload['metadata']
 
     model_id = form_data.model
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
     if model_info:
         if model_info.base_model_id:
             payload['model'] = model_info.base_model_id
@@ -1208,9 +1208,9 @@ async def generate_openai_completion(
         if params:
             payload = apply_model_params_to_body_openai(params, payload)
 
-        check_model_access(user, model_info)
+        await check_model_access(user, model_info)
     else:
-        check_model_access(user, None)
+        await check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1241,7 +1241,7 @@ async def generate_openai_chat_completion(
     url_idx: Optional[int] = None,
     user=Depends(check_billing_access),
 ):
-    # NOTE: We intentionally do NOT use Depends(get_session) here.
+    # NOTE: We intentionally do NOT use Depends(get_async_session) here.
     # Database operations (get_model_by_id, AccessGrants.has_access) manage their own short-lived sessions.
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
     # which would exhaust the connection pool under concurrent load.
@@ -1261,7 +1261,7 @@ async def generate_openai_chat_completion(
         del payload['metadata']
 
     model_id = completion_form.model
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
     if model_info:
         if model_info.base_model_id:
             payload['model'] = model_info.base_model_id
@@ -1274,9 +1274,9 @@ async def generate_openai_chat_completion(
             payload = apply_model_params_to_body_openai(params, payload)
             payload = apply_system_prompt_to_body(system, payload, metadata, user)
 
-        check_model_access(user, model_info)
+        await check_model_access(user, model_info)
     else:
-        check_model_access(user, None)
+        await check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1321,14 +1321,14 @@ async def generate_anthropic_messages(
     payload = {**form_data}
     model_id = payload.get('model', '')
 
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
     if model_info:
         if model_info.base_model_id:
             payload['model'] = model_info.base_model_id
 
-        check_model_access(user, model_info)
+        await check_model_access(user, model_info)
     else:
-        check_model_access(user, None)
+        await check_model_access(user, None)
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
@@ -1379,17 +1379,17 @@ async def generate_responses(
     payload = form_data.model_dump()
     model_id = form_data.model
 
-    model_info = Models.get_model_by_id(model_id)
+    model_info = await Models.get_model_by_id(model_id)
     if model_info:
         if model_info.base_model_id:
             payload['model'] = model_info.base_model_id
 
         # Check if user has access to the model
         if user.role == 'user':
-            user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id)}
+            user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
             if not (
                 user.id == model_info.user_id
-                or AccessGrants.has_access(
+                or await AccessGrants.has_access(
                     user_id=user.id,
                     resource_type='model',
                     resource_id=model_info.id,
@@ -1434,7 +1434,7 @@ async def get_openai_models(
     request: Request,
     url_idx: Optional[int] = None,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     models = []
     if url_idx is None:
@@ -1466,11 +1466,11 @@ async def get_openai_models(
     if user.role == 'user' and not BYPASS_MODEL_ACCESS_CONTROL:
         # Filter models based on user access control
         model_ids = [model['id'] for model in models]
-        model_infos = {model_info.id: model_info for model_info in Models.get_models_by_ids(model_ids, db=db)}
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user.id, db=db)}
+        model_infos = {model_info.id: model_info for model_info in await Models.get_models_by_ids(model_ids, db=db)}
+        user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
 
         # Batch-fetch accessible resource IDs in a single query instead of N has_access calls
-        accessible_model_ids = AccessGrants.get_accessible_resource_ids(
+        accessible_model_ids = await AccessGrants.get_accessible_resource_ids(
             user_id=user.id,
             resource_type='model',
             resource_ids=list(model_infos.keys()),
