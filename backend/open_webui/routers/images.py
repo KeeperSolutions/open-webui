@@ -562,7 +562,11 @@ async def image_generations(
                 'model': model,
                 'prompt': form_data.prompt,
                 'n': form_data.n,
-                'size': (form_data.size if form_data.size else request.app.state.config.IMAGE_SIZE),
+                **(
+                    {'size': form_data.size or request.app.state.config.IMAGE_SIZE}
+                    if (form_data.size or request.app.state.config.IMAGE_SIZE)
+                    else {}
+                ),
                 **(
                     {}
                     if re.match(
