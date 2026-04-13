@@ -550,6 +550,25 @@ async def get_oauth_client_info_with_static_credentials(
         raise e
 
 
+
+def resolve_oauth_client_info(connection: dict) -> dict:
+    """
+    Decrypt OAuth client info from a tool server connection config.
+
+    For oauth_2.1_static, overlays admin-provided credentials from
+    info.oauth_client_id and info.oauth_client_secret onto the blob.
+    """
+    info = connection.get('info', {})
+    data = decrypt_data(info.get('oauth_client_info', ''))
+
+    if connection.get('auth_type') == 'oauth_2.1_static':
+        if info.get('oauth_client_id') and info.get('oauth_client_secret'):
+            data['client_id'] = info['oauth_client_id']
+            data['client_secret'] = info['oauth_client_secret']
+
+    return data
+
+
 class OAuthClientManager:
     def __init__(self, app):
         self.oauth = OAuth()
@@ -626,7 +645,7 @@ class OAuthClientManager:
                 continue
 
             try:
-                oauth_client_info = decrypt_data(oauth_client_info)
+                oauth_client_info = resolve_oauth_client_info(connection)
                 return self.add_client(expected_client_id, OAuthClientInformationFull(**oauth_client_info))['client']
             except Exception as e:
                 log.error(f'Failed to lazily add OAuth client {expected_client_id} from config: {e}')

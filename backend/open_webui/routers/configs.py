@@ -27,6 +27,7 @@ from open_webui.utils.oauth import (
     get_oauth_client_info_with_static_credentials,
     encrypt_data,
     decrypt_data,
+    resolve_oauth_client_info,
     OAuthClientInformationFull,
 )
 from mcp.shared.auth import OAuthMetadata
@@ -203,9 +204,7 @@ async def set_tool_servers_config(
 
             if auth_type in ('oauth_2.1', 'oauth_2.1_static') and server_id:
                 try:
-                    oauth_client_info = connection.get('info', {}).get('oauth_client_info', '')
-                    oauth_client_info = decrypt_data(oauth_client_info)
-
+                    oauth_client_info = resolve_oauth_client_info(connection)
                     request.app.state.oauth_client_manager.add_client(
                         f'{server_type}:{server_id}',
                         OAuthClientInformationFull(**oauth_client_info),

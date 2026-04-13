@@ -571,6 +571,7 @@ from open_webui.utils.oauth import (
     get_oauth_client_info_with_static_credentials,
     encrypt_data,
     decrypt_data,
+    resolve_oauth_client_info,
     OAuthManager,
     OAuthClientManager,
     OAuthClientInformationFull,
@@ -2353,10 +2354,8 @@ if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
             auth_type = tool_server_connection.get('auth_type', 'none')
 
             if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-                oauth_client_info = tool_server_connection.get('info', {}).get('oauth_client_info', '')
-
                 try:
-                    oauth_client_info = decrypt_data(oauth_client_info)
+                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
                     app.state.oauth_client_manager.add_client(
                         f'mcp:{server_id}',
                         OAuthClientInformationFull(**oauth_client_info),
@@ -2417,18 +2416,25 @@ async def register_client(request, client_id: str) -> bool:
 
     try:
         if auth_type == 'oauth_2.1_static':
-            # Static credentials: rebuild from stored credentials + fresh metadata
-            existing_client_info = connection.get('info', {}).get('oauth_client_info', '')
-            if not existing_client_info:
-                log.error(f'No stored OAuth client info for static client {client_id}')
-                return False
-            existing_data = decrypt_data(existing_client_info)
+            # Static credentials: rebuild from admin-provided credentials + fresh metadata
+            info = connection.get('info', {})
+            oauth_client_id = info.get('oauth_client_id') or ''
+            oauth_client_secret = info.get('oauth_client_secret') or ''
+            if not oauth_client_id or not oauth_client_secret:
+                # Fall back to blob for backward compatibility
+                existing_client_info = info.get('oauth_client_info', '')
+                if not existing_client_info:
+                    log.error(f'No stored OAuth client info for static client {client_id}')
+                    return False
+                existing_data = decrypt_data(existing_client_info)
+                oauth_client_id = oauth_client_id or existing_data.get('client_id', '')
+                oauth_client_secret = oauth_client_secret or existing_data.get('client_secret', '')
             oauth_client_info = await get_oauth_client_info_with_static_credentials(
                 request,
                 client_id,
                 server_url,
-                oauth_client_id=existing_data.get('client_id', ''),
-                oauth_client_secret=existing_data.get('client_secret', ''),
+                oauth_client_id=oauth_client_id,
+                oauth_client_secret=oauth_client_secret,
             )
         else:
             oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
