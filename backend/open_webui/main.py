@@ -21,7 +21,7 @@ from typing import Optional
 from aiocache import cached
 import aiohttp
 import anyio.to_thread
-import requests
+
 from redis import Redis
 
 
@@ -60,6 +60,7 @@ from starsessions.stores.redis import RedisStore
 from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.logger import start_logger
+from open_webui.utils.session_pool import get_session
 from open_webui.socket.main import (
     MODELS,
     app as socket_app,
@@ -2561,7 +2562,13 @@ async def oauth_backchannel_logout(
 @app.get('/manifest.json')
 async def get_manifest_json():
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
-        return requests.get(app.state.EXTERNAL_PWA_MANIFEST_URL).json()
+        session = await get_session()
+        async with session.get(
+            app.state.EXTERNAL_PWA_MANIFEST_URL,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+        ) as r:
+            r.raise_for_status()
+            return await r.json()
     else:
         return {
             'name': app.state.WEBUI_NAME,

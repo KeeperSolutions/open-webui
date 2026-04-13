@@ -10,7 +10,7 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 from aiocache import cached
-import requests
+
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
@@ -375,19 +375,20 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
         r = None
         try:
-            r = requests.post(
+            session = await get_session()
+            r = await session.post(
                 url=f'{url}/audio/speech',
                 data=body,
                 headers=headers,
                 cookies=cookies,
-                stream=True,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
             )
 
             r.raise_for_status()
 
             # Save the streaming content to a file
             with open(file_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
+                async for chunk in r.content.iter_chunked(8192):
                     f.write(chunk)
 
             with open(file_body_path, 'w') as f:
@@ -402,14 +403,14 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             detail = None
             if r is not None:
                 try:
-                    res = r.json()
+                    res = await r.json()
                     if 'error' in res:
                         detail = f'External: {res["error"]}'
                 except Exception:
                     detail = f'External: {e}'
 
             raise HTTPException(
-                status_code=r.status_code if r else 500,
+                status_code=r.status if r else 500,
                 detail=detail if detail else 'Open WebUI: Server Connection Error',
             )
 
