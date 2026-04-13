@@ -2457,7 +2457,9 @@ async def update_task(
     try:
         status = status.strip().lower()
         if status not in VALID_TASK_STATUSES:
-            return json.dumps({'error': f'Invalid status: {status}. Must be one of: {", ".join(sorted(VALID_TASK_STATUSES))}'})
+            return json.dumps(
+                {'error': f'Invalid status: {status}. Must be one of: {", ".join(sorted(VALID_TASK_STATUSES))}'}
+            )
 
         all_tasks = await Chats.get_chat_tasks_by_id(__chat_id__)
 
