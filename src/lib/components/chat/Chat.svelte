@@ -1383,19 +1383,28 @@
 		}
 	};
 
+	let processingQueueChats = new Set<string>();
+
 	const processNextInQueue = async (targetChatId: string) => {
+		if (processingQueueChats.has(targetChatId)) return;
+
 		const queue = $chatRequestQueues[targetChatId];
 		if (!queue || queue.length === 0) return;
 
-		const combinedPrompt = queue.map((m) => m.prompt).join('\n\n');
-		const combinedFiles = queue.flatMap((m) => m.files);
+		processingQueueChats.add(targetChatId);
+		try {
+			const combinedPrompt = queue.map((m) => m.prompt).join('\n\n');
+			const combinedFiles = queue.flatMap((m) => m.files);
 
-		chatRequestQueues.update((q) => {
-			const { [targetChatId]: _, ...rest } = q;
-			return rest;
-		});
+			chatRequestQueues.update((q) => {
+				const { [targetChatId]: _, ...rest } = q;
+				return rest;
+			});
 
-		await submitPrompt(combinedPrompt, combinedFiles);
+			await submitPrompt(combinedPrompt, combinedFiles);
+		} finally {
+			processingQueueChats.delete(targetChatId);
+		}
 	};
 
 	const chatCompletedHandler = async (_chatId, modelId, responseMessageId, messages) => {
