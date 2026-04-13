@@ -538,15 +538,20 @@ class OAuthClientManager:
             'server_metadata_url': (oauth_client_info.issuer if oauth_client_info.issuer else None),
         }
 
-        if oauth_client_info.server_metadata and oauth_client_info.server_metadata.code_challenge_methods_supported:
-            if (
-                isinstance(
-                    oauth_client_info.server_metadata.code_challenge_methods_supported,
-                    list,
-                )
-                and 'S256' in oauth_client_info.server_metadata.code_challenge_methods_supported
-            ):
-                kwargs['code_challenge_method'] = 'S256'
+        # Default to S256 for OAuth 2.1 (PKCE is mandatory per RFC 9700)
+        kwargs['code_challenge_method'] = 'S256'
+
+        # Only remove PKCE if metadata explicitly excludes S256
+        if (
+            oauth_client_info.server_metadata
+            and oauth_client_info.server_metadata.code_challenge_methods_supported
+            and isinstance(
+                oauth_client_info.server_metadata.code_challenge_methods_supported,
+                list,
+            )
+            and 'S256' not in oauth_client_info.server_metadata.code_challenge_methods_supported
+        ):
+            del kwargs['code_challenge_method']
 
         self.clients[client_id] = {
             'client': self.oauth.register(**kwargs),
