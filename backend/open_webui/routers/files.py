@@ -48,7 +48,7 @@ from open_webui.routers.audio import transcribe
 from open_webui.storage.provider import Storage
 
 
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
 from pydantic import BaseModel
@@ -86,6 +86,20 @@ def _is_text_file(file_path: str, chunk_size: int = 8192) -> bool:
         return True
     except (UnicodeDecodeError, Exception):
         return False
+
+
+def _cleanup_local_cache(file_path: str) -> None:
+    """Remove the local cached copy of a cloud-stored file after processing."""
+    if STORAGE_LOCAL_CACHE or STORAGE_PROVIDER == 'local':
+        return
+    try:
+        local_filename = os.path.basename(file_path)
+        local_path = os.path.join(UPLOAD_DIR, local_filename)
+        if os.path.isfile(local_path):
+            os.remove(local_path)
+            log.debug(f'Cleaned up local cache: {local_path}')
+    except OSError as e:
+        log.warning(f'Failed to clean up local cache for {file_path}: {e}')
 
 
 async def process_uploaded_file(
@@ -150,11 +164,14 @@ async def process_uploaded_file(
                 db=db_session,
             )
 
-    if db:
-        await _process_handler(db)
-    else:
-        async with get_async_db_context() as db_session:
-            await _process_handler(db_session)
+    try:
+        if db:
+            await _process_handler(db)
+        else:
+            async with get_async_db_context() as db_session:
+                await _process_handler(db_session)
+    finally:
+        _cleanup_local_cache(file_path)
 
 
 @router.post('/', response_model=FileModelResponse)
