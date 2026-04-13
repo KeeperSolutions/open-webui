@@ -54,6 +54,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
+    BYPASS_PYDUB_PREPROCESSING,
     DEVICE_TYPE,
     ENABLE_FORWARD_USER_INFO_HEADERS,
 )
@@ -1098,24 +1099,28 @@ def transcription_handler(request, file_path, metadata, user=None):
 def transcribe(request: Request, file_path: str, metadata: Optional[dict] = None, user=None):
     log.info(f'transcribe: {file_path} {metadata}')
 
-    if is_audio_conversion_required(file_path):
-        file_path = convert_audio_to_mp3(file_path)
+    if BYPASS_PYDUB_PREPROCESSING:
+        log.info('Bypassing pydub preprocessing (BYPASS_PYDUB_PREPROCESSING=true)')
+        chunk_paths = [file_path]
+    else:
+        if is_audio_conversion_required(file_path):
+            file_path = convert_audio_to_mp3(file_path)
 
-    try:
-        file_path = compress_audio(file_path)
-    except Exception as e:
-        log.exception(e)
+        try:
+            file_path = compress_audio(file_path)
+        except Exception as e:
+            log.exception(e)
 
-    # Always produce a list of chunk paths (could be one entry if small)
-    try:
-        chunk_paths = split_audio(file_path, MAX_FILE_SIZE)
-        print(f'Chunk paths: {chunk_paths}')
-    except Exception as e:
-        log.exception(e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
-        )
+        # Always produce a list of chunk paths (could be one entry if small)
+        try:
+            chunk_paths = split_audio(file_path, MAX_FILE_SIZE)
+            print(f'Chunk paths: {chunk_paths}')
+        except Exception as e:
+            log.exception(e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(e),
+            )
 
     results = []
     try:

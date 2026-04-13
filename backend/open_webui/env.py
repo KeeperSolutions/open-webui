@@ -515,6 +515,11 @@ PASSWORD_VALIDATION_HINT = os.environ.get('PASSWORD_VALIDATION_HINT', '')
 
 BYPASS_MODEL_ACCESS_CONTROL = os.environ.get('BYPASS_MODEL_ACCESS_CONTROL', 'False').lower() == 'true'
 
+# When enabled, skips pydub-based preprocessing (format conversion, compression,
+# and chunked splitting) before sending files to processing engines. Useful when
+# the upstream provider handles these steps or when ffmpeg is unavailable.
+BYPASS_PYDUB_PREPROCESSING = os.environ.get('BYPASS_PYDUB_PREPROCESSING', 'False').lower() == 'true'
+
 # When disabled (default), the OpenAI catch-all proxy endpoint (/{path:path})
 # is blocked. Enable only if you need direct passthrough to upstream OpenAI-
 # compatible APIs for endpoints not natively handled by Open WebUI.
