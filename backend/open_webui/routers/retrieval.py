@@ -1698,7 +1698,12 @@ async def process_file(
 
                     # External embedding API takes time (5-60s+).
                     # Subsequent updates use fresh async sessions.
-                    result = save_docs_to_vector_db(
+                    # NOTE: save_docs_to_vector_db is a sync function that
+                    # calls asyncio.run_coroutine_threadsafe(..., main_loop).result()
+                    # which blocks the calling thread.  We MUST run it in a
+                    # worker thread to avoid deadlocking the event loop.
+                    result = await run_in_threadpool(
+                        save_docs_to_vector_db,
                         request,
                         docs=docs,
                         collection_name=collection_name,
