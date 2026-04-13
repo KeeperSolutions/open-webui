@@ -283,7 +283,6 @@ else:
                 pool_timeout=DATABASE_POOL_TIMEOUT,
                 pool_recycle=DATABASE_POOL_RECYCLE,
                 pool_pre_ping=True,
-                poolclass=QueuePool,
             )
         else:
             async_engine = create_async_engine(
