@@ -22,6 +22,7 @@ from dateutil.rrule import rrulestr
 from fastapi import Request
 from starlette.datastructures import Headers
 
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.automations import Automations, AutomationRuns, AutomationModel
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.users import Users
@@ -59,9 +60,9 @@ def validate_rrule(s: str) -> None:
     try:
         rule = _parse_rule(s)
     except Exception as e:
-        raise ValueError(f'Invalid RRULE: {e}')
+        raise ValueError(ERROR_MESSAGES.AUTOMATION_INVALID_RRULE(e))
     if rule.after(datetime.now()) is None:
-        raise ValueError('RRULE has no future occurrences')
+        raise ValueError(ERROR_MESSAGES.AUTOMATION_NO_FUTURE_RUNS)
 
 
 def next_run_ns(s: str, tz: str = None) -> Optional[int]:

@@ -19,7 +19,7 @@ from open_webui.utils.task import (
     moa_response_generation_template,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.constants import TASKS
+from open_webui.constants import ERROR_MESSAGES, TASKS
 
 from open_webui.routers.pipelines import process_pipeline_inlet_filter, process_pipeline_outlet_filter
 
@@ -311,7 +311,7 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -395,7 +395,7 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -470,7 +470,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -539,7 +539,7 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -599,13 +599,13 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
         if not request.app.state.config.ENABLE_SEARCH_QUERY_GENERATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Search query generation is disabled',
+                detail=ERROR_MESSAGES.FEATURE_DISABLED('Search query generation'),
             )
     elif type == 'retrieval':
         if not request.app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Query generation is disabled',
+                detail=ERROR_MESSAGES.FEATURE_DISABLED('Query generation'),
             )
 
     if getattr(request.state, 'cached_queries', None):
@@ -623,7 +623,7 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -682,7 +682,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     if not request.app.state.config.ENABLE_AUTOCOMPLETE_GENERATION:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'Autocompletion generation is disabled',
+            detail=ERROR_MESSAGES.FEATURE_DISABLED('Autocompletion generation'),
         )
 
     type = form_data.get('type')
@@ -693,7 +693,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
         if len(prompt) > request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Input prompt exceeds maximum length of {request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH}',
+                detail=ERROR_MESSAGES.INPUT_TOO_LONG(request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH),
             )
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
@@ -707,7 +707,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -775,7 +775,7 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Check if the user has a custom task model
@@ -848,7 +848,7 @@ async def generate_moa_response(request: Request, form_data: dict, user=Depends(
     if model_id not in models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     template = DEFAULT_MOA_GENERATION_PROMPT_TEMPLATE

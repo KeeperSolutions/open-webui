@@ -754,7 +754,7 @@ async def verify_connection(
             elif is_anthropic_url(url):
                 result = await get_anthropic_models(url, key)
                 if result is None:
-                    raise HTTPException(status_code=500, detail='Failed to connect to Anthropic API')
+                    raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
                 if 'error' in result:
                     raise HTTPException(status_code=500, detail=result['error'])
                 return result
@@ -781,10 +781,10 @@ async def verify_connection(
         except aiohttp.ClientError as e:
             # ClientError covers all aiohttp requests issues
             log.exception(f'Client error: {str(e)}')
-            raise HTTPException(status_code=500, detail='Open WebUI: Server Connection Error')
+            raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
         except Exception as e:
             log.exception(f'Unexpected error: {e}')
-            raise HTTPException(status_code=500, detail='Open WebUI: Server Connection Error')
+            raise HTTPException(status_code=500, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
 
 
 def get_azure_allowed_params(api_version: str) -> set[str]:
@@ -1147,7 +1147,7 @@ async def generate_chat_completion(
     else:
         raise HTTPException(
             status_code=404,
-            detail='Model not found',
+            detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
     # Get the API config for the model
@@ -1416,7 +1416,7 @@ async def generate_chat_completion(
 
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail='Open WebUI: Server Connection Error',
+            detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
         )
     finally:
         if not streaming:
@@ -1496,7 +1496,7 @@ async def embeddings(request: Request, form_data: dict, user):
         log.exception(e)
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail='Open WebUI: Server Connection Error',
+            detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
         )
     finally:
         if not streaming:
@@ -1620,7 +1620,7 @@ async def responses(
         log.exception(e)
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail='Open WebUI: Server Connection Error',
+            detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
         )
     finally:
         if not streaming:
