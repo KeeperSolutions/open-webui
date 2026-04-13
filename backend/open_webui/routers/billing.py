@@ -236,11 +236,12 @@ async def billing_portal(request: Request, user=Depends(get_verified_user)):
             detail="No billing account found. Please set up billing first.",
         )
 
+    webui_url = request.app.state.config.WEBUI_URL or str(request.base_url).rstrip("/")
     try:
         session = client.v1.billing_portal.sessions.create(
             params={
                 "customer": record.stripe_customer_id,
-                "return_url": str(request.base_url) + "billing",
+                "return_url": f"{webui_url}/billing",
             }
         )
     except stripe.StripeError as e:
