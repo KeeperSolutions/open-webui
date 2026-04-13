@@ -52,6 +52,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
+	import { getMyLangfuseUsage, type MyUsage } from '$lib/apis/langfuse';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
@@ -74,6 +75,41 @@
 	let showPinnedChat = true;
 
 	let showCreateChannel = false;
+
+	let myUsage: MyUsage | null = null;
+	let myUsageLoading = true;
+
+	const loadMyUsage = async () => {
+		myUsageLoading = true;
+		try {
+			myUsage = await getMyLangfuseUsage(localStorage.token);
+		} catch {
+			myUsage = null;
+		} finally {
+			myUsageLoading = false;
+		}
+	};
+
+	let lastChatUpdate: string | null = null;
+	let usageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+	$: {
+		const latest = ($chats as any[])?.[0]?.updated_at ?? null;
+		if (latest && latest !== lastChatUpdate) {
+			lastChatUpdate = latest;
+			if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
+			usageRefreshTimer = setTimeout(loadMyUsage, 5000);
+		}
+	}
+
+	$: myUsageTooltip = myUsage
+		? (() => {
+				const monthName = new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', {
+					month: 'long'
+				});
+				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div><div>Estimated cost: €${myUsage.total_cost.toFixed(2)}</div></div>`;
+			})()
+		: '';
 
 	// Pagination variables
 	let chatListLoading = false;
@@ -350,6 +386,7 @@
 	let unsubscribers = [];
 	onMount(async () => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
+		loadMyUsage();
 		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
 		unsubscribers = [
@@ -433,6 +470,8 @@
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
+
+		if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
 	});
 
 	const newChatHandler = async () => {
@@ -1220,7 +1259,29 @@
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
 								</div>
-								<div class=" self-center font-medium">{$user?.name}</div>
+								<div class="flex flex-col flex-1 min-w-0">
+									<div class="flex font-medium truncate">{$user?.name}</div>
+									{#if myUsageLoading}
+										<div class="text-xs text-gray-400 dark:text-gray-500 animate-pulse">
+											{$i18n.t('Loading...')}
+										</div>
+									{:else if myUsage !== null}
+										<Tooltip
+											placement="top"
+											interactive={true}
+											content={myUsageTooltip}
+											tippyOptions={{ allowHTML: true }}
+										>
+											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
+												{$i18n.t('This month')}: <span class="font-medium text-gray-700 dark:text-gray-300">€{myUsage.total_cost.toFixed(2)}</span>
+											</div>
+										</Tooltip>
+									{:else}
+										<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
+											{$i18n.t('Usage unavailable')}
+										</div>
+									{/if}
+								</div>
 							</div>
 						</UserMenu>
 					{/if}
