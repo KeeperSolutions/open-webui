@@ -1814,6 +1814,21 @@ async def chat_completion(
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
             response = await chat_completion_handler(request, form_data, user)
+
+            # When the upstream provider returns an error (e.g. HTTP 400
+            # content-filter, quota exceeded), generate_chat_completion
+            # returns a JSONResponse instead of raising.  Detect this and
+            # raise so the except-block below emits chat:message:error +
+            # chat:tasks:cancel, unblocking the frontend.
+            if isinstance(response, JSONResponse) and response.status_code >= 400:
+                try:
+                    error_body = json.loads(response.body.decode('utf-8', 'replace'))
+                    detail = error_body.get('error', error_body) if isinstance(error_body, dict) else error_body
+                    if isinstance(detail, dict):
+                        detail = detail.get('message', detail.get('detail', str(detail)))
+                except Exception:
+                    detail = f'Provider returned HTTP {response.status_code}'
+                raise Exception(detail)
             if metadata.get('chat_id') and metadata.get('message_id'):
                 try:
                     if not metadata['chat_id'].startswith('local:'):
