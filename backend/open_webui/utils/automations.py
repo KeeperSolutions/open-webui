@@ -26,7 +26,7 @@ from open_webui.models.automations import Automations, AutomationRuns, Automatio
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.users import Users
 from open_webui.utils.task import prompt_template
-from open_webui.internal.db import get_db
+from open_webui.internal.db import get_async_db
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ async def automation_worker_loop(app) -> None:
     log.info(f'Automation worker started (poll interval: {AUTOMATION_POLL_INTERVAL}s)')
     while True:
         try:
-            with get_db() as db:
+            async with get_async_db() as db:
                 batch = await Automations.claim_due(int(time.time_ns()), limit=10, db=db)
             if batch:
                 log.info(f'Claimed {len(batch)} due automation(s)')
@@ -428,5 +428,5 @@ async def _record_run(
     error: str = None,
 ):
     """Insert a run record into automation_run."""
-    with get_db() as db:
+    async with get_async_db() as db:
         await AutomationRuns.insert(automation_id, status, chat_id=chat_id, error=error, db=db)
