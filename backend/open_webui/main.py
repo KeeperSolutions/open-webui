@@ -476,6 +476,7 @@ from open_webui.config import (
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
     AppConfig,
     reset_config,
+    async_reset_config,
 )
 from open_webui.env import (
     BILLING_ENABLED,
@@ -652,7 +653,7 @@ async def lifespan(app: FastAPI):
     )
 
     if RESET_CONFIG_ON_START:
-        reset_config()
+        await async_reset_config()
 
     if LICENSE_KEY:
         get_license_data(app, LICENSE_KEY)

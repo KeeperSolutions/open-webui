@@ -8,7 +8,7 @@ from typing import Optional
 
 from open_webui.env import AIOHTTP_CLIENT_TIMEOUT
 from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.config import get_config, save_config
+from open_webui.config import get_config, save_config, async_save_config
 from open_webui.config import BannerModel
 
 from open_webui.utils.tools import (
@@ -49,7 +49,7 @@ class ImportConfigForm(BaseModel):
 
 @router.post('/import', response_model=dict)
 async def import_config(form_data: ImportConfigForm, user=Depends(get_admin_user)):
-    save_config(form_data.config)
+    await async_save_config(form_data.config)
     return get_config()
 
 
