@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from typing import Optional
@@ -319,9 +320,20 @@ class ModelsTable:
 
                 tag = filter.get('tag')
                 if tag:
-                    like_pattern = f'%"{tag.lower()}"%'
-                    meta_text = func.lower(cast(Model.meta, String))
-                    stmt = stmt.filter(meta_text.like(like_pattern))
+                    # SQLite stores JSON text via json.dumps(ensure_ascii=True),
+                    # so non-ASCII chars are \uXXXX-escaped. PostgreSQL native JSONB
+                    # stores literal Unicode. Use the right pattern for each.
+                    if db.bind.dialect.name == 'sqlite':
+                        if tag.isascii():
+                            meta_text = func.lower(cast(Model.meta, String))
+                            pattern = f'%{json.dumps(tag.lower())}%'
+                        else:
+                            meta_text = cast(Model.meta, String)
+                            pattern = f'%{json.dumps(tag)}%'
+                    else:
+                        meta_text = func.lower(cast(Model.meta, String))
+                        pattern = f'%{json.dumps(tag.lower(), ensure_ascii=False)}%'
+                    stmt = stmt.filter(meta_text.like(pattern))
 
                 order_by = filter.get('order_by')
                 direction = filter.get('direction')

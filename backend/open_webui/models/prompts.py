@@ -1,3 +1,4 @@
+import json
 import time
 import uuid
 from typing import Optional
@@ -292,10 +293,22 @@ class PromptsTable:
 
                 tag = filter.get('tag')
                 if tag:
-                    # Search for tag in JSON array field
-                    like_pattern = f'%"{tag.lower()}"%'
-                    tags_text = func.lower(cast(Prompt.tags, String))
-                    stmt = stmt.filter(tags_text.like(like_pattern))
+                    # SQLite stores JSON text via json.dumps(ensure_ascii=True),
+                    # so non-ASCII chars are \uXXXX-escaped. PostgreSQL native JSONB
+                    # stores literal Unicode. Use the right pattern for each.
+                    if db.bind.dialect.name == 'sqlite':
+                        if tag.isascii():
+                            tags_text = func.lower(cast(Prompt.tags, String))
+                            pattern = f'%{json.dumps(tag.lower())}%'
+                        else:
+                            # LOWER() is ASCII-only; non-ASCII codepoints would
+                            # produce different \uXXXX escapes when lowered.
+                            tags_text = cast(Prompt.tags, String)
+                            pattern = f'%{json.dumps(tag)}%'
+                    else:
+                        tags_text = func.lower(cast(Prompt.tags, String))
+                        pattern = f'%{json.dumps(tag.lower(), ensure_ascii=False)}%'
+                    stmt = stmt.filter(tags_text.like(pattern))
 
                 order_by = filter.get('order_by')
                 direction = filter.get('direction')
