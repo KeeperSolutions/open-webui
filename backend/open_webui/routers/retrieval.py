@@ -40,7 +40,7 @@ from open_webui.models.files import FileModel, FileUpdateForm, Files
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.models.knowledge import Knowledges
 from open_webui.storage.provider import Storage
-from open_webui.internal.db import get_async_session, get_db
+from open_webui.internal.db import get_async_db, get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -1694,10 +1694,10 @@ async def process_file(
                 try:
                     # Commit any pending changes before the slow embedding step.
                     # Note: file is already a Pydantic model (not ORM), so no expunge needed.
-                    db.commit()
+                    await db.commit()
 
                     # External embedding API takes time (5-60s+).
-                    # Subsequent updates use fresh sessions via get_db().
+                    # Subsequent updates use fresh async sessions.
                     result = save_docs_to_vector_db(
                         request,
                         docs=docs,
@@ -1714,7 +1714,7 @@ async def process_file(
 
                     if result:
                         # Fresh session for the final update.
-                        with get_db() as session:
+                        async with get_async_db() as session:
                             await Files.update_file_metadata_by_id(
                                 file.id,
                                 {
@@ -1744,7 +1744,7 @@ async def process_file(
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
-            with get_db() as session:
+            async with get_async_db() as session:
                 await Files.update_file_data_by_id(
                     file.id,
                     {'status': 'failed'},
