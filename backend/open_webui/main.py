@@ -1834,11 +1834,12 @@ async def chat_completion(
             log.info('Chat processing was cancelled')
             try:
                 event_emitter = await get_event_emitter(metadata)
-                await asyncio.shield(
-                    event_emitter(
-                        {'type': 'chat:tasks:cancel'},
+                if event_emitter:
+                    await asyncio.shield(
+                        event_emitter(
+                            {'type': 'chat:tasks:cancel'},
+                        )
                     )
-                )
             except Exception as e:
                 pass
             finally:
@@ -1859,15 +1860,16 @@ async def chat_completion(
                         )
 
                     event_emitter = await get_event_emitter(metadata)
-                    await event_emitter(
-                        {
-                            'type': 'chat:message:error',
-                            'data': {'error': {'content': str(e)}},
-                        }
-                    )
-                    await event_emitter(
-                        {'type': 'chat:tasks:cancel'},
-                    )
+                    if event_emitter:
+                        await event_emitter(
+                            {
+                                'type': 'chat:message:error',
+                                'data': {'error': {'content': str(e)}},
+                            }
+                        )
+                        await event_emitter(
+                            {'type': 'chat:tasks:cancel'},
+                        )
 
                 except Exception:
                     pass

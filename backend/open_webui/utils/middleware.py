@@ -4785,25 +4785,33 @@ async def streaming_chat_response_handler(response, ctx):
                 await background_tasks_handler(ctx)
             except asyncio.CancelledError:
                 log.warning('Task was cancelled!')
-                await event_emitter({'type': 'chat:tasks:cancel'})
+                try:
+                    await asyncio.shield(event_emitter({'type': 'chat:tasks:cancel'}))
 
-                if not ENABLE_REALTIME_CHAT_SAVE:
-                    # Save message in the database
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {
-                            'done': True,
-                            'content': serialize_output(output),
-                            'output': output,
-                        },
-                    )
-                else:
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {'done': True},
-                    )
+                    if not ENABLE_REALTIME_CHAT_SAVE:
+                        # Save message in the database
+                        await asyncio.shield(
+                            Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {
+                                    'done': True,
+                                    'content': serialize_output(output),
+                                    'output': output,
+                                },
+                            )
+                        )
+                    else:
+                        await asyncio.shield(
+                            Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {'done': True},
+                            )
+                        )
+                except Exception:
+                    pass
+                raise  # re-raise CancelledError for proper propagation
 
             if response.background is not None:
                 await response.background()
