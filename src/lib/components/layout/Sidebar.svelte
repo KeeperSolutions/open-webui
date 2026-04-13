@@ -1277,7 +1277,7 @@
 											</div>
 										</Tooltip>
 									{:else}
-										<div class="text-xs text-gray-400 dark:text-gray-500">
+										<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
 											{$i18n.t('Usage unavailable')}
 										</div>
 									{/if}
