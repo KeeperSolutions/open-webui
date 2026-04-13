@@ -18,6 +18,7 @@ from typing import Literal
 
 import aiohttp
 from authlib.integrations.starlette_client import OAuth
+from authlib.jose.errors import BadSignatureError
 from authlib.oidc.core import UserInfo
 from fastapi import (
     HTTPException,
@@ -1396,6 +1397,27 @@ class OAuthManager:
 
             try:
                 token = await client.authorize_access_token(request, **auth_params)
+            except BadSignatureError:
+                # The IdP likely rotated its signing keys and the cached JWKS
+                # is stale.  Evict the cached key set so the next attempt
+                # fetches fresh keys from the jwks_uri.
+                log.warning(
+                    'OIDC bad_signature for provider %s — evicting cached JWKS and retrying',
+                    provider,
+                )
+                if hasattr(client, 'server_metadata') and isinstance(client.server_metadata, dict):
+                    client.server_metadata.pop('jwks', None)
+                try:
+                    token = await client.authorize_access_token(request, **auth_params)
+                except Exception as retry_exc:
+                    detailed_error = _build_oauth_callback_error_message(retry_exc)
+                    log.warning(
+                        'OAuth callback error during authorize_access_token retry for provider %s: %s',
+                        provider,
+                        detailed_error,
+                        exc_info=True,
+                    )
+                    raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
             except Exception as e:
                 detailed_error = _build_oauth_callback_error_message(e)
                 log.warning(
