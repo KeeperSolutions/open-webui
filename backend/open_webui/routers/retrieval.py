@@ -151,7 +151,7 @@ def get_ef(
                 model_kwargs=SENTENCE_TRANSFORMERS_MODEL_KWARGS,
             )
         except Exception as e:
-            log.debug(f'Error loading SentenceTransformer: {e}')
+            log.error(f'Error loading SentenceTransformer: {e}')
 
     return ef
 
