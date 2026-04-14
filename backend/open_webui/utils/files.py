@@ -20,6 +20,7 @@ from open_webui.models.files import Files
 from open_webui.routers.files import upload_file_handler
 from open_webui.retrieval.web.utils import validate_url
 
+import asyncio
 import mimetypes
 import base64
 import io
@@ -51,7 +52,7 @@ async def get_image_base64_from_url(url: str) -> Optional[str]:
             if not file:
                 return None
 
-            file_path = Storage.get_file(file.path)
+            file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
 
             if file_path.is_file():
@@ -172,7 +173,7 @@ async def get_image_base64_from_file_id(id: str) -> Optional[str]:
         return None
 
     try:
-        file_path = Storage.get_file(file.path)
+        file_path = await asyncio.to_thread(Storage.get_file, file.path)
         file_path = Path(file_path)
 
         # Check if the file already exists in the cache
