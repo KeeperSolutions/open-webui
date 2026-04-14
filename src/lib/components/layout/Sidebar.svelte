@@ -15,6 +15,7 @@
 		mobile,
 		showArchivedChats,
 		pinnedChats,
+		pinnedNotes,
 		scrollPaginationEnabled,
 		currentChatPage,
 		temporaryChatEnabled,
@@ -45,6 +46,7 @@
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
 	import { isInternalUser } from '$lib/billing/planTiers';
 	import { checkActiveChats } from '$lib/apis/tasks';
+	import { getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
@@ -117,6 +119,13 @@
 	let allChatsLoaded = false;
 
 	let showCreateFolderModal = false;
+
+	let pinnedModels = [];
+
+	let showPinnedModels = false;
+	let showPinnedNotes = false;
+	let showChannels = false;
+	let showFolders = false;
 
 	let folders = {};
 	let folderRegistry = {};
@@ -236,6 +245,12 @@
 			await (async () => {
 				const _pinnedChats = await getPinnedChatList(localStorage.token);
 				pinnedChats.set(_pinnedChats);
+			})(),
+			await (async () => {
+				if ($config?.features?.enable_notes && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))) {
+					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
+					pinnedNotes.set(_pinnedNotes);
+				}
 			})(),
 			await (async () => {
 				const _chats = await getChatList(localStorage.token, $currentChatPage);
@@ -1071,7 +1086,51 @@
 					<PinnedModelList bind:selectedChatId {shiftKey} />
 				{/if}
 
-				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || $channels.length > 0)}
+				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
+					<Folder
+						id="sidebar-pinned-notes"
+						bind:open={showPinnedNotes}
+						className="px-2 mt-0.5"
+						name={$i18n.t('Notes')}
+						chevron={false}
+						dragAndDrop={false}
+					>
+						<div class="mt-0.5 pb-1.5">
+							{#each $pinnedNotes as note (note.id)}
+								<a
+									class="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition group text-sm"
+									href={`/notes/${note.id}`}
+									on:click={() => {
+										itemClickHandler();
+									}}
+									draggable="false"
+								>
+									<div class="self-center">
+										<Note className="size-4" strokeWidth="2" />
+									</div>
+									<div class="flex-1 text-ellipsis line-clamp-1">
+										{note.title}
+									</div>
+									<button
+										class="invisible group-hover:visible self-center p-0.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg transition"
+										on:click|preventDefault|stopPropagation={async () => {
+											await toggleNotePinnedStatusById(localStorage.token, note.id);
+											const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
+											pinnedNotes.set(_pinnedNotes);
+										}}
+										aria-label={$i18n.t('Unpin')}
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+										</svg>
+									</button>
+								</a>
+							{/each}
+						</div>
+					</Folder>
+				{/if}
+
+				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
 					<Folder
 						className="px-2 mt-0.5"
 						name={$i18n.t('Channels')}
