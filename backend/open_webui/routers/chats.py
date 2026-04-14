@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Optional
+from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 from fastapi.responses import StreamingResponse
@@ -557,7 +558,7 @@ async def create_new_chat(
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
-        chat = await Chats.insert_new_chat(user.id, form_data, db=db)
+        chat = await Chats.insert_new_chat(str(uuid4()), user.id, form_data, db=db)
         return ChatResponse(**chat.model_dump())
     except Exception as e:
         log.exception(e)

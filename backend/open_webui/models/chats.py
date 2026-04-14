@@ -293,10 +293,9 @@ class ChatTable:
         return changed
 
     async def insert_new_chat(
-        self, user_id: str, form_data: ChatForm, db: Optional[AsyncSession] = None
+        self, id: str, user_id: str, form_data: ChatForm, db: Optional[AsyncSession] = None
     ) -> Optional[ChatModel]:
         async with get_async_db_context(db) as db:
-            id = str(uuid.uuid4())
             chat = ChatModel(
                 **{
                     'id': id,

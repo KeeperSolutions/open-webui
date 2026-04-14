@@ -307,8 +307,9 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         user_msg_id = str(uuid4())
         assistant_msg_id = str(uuid4())
 
-        # Create the chat with user message (same structure as frontend)
+        chat_id = str(uuid4())
         chat = await Chats.insert_new_chat(
+            chat_id,
             automation.user_id,
             ChatForm(
                 chat={
@@ -378,7 +379,13 @@ async def execute_automation(app, automation: AutomationModel) -> None:
             'stream': True,
             'chat_id': chat.id,
             'id': assistant_msg_id,
-            'parent_id': user_msg_id,
+            'parent_id': None,  # Root message (chat already created above)
+            'user_message': {
+                'id': user_msg_id,
+                'parentId': None,
+                'role': 'user',
+                'content': prompt,
+            },
             'session_id': f'automation:{automation.id}',
             'background_tasks': {},
         }

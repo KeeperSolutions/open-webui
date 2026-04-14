@@ -2157,10 +2157,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Load messages from DB when available — DB preserves structured 'output' items
     # which the frontend strips, causing tool calls to be merged into content.
     chat_id = metadata.get('chat_id')
-    parent_message_id = metadata.get('parent_message_id')
+    user_message_id = metadata.get('user_message_id')
 
-    if chat_id and parent_message_id and not chat_id.startswith('local:'):
-        db_messages = await load_messages_from_db(chat_id, parent_message_id)
+    if chat_id and user_message_id and not chat_id.startswith('local:'):
+        db_messages = await load_messages_from_db(chat_id, user_message_id)
         if db_messages:
             system_message = get_system_message(form_data.get('messages', []))
             form_data['messages'] = [system_message, *db_messages] if system_message else db_messages
@@ -3119,6 +3119,110 @@ async def background_tasks_handler(ctx):
                             pass
 
 
+async def outlet_filter_handler(ctx):
+    """Run outlet filters inline after chat completion.
+
+    Replaces the separate POST /api/chat/completed round-trip.
+    Persists outlet-modified content to DB and emits a chat:outlet event
+    so the frontend can sync its in-memory state.
+    """
+    request = ctx['request']
+    user = ctx['user']
+    model = ctx['model']
+    metadata = ctx['metadata']
+    event_emitter = ctx.get('event_emitter')
+    event_caller = ctx.get('event_caller')
+
+    chat_id = metadata.get('chat_id', '')
+    message_id = metadata.get('message_id')
+
+    if not chat_id or chat_id.startswith('local:') or not message_id:
+        return
+
+    try:
+        messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
+        if not messages_map:
+            return
+
+        message_list = get_message_list(messages_map, message_id)
+        if not message_list:
+            return
+
+        model_id = model.get('id') if isinstance(model, dict) else model
+
+        outlet_data = {
+            'model': model_id,
+            'messages': [
+                {
+                    'id': m.get('id'),
+                    'role': m.get('role'),
+                    'content': m.get('content', ''),
+                    'info': m.get('info'),
+                    'timestamp': m.get('timestamp'),
+                    **(({'usage': m['usage']} if m.get('usage') else {})),
+                    **(({'sources': m['sources']} if m.get('sources') else {})),
+                }
+                for m in message_list
+            ],
+            'filter_ids': metadata.get('filter_ids', []),
+            'chat_id': chat_id,
+            'session_id': metadata.get('session_id'),
+            'id': message_id,
+        }
+
+        # Pipeline outlet filters
+        models = request.app.state.MODELS
+        try:
+            outlet_data = await process_pipeline_outlet_filter(request, outlet_data, user, models)
+        except Exception as e:
+            log.debug(f'Pipeline outlet filter error: {e}')
+
+        # Function outlet filters
+        extra_params = {
+            '__event_emitter__': event_emitter,
+            '__event_call__': event_caller,
+            '__user__': user.model_dump() if isinstance(user, UserModel) else {},
+            '__metadata__': metadata,
+            '__request__': request,
+            '__model__': model,
+        }
+
+        filter_ids = await get_sorted_filter_ids(request, model, metadata.get('filter_ids', []))
+        filter_functions = await Functions.get_functions_by_ids(filter_ids)
+
+        outlet_result, _ = await process_filter_functions(
+            request=request,
+            filter_functions=filter_functions,
+            filter_type='outlet',
+            form_data=outlet_data,
+            extra_params=extra_params,
+        )
+
+        # Persist outlet-modified content and notify frontend
+        if outlet_result and outlet_result.get('messages'):
+            for msg in outlet_result['messages']:
+                msg_id = msg.get('id')
+                if msg_id and msg_id in messages_map:
+                    original = messages_map[msg_id]
+                    if original.get('content') != msg.get('content'):
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            chat_id,
+                            msg_id,
+                            {
+                                'content': msg['content'],
+                                'originalContent': original.get('content'),
+                            },
+                        )
+
+            if event_emitter:
+                await event_emitter({
+                    'type': 'chat:outlet',
+                    'data': {'messages': outlet_result['messages']},
+                })
+    except Exception as e:
+        log.debug(f'Error running outlet filters: {e}')
+
+
 async def non_streaming_chat_response_handler(response, ctx):
     request = ctx['request']
 
@@ -3240,6 +3344,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                             )
 
                     await background_tasks_handler(ctx)
+                    await outlet_filter_handler(ctx)
 
             response = build_response_object(response, merge_events_into_response(response_data, events))
         except Exception as e:
@@ -4786,6 +4891,7 @@ async def streaming_chat_response_handler(response, ctx):
                 )
 
                 await background_tasks_handler(ctx)
+                await outlet_filter_handler(ctx)
             except asyncio.CancelledError:
                 log.warning('Task was cancelled!')
                 try:
