@@ -2187,53 +2187,54 @@
 			$settings?.params?.stream_response ??
 			params?.stream_response ??
 			true;
-
+		// Always include system prompt — backend extracts it and prepends to DB messages.
+		// Only temp chats need conversation messages (persisted chats load from DB).
 		let messages = [
 			params?.system || $settings.system
-				? {
-						role: 'system',
-						content: `${params?.system ?? $settings?.system ?? ''}`
-					}
-				: undefined,
-			..._messages.map((message) => ({
-				...message,
-				content: processDetails(message.content),
-				// Include output for temp chats (backend will use it and strip before LLM)
-				...(message.output ? { output: message.output } : {})
-			}))
-		].filter((message) => message);
+				? { role: 'system', content: `${params?.system ?? $settings?.system ?? ''}` }
+				: undefined
+		].filter(Boolean);
+		if ($temporaryChatEnabled) {
+			messages = [
+				...messages,
+				..._messages.map((message) => ({
+					...message,
+					content: processDetails(message.content),
+					...(message.output ? { output: message.output } : {})
+				}))
+			].filter((message) => message);
 
-		messages = messages
-			.map((message, idx, arr) => {
-				const imageFiles = (message?.files ?? []).filter(
-					(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
-				);
+			messages = messages
+				.map((message, idx, arr) => {
+					const imageFiles = (message?.files ?? []).filter(
+						(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
+					);
 
-				return {
-					role: message.role,
-					// Preserve output items so backend can reconstruct tool_calls/tool-role messages (temp chats)
-					...(message.output ? { output: message.output } : {}),
-					...(message.role === 'user' && imageFiles.length > 0
-						? {
-								content: [
-									{
-										type: 'text',
-										text: message?.merged?.content ?? message.content
-									},
-									...imageFiles.map((file) => ({
-										type: 'image_url',
-										image_url: {
-											url: file.url
-										}
-									}))
-								]
-							}
-						: {
-								content: message?.merged?.content ?? message.content
-							})
-				};
-			})
-			.filter((message) => message?.role === 'user' || message?.content?.trim());
+					return {
+						role: message.role,
+						...(message.output ? { output: message.output } : {}),
+						...(message.role === 'user' && imageFiles.length > 0
+							? {
+									content: [
+										{
+											type: 'text',
+											text: message?.merged?.content ?? message.content
+										},
+										...imageFiles.map((file) => ({
+											type: 'image_url',
+											image_url: {
+												url: file.url
+											}
+										}))
+									]
+								}
+							: {
+									content: message?.merged?.content ?? message.content
+								})
+					};
+				})
+				.filter((message) => message?.role === 'user' || message?.content?.trim());
+		}
 
 		const toolIds = [];
 		const toolServerIds = [];
@@ -2295,7 +2296,7 @@
 			{
 				stream: stream,
 				model: model.id,
-				messages: messages,
+				...(messages.length > 0 ? { messages } : {}),
 				params: {
 					...$settings?.params,
 					...params,
