@@ -186,6 +186,12 @@
 	}
 
 	const navigateHandler = async () => {
+		// Mark the outgoing chat as read before loading the new one.
+		// $chatId still holds the previous chat here — loadChat() updates it.
+		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
+			updateLastReadAt($chatId);
+		}
+
 		loading = true;
 
 		prompt = '';
