@@ -1236,8 +1236,14 @@ ENABLE_SIGNUP = PersistentConfig(
 
 ENABLE_LOGIN_FORM = PersistentConfig(
     'ENABLE_LOGIN_FORM',
-    'ui.ENABLE_LOGIN_FORM',
+    'ui.enable_login_form',
     os.environ.get('ENABLE_LOGIN_FORM', 'True').lower() == 'true',
+)
+
+ENABLE_PASSWORD_CHANGE_FORM = PersistentConfig(
+    'ENABLE_PASSWORD_CHANGE_FORM',
+    'ui.enable_password_change_form',
+    os.environ.get('ENABLE_PASSWORD_CHANGE_FORM', 'True').lower() == 'true',
 )
 
 ENABLE_PASSWORD_AUTH = os.environ.get('ENABLE_PASSWORD_AUTH', 'True').lower() == 'true'
