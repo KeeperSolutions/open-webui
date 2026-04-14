@@ -1852,9 +1852,11 @@
 
 		history.currentId = userMessageId;
 
-		// focus on chat input
-		const chatInput = document.getElementById('chat-input');
-		chatInput?.focus();
+		// focus on chat input (skip during voice call to avoid triggering mobile keyboard)
+		if (!$showCallOverlay) {
+			const chatInput = document.getElementById('chat-input');
+			chatInput?.focus();
+		}
 
 		saveSessionSelectedModels();
 
