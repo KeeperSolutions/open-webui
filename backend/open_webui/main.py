@@ -597,7 +597,7 @@ from open_webui.tasks import (
 from open_webui.utils.redis import get_sentinels_from_env
 
 
-from open_webui.constants import ERROR_MESSAGES
+from open_webui.constants import ERROR_MESSAGES, TASKS
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')  # allow-print
@@ -1874,7 +1874,7 @@ async def chat_completion(
             detail=str(e),
         )
 
-    async def process_chat(request, form_data, user, metadata, model):
+    async def process_chat(request, form_data, user, metadata, model, tasks=None):
         try:
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
@@ -1978,7 +1978,7 @@ async def chat_completion(
         task_ids = []
         chat_id = metadata['chat_id']
 
-        for target_model_id, assistant_message_id in message_ids.items():
+        for idx, (target_model_id, assistant_message_id) in enumerate(message_ids.items()):
             if not assistant_message_id:
                 continue
 
@@ -1998,9 +1998,17 @@ async def chat_completion(
             # Resolve the model object for this specific model
             resolved_model = request.app.state.MODELS.get(target_model_id, model)
 
+            # Only the first model runs title/tags generation;
+            # subsequent models only run follow-ups.
             task_id, _ = await create_task(
                 request.app.state.redis,
-                process_chat(request, model_form_data, user, per_model_metadata, resolved_model),
+                process_chat(
+                    request, model_form_data, user, per_model_metadata, resolved_model,
+                    tasks if idx == 0 else {
+                        k: v for k, v in (tasks or {}).items()
+                        if k not in (TASKS.TITLE_GENERATION, TASKS.TAGS_GENERATION)
+                    } or None,
+                ),
                 id=chat_id,
             )
             task_ids.append(task_id)
@@ -2022,7 +2030,7 @@ async def chat_completion(
     else:
         # Legacy/direct: single model, synchronous
         metadata['message_id'] = list(message_ids.values())[0]
-        return await process_chat(request, form_data, user, metadata, model)
+        return await process_chat(request, form_data, user, metadata, model, tasks)
 
 
 # Alias for chat_completion (Legacy)

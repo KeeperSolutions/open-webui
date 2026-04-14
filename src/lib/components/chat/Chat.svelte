@@ -2337,11 +2337,8 @@
 
 				background_tasks: {
 					...(!$temporaryChatEnabled &&
-					(messages.length == 1 ||
-						(messages.length == 2 &&
-							messages.at(0)?.role === 'system' &&
-							messages.at(1)?.role === 'user')) &&
-					(selectedModels[0] === model.id || atSelectedModel !== undefined)
+					!_chatId &&
+					(userMessage?.parentId ?? null) === null
 						? {
 								title_generation: $settings?.title?.auto ?? true,
 								tags_generation: $settings?.autoTags ?? true
