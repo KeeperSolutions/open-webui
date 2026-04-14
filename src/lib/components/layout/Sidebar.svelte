@@ -47,6 +47,7 @@
 	import { isInternalUser } from '$lib/billing/planTiers';
 	import { checkActiveChats } from '$lib/apis/tasks';
 	import { getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
+	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
@@ -1094,6 +1095,13 @@
 						name={$i18n.t('Notes')}
 						chevron={false}
 						dragAndDrop={false}
+						onAdd={async () => {
+							const note = await createNoteHandler('New Note');
+							if (note) {
+								goto(`/notes/${note.id}`);
+							}
+						}}
+						onAddLabel={$i18n.t('New Note')}
 					>
 						<div class="mt-0.5 pb-1.5">
 							{#each $pinnedNotes as note (note.id)}
