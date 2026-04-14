@@ -1026,6 +1026,8 @@ class ChatMessage(BaseModel):
     tool_calls: Optional[list[dict]] = None
     images: Optional[list[str]] = None
 
+    model_config = ConfigDict(extra='allow')
+
     @model_validator(mode="after")
     def check_at_least_one_field(self):
         # Raise an error if both 'content' and 'tool_calls' are None
