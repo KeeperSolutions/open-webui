@@ -27,4 +27,3 @@ def process_metadata(
         else:
             result[key] = sanitize_text_for_db(value)
     return result
-

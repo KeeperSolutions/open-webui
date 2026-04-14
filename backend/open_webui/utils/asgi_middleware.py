@@ -105,10 +105,7 @@ class CommitSessionMiddleware:
         try:
             ScopedSession.commit()
         except Exception:
-            log.exception(
-                'CommitSessionMiddleware: post-request commit failed; '
-                'response was already sent to client'
-            )
+            log.exception('CommitSessionMiddleware: post-request commit failed; response was already sent to client')
             try:
                 ScopedSession.rollback()
             except Exception:
@@ -190,9 +187,7 @@ class WebsocketUpgradeGuardMiddleware:
             if query_params.get('transport', [''])[0] == 'websocket':
                 headers = _scope_headers(scope)
                 upgrade = headers.get('upgrade', '').lower()
-                connection_tokens = [
-                    token.strip() for token in headers.get('connection', '').lower().split(',')
-                ]
+                connection_tokens = [token.strip() for token in headers.get('connection', '').lower().split(',')]
                 if upgrade != 'websocket' or 'upgrade' not in connection_tokens:
                     response = JSONResponse(
                         status_code=400,

@@ -545,7 +545,9 @@
 																		isPinned={note.is_pinned ?? false}
 																		onPin={async () => {
 																			await toggleNotePinnedStatusById(localStorage.token, note.id);
-																			pinnedNotes.set(await getPinnedNoteList(localStorage.token).catch(() => []));
+																			pinnedNotes.set(
+																				await getPinnedNoteList(localStorage.token).catch(() => [])
+																			);
 																			init();
 																		}}
 																	>
@@ -613,7 +615,9 @@
 																		isPinned={note.is_pinned ?? false}
 																		onPin={async () => {
 																			await toggleNotePinnedStatusById(localStorage.token, note.id);
-																			pinnedNotes.set(await getPinnedNoteList(localStorage.token).catch(() => []));
+																			pinnedNotes.set(
+																				await getPinnedNoteList(localStorage.token).catch(() => [])
+																			);
 																			init();
 																		}}
 																	>

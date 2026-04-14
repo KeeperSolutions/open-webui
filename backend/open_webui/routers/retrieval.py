@@ -2532,9 +2532,7 @@ async def delete_entries_from_collection(
             if hash is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT(
-                        'File has no hash; cannot delete vector entries by hash.'
-                    ),
+                    detail=ERROR_MESSAGES.DEFAULT('File has no hash; cannot delete vector entries by hash.'),
                 )
 
             # Pre-existing bug: this used `metadata=` which is not a

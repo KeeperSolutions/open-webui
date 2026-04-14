@@ -205,9 +205,7 @@ def convert_anthropic_to_openai_payload(anthropic_payload: dict) -> dict:
                             elif content_type == 'image':
                                 source = content_block.get('source', {})
                                 if source.get('type') == 'base64':
-                                    media_type = source.get(
-                                        'media_type', 'image/png'
-                                    )
+                                    media_type = source.get('media_type', 'image/png')
                                     data = source.get('data', '')
                                     converted_parts.append(
                                         {
@@ -229,68 +227,36 @@ def convert_anthropic_to_openai_payload(anthropic_payload: dict) -> dict:
                             elif content_type == 'document':
                                 # Documents have no direct OpenAI equivalent;
                                 # convert to a text representation.
-                                document_source = content_block.get(
-                                    'source', {}
-                                )
-                                document_title = content_block.get(
-                                    'title', 'Document'
-                                )
-                                document_context = content_block.get(
-                                    'context', ''
-                                )
-                                document_text = (
-                                    f'[Document: {document_title}]'
-                                )
+                                document_source = content_block.get('source', {})
+                                document_title = content_block.get('title', 'Document')
+                                document_context = content_block.get('context', '')
+                                document_text = f'[Document: {document_title}]'
                                 if document_context:
                                     document_text += f'\n{document_context}'
-                                if (
-                                    document_source.get('type') == 'text'
-                                    and document_source.get('data')
-                                ):
-                                    document_text += (
-                                        f'\n{document_source["data"]}'
-                                    )
-                                converted_parts.append(
-                                    {'type': 'text', 'text': document_text}
-                                )
+                                if document_source.get('type') == 'text' and document_source.get('data'):
+                                    document_text += f'\n{document_source["data"]}'
+                                converted_parts.append({'type': 'text', 'text': document_text})
                             elif content_type == 'search_result':
                                 # Convert search results to a text
                                 # representation with source attribution.
                                 search_title = content_block.get('title', '')
                                 search_url = content_block.get('source', '')
-                                search_content_blocks = content_block.get(
-                                    'content', []
-                                )
+                                search_content_blocks = content_block.get('content', [])
                                 search_texts = []
                                 for search_block in search_content_blocks:
-                                    if (
-                                        isinstance(search_block, dict)
-                                        and search_block.get('type') == 'text'
-                                    ):
-                                        search_texts.append(
-                                            search_block.get('text', '')
-                                        )
+                                    if isinstance(search_block, dict) and search_block.get('type') == 'text':
+                                        search_texts.append(search_block.get('text', ''))
                                 search_body = '\n'.join(search_texts)
-                                search_text = (
-                                    f'[Search Result: {search_title}]'
-                                )
+                                search_text = f'[Search Result: {search_title}]'
                                 if search_url:
                                     search_text += f'\nSource: {search_url}'
                                 if search_body:
                                     search_text += f'\n{search_body}'
-                                converted_parts.append(
-                                    {'type': 'text', 'text': search_text}
-                                )
+                                converted_parts.append({'type': 'text', 'text': search_text})
 
                         # Flatten to string when only text parts are present
-                        if all(
-                            part.get('type') == 'text'
-                            for part in converted_parts
-                        ):
-                            tool_content = '\n'.join(
-                                part.get('text', '')
-                                for part in converted_parts
-                            )
+                        if all(part.get('type') == 'text' for part in converted_parts):
+                            tool_content = '\n'.join(part.get('text', '') for part in converted_parts)
                         elif converted_parts:
                             tool_content = converted_parts
                         else:

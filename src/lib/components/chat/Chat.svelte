@@ -2136,7 +2136,14 @@
 			.map((token) => decodeURIComponent(JSON.parse(`"${token.replace(/"/g, '\\"')}"`)));
 	};
 
-	const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId, messageIdsMap?: Record<string, string>) => {
+	const sendMessageSocket = async (
+		model,
+		_messages,
+		_history,
+		responseMessageId,
+		_chatId,
+		messageIdsMap?: Record<string, string>
+	) => {
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -2336,9 +2343,7 @@
 				user_message: userMessage,
 
 				background_tasks: {
-					...(!$temporaryChatEnabled &&
-					!_chatId &&
-					(userMessage?.parentId ?? null) === null
+					...(!$temporaryChatEnabled && !_chatId && (userMessage?.parentId ?? null) === null
 						? {
 								title_generation: $settings?.title?.auto ?? true,
 								tags_generation: $settings?.autoTags ?? true

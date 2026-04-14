@@ -375,4 +375,3 @@ export const toggleNotePinnedStatusById = async (token: string, id: string) => {
 
 	return res;
 };
-

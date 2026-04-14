@@ -506,9 +506,7 @@ async def query_collection_with_hybrid_search(
             log.exception(f'Failed to fetch collection {name}: {e}')
             return name, None
 
-    collection_results = dict(
-        await asyncio.gather(*(_fetch_collection(name) for name in collection_names))
-    )
+    collection_results = dict(await asyncio.gather(*(_fetch_collection(name) for name in collection_names)))
 
     log.info(f'Starting hybrid search for {len(queries)} queries in {len(collection_names)} collections...')
 
@@ -1153,9 +1151,7 @@ async def get_sources_from_items(
                 if full_context:
                     # Sync helper makes blocking VECTOR_DB_CLIENT calls;
                     # offload so the async caller's event loop stays free.
-                    query_result = await asyncio.to_thread(
-                        get_all_items_from_collections, collection_names
-                    )
+                    query_result = await asyncio.to_thread(get_all_items_from_collections, collection_names)
                 else:
                     query_result = await query_collection(
                         request,

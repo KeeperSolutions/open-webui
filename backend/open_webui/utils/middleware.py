@@ -3159,8 +3159,8 @@ async def outlet_filter_handler(ctx):
                     'content': m.get('content', ''),
                     'info': m.get('info'),
                     'timestamp': m.get('timestamp'),
-                    **(({'usage': m['usage']} if m.get('usage') else {})),
-                    **(({'sources': m['sources']} if m.get('sources') else {})),
+                    **({'usage': m['usage']} if m.get('usage') else {}),
+                    **({'sources': m['sources']} if m.get('sources') else {}),
                 }
                 for m in message_list
             ],
@@ -3215,10 +3215,12 @@ async def outlet_filter_handler(ctx):
                         )
 
             if event_emitter:
-                await event_emitter({
-                    'type': 'chat:outlet',
-                    'data': {'messages': outlet_result['messages']},
-                })
+                await event_emitter(
+                    {
+                        'type': 'chat:outlet',
+                        'data': {'messages': outlet_result['messages']},
+                    }
+                )
     except Exception as e:
         log.debug(f'Error running outlet filters: {e}')
 

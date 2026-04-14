@@ -75,7 +75,9 @@
 
 	/** Measure all currently rendered message elements and cache their heights */
 	const measureMessageHeights = () => {
-		const elements = document.getElementById('messages-container')?.querySelectorAll('[role="listitem"]');
+		const elements = document
+			.getElementById('messages-container')
+			?.querySelectorAll('[role="listitem"]');
 		if (!elements) return;
 
 		messageHeights = new Map([
@@ -109,7 +111,10 @@
 		const cullLimit = firstUnmeasured === -1 ? messages.length : firstUnmeasured;
 
 		visibleStart = Math.max(0, Math.min(firstVisible - OVERSCAN, cullLimit));
-		visibleEnd = Math.min(messages.length, (lastVisible === -1 ? messages.length : lastVisible) + OVERSCAN);
+		visibleEnd = Math.min(
+			messages.length,
+			(lastVisible === -1 ? messages.length : lastVisible) + OVERSCAN
+		);
 		topSpacerHeight = prefixSums[visibleStart] ?? 0;
 		bottomSpacerHeight = (prefixSums[messages.length] ?? 0) - (prefixSums[visibleEnd] ?? 0);
 	};
@@ -528,8 +533,6 @@
 
 		showMessage({ id: parentMessageId }, false);
 	};
-
-
 
 	const triggerScroll = () => {
 		if (autoScroll) {

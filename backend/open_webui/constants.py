@@ -92,9 +92,7 @@ class ERROR_MESSAGES(str, Enum):
     INVALID_PASSWORD = lambda err='': err if err else 'The password does not meet the required validation criteria.'
 
     AUTOMATION_LIMIT_EXCEEDED = lambda size='': f'Automation limit reached ({size})'
-    AUTOMATION_TOO_FREQUENT = (
-        lambda interval='': f'Schedule too frequent. Minimum interval is {interval} seconds.'
-    )
+    AUTOMATION_TOO_FREQUENT = lambda interval='': f'Schedule too frequent. Minimum interval is {interval} seconds.'
     AUTOMATION_INVALID_RRULE = lambda err='': f'Invalid RRULE: {err}'
     AUTOMATION_NO_FUTURE_RUNS = 'RRULE has no future occurrences'
 

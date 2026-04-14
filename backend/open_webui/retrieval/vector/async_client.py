@@ -101,9 +101,7 @@ class AsyncVectorDBClient:
         filter: Optional[Dict] = None,
         limit: int = 10,
     ) -> Optional[SearchResult]:
-        return await asyncio.to_thread(
-            self._sync.search, collection_name, vectors, filter, limit
-        )
+        return await asyncio.to_thread(self._sync.search, collection_name, vectors, filter, limit)
 
     async def query(
         self,
@@ -111,9 +109,7 @@ class AsyncVectorDBClient:
         filter: Dict,
         limit: Optional[int] = None,
     ) -> Optional[GetResult]:
-        return await asyncio.to_thread(
-            self._sync.query, collection_name, filter, limit
-        )
+        return await asyncio.to_thread(self._sync.query, collection_name, filter, limit)
 
     async def get(self, collection_name: str) -> Optional[GetResult]:
         return await asyncio.to_thread(self._sync.get, collection_name)
@@ -124,9 +120,7 @@ class AsyncVectorDBClient:
         ids: Optional[List[str]] = None,
         filter: Optional[Dict] = None,
     ) -> None:
-        return await asyncio.to_thread(
-            self._sync.delete, collection_name, ids, filter
-        )
+        return await asyncio.to_thread(self._sync.delete, collection_name, ids, filter)
 
     async def reset(self) -> None:
         return await asyncio.to_thread(self._sync.reset)

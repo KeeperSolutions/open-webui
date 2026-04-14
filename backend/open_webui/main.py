@@ -1754,7 +1754,9 @@ async def chat_completion(
                                 },
                                 'messages': [
                                     {'role': 'user', 'content': user_message.get('content', '')},
-                                ] if user_message_id else [],
+                                ]
+                                if user_message_id
+                                else [],
                                 'tags': [],
                                 'timestamp': int(time.time() * 1000),
                             },
@@ -1781,9 +1783,7 @@ async def chat_completion(
                             pass
                 else:
                     # Existing chat — verify ownership
-                    if (
-                        not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin'
-                    ):
+                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -1834,16 +1834,16 @@ async def chat_completion(
 
                     # Link user message → all assistant messages (childrenIds)
                     if user_message_id and all_assistant_ids:
-                        existing_user_message = await Chats.get_message_by_id_and_message_id(
-                            chat_id, user_message_id
-                        )
+                        existing_user_message = await Chats.get_message_by_id_and_message_id(chat_id, user_message_id)
                         if existing_user_message:
                             child_ids = existing_user_message.get('childrenIds', [])
                             for assistant_id in all_assistant_ids:
                                 if assistant_id not in child_ids:
                                     child_ids.append(assistant_id)
                             await Chats.upsert_message_to_chat_by_id_and_message_id(
-                                chat_id, user_message_id, {'childrenIds': child_ids},
+                                chat_id,
+                                user_message_id,
+                                {'childrenIds': child_ids},
                             )
 
                     # Save each assistant placeholder
@@ -2003,11 +2003,19 @@ async def chat_completion(
             task_id, _ = await create_task(
                 request.app.state.redis,
                 process_chat(
-                    request, model_form_data, user, per_model_metadata, resolved_model,
-                    tasks if idx == 0 else {
-                        k: v for k, v in (tasks or {}).items()
+                    request,
+                    model_form_data,
+                    user,
+                    per_model_metadata,
+                    resolved_model,
+                    tasks
+                    if idx == 0
+                    else {
+                        k: v
+                        for k, v in (tasks or {}).items()
                         if k not in (TASKS.TITLE_GENERATION, TASKS.TAGS_GENERATION)
-                    } or None,
+                    }
+                    or None,
                 ),
                 id=chat_id,
             )

@@ -543,7 +543,6 @@ async def image_generations(
 
     model = get_image_model(request)
 
-
     try:
         if request.app.state.config.IMAGE_GENERATION_ENGINE == 'openai':
             headers = {
@@ -855,7 +854,6 @@ async def image_edits(
                 mime_type if mime_type else 'image/png',
             ),
         )
-
 
     try:
         if request.app.state.config.IMAGE_EDIT_ENGINE == 'openai':

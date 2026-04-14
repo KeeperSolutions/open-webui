@@ -169,7 +169,7 @@ def _normalize_token_expiry(token: dict) -> dict:
     # Neither field present — conservative fallback
     log.warning(
         "OAuth token response missing both 'expires_in' and 'expires_at'; "
-        f"defaulting to {DEFAULT_TOKEN_EXPIRY_SECONDS}s from now"
+        f'defaulting to {DEFAULT_TOKEN_EXPIRY_SECONDS}s from now'
     )
     token['expires_at'] = int(datetime.now().timestamp() + DEFAULT_TOKEN_EXPIRY_SECONDS)
     return token
@@ -550,7 +550,6 @@ async def get_oauth_client_info_with_static_credentials(
         raise e
 
 
-
 def resolve_oauth_client_info(connection: dict) -> dict:
     """
     Decrypt OAuth client info from a tool server connection config.
@@ -768,7 +767,11 @@ class OAuthClientManager:
                 log.warning(f'No OAuth session found for user {user_id}, client_id {client_id}')
                 return None
 
-            if force_refresh or session.expires_at is None or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at):
+            if (
+                force_refresh
+                or session.expires_at is None
+                or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at)
+            ):
                 log.debug(f'Token refresh needed for user {user_id}, client_id {session.provider}')
                 refreshed_token = await self._refresh_token(session)
                 if refreshed_token:
@@ -1021,7 +1024,11 @@ class OAuthManager:
                 log.warning(f'No OAuth session found for user {user_id}, session {session_id}')
                 return None
 
-            if force_refresh or session.expires_at is None or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at):
+            if (
+                force_refresh
+                or session.expires_at is None
+                or datetime.now() + timedelta(minutes=5) >= datetime.fromtimestamp(session.expires_at)
+            ):
                 log.debug(f'Token refresh needed for user {user_id}, provider {session.provider}')
                 refreshed_token = await self._refresh_token(session)
                 if refreshed_token:
