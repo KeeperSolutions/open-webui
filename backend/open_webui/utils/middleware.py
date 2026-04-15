@@ -3125,6 +3125,10 @@ async def outlet_filter_handler(ctx):
     Replaces the separate POST /api/chat/completed round-trip.
     Persists outlet-modified content to DB and emits a chat:outlet event
     so the frontend can sync its in-memory state.
+
+    For temp chats (local: prefix), messages are built from form_data
+    plus the assistant response message stored in ctx['assistant_message'],
+    since temp chats have no DB-persisted history.
     """
     request = ctx['request']
     user = ctx['user']
@@ -3136,17 +3140,43 @@ async def outlet_filter_handler(ctx):
     chat_id = metadata.get('chat_id', '')
     message_id = metadata.get('message_id')
 
-    if not chat_id or chat_id.startswith('local:') or not message_id:
+    if not chat_id or not message_id:
         return
 
-    try:
-        messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
-        if not messages_map:
-            return
+    is_temp_chat = chat_id.startswith('local:')
 
-        message_list = get_message_list(messages_map, message_id)
-        if not message_list:
-            return
+    try:
+        messages_map = None
+
+        if is_temp_chat:
+            # Temp chats have no DB record — build message list from
+            # the in-memory form_data plus the assistant response.
+            form_messages = ctx.get('form_data', {}).get('messages', [])
+            assistant_message = ctx.get('assistant_message', {})
+
+            message_list = [
+                {
+                    'role': m.get('role'),
+                    'content': m.get('content', ''),
+                }
+                for m in form_messages
+            ]
+
+            # Append the full assistant message (content, output, usage, etc.)
+            if assistant_message:
+                message_list.append({
+                    'id': message_id,
+                    'role': 'assistant',
+                    **assistant_message,
+                })
+        else:
+            messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
+            if not messages_map:
+                return
+
+            message_list = get_message_list(messages_map, message_id)
+            if not message_list:
+                return
 
         model_id = model.get('id') if isinstance(model, dict) else model
 
@@ -3159,6 +3189,7 @@ async def outlet_filter_handler(ctx):
                     'content': m.get('content', ''),
                     'info': m.get('info'),
                     'timestamp': m.get('timestamp'),
+                    **({'output': m['output']} if m.get('output') else {}),
                     **({'usage': m['usage']} if m.get('usage') else {}),
                     **({'sources': m['sources']} if m.get('sources') else {}),
                 }
@@ -3199,20 +3230,22 @@ async def outlet_filter_handler(ctx):
         )
 
         # Persist outlet-modified content and notify frontend
+        # (skip DB persistence for temp chats — they have no DB record)
         if outlet_result and outlet_result.get('messages'):
-            for msg in outlet_result['messages']:
-                msg_id = msg.get('id')
-                if msg_id and msg_id in messages_map:
-                    original = messages_map[msg_id]
-                    if original.get('content') != msg.get('content'):
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            chat_id,
-                            msg_id,
-                            {
-                                'content': msg['content'],
-                                'originalContent': original.get('content'),
-                            },
-                        )
+            if not is_temp_chat and messages_map:
+                for message in outlet_result['messages']:
+                    outlet_message_id = message.get('id')
+                    if outlet_message_id and outlet_message_id in messages_map:
+                        original_message = messages_map[outlet_message_id]
+                        if original_message.get('content') != message.get('content'):
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                chat_id,
+                                outlet_message_id,
+                                {
+                                    'content': message['content'],
+                                    'originalContent': original_message.get('content'),
+                                },
+                            )
 
             if event_emitter:
                 await event_emitter(
@@ -3346,6 +3379,11 @@ async def non_streaming_chat_response_handler(response, ctx):
                             )
 
                     await background_tasks_handler(ctx)
+                    ctx['assistant_message'] = {
+                        'content': content,
+                        'output': response_output,
+                        **({'usage': usage} if usage else {}),
+                    }
                     await outlet_filter_handler(ctx)
 
             response = build_response_object(response, merge_events_into_response(response_data, events))
@@ -4893,6 +4931,11 @@ async def streaming_chat_response_handler(response, ctx):
                 )
 
                 await background_tasks_handler(ctx)
+                ctx['assistant_message'] = {
+                    'content': serialize_output(output),
+                    'output': output,
+                    **({'usage': usage} if usage else {}),
+                }
                 await outlet_filter_handler(ctx)
             except asyncio.CancelledError:
                 log.warning('Task was cancelled!')
