@@ -2,7 +2,6 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getAdminBillingSummary, type AdminBillingRow } from '$lib/apis/billing';
-	import { user } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
