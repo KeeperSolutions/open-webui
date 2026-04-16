@@ -919,7 +919,7 @@ async def generate_embeddings(
         return embeddings[0] if isinstance(text, str) else embeddings
 
 
-def get_reranking_function(reranking_engine, reranking_model, reranking_function):
+def get_reranking_function(reranking_engine, reranking_model, reranking_function, reranking_batch_size=32):
     if reranking_function is None:
         return None
     if reranking_engine == 'external':
@@ -928,7 +928,7 @@ def get_reranking_function(reranking_engine, reranking_model, reranking_function
         )
     else:
         return lambda query, documents, user=None: reranking_function.predict(
-            [(query, doc.page_content) for doc in documents]
+            [(query, doc.page_content) for doc in documents], batch_size=int(reranking_batch_size)
         )
 
 
