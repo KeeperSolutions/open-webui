@@ -2365,7 +2365,6 @@ async def _validate_collection_access(collection_names: list[str], user, access_
         )
 
 
-
 class QueryDocForm(BaseModel):
     collection_name: str
     query: str

@@ -413,7 +413,6 @@ async def check_model_access(user, model, db=None):
             raise Exception('Model not found')
 
 
-
 async def get_filtered_models(models, user, db=None):
     # Filter out models that the user does not have access to
     if (

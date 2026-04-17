@@ -155,11 +155,7 @@
 
 				{#if chat.share_id}
 					<div class="mt-3">
-						<AccessControl
-							bind:accessGrants
-							accessRoles={['read']}
-							onChange={saveAccessGrants}
-						/>
+						<AccessControl bind:accessGrants accessRoles={['read']} onChange={saveAccessGrants} />
 					</div>
 				{/if}
 

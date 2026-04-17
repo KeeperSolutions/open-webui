@@ -16,7 +16,6 @@ This is to ensure large feature PRs are discussed with the community first, befo
 The most impactful way to contribute to Open WebUI is through well-written bug reports, detailed feature discussions, and thoughtful ideas. These directly shape the project. If you do open a pull request, please know that Open WebUI is held to the highest standard of code quality, consistency, and architectural coherence, and every line merged becomes something the core team must own, maintain, and support indefinitely. Submitted code may be refactored, rewritten, or used as inspiration for a different implementation. This is not a reflection of your work's quality. It is how we ensure that a small team can deeply understand and evolve every part of the codebase.
 -->
 
-
 **Before submitting, make sure you've checked the following:**
 
 - [ ] **Target branch:** Verify that the pull request targets the `dev` branch. **PRs targeting `main` will be immediately closed.**

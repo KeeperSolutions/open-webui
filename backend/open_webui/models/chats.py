@@ -723,9 +723,7 @@ class ChatTable:
         """Delegate to SharedChats for listing shared chats by user."""
         from open_webui.models.shared_chats import SharedChats
 
-        return await SharedChats.get_by_user_id(
-            user_id, filter=filter, skip=skip, limit=limit, db=db
-        )
+        return await SharedChats.get_by_user_id(user_id, filter=filter, skip=skip, limit=limit, db=db)
 
     async def get_chat_list_by_user_id(
         self,

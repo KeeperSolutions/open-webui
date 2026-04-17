@@ -456,6 +456,50 @@ def serialize_output(output: list) -> str:
             # Already handled inline with function_call above
             pass
 
+        elif item_type in ('web_search_call', 'file_search_call', 'computer_call'):
+            # OpenAI Responses API built-in server-side tool output items.
+            # These are emitted when the model uses native tools (web_search,
+            # file_search, computer_use) through the Responses API. Render as
+            # collapsible tool call blocks matching the function_call pattern.
+            if content and not content.endswith('\n'):
+                content += '\n'
+
+            call_id = item.get('id', '')
+            status = item.get('status', 'in_progress')
+
+            # Derive a human-readable display name
+            display_names = {
+                'web_search_call': 'Web Search',
+                'file_search_call': 'File Search',
+                'computer_call': 'Computer Use',
+            }
+            display_name = display_names.get(item_type, item_type)
+
+            # Extract a summary of what the tool did for the details body
+            summary_text = ''
+            if item_type == 'web_search_call':
+                action = item.get('action', {})
+                if isinstance(action, dict):
+                    query = action.get('query', '')
+                    if query:
+                        summary_text = f'Query: {query}'
+            elif item_type == 'file_search_call':
+                queries = item.get('queries', [])
+                if queries:
+                    summary_text = f'Queries: {", ".join(str(q) for q in queries)}'
+            elif item_type == 'computer_call':
+                action = item.get('action', {})
+                if isinstance(action, dict):
+                    action_type = action.get('type', '')
+                    if action_type:
+                        summary_text = f'Action: {action_type}'
+
+            done = status == 'completed' or idx != len(output) - 1
+            if done:
+                content += f'<details type="tool_calls" done="true" id="{call_id}" name="{html.escape(display_name)}" arguments="">\n<summary>Tool Executed</summary>\n{html.escape(summary_text)}\n</details>\n'
+            else:
+                content += f'<details type="tool_calls" done="false" id="{call_id}" name="{html.escape(display_name)}" arguments="">\n<summary>Executing...</summary>\n</details>\n'
+
         elif item_type == 'reasoning':
             reasoning_content = ''
             # Check for 'summary' (new structure) or 'content' (legacy/fallback)
@@ -2654,9 +2698,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Resolve terminal tools if terminal_id is set (outside tool_ids check
         # so system terminals work even when no other tools are selected)
-        terminal_capability = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get(
-            'terminal', True
-        )
+        terminal_capability = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('terminal', True)
         if terminal_id and terminal_capability:
             try:
                 terminal_result = await get_terminal_tools(
@@ -3168,11 +3210,13 @@ async def outlet_filter_handler(ctx):
 
             # Append the full assistant message (content, output, usage, etc.)
             if assistant_message:
-                message_list.append({
-                    'id': message_id,
-                    'role': 'assistant',
-                    **assistant_message,
-                })
+                message_list.append(
+                    {
+                        'id': message_id,
+                        'role': 'assistant',
+                        **assistant_message,
+                    }
+                )
         else:
             messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
             if not messages_map:
@@ -4291,7 +4335,6 @@ async def streaming_chat_response_handler(response, ctx):
                                     reasoning_item['ended_at'] - reasoning_item['started_at']
                                 )
                                 reasoning_item['status'] = 'completed'
-
 
                     if response_tool_calls:
                         tool_calls.append(_split_tool_calls(response_tool_calls))

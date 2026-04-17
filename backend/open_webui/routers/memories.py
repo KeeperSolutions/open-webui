@@ -150,15 +150,8 @@ async def query_memory(
     # same RELEVANCE_THRESHOLD used by RAG ensures only genuinely matching
     # memories are surfaced (distances are normalised to 0→1, higher is
     # better).
-    relevance_threshold = getattr(
-        request.app.state.config, 'RELEVANCE_THRESHOLD', 0.0
-    )
-    if (
-        results
-        and relevance_threshold > 0.0
-        and results.distances
-        and results.distances[0]
-    ):
+    relevance_threshold = getattr(request.app.state.config, 'RELEVANCE_THRESHOLD', 0.0)
+    if results and relevance_threshold > 0.0 and results.distances and results.distances[0]:
         from open_webui.retrieval.vector.main import SearchResult
 
         filtered_ids = []

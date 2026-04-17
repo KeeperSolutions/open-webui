@@ -91,41 +91,41 @@ def upgrade():
         original_chat_id = row.user_id.replace('shared-', '', 1)
 
         # Verify original chat still exists
-        original = conn.execute(
-            sa.select(chat_t.c.user_id).where(chat_t.c.id == original_chat_id)
-        ).fetchone()
+        original = conn.execute(sa.select(chat_t.c.user_id).where(chat_t.c.id == original_chat_id)).fetchone()
 
         if not original:
             continue
 
         # Insert snapshot into shared_chat
-        conn.execute(shared_chat_t.insert().values(
-            id=share_token,
-            chat_id=original_chat_id,
-            user_id=original.user_id,
-            title=row.title,
-            chat=row.chat,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        ))
+        conn.execute(
+            shared_chat_t.insert().values(
+                id=share_token,
+                chat_id=original_chat_id,
+                user_id=original.user_id,
+                title=row.title,
+                chat=row.chat,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+        )
 
         # Create user:*:read grant for backward compat
-        conn.execute(access_grant_t.insert().values(
-            id=str(uuid.uuid4()),
-            resource_type='shared_chat',
-            resource_id=original_chat_id,
-            principal_type='user',
-            principal_id='*',
-            permission='read',
-            created_at=row.created_at or int(time.time()),
-        ))
+        conn.execute(
+            access_grant_t.insert().values(
+                id=str(uuid.uuid4()),
+                resource_type='shared_chat',
+                resource_id=original_chat_id,
+                principal_type='user',
+                principal_id='*',
+                permission='read',
+                created_at=row.created_at or int(time.time()),
+            )
+        )
 
     # 3. Clean up old phantom rows
     conn.execute(
         chat_message_t.delete().where(
-            chat_message_t.c.chat_id.in_(
-                sa.select(chat_t.c.id).where(chat_t.c.user_id.like('shared-%'))
-            )
+            chat_message_t.c.chat_id.in_(sa.select(chat_t.c.id).where(chat_t.c.user_id.like('shared-%')))
         )
     )
     conn.execute(chat_t.delete().where(chat_t.c.user_id.like('shared-%')))
@@ -147,18 +147,18 @@ def downgrade():
     ).fetchall()
 
     for row in shared_rows:
-        conn.execute(chat_t.insert().values(
-            id=row.id,
-            user_id=f'shared-{row.chat_id}',
-            title=row.title,
-            chat=row.chat,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            archived=False,
-            meta={},
-        ))
+        conn.execute(
+            chat_t.insert().values(
+                id=row.id,
+                user_id=f'shared-{row.chat_id}',
+                title=row.title,
+                chat=row.chat,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                archived=False,
+                meta={},
+            )
+        )
 
-    conn.execute(
-        access_grant_t.delete().where(access_grant_t.c.resource_type == 'shared_chat')
-    )
+    conn.execute(access_grant_t.delete().where(access_grant_t.c.resource_type == 'shared_chat'))
     op.drop_table('shared_chat')

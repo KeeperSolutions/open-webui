@@ -506,11 +506,8 @@
 	);
 
 	let terminalCapableModels = [];
-	$: terminalCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
+		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
 	);
 
 	let toggleFilters = [];
@@ -1781,12 +1778,18 @@
 												<Tooltip content={filter?.name} placement="top">
 													<button
 														on:click|preventDefault={() => {
-															if (filter?.has_user_valves && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.valves ?? true))) {
+															if (
+																filter?.has_user_valves &&
+																($_user?.role === 'admin' ||
+																	($_user?.permissions?.chat?.valves ?? true))
+															) {
 																selectedValvesType = 'function';
 																selectedValvesItemId = filterId;
 																showValvesModal = true;
 															} else {
-																selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
+																selectedFilterIds = selectedFilterIds.filter(
+																	(id) => id !== filterId
+																);
 															}
 														}}
 														type="button"
@@ -1817,7 +1820,9 @@
 															on:click={(e) => {
 																e.stopPropagation();
 																e.preventDefault();
-																selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
+																selectedFilterIds = selectedFilterIds.filter(
+																	(id) => id !== filterId
+																);
 															}}
 														>
 															<XMark className="size-4" strokeWidth="1.75" />

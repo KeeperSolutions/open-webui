@@ -959,7 +959,7 @@ async def filter_accessible_collections(
             # System meta-collection — never exposed to non-admins.
             continue
         elif name.startswith('file-'):
-            file_id = name[len('file-'):]
+            file_id = name[len('file-') :]
             if await has_access_to_file(file_id=file_id, access_type=access_type, user=user):
                 validated.add(name)
         elif name.startswith('user-memory-'):

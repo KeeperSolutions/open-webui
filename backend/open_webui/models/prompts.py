@@ -299,15 +299,17 @@ class PromptsTable:
 
                     if dialect_name == 'sqlite':
                         tag_clause = text(
-                            "EXISTS (SELECT 1 FROM json_each(prompt.tags) t WHERE LOWER(t.value) = :tag_val)"
+                            'EXISTS (SELECT 1 FROM json_each(prompt.tags) t WHERE LOWER(t.value) = :tag_val)'
                         )
                     elif dialect_name == 'postgresql':
                         tag_clause = text(
-                            "EXISTS (SELECT 1 FROM json_array_elements_text(prompt.tags) t WHERE LOWER(t) = :tag_val)"
+                            'EXISTS (SELECT 1 FROM json_array_elements_text(prompt.tags) t WHERE LOWER(t) = :tag_val)'
                         )
                     else:
                         # Fallback: LIKE on serialised JSON text (ASCII-safe only)
-                        tag_clause = func.lower(cast(Prompt.tags, String)).like(f'%{json.dumps(tag_lower, ensure_ascii=False)}%')
+                        tag_clause = func.lower(cast(Prompt.tags, String)).like(
+                            f'%{json.dumps(tag_lower, ensure_ascii=False)}%'
+                        )
                         tag_lower = None
 
                     if tag_lower is not None:

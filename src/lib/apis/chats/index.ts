@@ -997,11 +997,7 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateChatAccessGrants = async (
-	token: string,
-	id: string,
-	accessGrants: object[]
-) => {
+export const updateChatAccessGrants = async (token: string, id: string, accessGrants: object[]) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access/update`, {
