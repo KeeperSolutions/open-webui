@@ -273,9 +273,20 @@ class AutomationTable:
 
             from open_webui.utils.automations import next_run_ns
 
+            # Batch-fetch user timezones so rescheduling respects each
+            # user's local timezone instead of falling back to server time.
+            user_ids = list({row.user_id for row in rows})
+            timezone_by_user_id: dict[str, Optional[str]] = {}
+            if user_ids:
+                from open_webui.models.users import User
+                tz_result = await db.execute(
+                    select(User.id, User.timezone).where(User.id.in_(user_ids))
+                )
+                timezone_by_user_id = {uid: tz for uid, tz in tz_result.all()}
+
             for row in rows:
                 row.last_run_at = now_ns
-                row.next_run_at = next_run_ns(row.data.get('rrule', ''))
+                row.next_run_at = next_run_ns(row.data.get('rrule', ''), tz=timezone_by_user_id.get(row.user_id))
 
             await db.commit()
 
