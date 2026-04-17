@@ -82,6 +82,7 @@ from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
 
 from open_webui.retrieval.utils import (
+    filter_accessible_collections,
     get_content_from_url,
     get_embedding_function,
     get_reranking_function,
@@ -2350,50 +2351,19 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
 
 async def _validate_collection_access(collection_names: list[str], user, access_type: str = 'read') -> None:
     """
-    Prevent users from accessing collections they don't own.
-    Enforces ownership on user-memory-*, file-*, and knowledge-base collections.
-    Admins bypass this check.
+    Raise 403 if the user lacks access to any of the requested collections.
+    Delegates to the shared filter_accessible_collections utility so the
+    access rules stay in one place.
     """
-    if user.role == 'admin':
-        return
+    requested = set(collection_names)
+    allowed = await filter_accessible_collections(requested, user, access_type=access_type)
+    denied = requested - allowed
+    if denied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
 
-    for name in collection_names:
-        # The 'knowledge-bases' meta-collection stores embedded metadata
-        # (names, descriptions, UUIDs) for every KB in the instance.
-        # Querying it would let any user enumerate all knowledge bases.
-        if name == 'knowledge-bases':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
-        elif name.startswith('user-memory-') and name != f'user-memory-{user.id}':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
-        elif name.startswith('file-'):
-            file_id = name[len('file-') :]
-            if not await has_access_to_file(
-                file_id=file_id,
-                access_type=access_type,
-                user=user,
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                )
-        else:
-            # Non-prefixed collection names may be knowledge base IDs.
-            # Verify the caller has the required permission on the knowledge base.
-            knowledge = await Knowledges.get_knowledge_by_id(name)
-            if knowledge is not None:
-                if not await Knowledges.check_access_by_user_id(
-                    name, user.id, permission=access_type
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                    )
 
 
 class QueryDocForm(BaseModel):

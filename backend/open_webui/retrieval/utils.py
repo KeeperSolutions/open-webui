@@ -932,6 +932,44 @@ def get_reranking_function(reranking_engine, reranking_model, reranking_function
         )
 
 
+async def filter_accessible_collections(
+    collection_names: set[str],
+    user: UserModel,
+    access_type: str = 'read',
+) -> set[str]:
+    """
+    Return only the collection names the user is allowed to access.
+    Admins bypass all checks.  For non-admins:
+      - file-*          → validated via has_access_to_file
+      - user-memory-*   → must match user's own memory collection
+      - knowledge-bases → always denied (meta-collection)
+      - known KB ids    → validated via Knowledges.check_access_by_user_id
+      - everything else → allowed (ephemeral collections like web-search-*)
+    """
+    if user.role == 'admin':
+        return collection_names
+
+    validated = set()
+    for name in collection_names:
+        if name == 'knowledge-bases':
+            continue
+        elif name.startswith('file-'):
+            file_id = name[len('file-'):]
+            if await has_access_to_file(file_id=file_id, access_type=access_type, user=user):
+                validated.add(name)
+        elif name.startswith('user-memory-'):
+            if name == f'user-memory-{user.id}':
+                validated.add(name)
+        else:
+            # May be a knowledge-base ID or an ephemeral collection
+            if await Knowledges.check_access_by_user_id(name, user.id, permission=access_type):
+                validated.add(name)
+            elif not await Knowledges.get_knowledge_by_id(name):
+                # Not a KB at all — ephemeral collection (e.g. web-search-*), allow
+                validated.add(name)
+    return validated
+
+
 async def get_sources_from_items(
     request,
     items,
@@ -1146,6 +1184,13 @@ async def get_sources_from_items(
             if not collection_names:
                 log.debug(f'skipping {item} as it has already been extracted')
                 continue
+
+            # Filter out collections the user cannot read
+            if user:
+                collection_names = await filter_accessible_collections(collection_names, user)
+                if not collection_names:
+                    log.debug(f'access denied for all collections in item {item}')
+                    continue
 
             try:
                 if full_context:
