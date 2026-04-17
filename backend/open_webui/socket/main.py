@@ -697,6 +697,31 @@ async def yjs_document_update(sid, data):
             log.warning(f'Session {sid} not in room {room}. Rejecting update.')
             return
 
+        # Verify write permission — room membership only proves read access
+        user = SESSION_POOL.get(sid)
+        if not user:
+            return
+
+        if document_id.startswith('note:'):
+            note_id = document_id.split(':')[1]
+            note = await Notes.get_note_by_id(note_id)
+            if not note:
+                log.error(f'Note {note_id} not found')
+                return
+
+            if (
+                user.get('role') != 'admin'
+                and user.get('id') != note.user_id
+                and not await AccessGrants.has_access(
+                    user_id=user.get('id'),
+                    resource_type='note',
+                    resource_id=note.id,
+                    permission='write',
+                )
+            ):
+                log.warning(f'User {user.get("id")} does not have write access to note {note_id}. Rejecting update.')
+                return
+
         try:
             await stop_item_tasks(REDIS, document_id)
         except Exception:
@@ -723,10 +748,6 @@ async def yjs_document_update(sid, data):
             room=f'doc_{document_id}',
             skip_sid=sid,
         )
-
-        user = SESSION_POOL.get(sid)
-        if not user:
-            return
 
         async def debounced_save():
             await asyncio.sleep(0.5)
