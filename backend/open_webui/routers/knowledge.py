@@ -901,16 +901,7 @@ async def delete_knowledge_by_id(
             if len(updated_knowledge) != len(knowledge_list):
                 log.info(f'Updating model {model.id} to remove knowledge base {id}')
                 model.meta.knowledge = updated_knowledge
-                # Create a ModelForm for the update
-                model_form = ModelForm(
-                    id=model.id,
-                    name=model.name,
-                    base_model_id=model.base_model_id,
-                    meta=model.meta,
-                    params=model.params,
-                    access_grants=model.access_grants,
-                    is_active=model.is_active,
-                )
+                model_form = ModelForm(**model.model_dump())
                 await Models.update_model_by_id(model.id, model_form, db=db)
 
     # Clean up vector DB
