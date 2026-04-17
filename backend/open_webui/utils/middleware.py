@@ -405,6 +405,55 @@ def is_opening_code_block(content):
     return len(backtick_segments) > 1 and len(backtick_segments) % 2 == 0
 
 
+_OPENAI_TOOL_DISPLAY_NAMES = {
+    'web_search_call': 'Web Search',
+    'file_search_call': 'File Search',
+    'computer_call': 'Computer Use',
+}
+
+
+def _render_openai_tool_call_handler(item: dict, done: bool) -> str:
+    """Render an OpenAI Responses API server-side tool item as a <details> block.
+
+    Handles web_search_call, file_search_call, and computer_call items whose
+    schemas are defined in the openai-python SDK (generated from OpenAPI spec).
+    """
+    item_type = item.get('type', '')
+    call_id = item.get('id', '')
+    display_name = _OPENAI_TOOL_DISPLAY_NAMES.get(item_type, item_type)
+
+    # Build a short summary of what the tool did
+    summary = ''
+    if item_type == 'web_search_call':
+        action = item.get('action', {})
+        if isinstance(action, dict):
+            atype = action.get('type', '')
+            if atype == 'search':
+                queries = action.get('queries') or []
+                query = action.get('query', '')
+                summary = f'Search: {", ".join(str(q) for q in queries)}' if queries else (f'Search: {query}' if query else '')
+            elif atype == 'open_page':
+                summary = f'Open page: {action.get("url", "")}' if action.get('url') else ''
+            elif atype == 'find_in_page':
+                summary = f'Find in page: {action.get("pattern", "")}' if action.get('pattern') else ''
+    elif item_type == 'file_search_call':
+        queries = item.get('queries', [])
+        if queries:
+            summary = f'Queries: {", ".join(str(q) for q in queries)}'
+    elif item_type == 'computer_call':
+        action = item.get('action')
+        actions = item.get('actions')
+        if isinstance(action, dict):
+            summary = f'Action: {action.get("type", "unknown")}'
+        elif isinstance(actions, list) and actions:
+            summary = f'Actions: {", ".join(a.get("type", "?") for a in actions if isinstance(a, dict))}'
+
+    escaped_name = html.escape(display_name)
+    if done:
+        return f'<details type="tool_calls" done="true" id="{call_id}" name="{escaped_name}" arguments="">\n<summary>Tool Executed</summary>\n{html.escape(summary)}\n</details>\n'
+    return f'<details type="tool_calls" done="false" id="{call_id}" name="{escaped_name}" arguments="">\n<summary>Executing...</summary>\n</details>\n'
+
+
 def serialize_output(output: list) -> str:
     """
     Convert OR-aligned output items to HTML for display.
@@ -456,49 +505,12 @@ def serialize_output(output: list) -> str:
             # Already handled inline with function_call above
             pass
 
-        elif item_type in ('web_search_call', 'file_search_call', 'computer_call'):
-            # OpenAI Responses API built-in server-side tool output items.
-            # These are emitted when the model uses native tools (web_search,
-            # file_search, computer_use) through the Responses API. Render as
-            # collapsible tool call blocks matching the function_call pattern.
+        elif item_type in _OPENAI_TOOL_DISPLAY_NAMES:
             if content and not content.endswith('\n'):
                 content += '\n'
-
-            call_id = item.get('id', '')
             status = item.get('status', 'in_progress')
-
-            # Derive a human-readable display name
-            display_names = {
-                'web_search_call': 'Web Search',
-                'file_search_call': 'File Search',
-                'computer_call': 'Computer Use',
-            }
-            display_name = display_names.get(item_type, item_type)
-
-            # Extract a summary of what the tool did for the details body
-            summary_text = ''
-            if item_type == 'web_search_call':
-                action = item.get('action', {})
-                if isinstance(action, dict):
-                    query = action.get('query', '')
-                    if query:
-                        summary_text = f'Query: {query}'
-            elif item_type == 'file_search_call':
-                queries = item.get('queries', [])
-                if queries:
-                    summary_text = f'Queries: {", ".join(str(q) for q in queries)}'
-            elif item_type == 'computer_call':
-                action = item.get('action', {})
-                if isinstance(action, dict):
-                    action_type = action.get('type', '')
-                    if action_type:
-                        summary_text = f'Action: {action_type}'
-
-            done = status == 'completed' or idx != len(output) - 1
-            if done:
-                content += f'<details type="tool_calls" done="true" id="{call_id}" name="{html.escape(display_name)}" arguments="">\n<summary>Tool Executed</summary>\n{html.escape(summary_text)}\n</details>\n'
-            else:
-                content += f'<details type="tool_calls" done="false" id="{call_id}" name="{html.escape(display_name)}" arguments="">\n<summary>Executing...</summary>\n</details>\n'
+            done = status in ('completed', 'failed', 'incomplete') or idx != len(output) - 1
+            content += _render_openai_tool_call_handler(item, done)
 
         elif item_type == 'reasoning':
             reasoning_content = ''
