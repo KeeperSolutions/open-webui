@@ -3813,6 +3813,40 @@ async def streaming_chat_response_handler(response, ctx):
                                 elif data.get('type', '').startswith('response.'):
                                     output, response_metadata = handle_responses_streaming_event(data, output)
 
+                                    # Emit citation sources from finalized output items
+                                    # (mirrors Chat Completions annotation handling at delta level)
+                                    if data.get('type') == 'response.output_item.done':
+                                        item = data.get('item', {})
+                                        if item.get('type') == 'message':
+                                            for part in item.get('content', []):
+                                                for annotation in part.get('annotations', []):
+                                                    if annotation.get('type') == 'url_citation':
+                                                        # Handle both flat (Responses API) and nested (Chat Completions) formats
+                                                        url_citation = annotation.get('url_citation', annotation)
+
+                                                        url = url_citation.get('url', '')
+                                                        title = url_citation.get('title', url)
+
+                                                        if url:
+                                                            await event_emitter(
+                                                                {
+                                                                    'type': 'source',
+                                                                    'data': {
+                                                                        'source': {
+                                                                            'name': title,
+                                                                            'url': url,
+                                                                        },
+                                                                        'document': [title],
+                                                                        'metadata': [
+                                                                            {
+                                                                                'source': url,
+                                                                                'name': title,
+                                                                            }
+                                                                        ],
+                                                                    },
+                                                                }
+                                                            )
+
                                     processed_data = {
                                         'output': full_output(),
                                         'content': serialize_output(full_output()),
@@ -4257,6 +4291,7 @@ async def streaming_chat_response_handler(response, ctx):
                                     reasoning_item['ended_at'] - reasoning_item['started_at']
                                 )
                                 reasoning_item['status'] = 'completed'
+
 
                     if response_tool_calls:
                         tool_calls.append(_split_tool_calls(response_tool_calls))
