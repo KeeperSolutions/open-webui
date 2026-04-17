@@ -3424,7 +3424,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                             await post_webhook(
                                 request.app.state.WEBUI_NAME,
                                 webhook_url,
-                                f'{title} - {request.app.state.WEBUI_URL}/c/{metadata["chat_id"]}\n\n{content}',
+                                f'{content}\n\n{title} - {request.app.state.WEBUI_URL}/c/{metadata["chat_id"]}',
                                 {
                                     'action': 'chat',
                                     'message': content,
@@ -5003,7 +5003,7 @@ async def streaming_chat_response_handler(response, ctx):
                         await post_webhook(
                             request.app.state.WEBUI_NAME,
                             webhook_url,
-                            f"{title} - {request.app.state.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
+                            f"{content}\n\n{title} - {request.app.state.WEBUI_URL}/c/{metadata['chat_id']}",
                             {
                                 "action": "chat",
                                 "message": content,
