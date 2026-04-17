@@ -2998,7 +2998,7 @@
 										if (e.detail || files.length > 0) {
 											await tick();
 
-											submitHandler(e.detail.replaceAll('\n\n', '\n'));
+											submitHandler(e.detail);
 										}
 									}}
 								/>
@@ -3042,7 +3042,7 @@
 										clearDraft();
 										if (e.detail || files.length > 0) {
 											await tick();
-											submitHandler(e.detail.replaceAll('\n\n', '\n'));
+											submitHandler(e.detail);
 										}
 									}}
 								/>
