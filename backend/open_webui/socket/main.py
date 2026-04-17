@@ -764,7 +764,7 @@ async def yjs_document_update(sid, data):
 async def yjs_document_leave(sid, data):
     """Handle user leaving a document"""
     try:
-        document_id = data['document_id']
+        document_id = normalize_document_id(data['document_id'])
         user_id = data.get('user_id', sid)
 
         log.info(f'User {user_id} leaving document {document_id}')
