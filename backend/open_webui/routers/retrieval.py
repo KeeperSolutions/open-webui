@@ -1800,6 +1800,8 @@ async def process_text(
     collection_name = form_data.collection_name
     if collection_name is None:
         collection_name = calculate_sha256_string(form_data.content)
+    else:
+        await _validate_collection_access([collection_name], user, access_type='write')
 
     docs = [
         Document(
@@ -1841,6 +1843,8 @@ async def process_web(
             collection_name = form_data.collection_name
             if not collection_name:
                 collection_name = calculate_sha256_string(form_data.url)[:63]
+            else:
+                await _validate_collection_access([collection_name], user, access_type='write')
 
             if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
                 await run_in_threadpool(
@@ -2344,17 +2348,25 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
         )
 
 
-async def _validate_collection_access(collection_names: list[str], user) -> None:
+async def _validate_collection_access(collection_names: list[str], user, access_type: str = 'read') -> None:
     """
-    Prevent users from querying collections they don't own.
-    Enforces ownership on user-memory-* and file-* collections.
+    Prevent users from accessing collections they don't own.
+    Enforces ownership on user-memory-*, file-*, and knowledge-base collections.
     Admins bypass this check.
     """
     if user.role == 'admin':
         return
 
     for name in collection_names:
-        if name.startswith('user-memory-') and name != f'user-memory-{user.id}':
+        # The 'knowledge-bases' meta-collection stores embedded metadata
+        # (names, descriptions, UUIDs) for every KB in the instance.
+        # Querying it would let any user enumerate all knowledge bases.
+        if name == 'knowledge-bases':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+        elif name.startswith('user-memory-') and name != f'user-memory-{user.id}':
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -2363,13 +2375,25 @@ async def _validate_collection_access(collection_names: list[str], user) -> None
             file_id = name[len('file-') :]
             if not await has_access_to_file(
                 file_id=file_id,
-                access_type='read',
+                access_type=access_type,
                 user=user,
             ):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
                 )
+        else:
+            # Non-prefixed collection names may be knowledge base IDs.
+            # Verify the caller has the required permission on the knowledge base.
+            knowledge = await Knowledges.get_knowledge_by_id(name)
+            if knowledge is not None:
+                if not await Knowledges.check_access_by_user_id(
+                    name, user.id, permission=access_type
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                    )
 
 
 class QueryDocForm(BaseModel):
