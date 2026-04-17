@@ -2489,6 +2489,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     metadata = {
         **metadata,
+        'model_id': form_data.get('model'),
         'tool_ids': tool_ids,
         'terminal_id': terminal_id,
         'files': files,
