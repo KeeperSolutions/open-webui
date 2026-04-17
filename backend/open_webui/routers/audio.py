@@ -975,7 +975,10 @@ def transcription_handler(request, file_path, metadata, user=None):
 
                 # Read and encode audio file as base64
                 with open(audio_file_to_use, 'rb') as audio_file:
-                    audio_base64 = base64.b64encode(audio_file.read()).decode('utf-8')
+                    audio_base64 = {
+                        'data': base64.b64encode(audio_file.read()).decode('utf-8'),
+                        'format': mimetypes.guess_extension(mimetypes.guess_type(audio_file_to_use)[0]).lstrip('.'),
+                    }
 
                 # Prepare chat completions request
                 url = f'{api_base_url}/chat/completions'
