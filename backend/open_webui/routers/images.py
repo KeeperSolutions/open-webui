@@ -112,7 +112,6 @@ async def get_image_model(request):
                 options = await r.json()
             return options['sd_model_checkpoint']
         except Exception as e:
-            request.app.state.config.ENABLE_IMAGE_GENERATION = False
             raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
 
 
@@ -330,7 +329,6 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
                 r.raise_for_status()
                 return True
         except Exception:
-            request.app.state.config.ENABLE_IMAGE_GENERATION = False
             raise HTTPException(status_code=400, detail=ERROR_MESSAGES.INVALID_URL)
     elif request.app.state.config.IMAGE_GENERATION_ENGINE == 'comfyui':
         headers = None
@@ -346,7 +344,6 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
                 r.raise_for_status()
                 return True
         except Exception:
-            request.app.state.config.ENABLE_IMAGE_GENERATION = False
             raise HTTPException(status_code=400, detail=ERROR_MESSAGES.INVALID_URL)
     else:
         return True
@@ -427,7 +424,6 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
                 )
             )
     except Exception as e:
-        request.app.state.config.ENABLE_IMAGE_GENERATION = False
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
 
 
