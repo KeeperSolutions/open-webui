@@ -505,6 +505,14 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
 	);
 
+	let terminalCapableModels = [];
+	$: terminalCapableModels = (
+		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
+	).filter(
+		(model) =>
+			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	);
+
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
 		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
@@ -538,6 +546,11 @@
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
 		codeInterpreterEnabled = false;
+	}
+
+	// Clear selected terminal when model doesn't support terminal
+	$: if ($selectedTerminalId && terminalCapableModels.length === 0) {
+		selectedTerminalId.set(null);
 	}
 
 	const scrollToBottom = () => {
@@ -1965,7 +1978,7 @@
 
 									{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 										<!-- Terminal Server Selector -->
-										{#if ($terminalServers ?? []).length > 0 || ($settings?.terminalServers ?? []).some((s) => s.url)}
+										{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).length > 0 || ($settings?.terminalServers ?? []).some((s) => s.url))}
 											<TerminalMenu bind:show={showTerminalMenu} />
 										{/if}
 

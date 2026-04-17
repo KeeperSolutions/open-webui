@@ -2298,6 +2298,9 @@
 		// Use the user-selected terminal from the dropdown
 		const activeTerminalId = $selectedTerminalId ?? null;
 
+		// Only send terminal_id if the model has terminal capability enabled
+		const terminalEnabled = model.info?.meta?.capabilities?.terminal ?? true;
+
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
 			{
@@ -2315,7 +2318,7 @@
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
-				terminal_id: activeTerminalId ?? undefined,
+				terminal_id: terminalEnabled ? (activeTerminalId ?? undefined) : undefined,
 				tool_servers: [
 					...($toolServers ?? []).filter(
 						(server, idx) => toolServerIds.includes(idx) || toolServerIds.includes(server?.id)

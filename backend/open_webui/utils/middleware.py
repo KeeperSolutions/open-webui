@@ -2653,7 +2653,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Resolve terminal tools if terminal_id is set (outside tool_ids check
         # so system terminals work even when no other tools are selected)
-        if terminal_id:
+        terminal_capability = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get(
+            'terminal', True
+        )
+        if terminal_id and terminal_capability:
             try:
                 terminal_result = await get_terminal_tools(
                     request,
