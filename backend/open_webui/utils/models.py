@@ -22,7 +22,7 @@ from open_webui.utils.plugin import (
     load_function_module_by_id,
     get_function_module_from_cache,
 )
-from open_webui.utils.access_control import has_access
+from open_webui.utils.access_control import has_access, has_base_model_access
 
 
 from open_webui.config import (
@@ -403,6 +403,11 @@ async def check_model_access(user, model, db=None):
             )
         ):
             raise Exception('Model not found')
+
+        # Enforce access on chained base models
+        if not await has_base_model_access(user.id, model_info, db=db):
+            raise Exception('Model not found')
+
 
 
 async def get_filtered_models(models, user, db=None):
