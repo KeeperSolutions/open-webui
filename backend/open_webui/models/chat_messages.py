@@ -291,7 +291,6 @@ class ChatMessageTable:
             stmt = select(ChatMessage.model_id, func.count(ChatMessage.id).label('count')).filter(
                 ChatMessage.role == 'assistant',
                 ChatMessage.model_id.isnot(None),
-                ~ChatMessage.user_id.like('shared-%'),
             )
 
             if start_date:
@@ -346,7 +345,6 @@ class ChatMessageTable:
                 ChatMessage.role == 'assistant',
                 ChatMessage.model_id.isnot(None),
                 ChatMessage.usage.isnot(None),
-                ~ChatMessage.user_id.like('shared-%'),
             )
 
             if start_date:
@@ -408,7 +406,6 @@ class ChatMessageTable:
                 ChatMessage.role == 'assistant',
                 ChatMessage.user_id.isnot(None),
                 ChatMessage.usage.isnot(None),
-                ~ChatMessage.user_id.like('shared-%'),
             )
 
             if start_date:
@@ -443,7 +440,7 @@ class ChatMessageTable:
             from open_webui.models.groups import GroupMember
 
             stmt = select(ChatMessage.user_id, func.count(ChatMessage.id).label('count')).filter(
-                ~ChatMessage.user_id.like('shared-%')
+                ChatMessage.role == 'assistant',
             )
 
             if start_date:
@@ -469,7 +466,7 @@ class ChatMessageTable:
             from open_webui.models.groups import GroupMember
 
             stmt = select(ChatMessage.chat_id, func.count(ChatMessage.id).label('count')).filter(
-                ~ChatMessage.user_id.like('shared-%')
+                ChatMessage.role == 'assistant',
             )
 
             if start_date:
@@ -499,7 +496,6 @@ class ChatMessageTable:
             stmt = select(ChatMessage.created_at, ChatMessage.model_id).filter(
                 ChatMessage.role == 'assistant',
                 ChatMessage.model_id.isnot(None),
-                ~ChatMessage.user_id.like('shared-%'),
             )
 
             if start_date:
@@ -546,7 +542,6 @@ class ChatMessageTable:
             stmt = select(ChatMessage.created_at, ChatMessage.model_id).filter(
                 ChatMessage.role == 'assistant',
                 ChatMessage.model_id.isnot(None),
-                ~ChatMessage.user_id.like('shared-%'),
             )
 
             if start_date:
