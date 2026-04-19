@@ -245,6 +245,7 @@ type Settings = {
 	ctrlEnterToSend?: boolean;
 	renderMarkdownInPreviews?: boolean;
 	recentEmojis?: string[];
+	pinnedMenuItems?: string[];
 
 	pipelines?: {
 		valves?: Record<string, Record<string, unknown>>;
