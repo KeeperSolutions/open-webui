@@ -71,7 +71,7 @@
 <div class="flex flex-col gap-4">
 	<!-- Mini Month Calendar -->
 	<div>
-		<div class="flex items-center justify-between px-1 mb-1.5 mt-2">
+		<div class="flex items-center justify-between px-1 mb-1.5 mt-1.5">
 			<div class="text-[11px] font-medium">{miniMonthNames[miniMonth]} {miniYear}</div>
 			<div class="flex items-center gap-0.5">
 				<button

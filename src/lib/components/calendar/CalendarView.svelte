@@ -1,13 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext } from 'svelte';
-	import { mobile, showSidebar } from '$lib/stores';
 	import type { CalendarEventModel, CalendarModel } from '$lib/apis/calendar';
 	import CalendarEventChip from './CalendarEventChip.svelte';
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
-	import Select from '$lib/components/common/Select.svelte';
-	import Check from '$lib/components/icons/Check.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -20,20 +14,6 @@
 
 	const NS = 1_000_000;
 	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-	const MONTH_NAMES = [
-		'January',
-		'February',
-		'March',
-		'April',
-		'May',
-		'June',
-		'July',
-		'August',
-		'September',
-		'October',
-		'November',
-		'December'
-	];
 
 	$: calColorMap = calendars.reduce(
 		(acc, c) => ({ ...acc, [c.id]: c.color }),
@@ -135,22 +115,6 @@
 		return `${h - 12} PM`;
 	}
 
-	function navigate(delta: number) {
-		const d = new Date(currentDate);
-		if (view === 'month') {
-			d.setDate(1);
-			d.setMonth(d.getMonth() + delta);
-		} else if (view === 'week') d.setDate(d.getDate() + delta * 7);
-		else d.setDate(d.getDate() + delta);
-		currentDate = d;
-		dispatch('navigate', { date: currentDate });
-	}
-
-	function goToToday() {
-		currentDate = new Date();
-		dispatch('navigate', { date: currentDate });
-	}
-
 	function handleDayClick(day: Date) {
 		currentDate = day;
 		const ms = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9).getTime();
@@ -173,137 +137,9 @@
 	function handleEventClick(event: CalendarEventModel) {
 		dispatch('eventClick', event);
 	}
-
-	$: headerText =
-		view === 'day'
-			? `${DAY_NAMES[currentDate.getDay()]}, ${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`
-			: `${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
 </script>
 
 <div class="flex flex-col h-full w-full min-h-0 min-w-0">
-	<!-- Navbar — matches admin/workspace/notes pattern -->
-	<nav class="px-2.5 pt-1.5 pb-2 backdrop-blur-xl drag-region select-none shrink-0">
-		<div class="flex items-center gap-1">
-			{#if $mobile}
-				<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center">
-					<Tooltip
-						content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
-						interactive={true}
-					>
-						<button
-							id="sidebar-toggle-button"
-							class="cursor-pointer flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-							on:click={() => showSidebar.set(!$showSidebar)}
-						>
-							<div class="self-center p-1.5">
-								<SidebarIcon />
-							</div>
-						</button>
-					</Tooltip>
-				</div>
-			{/if}
-
-			<div class="flex w-full items-center">
-				<div class="flex items-center gap-0.5 py-1">
-					<span class="min-w-fit px-1 text-sm select-none">{headerText}</span>
-					<button
-						class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-						on:click={() => navigate(-1)}
-						aria-label="Previous"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="size-3.5 text-gray-400"
-							><path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M15.75 19.5 8.25 12l7.5-7.5"
-							/></svg
-						>
-					</button>
-					<button
-						class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-						on:click={() => navigate(1)}
-						aria-label="Next"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="1.5"
-							stroke="currentColor"
-							class="size-3.5 text-gray-400"
-							><path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="m8.25 4.5 7.5 7.5-7.5 7.5"
-							/></svg
-						>
-					</button>
-				</div>
-
-				<div class="ml-auto flex items-center gap-1">
-					<button
-						class="text-xs px-2 py-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition text-gray-500 hover:text-gray-700 dark:hover:text-white"
-						on:click={goToToday}
-					>
-						{$i18n.t('Today')}
-					</button>
-
-					<Select
-						bind:value={view}
-						items={[
-							{ value: 'day', label: $i18n.t('Day') },
-							{ value: 'week', label: $i18n.t('Week') },
-							{ value: 'month', label: $i18n.t('Month') }
-						]}
-						onChange={() => dispatch('viewChange', view)}
-						triggerClass="relative flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 dark:bg-gray-850 rounded-xl text-xs"
-						contentClass="rounded-2xl w-40 p-1 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-						align="end"
-					>
-						<svelte:fragment slot="trigger" let:selectedLabel>
-							<span class="inline-flex h-input px-0.5 outline-hidden bg-transparent">
-								{selectedLabel}
-							</span>
-							<ChevronDown className="size-3.5" strokeWidth="2.5" />
-						</svelte:fragment>
-
-						<svelte:fragment slot="item" let:item let:selected>
-							{item.label}
-							<div class="ml-auto {selected ? '' : 'invisible'}">
-								<Check />
-							</div>
-						</svelte:fragment>
-					</Select>
-
-					<button
-						class="md:hidden px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition text-sm flex items-center"
-						on:click={() => dispatch('newEvent')}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke-width="2.5"
-							stroke="currentColor"
-							class="size-3"
-							><path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M12 4.5v15m7.5-7.5h-15"
-							/></svg
-						>
-					</button>
-				</div>
-			</div>
-		</div>
-	</nav>
-
 	<!-- Month View -->
 	{#if view === 'month'}
 		<div class="flex-1 flex flex-col min-h-0 px-3 pb-3">
