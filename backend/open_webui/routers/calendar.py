@@ -2,8 +2,7 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from open_webui.models.calendar import (
     Calendars,
@@ -23,6 +22,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.calendar import expand_recurring_event
 from open_webui.constants import ERROR_MESSAGES
 
@@ -31,12 +31,19 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def check_calendar_enabled(request: Request):
-    """Dependency to ensure calendar feature is globally enabled."""
+async def check_calendar_permission(request: Request, user):
+    """Check global feature flag AND per-user permission for calendar access."""
     if not request.app.state.config.ENABLE_CALENDAR:
         raise HTTPException(
-            status_code=403,
-            detail=ERROR_MESSAGES.FEATURE_DISABLED('Calendar'),
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'features.calendar', request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
 
@@ -70,14 +77,14 @@ async def _check_calendar_access(
 @router.get('/', response_model=list[CalendarModel])
 async def get_calendars(request: Request, user: UserModel = Depends(get_verified_user)):
     """List user's calendars (owned + shared). Auto-creates defaults on first call."""
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     return await Calendars.get_calendars_by_user(user.id)
 
 
 @router.post('/create', response_model=CalendarModel)
 async def create_calendar(request: Request, form_data: CalendarForm, user: UserModel = Depends(get_verified_user)):
     """Create a new user calendar."""
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     return await Calendars.insert_new_calendar(user.id, form_data)
 
 
@@ -105,7 +112,7 @@ async def get_events(
     - Stored events from the database
     - Virtual events computed from active automation RRULEs (Scheduled Tasks calendar)
     """
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     from datetime import datetime
 
     try:
@@ -218,7 +225,7 @@ async def get_events(
 
 @router.post('/events/create', response_model=CalendarEventModel)
 async def create_event(request: Request, form_data: CalendarEventForm, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     await _check_calendar_access(form_data.calendar_id, user, 'write')
     return await CalendarEvents.insert_new_event(user.id, form_data)
 
@@ -231,7 +238,7 @@ async def search_events(
     limit: int = 30,
     user: UserModel = Depends(get_verified_user),
 ):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     return await CalendarEvents.search_events(
         user_id=user.id, query=query, skip=skip, limit=limit
     )
@@ -239,7 +246,7 @@ async def search_events(
 
 @router.get('/events/{event_id}', response_model=CalendarEventModel)
 async def get_event(request: Request, event_id: str, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     event = await CalendarEvents.get_event_by_id(event_id)
     if not event:
         raise HTTPException(status_code=404, detail='Event not found')
@@ -253,7 +260,7 @@ async def get_event(request: Request, event_id: str, user: UserModel = Depends(g
 async def update_event(
     request: Request, event_id: str, form_data: CalendarEventUpdateForm, user: UserModel = Depends(get_verified_user)
 ):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     event = await CalendarEvents.get_event_by_id(event_id)
     if not event:
         raise HTTPException(status_code=404, detail='Event not found')
@@ -268,7 +275,7 @@ async def update_event(
 
 @router.delete('/events/{event_id}/delete')
 async def delete_event(request: Request, event_id: str, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     event = await CalendarEvents.get_event_by_id(event_id)
     if not event:
         raise HTTPException(status_code=404, detail='Event not found')
@@ -286,7 +293,7 @@ async def rsvp_event(
     request: Request, event_id: str, form_data: RSVPForm, user: UserModel = Depends(get_verified_user)
 ):
     """Update own RSVP status for an event."""
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     if form_data.status not in ('accepted', 'declined', 'tentative', 'pending'):
         raise HTTPException(status_code=400, detail='Invalid status')
 
@@ -303,7 +310,7 @@ async def rsvp_event(
 
 @router.get('/{calendar_id}', response_model=CalendarModel)
 async def get_calendar_by_id(request: Request, calendar_id: str, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     cal = await _check_calendar_access(calendar_id, user, 'read')
     return cal
 
@@ -312,7 +319,7 @@ async def get_calendar_by_id(request: Request, calendar_id: str, user: UserModel
 async def update_calendar(
     request: Request, calendar_id: str, form_data: CalendarUpdateForm, user: UserModel = Depends(get_verified_user)
 ):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can change access grants
@@ -327,7 +334,7 @@ async def update_calendar(
 
 @router.delete('/{calendar_id}/delete')
 async def delete_calendar(request: Request, calendar_id: str, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can delete
@@ -343,7 +350,7 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
 
 @router.post('/{calendar_id}/default')
 async def set_default_calendar(request: Request, calendar_id: str, user: UserModel = Depends(get_verified_user)):
-    await check_calendar_enabled(request)
+    await check_calendar_permission(request, user)
     cal = await Calendars.set_default_calendar(user.id, calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
