@@ -153,6 +153,18 @@ class AutomationTable:
             row = await db.get(Automation, id)
             return AutomationModel.model_validate(row) if row else None
 
+    async def get_active_by_user(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> list[AutomationModel]:
+        """Get active automations for a user (for calendar RRULE expansion)."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Automation)
+                .filter_by(user_id=user_id, is_active=True)
+                .order_by(Automation.created_at.desc())
+            )
+            return [AutomationModel.model_validate(r) for r in result.scalars().all()]
+
     async def search_automations(
         self,
         user_id: str,
@@ -382,6 +394,32 @@ class AutomationRunTable:
             result = await db.execute(delete(AutomationRun).filter_by(automation_id=automation_id))
             await db.commit()
             return result.rowcount
+
+    async def get_runs_by_user_range(
+        self,
+        user_id: str,
+        start_ns: int,
+        end_ns: int,
+        limit: int = 500,
+        db: Optional[AsyncSession] = None,
+    ) -> list[tuple['AutomationRunModel', 'AutomationModel']]:
+        """Get runs within a date range for a user, joined with parent automation."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(AutomationRun, Automation)
+                .join(Automation, Automation.id == AutomationRun.automation_id)
+                .filter(
+                    Automation.user_id == user_id,
+                    AutomationRun.created_at >= start_ns,
+                    AutomationRun.created_at < end_ns,
+                )
+                .order_by(AutomationRun.created_at.desc())
+                .limit(limit)
+            )
+            return [
+                (AutomationRunModel.model_validate(run), AutomationModel.model_validate(auto))
+                for run, auto in result.all()
+            ]
 
 
 Automations = AutomationTable()

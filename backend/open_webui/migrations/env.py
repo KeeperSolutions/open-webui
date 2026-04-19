@@ -3,6 +3,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from open_webui.models.auths import Auth
+from open_webui.models.calendar import Calendar, CalendarEvent, CalendarEventAttendee  # noqa: F401
 from open_webui.env import DATABASE_URL, DATABASE_PASSWORD, LOG_FORMAT
 from sqlalchemy import engine_from_config, pool, create_engine
 

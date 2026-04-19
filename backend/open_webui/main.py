@@ -109,6 +109,7 @@ from open_webui.routers import (
     model_classes,
     terminals,
     automations,
+    calendar,
 )
 
 from open_webui.routers.retrieval import (
@@ -1478,6 +1479,7 @@ app.include_router(billing.router, prefix='/api/v1/billing', tags=['billing'])
 app.include_router(model_classes.router, prefix='/api/v1/model-classes', tags=['model-classes'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
+app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars'])
 
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
