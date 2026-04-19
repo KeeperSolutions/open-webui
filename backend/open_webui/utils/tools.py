@@ -44,6 +44,7 @@ from open_webui.utils.plugin import load_tool_module_by_id
 from open_webui.utils.access_control import has_access, has_connection_access
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER,
     AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA,
@@ -907,7 +908,7 @@ async def get_terminal_cwd(
             timeout=aiohttp.ClientTimeout(total=5),
             trust_env=True,
         ) as session:
-            async with session.get(cwd_url, headers=headers, cookies=cookies or {}) as resp:
+            async with session.get(cwd_url, headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('cwd')
@@ -934,7 +935,7 @@ async def get_terminal_system_prompt(
             trust_env=True,
         ) as session:
             # 1. Check feature flag
-            async with session.get(f'{base}/api/config') as resp:
+            async with session.get(f'{base}/api/config', ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
                 if resp.status != 200:
                     return None
                 config = await resp.json()
@@ -942,7 +943,7 @@ async def get_terminal_system_prompt(
                     return None
 
             # 2. Fetch system prompt
-            async with session.get(f'{base}/system', headers=headers, cookies=cookies or {}) as resp:
+            async with session.get(f'{base}/system', headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('prompt')

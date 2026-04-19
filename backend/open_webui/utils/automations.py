@@ -272,6 +272,7 @@ async def _set_terminal_cwd(app, server_id: str, user, cwd: str, chat_id: str) -
     handled correctly — same path the frontend uses.
     """
     import aiohttp
+    from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
 
     connections = getattr(getattr(app, 'state', None), 'config', None)
     if connections is None:
@@ -307,6 +308,7 @@ async def _set_terminal_cwd(app, server_id: str, user, cwd: str, chat_id: str) -
                 target_url,
                 json={'path': cwd},
                 headers=headers,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()

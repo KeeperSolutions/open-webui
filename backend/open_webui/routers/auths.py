@@ -909,7 +909,7 @@ async def signout(request: Request, response: Response, db: AsyncSession = Depen
             oauth_id_token = session.token.get('id_token')
             try:
                 async with ClientSession(trust_env=True) as session:
-                    async with session.get(oauth_server_metadata_url) as r:
+                    async with session.get(oauth_server_metadata_url, ssl=AIOHTTP_CLIENT_SESSION_SSL) as r:
                         if r.status == 200:
                             openid_data = await r.json()
                             logout_url = openid_data.get('end_session_endpoint')
