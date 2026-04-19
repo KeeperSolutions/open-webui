@@ -13,6 +13,7 @@
 	import { get, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import equal from 'fast-deep-equal';
 
 	import {
 		chatId,
@@ -284,7 +285,7 @@
 	};
 
 	let oldSelectedModelIds = [''];
-	$: if (JSON.stringify(selectedModelIds) !== JSON.stringify(oldSelectedModelIds)) {
+	$: if (!equal(selectedModelIds, oldSelectedModelIds)) {
 		onSelectedModelIdsChange();
 	}
 
@@ -679,7 +680,7 @@
 		if (
 			$selectedFolder &&
 			selectedModels.filter((modelId) => modelId !== '').length > 0 &&
-			JSON.stringify($selectedFolder?.data?.model_ids) !== JSON.stringify(selectedModels)
+			!equal($selectedFolder?.data?.model_ids, selectedModels)
 		) {
 			const res = await updateFolderById(localStorage.token, $selectedFolder.id, {
 				data: {
@@ -777,7 +778,7 @@
 			await tick();
 			if (
 				folder?.data?.model_ids &&
-				JSON.stringify(selectedModels) !== JSON.stringify(folder.data.model_ids)
+				!equal(selectedModels, folder.data.model_ids)
 			) {
 				selectedModels = folder.data.model_ids;
 			}
@@ -1827,7 +1828,7 @@
 		chatFiles = chatFiles.filter(
 			// Remove duplicates
 			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+				array.findIndex((i) => equal(i, item)) === index
 		);
 
 		// Create user message
@@ -1871,7 +1872,7 @@
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
 
-		if (JSON.stringify(selectedModels) !== JSON.stringify(_selectedModels)) {
+		if (!equal(selectedModels, _selectedModels)) {
 			selectedModels = _selectedModels;
 		}
 
@@ -2169,7 +2170,7 @@
 		// Remove duplicates
 		files = files.filter(
 			(item, index, array) =>
-				array.findIndex((i) => JSON.stringify(i) === JSON.stringify(item)) === index
+				array.findIndex((i) => equal(i, item)) === index
 		);
 
 		scrollToBottom();
