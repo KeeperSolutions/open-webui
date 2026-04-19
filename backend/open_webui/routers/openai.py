@@ -1471,6 +1471,7 @@ async def embeddings(request: Request, form_data: dict, user):
             timeout=aiohttp.ClientTimeout(
                 total=AIOHTTP_CLIENT_TIMEOUT, sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
             ),
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
         )
 
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
