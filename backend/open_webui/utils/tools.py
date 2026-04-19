@@ -557,7 +557,10 @@ async def get_builtin_tools(
         )
 
     # Calendar tools - search/create/update/delete events
-    if is_builtin_tool_enabled('calendar'):
+    if (
+        is_builtin_tool_enabled('calendar')
+        and getattr(request.app.state.config, 'ENABLE_CALENDAR', False)
+    ):
         builtin_functions.extend(
             [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event]
         )

@@ -1642,6 +1642,12 @@ ENABLE_CHANNELS = PersistentConfig(
     os.environ.get('ENABLE_CHANNELS', 'False').lower() == 'true',
 )
 
+ENABLE_CALENDAR = PersistentConfig(
+    'ENABLE_CALENDAR',
+    'calendar.enable',
+    os.environ.get('ENABLE_CALENDAR', 'True').lower() == 'true',
+)
+
 AUTOMATION_MAX_COUNT = PersistentConfig(
     'AUTOMATION_MAX_COUNT',
     'automations.max_count',
