@@ -184,7 +184,7 @@
 					class="w-full text-sm bg-transparent outline-hidden cursor-pointer"
 					bind:value={calendarId}
 				>
-					{#each calendars.filter((c) => c.name !== 'Scheduled Tasks') as cal (cal.id)}
+					{#each calendars.filter((c) => c.id !== '__scheduled_tasks__') as cal (cal.id)}
 						<option value={cal.id}>{cal.name}</option>
 					{/each}
 				</select>

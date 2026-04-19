@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SCHEDULED_TASKS_CALENDAR_ID = '__scheduled_tasks__'
+
 
 async def check_calendar_permission(request: Request, user):
     """Check global feature flag AND per-user permission for calendar access."""
@@ -45,6 +47,17 @@ async def check_calendar_permission(request: Request, user):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
+
+
+async def _user_has_automations(request: Request, user) -> bool:
+    """Check if automations feature is available to this user."""
+    if not getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False):
+        return False
+    if user.role == 'admin':
+        return True
+    return await has_permission(
+        user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS
+    )
 
 
 async def _check_calendar_access(calendar_id: str, user: UserModel, permission: str = 'write') -> CalendarModel:
@@ -74,9 +87,26 @@ async def _check_calendar_access(calendar_id: str, user: UserModel, permission: 
 
 @router.get('/', response_model=list[CalendarModel])
 async def get_calendars(request: Request, user: UserModel = Depends(get_verified_user)):
-    """List user's calendars (owned + shared). Auto-creates defaults on first call."""
+    """List user's calendars (owned + shared), plus a virtual Scheduled Tasks calendar
+    when automations are available."""
     await check_calendar_permission(request, user)
-    return await Calendars.get_calendars_by_user(user.id)
+    calendars = await Calendars.get_calendars_by_user(user.id)
+
+    if await _user_has_automations(request, user):
+        now = int(time.time_ns())
+        calendars.append(
+            CalendarModel(
+                id=SCHEDULED_TASKS_CALENDAR_ID,
+                user_id=user.id,
+                name='Scheduled Tasks',
+                color='#8b5cf6',
+                is_default=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    return calendars
 
 
 @router.post('/create', response_model=CalendarModel)
@@ -144,11 +174,12 @@ async def get_events(
             expanded.append(event)
 
     # 2. Virtual automation events (Scheduled Tasks calendar)
-    try:
-        from open_webui.models.automations import Automations, AutomationRuns
+    if await _user_has_automations(request, user) and (
+        cal_id_list is None or SCHEDULED_TASKS_CALENDAR_ID in cal_id_list
+    ):
+        try:
+            from open_webui.models.automations import Automations, AutomationRuns
 
-        scheduled_cal = await Calendars.get_scheduled_tasks_calendar(user.id)
-        if scheduled_cal and (cal_id_list is None or scheduled_cal.id in cal_id_list):
             # Future runs: expand RRULEs for active automations only
             active_automations = await Automations.get_active_by_user(user.id)
             for auto in active_automations:
@@ -158,7 +189,7 @@ async def get_events(
 
                 virtual = {
                     'id': f'auto_{auto.id}',
-                    'calendar_id': scheduled_cal.id,
+                    'calendar_id': SCHEDULED_TASKS_CALENDAR_ID,
                     'user_id': user.id,
                     'title': auto.name,
                     'description': auto.data.get('prompt', '') if auto.data else '',
@@ -190,7 +221,7 @@ async def get_events(
                 expanded.append(
                     CalendarEventUserResponse(
                         id=f'run_{run.id}',
-                        calendar_id=scheduled_cal.id,
+                        calendar_id=SCHEDULED_TASKS_CALENDAR_ID,
                         user_id=user.id,
                         title=auto.name,
                         description=run.error if run.status == 'error' else '',
@@ -213,8 +244,8 @@ async def get_events(
                         user=None,
                     )
                 )
-    except Exception as e:
-        log.warning(f'Failed to compute automation events: {e}', exc_info=True)
+        except Exception as e:
+            log.warning(f'Failed to compute automation events: {e}', exc_info=True)
 
     return [e.model_dump() if hasattr(e, 'model_dump') else e for e in expanded]
 
