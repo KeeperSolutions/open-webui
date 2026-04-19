@@ -296,9 +296,9 @@
 							: ''}"
 					>
 						<div
-							class="w-14 shrink-0 text-[10px] text-gray-400 dark:text-gray-500 text-right pr-3 -mt-1.5 select-none"
+							class="w-14 shrink-0 text-[10px] text-gray-400 dark:text-gray-500 text-right pr-3 mt-1 select-none"
 						>
-							{hour > 0 ? formatHour(hour) : ''}
+							{formatHour(hour)}
 						</div>
 						<button
 							class="flex-1 border-l border-gray-100/15 dark:border-gray-850/15 px-1.5 py-0.5
