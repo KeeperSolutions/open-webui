@@ -93,6 +93,10 @@ from open_webui.tools.builtin import (
     list_automations,
     toggle_automation,
     delete_automation,
+    search_calendar_events,
+    create_calendar_event,
+    update_calendar_event,
+    delete_calendar_event,
 )
 
 import copy
@@ -550,6 +554,12 @@ async def get_builtin_tools(
     if is_builtin_tool_enabled('automations') and await has_user_permission('automations'):
         builtin_functions.extend(
             [create_automation, update_automation, list_automations, toggle_automation, delete_automation]
+        )
+
+    # Calendar tools - search/create/update/delete events
+    if is_builtin_tool_enabled('calendar'):
+        builtin_functions.extend(
+            [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event]
         )
 
     for func in builtin_functions:

@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -28,6 +29,7 @@
 	let allDay = false;
 	let location = '';
 	let loading = false;
+	let showDeleteConfirmDialog = false;
 
 	const NS = 1_000_000;
 
@@ -223,9 +225,9 @@
 			<div class="flex items-center gap-0.5 flex-1 min-w-0">
 				{#if event && !event.meta?.automation_id}
 					<button
-						class="px-3 py-1 text-xs text-gray-400 hover:text-red-500 transition"
+						class="px-3 py-1 text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
 						type="button"
-						on:click={deleteHandler}
+						on:click={() => (showDeleteConfirmDialog = true)}
 						disabled={loading}
 					>
 						{$i18n.t('Delete')}
@@ -258,3 +260,10 @@
 		</div>
 	</div>
 </Modal>
+
+<DeleteConfirmDialog
+	bind:show={showDeleteConfirmDialog}
+	title={$i18n.t('Delete Event')}
+	message={$i18n.t('This action cannot be undone. Do you wish to continue?')}
+	on:confirm={deleteHandler}
+/>
