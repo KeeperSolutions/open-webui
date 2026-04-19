@@ -145,7 +145,7 @@
 		<div class="flex-1 flex flex-col min-h-0 px-3 pb-3">
 			<div class="grid grid-cols-7">
 				{#each DAY_NAMES as day}
-					<div class="px-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 text-left">
+					<div class="px-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 text-left truncate">
 						{$i18n.t(day)}
 					</div>
 				{/each}

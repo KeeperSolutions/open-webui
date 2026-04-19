@@ -266,7 +266,7 @@
 
 					<div class="ml-auto flex items-center gap-1">
 						<button
-							class="text-xs px-2 py-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition text-gray-500 hover:text-gray-700 dark:hover:text-white"
+							class="hidden sm:inline text-xs px-2 py-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition text-gray-500 hover:text-gray-700 dark:hover:text-white"
 							on:click={goToToday}
 						>
 							{$i18n.t('Today')}
@@ -285,7 +285,9 @@
 							align="end"
 						>
 							<svelte:fragment slot="trigger" let:selectedLabel>
-								<span class="inline-flex h-input px-0.5 outline-hidden bg-transparent">
+								<span
+									class="inline-flex h-input px-0.5 outline-hidden bg-transparent truncate line-clamp-1"
+								>
 									{selectedLabel}
 								</span>
 								<ChevronDown className="size-3.5" strokeWidth="2.5" />
