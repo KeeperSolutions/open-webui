@@ -32,6 +32,7 @@
 	let endTime = '';
 	let allDay = false;
 	let location = '';
+	let alertMinutes: number = 10;
 	let loading = false;
 	let showDeleteConfirmDialog = false;
 
@@ -60,6 +61,7 @@
 			endTime = event.end_at ? nsToTimeStr(event.end_at) : '';
 			allDay = event.all_day;
 			location = event.location || '';
+			alertMinutes = event.meta?.alert_minutes ?? 10;
 		} else {
 			title = '';
 			description = '';
@@ -80,6 +82,7 @@
 			}
 			allDay = false;
 			location = '';
+			alertMinutes = 10;
 		}
 	}
 
@@ -104,7 +107,8 @@
 					start_at: startNs,
 					end_at: endNs,
 					all_day: allDay,
-					location: location.trim() || undefined
+					location: location.trim() || undefined,
+					meta: { alert_minutes: alertMinutes }
 				});
 				if (result) {
 					toast.success($i18n.t('Event updated'));
@@ -119,7 +123,8 @@
 					start_at: startNs,
 					end_at: endNs,
 					all_day: allDay,
-					location: location.trim() || undefined
+					location: location.trim() || undefined,
+					meta: { alert_minutes: alertMinutes }
 				};
 				const result = await createCalendarEvent(localStorage.token, form);
 				if (result) {
@@ -210,6 +215,23 @@
 					placeholder={$i18n.t('Add location')}
 					bind:value={location}
 				/>
+			</div>
+
+			<!-- Reminder -->
+			<div>
+				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Reminder')}</div>
+				<select
+					class="w-full text-sm bg-transparent outline-hidden cursor-pointer"
+					bind:value={alertMinutes}
+				>
+					<option value={-1}>{$i18n.t('None')}</option>
+					<option value={0}>{$i18n.t('At time of event')}</option>
+					<option value={5}>{$i18n.t('5 minutes before')}</option>
+					<option value={10}>{$i18n.t('10 minutes before')}</option>
+					<option value={15}>{$i18n.t('15 minutes before')}</option>
+					<option value={30}>{$i18n.t('30 minutes before')}</option>
+					<option value={60}>{$i18n.t('1 hour before')}</option>
+				</select>
 			</div>
 
 			<!-- Description -->

@@ -725,6 +725,57 @@ class CalendarEventTable:
             await db.commit()
             return await self._to_event_model(event, db=db)
 
+    async def get_upcoming_events(
+        self,
+        now_ns: int,
+        default_lookahead_ns: int,
+        db: Optional[AsyncSession] = None,
+    ) -> list[tuple[CalendarEventModel, Optional[str]]]:
+        """Events starting between now and now + lookahead, for alert processing.
+
+        Per-event lookahead is read from meta.alert_minutes (falls back to
+        default_lookahead_ns).  Returns (event, user_timezone) pairs.
+        """
+        from open_webui.models.users import User as UserRow
+
+        # Use the maximum possible lookahead (60 min) to cast a wide net;
+        # per-event filtering happens in Python after fetching.
+        max_lookahead_ns = max(default_lookahead_ns, 60 * 60 * 1_000_000_000)
+        upper = now_ns + max_lookahead_ns
+
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(CalendarEvent, UserRow.timezone)
+                .outerjoin(UserRow, UserRow.id == CalendarEvent.user_id)
+                .filter(
+                    CalendarEvent.is_cancelled == False,
+                    CalendarEvent.start_at >= now_ns,
+                    CalendarEvent.start_at <= upper,
+                )
+            )
+            rows = result.all()
+
+        events = []
+        for event, tz in rows:
+            model = CalendarEventModel.model_validate(event)
+            # Determine per-event alert window
+            alert_minutes = None
+            if model.meta and 'alert_minutes' in model.meta:
+                alert_minutes = model.meta['alert_minutes']
+
+            if alert_minutes is not None:
+                if alert_minutes < 0:
+                    # alert_minutes < 0 means "no alert"
+                    continue
+                event_lookahead_ns = alert_minutes * 60 * 1_000_000_000
+            else:
+                event_lookahead_ns = default_lookahead_ns
+
+            if model.start_at <= now_ns + event_lookahead_ns:
+                events.append((model, tz))
+
+        return events
+
     async def delete_event_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
             async with get_async_db_context(db) as db:
