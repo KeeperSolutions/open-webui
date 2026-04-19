@@ -21,11 +21,24 @@
 	const NS = 1_000_000;
 	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 	const MONTH_NAMES = [
-		'January', 'February', 'March', 'April', 'May', 'June',
-		'July', 'August', 'September', 'October', 'November', 'December'
+		'January',
+		'February',
+		'March',
+		'April',
+		'May',
+		'June',
+		'July',
+		'August',
+		'September',
+		'October',
+		'November',
+		'December'
 	];
 
-	$: calColorMap = calendars.reduce((acc, c) => ({ ...acc, [c.id]: c.color }), {} as Record<string, string | null>);
+	$: calColorMap = calendars.reduce(
+		(acc, c) => ({ ...acc, [c.id]: c.color }),
+		{} as Record<string, string | null>
+	);
 	$: filteredEvents = events.filter((e) => visibleCalendarIds.has(e.calendar_id));
 
 	// Pre-group events by day key so the template reactively updates when events change
@@ -102,7 +115,11 @@
 		});
 	}
 
-	function getEventsForHour(day: Date, hour: number, eventsList: CalendarEventModel[] = filteredEvents): CalendarEventModel[] {
+	function getEventsForHour(
+		day: Date,
+		hour: number,
+		eventsList: CalendarEventModel[] = filteredEvents
+	): CalendarEventModel[] {
 		const hourStartMs = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
 		const hourEndMs = hourStartMs + 3_600_000;
 		return eventsList.filter((e) => {
@@ -157,9 +174,10 @@
 		dispatch('eventClick', event);
 	}
 
-	$: headerText = view === 'day' 
-		? `${DAY_NAMES[currentDate.getDay()]}, ${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`
-		: `${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+	$: headerText =
+		view === 'day'
+			? `${DAY_NAMES[currentDate.getDay()]}, ${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`
+			: `${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
 </script>
 
 <div class="flex flex-col h-full w-full min-h-0 min-w-0">
@@ -168,7 +186,10 @@
 		<div class="flex items-center gap-1">
 			{#if $mobile}
 				<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center">
-					<Tooltip content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')} interactive={true}>
+					<Tooltip
+						content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
+						interactive={true}
+					>
 						<button
 							id="sidebar-toggle-button"
 							class="cursor-pointer flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition"
@@ -185,11 +206,43 @@
 			<div class="flex w-full items-center">
 				<div class="flex items-center gap-0.5 py-1">
 					<span class="min-w-fit px-1 text-sm select-none">{headerText}</span>
-					<button class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition" on:click={() => navigate(-1)} aria-label="Previous">
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3.5 text-gray-400"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+					<button
+						class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+						on:click={() => navigate(-1)}
+						aria-label="Previous"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="1.5"
+							stroke="currentColor"
+							class="size-3.5 text-gray-400"
+							><path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M15.75 19.5 8.25 12l7.5-7.5"
+							/></svg
+						>
 					</button>
-					<button class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition" on:click={() => navigate(1)} aria-label="Next">
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3.5 text-gray-400"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+					<button
+						class="p-1 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+						on:click={() => navigate(1)}
+						aria-label="Next"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="1.5"
+							stroke="currentColor"
+							class="size-3.5 text-gray-400"
+							><path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="m8.25 4.5 7.5 7.5-7.5 7.5"
+							/></svg
+						>
 					</button>
 				</div>
 
@@ -232,7 +285,19 @@
 						class="md:hidden px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition text-sm flex items-center"
 						on:click={() => dispatch('newEvent')}
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="size-3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2.5"
+							stroke="currentColor"
+							class="size-3"
+							><path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 4.5v15m7.5-7.5h-15"
+							/></svg
+						>
 					</button>
 				</div>
 			</div>
@@ -244,13 +309,19 @@
 		<div class="flex-1 flex flex-col min-h-0 px-3 pb-3">
 			<div class="grid grid-cols-7">
 				{#each DAY_NAMES as day}
-					<div class="px-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 text-left">{$i18n.t(day)}</div>
+					<div class="px-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 text-left">
+						{$i18n.t(day)}
+					</div>
 				{/each}
 			</div>
 
-			<div class="flex-1 grid grid-cols-7 auto-rows-fr min-h-0 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30">
+			<div
+				class="flex-1 grid grid-cols-7 auto-rows-fr min-h-0 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30"
+			>
 				{#each monthDays as day, i}
-					{@const dayKey = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime().toString()}
+					{@const dayKey = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+						.getTime()
+						.toString()}
 					{@const dayEvents = eventsByDay[dayKey] || []}
 					{@const col = i % 7}
 					{@const row = Math.floor(i / 7)}
@@ -293,18 +364,34 @@
 			</div>
 		</div>
 
-	<!-- Week View -->
+		<!-- Week View -->
 	{:else if view === 'week'}
 		<div class="flex-1 flex flex-col min-h-0 px-3 pb-3">
-			<div class="flex-1 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30 overflow-hidden relative">
+			<div
+				class="flex-1 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30 overflow-hidden relative"
+			>
 				<div class="absolute inset-0 overflow-x-auto flex flex-col">
 					<div class="min-w-[700px] flex flex-col flex-1">
-						<div class="grid grid-cols-[52px_repeat(7,1fr)] shrink-0 border-b border-gray-100/30 dark:border-gray-850/30">
+						<div
+							class="grid grid-cols-[52px_repeat(7,1fr)] shrink-0 border-b border-gray-100/30 dark:border-gray-850/30"
+						>
 							<div></div>
 							{#each weekDays as day}
-								<div class="text-center py-2.5 {day.getDay() > 0 ? 'border-l border-gray-100/20 dark:border-gray-850/20' : ''}">
-									<div class="text-[11px] text-gray-400 dark:text-gray-500">{DAY_NAMES[day.getDay()]}</div>
-									<div class="text-sm mt-0.5 w-7 h-7 flex items-center justify-center mx-auto rounded-full {isToday(day) ? 'bg-blue-500 text-white' : ''}">
+								<div
+									class="text-center py-2.5 {day.getDay() > 0
+										? 'border-l border-gray-100/20 dark:border-gray-850/20'
+										: ''}"
+								>
+									<div class="text-[11px] text-gray-400 dark:text-gray-500">
+										{DAY_NAMES[day.getDay()]}
+									</div>
+									<div
+										class="text-sm mt-0.5 w-7 h-7 flex items-center justify-center mx-auto rounded-full {isToday(
+											day
+										)
+											? 'bg-blue-500 text-white'
+											: ''}"
+									>
 										{day.getDate()}
 									</div>
 								</div>
@@ -313,12 +400,22 @@
 
 						<div class="flex-1 overflow-y-auto">
 							{#each hours as hour}
-								<div class="grid grid-cols-[52px_repeat(7,1fr)] min-h-[52px] {hour > 0 ? 'border-t border-gray-100/15 dark:border-gray-850/15' : ''}">
-									<div class="text-[10px] text-gray-400 dark:text-gray-500 text-right pr-2 select-none -mt-1.5 z-10">{hour > 0 ? formatHour(hour) : ''}</div>
+								<div
+									class="grid grid-cols-[52px_repeat(7,1fr)] min-h-[52px] {hour > 0
+										? 'border-t border-gray-100/15 dark:border-gray-850/15'
+										: ''}"
+								>
+									<div
+										class="text-[10px] text-gray-400 dark:text-gray-500 text-right pr-2 select-none -mt-1.5 z-10"
+									>
+										{hour > 0 ? formatHour(hour) : ''}
+									</div>
 									{#each weekDays as day}
 										{@const hourEvents = getEventsForHour(day, hour, filteredEvents)}
 										<button
-											class="px-0.5 py-0.5 {day.getDay() > 0 ? 'border-l border-gray-100/15 dark:border-gray-850/15' : ''} hover:bg-gray-50/50 dark:hover:bg-gray-850/20 transition cursor-pointer min-w-0 flex flex-col"
+											class="px-0.5 py-0.5 {day.getDay() > 0
+												? 'border-l border-gray-100/15 dark:border-gray-850/15'
+												: ''} hover:bg-gray-50/50 dark:hover:bg-gray-850/20 transition cursor-pointer min-w-0 flex flex-col"
 											on:click={() => handleHourClick(day, hour)}
 										>
 											<div class="flex flex-col gap-0.5 w-full min-h-0">
@@ -349,14 +446,24 @@
 			</div>
 		</div>
 
-	<!-- Day View -->
+		<!-- Day View -->
 	{:else}
 		<div class="flex-1 flex flex-col min-h-0 px-3 pb-3">
-			<div class="flex-1 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30 overflow-y-auto">
+			<div
+				class="flex-1 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-100/30 dark:border-gray-850/30 overflow-y-auto"
+			>
 				{#each hours as hour}
 					{@const hourEvents = getEventsForHour(currentDate, hour, filteredEvents)}
-					<div class="flex min-h-[52px] {hour > 0 ? 'border-t border-gray-100/15 dark:border-gray-850/15' : ''}">
-						<div class="w-14 shrink-0 text-[10px] text-gray-400 dark:text-gray-500 text-right pr-3 -mt-1.5 select-none">{hour > 0 ? formatHour(hour) : ''}</div>
+					<div
+						class="flex min-h-[52px] {hour > 0
+							? 'border-t border-gray-100/15 dark:border-gray-850/15'
+							: ''}"
+					>
+						<div
+							class="w-14 shrink-0 text-[10px] text-gray-400 dark:text-gray-500 text-right pr-3 -mt-1.5 select-none"
+						>
+							{hour > 0 ? formatHour(hour) : ''}
+						</div>
 						<button
 							class="flex-1 border-l border-gray-100/15 dark:border-gray-850/15 px-1.5 py-0.5
 								hover:bg-gray-50/50 dark:hover:bg-gray-850/20 transition cursor-pointer flex flex-col text-left justify-start"

@@ -222,7 +222,7 @@
 	const getVoiceId = () =>
 		model?.info?.meta?.tts?.voice ??
 		($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
-			? $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice
+			? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
 			: $config?.audio?.tts?.voice);
 
 	const speak = async () => {

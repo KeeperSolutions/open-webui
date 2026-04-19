@@ -8,7 +8,11 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import type { CalendarModel, CalendarEventModel, CalendarEventForm } from '$lib/apis/calendar';
-	import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '$lib/apis/calendar';
+	import {
+		createCalendarEvent,
+		updateCalendarEvent,
+		deleteCalendarEvent
+	} from '$lib/apis/calendar';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();

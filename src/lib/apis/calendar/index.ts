@@ -418,7 +418,6 @@ export const rsvpCalendarEvent = async (
 	return res;
 };
 
-
 export const searchCalendarEvents = async (
 	token: string,
 	query: string | null,

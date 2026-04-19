@@ -47,9 +47,7 @@ async def check_calendar_permission(request: Request, user):
         )
 
 
-async def _check_calendar_access(
-    calendar_id: str, user: UserModel, permission: str = 'write'
-) -> CalendarModel:
+async def _check_calendar_access(calendar_id: str, user: UserModel, permission: str = 'write') -> CalendarModel:
     """Verify user has access to a calendar. Returns the calendar or raises 403/404."""
     cal = await Calendars.get_calendar_by_id(calendar_id)
     if not cal:
@@ -139,9 +137,7 @@ async def get_events(
     for event in events:
         event_dict = event.model_dump()
         if event_dict.get('rrule'):
-            instances = expand_recurring_event(
-                event_dict, start_ns, end_ns, tz=user.timezone
-            )
+            instances = expand_recurring_event(event_dict, start_ns, end_ns, tz=user.timezone)
             for inst in instances:
                 expanded.append(CalendarEventUserResponse(**{**inst, 'user': event.user}))
         else:
@@ -189,34 +185,34 @@ async def get_events(
                     expanded.append(CalendarEventUserResponse(**inst))
 
             # Past runs: single range query joined with automation
-            runs_with_auto = await AutomationRuns.get_runs_by_user_range(
-                user.id, start_ns, end_ns
-            )
+            runs_with_auto = await AutomationRuns.get_runs_by_user_range(user.id, start_ns, end_ns)
             for run, auto in runs_with_auto:
-                expanded.append(CalendarEventUserResponse(
-                    id=f'run_{run.id}',
-                    calendar_id=scheduled_cal.id,
-                    user_id=user.id,
-                    title=auto.name,
-                    description=run.error if run.status == 'error' else '',
-                    start_at=run.created_at,
-                    end_at=None,
-                    all_day=False,
-                    color=None,
-                    location=None,
-                    data=None,
-                    meta={
-                        'automation_id': auto.id,
-                        'run_id': run.id,
-                        'chat_id': run.chat_id,
-                        'status': run.status,
-                    },
-                    is_cancelled=False,
-                    attendees=[],
-                    created_at=run.created_at,
-                    updated_at=run.created_at,
-                    user=None,
-                ))
+                expanded.append(
+                    CalendarEventUserResponse(
+                        id=f'run_{run.id}',
+                        calendar_id=scheduled_cal.id,
+                        user_id=user.id,
+                        title=auto.name,
+                        description=run.error if run.status == 'error' else '',
+                        start_at=run.created_at,
+                        end_at=None,
+                        all_day=False,
+                        color=None,
+                        location=None,
+                        data=None,
+                        meta={
+                            'automation_id': auto.id,
+                            'run_id': run.id,
+                            'chat_id': run.chat_id,
+                            'status': run.status,
+                        },
+                        is_cancelled=False,
+                        attendees=[],
+                        created_at=run.created_at,
+                        updated_at=run.created_at,
+                        user=None,
+                    )
+                )
     except Exception as e:
         log.warning(f'Failed to compute automation events: {e}', exc_info=True)
 
@@ -239,9 +235,7 @@ async def search_events(
     user: UserModel = Depends(get_verified_user),
 ):
     await check_calendar_permission(request, user)
-    return await CalendarEvents.search_events(
-        user_id=user.id, query=query, skip=skip, limit=limit
-    )
+    return await CalendarEvents.search_events(user_id=user.id, query=query, skip=skip, limit=limit)
 
 
 @router.get('/events/{event_id}', response_model=CalendarEventModel)
@@ -340,7 +334,6 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     # Only owner/admin can delete
     if cal.user_id != user.id and user.role != 'admin':
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
-
 
     result = await Calendars.delete_calendar_by_id(calendar_id)
     if not result:

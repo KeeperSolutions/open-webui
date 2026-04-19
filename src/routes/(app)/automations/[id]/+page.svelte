@@ -18,7 +18,10 @@
 	$: automationId = $page.params.id;
 
 	onMount(async () => {
-		if (!$config?.features?.enable_automations || ($user?.role !== 'admin' && !($user?.permissions?.features?.automations ?? false))) {
+		if (
+			!$config?.features?.enable_automations ||
+			($user?.role !== 'admin' && !($user?.permissions?.features?.automations ?? false))
+		) {
 			goto('/');
 			return;
 		}

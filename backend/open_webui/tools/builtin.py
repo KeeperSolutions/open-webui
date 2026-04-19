@@ -2868,9 +2868,6 @@ def _event_to_dict(event, tz) -> dict:
     }
 
 
-
-
-
 async def search_calendar_events(
     query: Optional[str] = None,
     start: Optional[str] = None,
@@ -2915,7 +2912,11 @@ async def search_calendar_events(
                 return json.dumps({'error': f'Invalid start datetime: {e}'})
 
             try:
-                end_ns = _dt_to_ns(end, tz) if end else int(time.time() * 1_000) * 1_000_000 + 365 * 86400 * 1_000_000_000_000
+                end_ns = (
+                    _dt_to_ns(end, tz)
+                    if end
+                    else int(time.time() * 1_000) * 1_000_000 + 365 * 86400 * 1_000_000_000_000
+                )
             except (ValueError, TypeError) as e:
                 return json.dumps({'error': f'Invalid end datetime: {e}'})
 
@@ -2929,7 +2930,8 @@ async def search_calendar_events(
             if query:
                 q = query.lower()
                 items = [
-                    e for e in items
+                    e
+                    for e in items
                     if q in (e.title or '').lower()
                     or q in (e.description or '').lower()
                     or q in (e.location or '').lower()
@@ -3229,4 +3231,3 @@ async def delete_calendar_event(
     except Exception as e:
         log.exception(f'delete_calendar_event error: {e}')
         return json.dumps({'error': str(e)})
-
