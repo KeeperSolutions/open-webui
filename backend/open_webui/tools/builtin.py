@@ -56,19 +56,30 @@ async def get_current_timestamp(
     """
     Get the current Unix timestamp in seconds.
 
-    :return: JSON with current_timestamp (seconds) and current_iso (ISO format)
+    :return: JSON with current_timestamp (seconds), current_iso (UTC ISO format), and user_local_iso (user's local time)
     """
     try:
         import datetime
+        from zoneinfo import ZoneInfo
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        return json.dumps(
-            {
-                'current_timestamp': int(now.timestamp()),
-                'current_iso': now.isoformat(),
-            },
-            ensure_ascii=False,
-        )
+        result = {
+            'current_timestamp': int(now.timestamp()),
+            'current_iso': now.isoformat(),
+        }
+
+        # Include the user's local time if timezone is available
+        tz_name = __user__.get('timezone') if __user__ else None
+        if tz_name:
+            try:
+                user_tz = ZoneInfo(tz_name)
+                user_now = now.astimezone(user_tz)
+                result['user_local_iso'] = user_now.isoformat()
+                result['user_timezone'] = tz_name
+            except Exception:
+                pass
+
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         log.exception(f'get_current_timestamp error: {e}')
         return json.dumps({'error': str(e)})
@@ -110,15 +121,27 @@ async def calculate_timestamp(
 
         adjusted_ts = int(adjusted.timestamp())
 
-        return json.dumps(
-            {
-                'current_timestamp': current_ts,
-                'current_iso': now.isoformat(),
-                'calculated_timestamp': adjusted_ts,
-                'calculated_iso': adjusted.isoformat(),
-            },
-            ensure_ascii=False,
-        )
+        result = {
+            'current_timestamp': current_ts,
+            'current_iso': now.isoformat(),
+            'calculated_timestamp': adjusted_ts,
+            'calculated_iso': adjusted.isoformat(),
+        }
+
+        # Include the user's local time if timezone is available
+        tz_name = __user__.get('timezone') if __user__ else None
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+
+                user_tz = ZoneInfo(tz_name)
+                result['user_local_iso'] = now.astimezone(user_tz).isoformat()
+                result['calculated_local_iso'] = adjusted.astimezone(user_tz).isoformat()
+                result['user_timezone'] = tz_name
+            except Exception:
+                pass
+
+        return json.dumps(result, ensure_ascii=False)
     except ImportError:
         # Fallback without dateutil
         import datetime
@@ -128,15 +151,26 @@ async def calculate_timestamp(
         total_days = days_ago + (weeks_ago * 7) + (months_ago * 30) + (years_ago * 365)
         adjusted = now - datetime.timedelta(days=total_days)
         adjusted_ts = int(adjusted.timestamp())
-        return json.dumps(
-            {
-                'current_timestamp': current_ts,
-                'current_iso': now.isoformat(),
-                'calculated_timestamp': adjusted_ts,
-                'calculated_iso': adjusted.isoformat(),
-            },
-            ensure_ascii=False,
-        )
+        result = {
+            'current_timestamp': current_ts,
+            'current_iso': now.isoformat(),
+            'calculated_timestamp': adjusted_ts,
+            'calculated_iso': adjusted.isoformat(),
+        }
+
+        tz_name = __user__.get('timezone') if __user__ else None
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+
+                user_tz = ZoneInfo(tz_name)
+                result['user_local_iso'] = now.astimezone(user_tz).isoformat()
+                result['calculated_local_iso'] = adjusted.astimezone(user_tz).isoformat()
+                result['user_timezone'] = tz_name
+            except Exception:
+                pass
+
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         log.exception(f'calculate_timestamp error: {e}')
         return json.dumps({'error': str(e)})
