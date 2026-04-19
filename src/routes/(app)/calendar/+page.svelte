@@ -159,7 +159,7 @@
 	{#if loaded}
 		<div class="flex flex-1 min-h-0">
 			<!-- Sidebar -->
-			<div class="hidden md:flex flex-col w-56 shrink-0 px-3 pt-3 overflow-y-auto">
+			<div class="hidden md:flex flex-col w-56 shrink-0 pr-1.5 pl-3 pt-3 overflow-y-auto">
 				<button
 					class="px-2 py-1.5 mt-0.5 mb-2.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition text-sm flex items-center justify-center gap-1"
 					on:click={handleNewEvent}
