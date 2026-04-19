@@ -72,7 +72,7 @@
 	<!-- Mini Month Calendar -->
 	<div>
 		<div class="flex items-center justify-between px-1 mb-1.5 mt-2">
-			<div class="text-xs font-medium">{miniMonthNames[miniMonth]} {miniYear}</div>
+			<div class="text-[11px] font-medium">{miniMonthNames[miniMonth]} {miniYear}</div>
 			<div class="flex items-center gap-0.5">
 				<button
 					class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition"
@@ -113,16 +113,16 @@
 			</div>
 		</div>
 
-		<div class="grid grid-cols-7 text-center text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">
+		<div class="grid grid-cols-7 text-center text-[9px] text-gray-400 dark:text-gray-500 mb-0.5">
 			{#each ['S', 'M', 'T', 'W', 'T', 'F', 'S'] as d}
 				<div class="py-0.5">{d}</div>
 			{/each}
 		</div>
 
-		<div class="grid grid-cols-7 text-center text-xs">
+		<div class="grid grid-cols-7 text-center text-[10px]">
 			{#each miniDays as day}
 				<button
-					class="w-7 h-7 flex items-center justify-center rounded-full transition
+					class="w-6 h-6 flex items-center justify-center rounded-full transition
 						{day.getMonth() !== miniMonth ? 'text-gray-300 dark:text-gray-600' : ''}
 						{isToday(day) ? 'bg-blue-500 text-white' : ''}
 						{day.toDateString() === currentDate.toDateString() && !isToday(day)
