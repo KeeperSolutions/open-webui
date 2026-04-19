@@ -248,7 +248,7 @@ class CalendarTable:
         return CalendarModel.model_validate(cal_data)
 
     async def get_or_create_defaults(self, user_id: str, db: Optional[AsyncSession] = None) -> list[CalendarModel]:
-        """Return user's calendars, creating 'Personal' and 'Scheduled Tasks' if none exist."""
+        """Return user's calendars, creating 'Personal' default if none exist."""
         async with get_async_db_context(db) as db:
             result = await db.execute(
                 select(Calendar).filter(Calendar.user_id == user_id).order_by(Calendar.created_at.asc())
@@ -259,29 +259,18 @@ class CalendarTable:
                 return [CalendarModel.model_validate(c) for c in calendars]
 
             now = int(time.time_ns())
-            defaults = [
-                Calendar(
-                    id=str(uuid4()),
-                    user_id=user_id,
-                    name='Personal',
-                    color='#3b82f6',
-                    is_default=True,
-                    created_at=now,
-                    updated_at=now,
-                ),
-                Calendar(
-                    id=str(uuid4()),
-                    user_id=user_id,
-                    name='Scheduled Tasks',
-                    color='#8b5cf6',
-                    created_at=now + 1,
-                    updated_at=now + 1,
-                ),
-            ]
-            for cal in defaults:
-                db.add(cal)
+            cal = Calendar(
+                id=str(uuid4()),
+                user_id=user_id,
+                name='Personal',
+                color='#3b82f6',
+                is_default=True,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(cal)
             await db.commit()
-            return [CalendarModel.model_validate(c) for c in defaults]
+            return [CalendarModel.model_validate(cal)]
 
     async def get_calendars_by_user(self, user_id: str, db: Optional[AsyncSession] = None) -> list[CalendarModel]:
         """Owned + shared calendars."""
@@ -317,30 +306,7 @@ class CalendarTable:
             cal = result.scalars().first()
             return await self._to_calendar_model(cal, db=db) if cal else None
 
-    async def get_scheduled_tasks_calendar(
-        self, user_id: str, db: Optional[AsyncSession] = None
-    ) -> Optional[CalendarModel]:
-        """Get the user's Scheduled Tasks calendar (for automation integration)."""
-        async with get_async_db_context(db) as db:
-            result = await db.execute(
-                select(Calendar).filter(
-                    Calendar.user_id == user_id,
-                    Calendar.name == 'Scheduled Tasks',
-                )
-            )
-            cal = result.scalars().first()
-            if not cal:
-                # Ensure defaults exist then retry
-                await self.get_or_create_defaults(user_id, db=db)
-                result = await db.execute(
-                    select(Calendar).filter(
-                        Calendar.user_id == user_id,
-                        Calendar.name == 'Scheduled Tasks',
-                    )
-                )
-                cal = result.scalars().first()
-            # Lightweight return — skip access_grants loading since we only need id/color
-            return CalendarModel.model_validate(cal) if cal else None
+
 
     async def insert_new_calendar(
         self, user_id: str, form_data: CalendarForm, db: Optional[AsyncSession] = None
