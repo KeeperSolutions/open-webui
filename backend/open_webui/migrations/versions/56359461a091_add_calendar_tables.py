@@ -24,7 +24,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Text(), nullable=False),
     sa.Column('name', sa.Text(), nullable=False),
     sa.Column('color', sa.Text(), nullable=True),
-    sa.Column('is_system', sa.Boolean(), nullable=False),
+    sa.Column('is_default', sa.Boolean(), nullable=False),
     sa.Column('data', sa.JSON(), nullable=True),
     sa.Column('meta', sa.JSON(), nullable=True),
     sa.Column('created_at', sa.BigInteger(), nullable=False),

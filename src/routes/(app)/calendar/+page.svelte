@@ -128,7 +128,7 @@
 		showEventModal = true;
 	}
 
-	$: defaultCalendarId = calendars.find((c) => !c.is_system || c.name === 'Personal')?.id || calendars[0]?.id || '';
+	$: defaultCalendarId = calendars.find((c) => c.is_default)?.id || calendars[0]?.id || '';
 
 	onMount(async () => {
 		await loadCalendars();

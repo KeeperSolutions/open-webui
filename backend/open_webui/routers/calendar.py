@@ -310,10 +310,16 @@ async def delete_calendar(calendar_id: str, user: UserModel = Depends(get_verifi
     if cal.user_id != user.id and user.role != 'admin':
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
 
-    if cal.is_system:
-        raise HTTPException(status_code=400, detail='Cannot delete system calendar')
 
     result = await Calendars.delete_calendar_by_id(calendar_id)
     if not result:
         raise HTTPException(status_code=500, detail='Failed to delete')
     return {'status': True}
+
+
+@router.post('/{calendar_id}/default')
+async def set_default_calendar(calendar_id: str, user: UserModel = Depends(get_verified_user)):
+    cal = await Calendars.set_default_calendar(user.id, calendar_id)
+    if not cal:
+        raise HTTPException(status_code=404, detail='Calendar not found')
+    return cal

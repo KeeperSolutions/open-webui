@@ -17,6 +17,7 @@ from sqlalchemy import (
     exists,
     func,
     delete,
+    update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +41,7 @@ class Calendar(Base):
     user_id = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
     color = Column(Text, nullable=True)
-    is_system = Column(Boolean, nullable=False, default=False)
+    is_default = Column(Boolean, nullable=False, default=False)
     data = Column(JSON, nullable=True)
     meta = Column(JSON, nullable=True)
 
@@ -107,7 +108,8 @@ class CalendarModel(BaseModel):
     user_id: str
     name: str
     color: Optional[str] = None
-    is_system: bool = False
+    is_default: bool = False
+
     data: Optional[dict] = None
     meta: Optional[dict] = None
 
@@ -269,7 +271,7 @@ class CalendarTable:
                     user_id=user_id,
                     name='Personal',
                     color='#3b82f6',
-                    is_system=True,
+                    is_default=True,
                     created_at=now,
                     updated_at=now,
                 ),
@@ -278,7 +280,6 @@ class CalendarTable:
                     user_id=user_id,
                     name='Scheduled Tasks',
                     color='#8b5cf6',
-                    is_system=True,
                     created_at=now + 1,
                     updated_at=now + 1,
                 ),
@@ -338,7 +339,6 @@ class CalendarTable:
                 select(Calendar).filter(
                     Calendar.user_id == user_id,
                     Calendar.name == 'Scheduled Tasks',
-                    Calendar.is_system == True,
                 )
             )
             cal = result.scalars().first()
@@ -349,7 +349,6 @@ class CalendarTable:
                     select(Calendar).filter(
                         Calendar.user_id == user_id,
                         Calendar.name == 'Scheduled Tasks',
-                        Calendar.is_system == True,
                     )
                 )
                 cal = result.scalars().first()
@@ -366,7 +365,7 @@ class CalendarTable:
                 user_id=user_id,
                 name=form_data.name,
                 color=form_data.color,
-                is_system=False,
+                is_default=False,
                 data=form_data.data,
                 meta=form_data.meta,
                 created_at=now,
@@ -403,13 +402,36 @@ class CalendarTable:
             await db.commit()
             return await self._to_calendar_model(cal, db=db)
 
+    async def set_default_calendar(
+        self, user_id: str, calendar_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[CalendarModel]:
+        """Set a calendar as the user's default, clearing all others."""
+        async with get_async_db_context(db) as db:
+            # Clear all defaults for this user
+            await db.execute(
+                update(Calendar)
+                .where(Calendar.user_id == user_id, Calendar.is_default == True)
+                .values(is_default=False)
+            )
+            # Set the new default
+            result = await db.execute(
+                select(Calendar).filter(Calendar.id == calendar_id, Calendar.user_id == user_id)
+            )
+            cal = result.scalars().first()
+            if not cal:
+                return None
+            cal.is_default = True
+            cal.updated_at = int(time.time_ns())
+            await db.commit()
+            return await self._to_calendar_model(cal, db=db)
+
     async def delete_calendar_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        """Delete a non-system calendar. Cascades to events, attendees, and grants."""
+        """Delete a non-default calendar. Cascades to events, attendees, and grants."""
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Calendar).filter(Calendar.id == id))
                 cal = result.scalars().first()
-                if not cal or cal.is_system:
+                if not cal or cal.is_default:
                     return False
 
                 # Delete attendees for all events in this calendar
