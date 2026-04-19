@@ -238,7 +238,7 @@
 				</button>
 			{/if}
 
-			{#if $user?.role === 'admin' || $user?.permissions?.features?.automations}
+			{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
 				<a
 					href="/automations"
 					draggable="false"

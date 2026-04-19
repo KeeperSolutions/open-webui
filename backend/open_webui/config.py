@@ -1648,6 +1648,12 @@ ENABLE_CALENDAR = PersistentConfig(
     os.environ.get('ENABLE_CALENDAR', 'True').lower() == 'true',
 )
 
+ENABLE_AUTOMATIONS = PersistentConfig(
+    'ENABLE_AUTOMATIONS',
+    'automations.enable',
+    os.environ.get('ENABLE_AUTOMATIONS', 'True').lower() == 'true',
+)
+
 AUTOMATION_MAX_COUNT = PersistentConfig(
     'AUTOMATION_MAX_COUNT',
     'automations.max_count',

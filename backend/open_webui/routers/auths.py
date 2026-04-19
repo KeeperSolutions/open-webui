@@ -1071,6 +1071,7 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
         'AUTOMATION_MAX_COUNT': request.app.state.config.AUTOMATION_MAX_COUNT,
         'AUTOMATION_MIN_INTERVAL': request.app.state.config.AUTOMATION_MIN_INTERVAL,
+        'ENABLE_AUTOMATIONS': request.app.state.config.ENABLE_AUTOMATIONS,
         'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
         'ENABLE_CALENDAR': request.app.state.config.ENABLE_CALENDAR,
         'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
@@ -1100,6 +1101,7 @@ class AdminConfig(BaseModel):
     FOLDER_MAX_FILE_COUNT: Optional[int | str] = None
     AUTOMATION_MAX_COUNT: Optional[int | str] = None
     AUTOMATION_MIN_INTERVAL: Optional[int | str] = None
+    ENABLE_AUTOMATIONS: bool
     ENABLE_CHANNELS: bool
     ENABLE_CALENDAR: bool
     ENABLE_MEMORIES: bool
@@ -1132,6 +1134,7 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     request.app.state.config.AUTOMATION_MIN_INTERVAL = (
         int(form_data.AUTOMATION_MIN_INTERVAL) if form_data.AUTOMATION_MIN_INTERVAL else ''
     )
+    request.app.state.config.ENABLE_AUTOMATIONS = form_data.ENABLE_AUTOMATIONS
     request.app.state.config.ENABLE_CHANNELS = form_data.ENABLE_CHANNELS
     request.app.state.config.ENABLE_CALENDAR = form_data.ENABLE_CALENDAR
     request.app.state.config.ENABLE_MEMORIES = form_data.ENABLE_MEMORIES
@@ -1176,6 +1179,7 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
         'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
         'AUTOMATION_MAX_COUNT': request.app.state.config.AUTOMATION_MAX_COUNT,
         'AUTOMATION_MIN_INTERVAL': request.app.state.config.AUTOMATION_MIN_INTERVAL,
+        'ENABLE_AUTOMATIONS': request.app.state.config.ENABLE_AUTOMATIONS,
         'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
         'ENABLE_CALENDAR': request.app.state.config.ENABLE_CALENDAR,
         'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,

@@ -551,7 +551,11 @@ async def get_builtin_tools(
         builtin_functions.extend([create_tasks, update_task])
 
     # Automation tools - create and manage scheduled automations from chat
-    if is_builtin_tool_enabled('automations') and await has_user_permission('automations'):
+    if (
+        is_builtin_tool_enabled('automations')
+        and getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False)
+        and await has_user_permission('automations')
+    ):
         builtin_functions.extend(
             [create_automation, update_automation, list_automations, toggle_automation, delete_automation]
         )

@@ -126,6 +126,10 @@ async def automation_worker_loop(app) -> None:
     log.info(f'Automation worker started (poll interval: {AUTOMATION_POLL_INTERVAL}s)')
     while True:
         try:
+            if not getattr(app.state.config, 'ENABLE_AUTOMATIONS', False):
+                await asyncio.sleep(AUTOMATION_POLL_INTERVAL)
+                continue
+
             async with get_async_db() as db:
                 batch = await Automations.claim_due(int(time.time_ns()), limit=10, db=db)
             if batch:
