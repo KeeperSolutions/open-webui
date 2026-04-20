@@ -6,6 +6,7 @@ export type CalendarModel = {
 	name: string;
 	color: string | null;
 	is_default: boolean;
+	is_system: boolean;
 	data: Record<string, any> | null;
 	meta: Record<string, any> | null;
 	access_grants: any[];

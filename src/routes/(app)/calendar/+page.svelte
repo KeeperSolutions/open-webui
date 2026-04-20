@@ -6,6 +6,7 @@
 	import {
 		getCalendars,
 		getCalendarEvents,
+		deleteCalendar,
 		type CalendarModel,
 		type CalendarEventModel
 	} from '$lib/apis/calendar';
@@ -109,6 +110,21 @@
 			next.add(id);
 		}
 		visibleCalendarIds = next;
+	}
+
+	async function handleDeleteCalendar(id: string) {
+		try {
+			const result = await deleteCalendar(localStorage.token, id);
+			if (result) {
+				toast.success($i18n.t('Calendar deleted'));
+				await loadCalendars();
+				await refresh();
+			} else {
+				toast.error($i18n.t('Failed to delete calendar'));
+			}
+		} catch (err) {
+			toast.error(`${err}`);
+		}
 	}
 
 	function handleCreateEvent(e: CustomEvent<{ start_at: number }>) {
@@ -334,6 +350,7 @@
 					{visibleCalendarIds}
 					{currentDate}
 					onToggle={toggleCalendar}
+					onDeleteCalendar={handleDeleteCalendar}
 					onDateSelect={handleDateSelect}
 				/>
 			</div>

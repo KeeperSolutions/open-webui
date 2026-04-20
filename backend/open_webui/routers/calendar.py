@@ -101,6 +101,7 @@ async def get_calendars(request: Request, user: UserModel = Depends(get_verified
                 name='Scheduled Tasks',
                 color='#8b5cf6',
                 is_default=False,
+                is_system=True,
                 created_at=now,
                 updated_at=now,
             )
@@ -360,11 +361,20 @@ async def update_calendar(
 @router.delete('/{calendar_id}/delete')
 async def delete_calendar(request: Request, calendar_id: str, user: UserModel = Depends(get_verified_user)):
     await check_calendar_permission(request, user)
+
+    # Block deletion of the virtual Scheduled Tasks calendar
+    if calendar_id == SCHEDULED_TASKS_CALENDAR_ID:
+        raise HTTPException(status_code=400, detail='System calendars cannot be deleted')
+
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can delete
     if cal.user_id != user.id and user.role != 'admin':
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
+
+    # Block deletion of default calendar
+    if cal.is_default:
+        raise HTTPException(status_code=400, detail='Default calendar cannot be deleted')
 
     result = await Calendars.delete_calendar_by_id(calendar_id)
     if not result:

@@ -109,6 +109,7 @@ class CalendarModel(BaseModel):
     name: str
     color: Optional[str] = None
     is_default: bool = False
+    is_system: bool = False
 
     data: Optional[dict] = None
     meta: Optional[dict] = None
