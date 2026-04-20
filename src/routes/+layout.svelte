@@ -431,13 +431,13 @@
 			return;
 		}
 
-		let isFocused = document.visibilityState !== 'visible';
+		let isInBackground = document.visibilityState !== 'visible';
 		if (window.electronAPI) {
 			const res = await window.electronAPI.send({
 				type: 'window:isFocused'
 			});
 			if (res) {
-				isFocused = res.isFocused;
+				isInBackground = !res.isFocused;
 			}
 		}
 
@@ -477,7 +477,7 @@
 			return;
 		}
 
-		if ((event.chat_id !== $chatId && !$temporaryChatEnabled) || isFocused) {
+		if ((event.chat_id !== $chatId && !$temporaryChatEnabled) || isInBackground) {
 			if (type === 'chat:completion') {
 				const { done, content, title } = data;
 				const displayTitle = title || $i18n.t('New Chat');
@@ -645,17 +645,17 @@
 		// check url path
 		const channel = $page.url.pathname.includes(`/channels/${event.channel_id}`);
 
-		let isFocused = document.visibilityState !== 'visible';
+		let isInBackground = document.visibilityState !== 'visible';
 		if (window.electronAPI) {
 			const res = await window.electronAPI.send({
 				type: 'window:isFocused'
 			});
 			if (res) {
-				isFocused = res.isFocused;
+				isInBackground = !res.isFocused;
 			}
 		}
 
-		if ((!channel || isFocused) && event?.user?.id !== $user?.id) {
+		if ((!channel || isInBackground) && event?.user?.id !== $user?.id) {
 			await tick();
 			const type = event?.data?.type ?? null;
 			const data = event?.data?.data ?? null;

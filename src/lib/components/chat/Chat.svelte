@@ -2403,8 +2403,11 @@
 					taskIds = newTaskIds;
 				}
 
-				// Backend returns chat_id for new chats — set store + URL
-				if (res.chat_id && $chatId !== res.chat_id) {
+				// Backend returns chat_id for new chats — set store + URL.
+				// Only update if the user hasn't navigated to a different chat
+				// while the request was in flight (prevents overwriting $chatId
+				// and causing spurious toast notifications / state duplication).
+				if (res.chat_id && $chatId !== res.chat_id && $chatId === _chatId) {
 					await chatId.set(res.chat_id);
 					if (!$temporaryChatEnabled) {
 						window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
