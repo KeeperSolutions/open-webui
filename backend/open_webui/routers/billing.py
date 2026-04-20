@@ -188,12 +188,20 @@ async def setup_billing(user=Depends(get_verified_user)):
         except stripe.StripeError as e:
             log.warning(f"Could not apply free tier credit: {e}")
 
-    # --- Create subscription if not already existing ---
+    # --- Create subscription if not already existing or if canceled ---
+    existing_sub_active = False
     if existing and existing.stripe_subscription_id:
-        sub_id = existing.stripe_subscription_id
-        sub_item_id = existing.stripe_subscription_item_id
-        sub_status = existing.subscription_status
-    else:
+        try:
+            live_sub = client.v1.subscriptions.retrieve(existing.stripe_subscription_id)
+            if live_sub.status not in ("canceled",):
+                sub_id = existing.stripe_subscription_id
+                sub_item_id = existing.stripe_subscription_item_id
+                sub_status = live_sub.status
+                existing_sub_active = True
+        except stripe.StripeError:
+            pass  # Will create a new subscription below
+
+    if not existing_sub_active:
         try:
             sub = client.v1.subscriptions.create(
                 params={

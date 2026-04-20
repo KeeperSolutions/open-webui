@@ -137,13 +137,26 @@
 				</div>
 			{/if}
 
-			<button
-				on:click={handlePortal}
-				disabled={openingPortal}
-				class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition disabled:opacity-50"
-			>
-				{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage payment method')}
-			</button>
+			{#if status.subscription_status === 'canceled'}
+				<div class="rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+					{$i18n.t('Your subscription has been canceled.')}
+				</div>
+				<button
+					on:click={handleSetup}
+					disabled={settingUp}
+					class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
+				>
+					{settingUp ? $i18n.t('Setting up...') : $i18n.t('Resubscribe')}
+				</button>
+			{:else}
+				<button
+					on:click={handlePortal}
+					disabled={openingPortal}
+					class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition disabled:opacity-50"
+				>
+					{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage payment method')}
+				</button>
+			{/if}
 		</div>
 
 		<!-- Invoice history -->
