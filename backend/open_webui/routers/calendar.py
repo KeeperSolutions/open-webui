@@ -55,9 +55,7 @@ async def _user_has_automations(request: Request, user) -> bool:
         return False
     if user.role == 'admin':
         return True
-    return await has_permission(
-        user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS
-    )
+    return await has_permission(user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS)
 
 
 async def _check_calendar_access(calendar_id: str, user: UserModel, permission: str = 'write') -> CalendarModel:

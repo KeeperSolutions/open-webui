@@ -293,7 +293,9 @@ async def verify_terminal_server_connection(
         ) as session:
             # Orchestrators expose a policies API; plain terminals don't.
             try:
-                async with session.get(f'{base_url}/api/v1/policies', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+                async with session.get(
+                    f'{base_url}/api/v1/policies', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL
+                ) as resp:
                     if resp.ok:
                         return {'status': True, 'type': 'orchestrator'}
             except Exception:
@@ -301,7 +303,9 @@ async def verify_terminal_server_connection(
 
             # Fall back to open-terminal config endpoint.
             try:
-                async with session.get(f'{base_url}/api/config', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+                async with session.get(
+                    f'{base_url}/api/config', headers=headers, ssl=AIOHTTP_CLIENT_SESSION_SSL
+                ) as resp:
                     if resp.ok:
                         return {'status': True, 'type': 'terminal'}
             except Exception:
@@ -342,7 +346,9 @@ async def put_terminal_server_policy(
             timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         ) as session:
             policy_url = f'{base_url}/api/v1/policies/{form_data.policy_id}'
-            async with session.put(policy_url, headers=headers, json=form_data.policy_data, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+            async with session.put(
+                policy_url, headers=headers, json=form_data.policy_data, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
                 if resp.ok:
                     return await resp.json()
                 detail = await resp.text()
@@ -369,7 +375,9 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
                         trust_env=True,
                         timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
                     ) as session:
-                        async with session.get(discovery_url, ssl=AIOHTTP_CLIENT_SESSION_SSL) as oauth_server_metadata_response:
+                        async with session.get(
+                            discovery_url, ssl=AIOHTTP_CLIENT_SESSION_SSL
+                        ) as oauth_server_metadata_response:
                             if oauth_server_metadata_response.status == 200:
                                 try:
                                     oauth_server_metadata = OAuthMetadata.model_validate(

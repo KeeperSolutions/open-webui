@@ -34,19 +34,19 @@ MARKDOWN_IMAGE_URL_PATTERN = re.compile(r'!\[(.*?)\]\((.+?)\)', re.IGNORECASE)
 
 # Extension-based MIME fallback, only used when ENABLE_IMAGE_CONTENT_TYPE_EXTENSION_FALLBACK is True.
 _IMAGE_MIME_FALLBACK = {
-    ".webp": "image/webp",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".svg": "image/svg+xml",
-    ".bmp": "image/bmp",
-    ".tiff": "image/tiff",
-    ".tif": "image/tiff",
-    ".ico": "image/x-icon",
-    ".heic": "image/heic",
-    ".heif": "image/heif",
-    ".avif": "image/avif",
+    '.webp': 'image/webp',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.tiff': 'image/tiff',
+    '.tif': 'image/tiff',
+    '.ico': 'image/x-icon',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.avif': 'image/avif',
 }
 
 
@@ -75,10 +75,7 @@ async def get_image_base64_from_url(url: str) -> Optional[str]:
             if file_path.is_file():
                 with open(file_path, 'rb') as image_file:
                     encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                    content_type = (
-                        mimetypes.guess_type(file_path.name)[0]
-                        or (file.meta or {}).get('content_type')
-                    )
+                    content_type = mimetypes.guess_type(file_path.name)[0] or (file.meta or {}).get('content_type')
                     if not content_type and ENABLE_IMAGE_CONTENT_TYPE_EXTENSION_FALLBACK:
                         content_type = _IMAGE_MIME_FALLBACK.get(file_path.suffix.lower())
                     if not content_type:
@@ -204,10 +201,7 @@ async def get_image_base64_from_file_id(id: str) -> Optional[str]:
         if file_path.is_file():
             with open(file_path, 'rb') as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                content_type = (
-                    mimetypes.guess_type(file_path.name)[0]
-                    or (file.meta or {}).get('content_type')
-                )
+                content_type = mimetypes.guess_type(file_path.name)[0] or (file.meta or {}).get('content_type')
                 if not content_type and ENABLE_IMAGE_CONTENT_TYPE_EXTENSION_FALLBACK:
                     content_type = _IMAGE_MIME_FALLBACK.get(file_path.suffix.lower())
                 if not content_type:

@@ -122,9 +122,7 @@ def build_loader_from_config(request):
     )
 
 
-def _extract_text_from_binary_response(
-    request, response: requests.Response, url: str
-) -> tuple[str, list]:
+def _extract_text_from_binary_response(request, response: requests.Response, url: str) -> tuple[str, list]:
     """Download response body to a temp file and extract text using the Loader pipeline."""
     import mimetypes
     import tempfile

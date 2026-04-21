@@ -908,7 +908,9 @@ async def get_terminal_cwd(
             timeout=aiohttp.ClientTimeout(total=5),
             trust_env=True,
         ) as session:
-            async with session.get(cwd_url, headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+            async with session.get(
+                cwd_url, headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('cwd')
@@ -943,7 +945,9 @@ async def get_terminal_system_prompt(
                     return None
 
             # 2. Fetch system prompt
-            async with session.get(f'{base}/system', headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+            async with session.get(
+                f'{base}/system', headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('prompt')

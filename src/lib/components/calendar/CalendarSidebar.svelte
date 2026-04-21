@@ -94,7 +94,10 @@
 <ConfirmDialog
 	bind:show={showDeleteConfirm}
 	title={$i18n.t('Delete Calendar')}
-	message={$i18n.t('This will permanently delete the calendar "{{name}}" and all its events. This action cannot be undone.', { name: deleteTargetCalendar?.name ?? '' })}
+	message={$i18n.t(
+		'This will permanently delete the calendar "{{name}}" and all its events. This action cannot be undone.',
+		{ name: deleteTargetCalendar?.name ?? '' }
+	)}
 	confirmLabel={$i18n.t('Delete')}
 	onConfirm={confirmDelete}
 />
@@ -219,11 +222,7 @@
 								stroke="currentColor"
 								class="size-3"
 							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M6 18 18 6M6 6l12 12"
-								/>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
 							</svg>
 						</span>
 					{/if}

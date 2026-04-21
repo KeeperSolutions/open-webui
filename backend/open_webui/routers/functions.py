@@ -117,7 +117,9 @@ async def load_function_from_url(request: Request, form_data: LoadUrlForm, user=
         async with aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         ) as session:
-            async with session.get(url, headers={'Content-Type': 'application/json'}, ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+            async with session.get(
+                url, headers={'Content-Type': 'application/json'}, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
                 if resp.status != 200:
                     raise HTTPException(status_code=resp.status, detail='Failed to fetch the function')
                 data = await resp.text()

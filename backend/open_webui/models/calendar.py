@@ -307,8 +307,6 @@ class CalendarTable:
             cal = result.scalars().first()
             return await self._to_calendar_model(cal, db=db) if cal else None
 
-
-
     async def insert_new_calendar(
         self, user_id: str, form_data: CalendarForm, db: Optional[AsyncSession] = None
     ) -> Optional[CalendarModel]:
