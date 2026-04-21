@@ -1948,10 +1948,10 @@ class OAuthManager:
                 users_to_logout.append(user)
 
         if not users_to_logout and sid:
-            log.info(f'Back-channel logout: no user found by sub, sid-based lookup not yet supported (sid={sid})')
+            log.debug(f'Back-channel logout: no user found by sub, sid-based lookup not yet supported (sid={sid})')
 
         if not users_to_logout:
-            log.info(f'Back-channel logout: no matching user for provider={matched_provider}, sub={sub}, sid={sid}')
+            log.debug(f'Back-channel logout: no matching user for provider={matched_provider}, sub={sub}, sid={sid}')
             return JSONResponse(status_code=200, content={})
 
         # 9. Revoke tokens and delete sessions
