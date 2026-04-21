@@ -45,6 +45,22 @@ CALENDAR_ALERT_LOOKAHEAD_MINUTES = int(os.getenv('CALENDAR_ALERT_LOOKAHEAD_MINUT
 ####################
 
 
+def _resolve_tz(tz: str = None) -> Optional[ZoneInfo]:
+    """Safely resolve a timezone string to ZoneInfo.
+
+    Returns None (→ server-local fallback) when *tz* is empty, None,
+    or an unrecognised IANA key.  Logs a warning on bad keys so
+    misconfiguration is visible in the server logs.
+    """
+    if not tz:
+        return None
+    try:
+        return ZoneInfo(tz)
+    except (KeyError, Exception):
+        log.warning('Unknown timezone %r — falling back to server time', tz)
+        return None
+
+
 def _parse_rule(s: str):
     """Parse RRULE with clock-aligned DTSTART for sub-daily frequencies.
 
@@ -72,19 +88,21 @@ def validate_rrule(s: str, tz: str = None) -> None:
         rule = _parse_rule(s)
     except Exception as e:
         raise ValueError(ERROR_MESSAGES.AUTOMATION_INVALID_RRULE(e))
-    now = datetime.now(ZoneInfo(tz)).replace(tzinfo=None) if tz else datetime.now()
+    zi = _resolve_tz(tz)
+    now = datetime.now(zi).replace(tzinfo=None) if zi else datetime.now()
     if rule.after(now) is None:
         raise ValueError(ERROR_MESSAGES.AUTOMATION_NO_FUTURE_RUNS)
 
 
 def next_run_ns(s: str, tz: str = None) -> Optional[int]:
     """Next occurrence as epoch nanoseconds, respecting user timezone."""
-    now = datetime.now(ZoneInfo(tz)) if tz else datetime.now()
+    zi = _resolve_tz(tz)
+    now = datetime.now(zi) if zi else datetime.now()
     dt = _parse_rule(s).after(now.replace(tzinfo=None))
     if dt is None:
         return None
-    if tz:
-        dt = dt.replace(tzinfo=ZoneInfo(tz))
+    if zi:
+        dt = dt.replace(tzinfo=zi)
     return int(dt.timestamp() * 1_000_000_000)
 
 
@@ -94,16 +112,17 @@ def next_n_runs_ns(s: str, n: int = 5, tz: str = None) -> list[int]:
     Uses the user's timezone for the starting "now" so that the
     preview matches the user's local clock (same as next_run_ns).
     """
+    zi = _resolve_tz(tz)
     rule = _parse_rule(s)
     result = []
-    now = datetime.now(ZoneInfo(tz)).replace(tzinfo=None) if tz else datetime.now()
+    now = datetime.now(zi).replace(tzinfo=None) if zi else datetime.now()
     dt = now
     for _ in range(n):
         dt = rule.after(dt)
         if not dt:
             break
-        if tz:
-            dt_tz = dt.replace(tzinfo=ZoneInfo(tz))
+        if zi:
+            dt_tz = dt.replace(tzinfo=zi)
             result.append(int(dt_tz.timestamp() * 1_000_000_000))
         else:
             result.append(int(dt.timestamp() * 1_000_000_000))
