@@ -148,22 +148,19 @@ def convert_output_to_messages(output: list, raw: bool = False) -> list[dict]:
     messages = []
     pending_tool_calls = []
     pending_content = []
-    pending_reasoning = ''
 
     def flush_pending():
-        nonlocal pending_content, pending_tool_calls, pending_reasoning
-        if pending_content or pending_tool_calls or pending_reasoning:
+        nonlocal pending_content, pending_tool_calls
+        if pending_content or pending_tool_calls:
             messages.append(
                 {
                     'role': 'assistant',
                     'content': '\n'.join(pending_content) if pending_content else '',
                     **({'tool_calls': pending_tool_calls} if pending_tool_calls else {}),
-                    **({'reasoning_content': pending_reasoning} if pending_reasoning else {}),
                 }
             )
             pending_content = []
             pending_tool_calls = []
-            pending_reasoning = ''
 
     for item in output:
         item_type = item.get('type', '')
@@ -248,10 +245,12 @@ def convert_output_to_messages(output: list, raw: bool = False) -> list[dict]:
                     start_tag = item.get('start_tag', '<think>')
                     end_tag = item.get('end_tag', '</think>')
                     pending_content.append(f'{start_tag}{reasoning_text}{end_tag}')
-                    # Preserve raw reasoning text as reasoning_content for
-                    # providers that require it on assistant tool-call messages
-                    # (e.g. Moonshot/Kimi K2.5).
-                    pending_reasoning += reasoning_text
+                    # NOTE: Some providers (e.g. Moonshot/Kimi K2.5) require
+                    # reasoning_content as a top-level field on assistant
+                    # messages.  This should be handled externally via a
+                    # pipeline filter or connection-level middleware, not
+                    # here — adding it universally breaks strict providers
+                    # (OpenAI, Vertex AI, Azure) that reject unknown fields.
             # else: skip reasoning blocks for normal LLM messages
 
         elif item_type == 'open_webui:code_interpreter':
