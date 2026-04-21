@@ -234,11 +234,24 @@ async def generate_function_chat_completion(request, form_data, user, models: di
 
     oauth_token = None
     try:
-        if request.cookies.get('oauth_session_id', None):
+        oauth_session_id = request.cookies.get('oauth_session_id', None)
+        if oauth_session_id:
             oauth_token = await request.app.state.oauth_manager.get_oauth_token(
                 user.id,
-                request.cookies.get('oauth_session_id', None),
+                oauth_session_id,
             )
+
+        # Fallback: no cookie (automation, API key, etc.) — use most recent session
+        if oauth_token is None:
+            from open_webui.models.oauth_sessions import OAuthSessions
+
+            sessions = await OAuthSessions.get_sessions_by_user_id(user.id)
+            if sessions:
+                best = max(sessions, key=lambda s: s.updated_at)
+                oauth_token = await request.app.state.oauth_manager.get_oauth_token(
+                    user.id,
+                    best.id,
+                )
     except Exception as e:
         log.error(f'Error getting OAuth token: {e}')
 

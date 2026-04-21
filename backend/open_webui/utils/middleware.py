@@ -2951,13 +2951,32 @@ def build_response_object(response, response_data):
 
 
 async def get_system_oauth_token(request, user):
+    """Get the system OAuth token for a user.
+
+    Primary path: use the oauth_session_id cookie (browser requests).
+    Fallback: look up the user's most recent OAuth session from the DB
+    (covers automations, API calls, and other cookie-less contexts).
+    """
     oauth_token = None
     try:
-        if request.cookies.get('oauth_session_id', None):
+        oauth_session_id = request.cookies.get('oauth_session_id', None)
+        if oauth_session_id:
             oauth_token = await request.app.state.oauth_manager.get_oauth_token(
                 user.id,
-                request.cookies.get('oauth_session_id', None),
+                oauth_session_id,
             )
+
+        # Fallback: no cookie (automation, API key, etc.) — use most recent session
+        if oauth_token is None:
+            from open_webui.models.oauth_sessions import OAuthSessions
+
+            sessions = await OAuthSessions.get_sessions_by_user_id(user.id)
+            if sessions:
+                best = max(sessions, key=lambda s: s.updated_at)
+                oauth_token = await request.app.state.oauth_manager.get_oauth_token(
+                    user.id,
+                    best.id,
+                )
     except Exception as e:
         log.error(f'Error getting OAuth token: {e}')
     return oauth_token
