@@ -61,13 +61,19 @@ def _parse_rule(s: str):
     return rrulestr(s, ignoretz=True)
 
 
-def validate_rrule(s: str) -> None:
-    """Raise ValueError if the RRULE is malformed or exhausted."""
+def validate_rrule(s: str, tz: str = None) -> None:
+    """Raise ValueError if the RRULE is malformed or exhausted.
+
+    When *tz* is provided the "now" reference uses the user's local
+    clock so that near-future schedules are not incorrectly rejected
+    on servers whose system clock is ahead (e.g. UTC vs US timezones).
+    """
     try:
         rule = _parse_rule(s)
     except Exception as e:
         raise ValueError(ERROR_MESSAGES.AUTOMATION_INVALID_RRULE(e))
-    if rule.after(datetime.now()) is None:
+    now = datetime.now(ZoneInfo(tz)).replace(tzinfo=None) if tz else datetime.now()
+    if rule.after(now) is None:
         raise ValueError(ERROR_MESSAGES.AUTOMATION_NO_FUTURE_RUNS)
 
 
@@ -83,10 +89,15 @@ def next_run_ns(s: str, tz: str = None) -> Optional[int]:
 
 
 def next_n_runs_ns(s: str, n: int = 5, tz: str = None) -> list[int]:
-    """Compute next N occurrences for UI preview."""
+    """Compute next N occurrences for UI preview.
+
+    Uses the user's timezone for the starting "now" so that the
+    preview matches the user's local clock (same as next_run_ns).
+    """
     rule = _parse_rule(s)
     result = []
-    dt = datetime.now()
+    now = datetime.now(ZoneInfo(tz)).replace(tzinfo=None) if tz else datetime.now()
+    dt = now
     for _ in range(n):
         dt = rule.after(dt)
         if not dt:

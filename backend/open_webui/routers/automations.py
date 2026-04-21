@@ -163,7 +163,7 @@ async def create_new_automation(
 ):
     await check_automations_permission(request, user)
     try:
-        validate_rrule(form_data.data.rrule)
+        validate_rrule(form_data.data.rrule, tz=user.timezone)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -213,7 +213,7 @@ async def update_automation_by_id(
     check_automation_access(automation, user)
 
     try:
-        validate_rrule(form_data.data.rrule)
+        validate_rrule(form_data.data.rrule, tz=user.timezone)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

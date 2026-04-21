@@ -2575,7 +2575,7 @@ async def create_automation(
 
         # Validate the RRULE
         try:
-            validate_rrule(rrule)
+            validate_rrule(rrule, tz=user.timezone)
         except ValueError as e:
             return json.dumps({'error': f'Invalid schedule: {e}'})
 
@@ -2656,7 +2656,7 @@ async def update_automation(
         # Validate RRULE if changed
         if rrule is not None:
             try:
-                validate_rrule(new_rrule)
+                validate_rrule(new_rrule, tz=user.timezone if user else None)
             except ValueError as e:
                 return json.dumps({'error': f'Invalid schedule: {e}'})
 
