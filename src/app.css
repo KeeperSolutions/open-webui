@@ -261,10 +261,15 @@ select {
 	display: none;
 }
 
-/* Hide leaked Mermaid temp containers if render cleanup misses */
+/* Hide leaked Mermaid temp containers if render cleanup misses.
+   Use visibility:hidden (not display:none) so mermaid can still
+   measure the SVG layout before extracting its HTML. */
 body > div[id^='dmermaid-'],
 body > iframe[id^='imermaid-'] {
-	display: none !important;
+	position: fixed !important;
+	visibility: hidden !important;
+	height: 0 !important;
+	overflow: hidden !important;
 }
 
 .scrollbar-hidden:active::-webkit-scrollbar-thumb,
