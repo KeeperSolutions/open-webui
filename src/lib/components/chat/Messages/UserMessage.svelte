@@ -575,8 +575,12 @@
 										? ''
 										: 'invisible group-hover:visible'} p-1 rounded-sm dark:hover:text-white hover:text-black transition"
 									aria-label={$i18n.t('Delete')}
-									on:click={() => {
-										showDeleteConfirm = true;
+									on:click={(e) => {
+										if (e.shiftKey) {
+											deleteMessageHandler();
+										} else {
+											showDeleteConfirm = true;
+										}
 									}}
 								>
 									<svg
