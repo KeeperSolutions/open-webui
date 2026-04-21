@@ -2466,6 +2466,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     tool_ids = form_data.pop('tool_ids', None)
     terminal_id = form_data.pop('terminal_id', None)
     files = form_data.pop('files', None)
+    form_data.pop('folder_id', None)
 
     # Caller-provided OpenAI-style tools take precedence over server-side
     # tool resolution (tool_ids, MCP servers, builtin tools).
