@@ -826,7 +826,10 @@ export const convertOpenAIChats = (_chats) => {
 		// Skip folder/project metadata entries that lack a 'mapping' key
 		if (!('mapping' in convo)) {
 			skipped++;
-			console.log('Skipping non-conversation entry (folder/project):', convo['title'] ?? convo['id']);
+			console.log(
+				'Skipping non-conversation entry (folder/project):',
+				convo['title'] ?? convo['id']
+			);
 			continue;
 		}
 
