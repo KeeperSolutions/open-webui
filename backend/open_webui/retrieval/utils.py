@@ -172,6 +172,11 @@ def _is_text_content_type(content_type: str) -> bool:
 
 
 def get_content_from_url(request, url: str) -> str:
+    from open_webui.retrieval.web.utils import validate_url
+
+    # Validate URL before making any request (blocks private IPs, non-HTTP, filter list)
+    validate_url(url)
+
     # Streamed GET to check Content-Type without downloading the body.
     try:
         response = requests.get(url, stream=True, timeout=30)
