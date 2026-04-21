@@ -83,11 +83,120 @@ def get_loader(request, url: str):
         )
 
 
+def build_loader_from_config(request):
+    """Build a Loader instance with the admin's configured extraction engine settings."""
+    from open_webui.retrieval.loaders.main import Loader
+
+    config = request.app.state.config
+    return Loader(
+        engine=config.CONTENT_EXTRACTION_ENGINE,
+        DATALAB_MARKER_API_KEY=config.DATALAB_MARKER_API_KEY,
+        DATALAB_MARKER_API_BASE_URL=config.DATALAB_MARKER_API_BASE_URL,
+        DATALAB_MARKER_ADDITIONAL_CONFIG=config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+        DATALAB_MARKER_SKIP_CACHE=config.DATALAB_MARKER_SKIP_CACHE,
+        DATALAB_MARKER_FORCE_OCR=config.DATALAB_MARKER_FORCE_OCR,
+        DATALAB_MARKER_PAGINATE=config.DATALAB_MARKER_PAGINATE,
+        DATALAB_MARKER_STRIP_EXISTING_OCR=config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+        DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+        DATALAB_MARKER_FORMAT_LINES=config.DATALAB_MARKER_FORMAT_LINES,
+        DATALAB_MARKER_USE_LLM=config.DATALAB_MARKER_USE_LLM,
+        DATALAB_MARKER_OUTPUT_FORMAT=config.DATALAB_MARKER_OUTPUT_FORMAT,
+        EXTERNAL_DOCUMENT_LOADER_URL=config.EXTERNAL_DOCUMENT_LOADER_URL,
+        EXTERNAL_DOCUMENT_LOADER_API_KEY=config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+        TIKA_SERVER_URL=config.TIKA_SERVER_URL,
+        DOCLING_SERVER_URL=config.DOCLING_SERVER_URL,
+        DOCLING_API_KEY=config.DOCLING_API_KEY,
+        DOCLING_PARAMS=config.DOCLING_PARAMS,
+        PDF_EXTRACT_IMAGES=config.PDF_EXTRACT_IMAGES,
+        PDF_LOADER_MODE=config.PDF_LOADER_MODE,
+        DOCUMENT_INTELLIGENCE_ENDPOINT=config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+        DOCUMENT_INTELLIGENCE_KEY=config.DOCUMENT_INTELLIGENCE_KEY,
+        DOCUMENT_INTELLIGENCE_MODEL=config.DOCUMENT_INTELLIGENCE_MODEL,
+        MISTRAL_OCR_API_BASE_URL=config.MISTRAL_OCR_API_BASE_URL,
+        MISTRAL_OCR_API_KEY=config.MISTRAL_OCR_API_KEY,
+        MINERU_API_MODE=config.MINERU_API_MODE,
+        MINERU_API_URL=config.MINERU_API_URL,
+        MINERU_API_KEY=config.MINERU_API_KEY,
+        MINERU_API_TIMEOUT=config.MINERU_API_TIMEOUT,
+        MINERU_PARAMS=config.MINERU_PARAMS,
+    )
+
+
+def _extract_text_from_binary_response(
+    request, response: requests.Response, url: str
+) -> tuple[str, list]:
+    """Download response body to a temp file and extract text using the Loader pipeline."""
+    import mimetypes
+    import tempfile
+    import urllib.parse
+
+    content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
+
+    # Derive filename from URL path, falling back to Content-Disposition or mime guess
+    url_path = urllib.parse.urlparse(url).path
+    filename = os.path.basename(url_path) if url_path else ''
+
+    if not filename or '.' not in filename:
+        # Try Content-Disposition header
+        cd = response.headers.get('Content-Disposition', '')
+        if 'filename=' in cd:
+            filename = cd.split('filename=')[-1].strip('"\'')
+
+    if not filename or '.' not in filename:
+        ext = mimetypes.guess_extension(content_type) or ''
+        filename = f'download{ext}'
+
+    suffix = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(response.content)
+        tmp_path = tmp.name
+
+    try:
+        loader = build_loader_from_config(request)
+        docs = loader.load(filename, content_type, tmp_path)
+        for doc in docs:
+            doc.metadata['source'] = url
+        content = ' '.join([doc.page_content for doc in docs])
+        return content, docs
+    finally:
+        os.remove(tmp_path)
+
+
+def _is_text_content_type(content_type: str) -> bool:
+    """Return True if the content type should be handled by the web loader."""
+    ct = content_type.split(';')[0].strip().lower()
+    if ct.startswith('text/'):
+        return True
+    if any(t in ct for t in ['xml', 'json', 'javascript']):
+        return True
+    return not ct  # empty / missing → assume HTML
+
+
 def get_content_from_url(request, url: str) -> str:
-    loader = get_loader(request, url)
-    docs = loader.load()
-    content = ' '.join([doc.page_content for doc in docs])
-    return content, docs
+    # Streamed GET to check Content-Type without downloading the body.
+    try:
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '')
+    except Exception:
+        content_type = ''
+        response = None
+
+    # Text / HTML / unknown — use the configured web loader
+    if response is None or _is_text_content_type(content_type):
+        if response is not None:
+            response.close()
+        loader = get_loader(request, url)
+        docs = loader.load()
+        content = ' '.join([doc.page_content for doc in docs])
+        return content, docs
+
+    # Binary content (PDF, DOCX, XLSX, PPTX, etc.) — download and extract
+    try:
+        return _extract_text_from_binary_response(request, response, url)
+    finally:
+        response.close()
 
 
 CHUNK_HASH_KEY = '_chunk_hash'
