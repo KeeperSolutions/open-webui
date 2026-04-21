@@ -1998,7 +1998,8 @@
 
 									{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 										<!-- Terminal Server Selector -->
-										{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).length > 0 || ($settings?.terminalServers ?? []).some((s) => s.url))}
+										{@const hasDirectToolServerAccess = $_user?.role === 'admin' || ($_user?.permissions?.features?.direct_tool_servers ?? true)}
+										{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
 											<TerminalMenu bind:show={showTerminalMenu} />
 										{/if}
 
