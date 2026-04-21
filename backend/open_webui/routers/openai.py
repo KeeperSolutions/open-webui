@@ -50,6 +50,7 @@ from open_webui.utils.misc import (
 )
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.routers.billing import check_billing_access
 from open_webui.utils.access_control import has_access
 from open_webui.utils.headers import include_user_info_headers
 
@@ -798,7 +799,7 @@ def convert_to_azure_payload(url, payload: dict, api_version: str):
 async def generate_chat_completion(
     request: Request,
     form_data: dict,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
     bypass_filter: Optional[bool] = False,
     bypass_system_prompt: bool = False,
     db: Session = Depends(get_session),

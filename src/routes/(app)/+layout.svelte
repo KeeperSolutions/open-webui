@@ -13,6 +13,7 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
+	import { getBillingStatus, type BillingStatus } from '$lib/apis/billing';
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -54,6 +55,19 @@
 	let version = {
 		current: WEBUI_VERSION,
 		latest: WEBUI_VERSION
+	};
+	let billingStatus: BillingStatus | null = null;
+	let showPastDueBanner = false;
+
+	const checkBillingStatus = async () => {
+		if (!($config?.features?.enable_billing ?? false)) return;
+		if ($user?.role === 'admin') return;
+		try {
+			billingStatus = await getBillingStatus(localStorage.token);
+			showPastDueBanner = billingStatus?.subscription_status === 'past_due';
+		} catch {
+			// Billing unavailable — don't block the user
+		}
 	};
 
 	const clearChatInputStorage = () => {
@@ -158,6 +172,7 @@
 			checkLocalDBChats(),
 			setBanners(),
 			setTools(),
+			checkBillingStatus(),
 			setUserSettings(async () => {
 				await Promise.all([setModels(), setToolServers()]);
 			})
@@ -385,6 +400,27 @@
 							</div>
 						</div>
 					</div>
+				{/if}
+
+				{#if showPastDueBanner}
+					<div class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm">
+						<span>
+							{$i18n.t('Your payment is past due. Please')}
+							<a href="/billing" class="underline font-semibold hover:opacity-80">
+								{$i18n.t('update your billing details')}
+							</a>
+							{$i18n.t('to avoid service interruption.')}
+						</span>
+						<button
+							on:click={() => (showPastDueBanner = false)}
+							class="shrink-0 opacity-80 hover:opacity-100 transition text-lg leading-none"
+							aria-label="Dismiss"
+						>
+							✕
+						</button>
+					</div>
+					<!-- Push content below the banner -->
+					<div class="h-10 w-full shrink-0"></div>
 				{/if}
 
 				<Sidebar />
