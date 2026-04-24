@@ -120,8 +120,6 @@
 		[res, controller] = await chatCompletion(localStorage.token, {
 			model: model,
 			model_item: $models.find((m) => m.id === model),
-			session_id: $socket?.id,
-			chat_id: $chatId,
 			messages: [
 				...messages,
 				{
