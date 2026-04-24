@@ -399,9 +399,8 @@
 
 													// Refresh tools to update authenticated state
 													_tools.set(await getTools(localStorage.token));
-
-													// Remove from selected if it was selected
 													selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+													await init();
 												} catch (err) {
 													toast.error(err ?? $i18n.t('Failed to disconnect'));
 												}
