@@ -4751,6 +4751,7 @@ async def streaming_chat_response_handler(response, ctx):
                             **form_data,
                             'model': model_id,
                             'stream': True,
+                            'metadata': metadata,
                         }
 
                         if ENABLE_RESPONSES_API_STATEFUL and last_response_id:
@@ -4974,6 +4975,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 **form_data,
                                 'model': model_id,
                                 'stream': True,
+                                'metadata': metadata,
                                 'messages': [
                                     *form_data['messages'],
                                     *convert_output_to_messages(output, raw=True),
