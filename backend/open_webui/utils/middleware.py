@@ -2184,6 +2184,43 @@ def process_messages_with_output(messages: list[dict]) -> list[dict]:
     return processed
 
 
+SKILL_MENTION_RE = re.compile(r'<\$([^|>]+)\|?[^>]*>')
+
+
+def _get_text_parts(message: dict) -> list[str]:
+    """Return all text segments from a message's content."""
+    content = message.get('content')
+    if isinstance(content, str):
+        return [content]
+    if isinstance(content, list):
+        return [p.get('text', '') for p in content if isinstance(p, dict) and p.get('type') == 'text']
+    return []
+
+
+def extract_skill_ids_from_messages(messages: list[dict]) -> set[str]:
+    """Extract skill IDs from <$skillId|label> mention tags in messages."""
+    ids: set[str] = set()
+    for message in messages:
+        for text in _get_text_parts(message):
+            ids.update(m.group(1) for m in SKILL_MENTION_RE.finditer(text))
+    return ids
+
+
+def strip_skill_mentions(messages: list[dict]) -> None:
+    """Strip <$skillId|label> mention tags from message content in-place."""
+    strip_re = re.compile(r'<\$[^>]+>')
+    for message in messages:
+        content = message.get('content')
+        if isinstance(content, str) and strip_re.search(content):
+            message['content'] = strip_re.sub('', content).strip()
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'text':
+                    text = part.get('text', '')
+                    if strip_re.search(text):
+                        part['text'] = strip_re.sub('', text).strip()
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
     # Pipeline Inlet -> Filter Inlet -> Chat Memory -> Chat Web Search -> Chat Image Generation
     # -> Chat Code Interpreter (Form Data Update) -> (Default) Chat Tools Function Calling
@@ -2472,8 +2509,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # tool resolution (tool_ids, MCP servers, builtin tools).
     payload_tools = form_data.get('tools', None)
 
-    # Skills
+    # Skills — extract IDs from message content (<$skillId|label> tags) so
+    # persisted chats work without relying on the frontend to send skill_ids.
     user_skill_ids = set(form_data.pop('skill_ids', None) or [])
+    user_skill_ids |= extract_skill_ids_from_messages(form_data.get('messages', []))
     model_skill_ids = set(model.get('info', {}).get('meta', {}).get('skillIds', []))
 
     all_skill_ids = user_skill_ids | model_skill_ids
@@ -2508,6 +2547,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data['messages'],
                 append=True,
             )
+
+    # Strip <$skillId|label> mention tags so the model doesn't see raw markup.
+    strip_skill_mentions(form_data.get('messages', []))
 
     prompt = get_last_user_message(form_data['messages'])
     # TODO: re-enable URL extraction from prompt
