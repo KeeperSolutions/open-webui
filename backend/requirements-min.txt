@@ -22,6 +22,7 @@ aiocache
 aiofiles
 starlette-compress==1.7.0
 Brotli==1.2.0
+brotlicffi==1.2.0.1
 httpx[socks,http2,zstd,cli,brotli]==0.28.1
 starsessions[redis]==2.2.1
 

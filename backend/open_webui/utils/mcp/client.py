@@ -156,14 +156,14 @@ class MCPClient:
 
         try:
             # IMPORTANT: Do NOT use asyncio.shield() or asyncio.wait_for()
-            # here — both create a new asyncio task.  The MCP SDK's
-            # streamablehttp_client uses anyio task groups / cancel scopes
-            # that MUST be exited in the same task they were entered in.
-            # Using anyio.CancelScope(shield=True) protects from
-            # CancelledError while staying in the current task.
-            with anyio.CancelScope(shield=True):
-                with anyio.fail_after(5.0):
-                    await exit_stack.aclose()
+            # because they create a new asyncio task, which violates the MCP SDK's
+            # requirement that its TaskGroup be exited in the exact same task.
+            # ALSO do NOT use anyio.CancelScope(shield=True) or anyio.fail_after(),
+            # because they push a new cancel scope onto the task, violating LIFO
+            # order when aclose() attempts to exit the inner TaskGroup.
+            # We simply call aclose() directly. If the task is cancelled, the
+            # sockets will eventually be cleaned up by garbage collection.
+            await exit_stack.aclose()
         except TimeoutError:
             log.warning('MCPClient.disconnect() timed out after 5 s')
         except RuntimeError as exc:
