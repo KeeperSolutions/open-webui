@@ -4,6 +4,8 @@ import base64
 import logging
 import os
 from pathlib import Path
+import posixpath
+from urllib.parse import unquote
 
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
@@ -29,7 +31,7 @@ from fastapi import (
     status,
     Response,
 )
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -62,6 +64,34 @@ def _safe_static_path(static_dir, url_path: str) -> Optional[Path]:
     return candidate
 
 router = APIRouter()
+
+
+def _safe_static_redirect_path(url: str) -> Optional[str]:
+    """
+    If url is a same-origin static asset path, return a normalized path safe for
+    RedirectResponse Location. Otherwise None (caller should fall back to default).
+    Rejects traversal (..), encoded dots, query/fragment, and non-/static targets.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    path = url.split('?', 1)[0].split('#', 1)[0].strip()
+    for _ in range(2):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    if '\x00' in path or '\\' in path:
+        return None
+    if not path.startswith('/'):
+        return None
+    normalized = posixpath.normpath(path)
+    if normalized in ('.', '/'):
+        return None
+    if not (normalized == '/static' or normalized.startswith('/static/')):
+        return None
+    if normalized == '/static':
+        return '/static/'
+    return normalized
 
 
 def is_valid_model_id(model_id: str) -> bool:
@@ -630,7 +660,12 @@ async def get_model_profile_image(
                         return FileResponse(str(file_path), headers=headers)
 
     # Priority 3: Default fallback
-    return FileResponse(f"{STATIC_DIR}/favicon.png")
+    # Canonical URL so browsers cache one asset for all default model avatars
+    # (distinct /profile/image?id=... URLs would otherwise re-download the same bytes).
+    safe_static = _safe_static_redirect_path(model.meta.profile_image_url) if model and model.meta else None
+    if safe_static:
+        return RedirectResponse(url=safe_static, status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/model/profile/image/preview")
