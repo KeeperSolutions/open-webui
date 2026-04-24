@@ -1883,7 +1883,7 @@ async def chat_completion(
     except HTTPException:
         raise
     except Exception as e:
-        log.debug(f'Error processing chat metadata: {e}')
+        log.warning(f'Error processing chat metadata: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -1955,6 +1955,15 @@ async def chat_completion(
 
                 except Exception:
                     pass
+            else:
+                # No chat_id/message_id → legacy/direct API path with no
+                # WebSocket error channel.  We must surface the error as
+                # a proper HTTP response; without this the function would
+                # return None which FastAPI serializes as null.  #23924
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=error_detail,
+                )
         finally:
             # MCP cleanup — MUST run in the SAME asyncio task as
             # connect() because the MCP SDK's streamablehttp_client
