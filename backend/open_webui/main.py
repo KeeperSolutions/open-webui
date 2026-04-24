@@ -1956,37 +1956,29 @@ async def chat_completion(
                 except Exception:
                     pass
         finally:
-            # Clean up MCP clients and emit chat:active=false.
-            # Shield the entire block from CancelledError so cleanup
-            # can finish even when the task is being stopped.
-            async def cleanup_process_chat():
-                try:
-                    if mcp_clients := metadata.get('mcp_clients'):
-
-                        async def cleanup_mcp_clients():
-                            for client in reversed(list(mcp_clients.values())):
-                                try:
-                                    await client.disconnect()
-                                except Exception as e:
-                                    log.debug(f'Error disconnecting MCP client: {e}')
-
-                        await asyncio.wait_for(cleanup_mcp_clients(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    log.warning('MCP client cleanup timed out after 10 s')
-                except Exception as e:
-                    log.debug(f'Error cleaning up MCP clients: {e}')
-
-                try:
-                    if metadata.get('chat_id'):
-                        event_emitter = await get_event_emitter(metadata, update_db=False)
-                        if event_emitter:
-                            await event_emitter({'type': 'chat:active', 'data': {'active': False}})
-                except Exception as e:
-                    log.debug(f'Error emitting chat:active: {e}')
+            # MCP cleanup — MUST run in the SAME asyncio task as
+            # connect() because the MCP SDK's streamablehttp_client
+            # uses anyio task groups whose cancel scopes enforce
+            # same-task exit.  Do NOT wrap in asyncio.shield() or
+            # asyncio.wait_for() — both create a new task.
+            # MCPClient.disconnect() self-shields via
+            # anyio.CancelScope(shield=True).
+            try:
+                if mcp_clients := metadata.get('mcp_clients'):
+                    for client in reversed(list(mcp_clients.values())):
+                        try:
+                            await client.disconnect()
+                        except Exception as e:
+                            log.debug(f'Error disconnecting MCP client: {e}')
+            except Exception as e:
+                log.debug(f'Error cleaning up MCP clients: {e}')
 
             try:
-                await asyncio.shield(cleanup_process_chat())
-            except (asyncio.CancelledError, Exception):
+                if metadata.get('chat_id'):
+                    event_emitter = await get_event_emitter(metadata, update_db=False)
+                    if event_emitter:
+                        await event_emitter({'type': 'chat:active', 'data': {'active': False}})
+            except Exception:
                 pass
 
     # Fan out: one task per model

@@ -155,20 +155,18 @@ class MCPClient:
         self.session = None
 
         try:
-            await asyncio.wait_for(
-                asyncio.shield(exit_stack.aclose()),
-                timeout=5.0,
-            )
-        except asyncio.TimeoutError:
+            # IMPORTANT: Do NOT use asyncio.shield() or asyncio.wait_for()
+            # here — both create a new asyncio task.  The MCP SDK's
+            # streamablehttp_client uses anyio task groups / cancel scopes
+            # that MUST be exited in the same task they were entered in.
+            # Using anyio.CancelScope(shield=True) protects from
+            # CancelledError while staying in the current task.
+            with anyio.CancelScope(shield=True):
+                with anyio.fail_after(5.0):
+                    await exit_stack.aclose()
+        except TimeoutError:
             log.warning('MCPClient.disconnect() timed out after 5 s')
         except RuntimeError as exc:
-            # The MCP SDK's streamable_http transport uses anyio task
-            # groups and async generators internally.  When we close
-            # a session that was interrupted mid-flight these can
-            # raise RuntimeError ("aclose(): asynchronous generator is
-            # already running" or "Attempted to exit cancel scope in a
-            # different task").  Swallowing the error here prevents the
-            # orphaned coroutines from spinning at 100 % CPU.
             log.debug('MCPClient.disconnect() suppressed RuntimeError: %s', exc)
         except Exception as exc:
             log.debug('MCPClient.disconnect() error: %s', exc)
