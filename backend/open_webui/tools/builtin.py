@@ -2568,8 +2568,11 @@ async def create_automation(
         if not user:
             return json.dumps({'error': 'User not found'})
 
-        # Always use the calling model for the automation
-        model_id = (__metadata__ or {}).get('model_id')
+        # Fall back to model dict ID since __metadata__ may predate model_id assignment
+        metadata = __metadata__ or {}
+        model_id = metadata.get('model_id') or (
+            metadata.get('model', {}).get('id') if isinstance(metadata.get('model'), dict) else None
+        )
         if not model_id:
             return json.dumps({'error': 'Could not detect current model'})
 
