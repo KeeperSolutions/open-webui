@@ -30,7 +30,7 @@ def search_firecrawl(
             timeout=count * 3 + 10,
         )
         response.raise_for_status()
-        data = response.json().get('data', {})
+        data = response.json().get('data', [])
 
         results = [
             SearchResult(
@@ -38,7 +38,7 @@ def search_firecrawl(
                 title=r.get('title', ''),
                 snippet=r.get('description', ''),
             )
-            for r in data.get('web', [])
+            for r in (data if isinstance(data, list) else [])
         ]
 
         if filter_list:
