@@ -123,6 +123,17 @@ def _llm_retry_backoff_seconds(attempt: int) -> float:
 #
 ##########################################
 
+# Headers that become stale after aiohttp auto-decompresses the upstream
+# response body.  Forwarding them verbatim causes desktop / programmatic
+# clients to attempt decompression of an already-decoded payload, resulting
+# in ZlibError.  See https://github.com/aio-libs/aiohttp/issues/4462.
+_STRIP_PROXY_HEADERS = frozenset({'Content-Encoding', 'Content-Length', 'Transfer-Encoding'})
+
+
+def _clean_proxy_headers(raw_headers) -> dict:
+    """Return a copy of *raw_headers* with stale encoding headers removed."""
+    return {k: v for k, v in raw_headers.items() if k not in _STRIP_PROXY_HEADERS}
+
 
 async def send_get_request(
     request: Request = None,
@@ -1330,7 +1341,7 @@ async def generate_chat_completion(
                     return StreamingResponse(
                         stream_wrapper(r, session, stream_chunks_handler),
                         status_code=r.status,
-                        headers=dict(r.headers),
+                        headers=_clean_proxy_headers(r.headers),
                     )
 
                 # Non-stream transient upstream status (429 / transient 5xx):
@@ -1479,7 +1490,7 @@ async def embeddings(request: Request, form_data: dict, user):
             return StreamingResponse(
                 stream_wrapper(r),
                 status_code=r.status,
-                headers=dict(r.headers),
+                headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
@@ -1600,7 +1611,7 @@ async def responses(
             return StreamingResponse(
                 stream_wrapper(r),
                 status_code=r.status,
-                headers=dict(r.headers),
+                headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
@@ -1719,7 +1730,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             return StreamingResponse(
                 stream_wrapper(r),
                 status_code=r.status,
-                headers=dict(r.headers),
+                headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
