@@ -143,6 +143,8 @@ class ModelAccessListResponse(BaseModel):
 
 
 class ModelForm(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+
     id: str
     base_model_id: Optional[str] = None
     name: str
