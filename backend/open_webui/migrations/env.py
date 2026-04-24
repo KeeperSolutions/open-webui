@@ -37,7 +37,7 @@ target_metadata = Auth.metadata
 
 DB_URL = DATABASE_URL
 
-# Normalize SSL query params for psycopg2 (Alembic uses psycopg2, not asyncpg).
+# Normalize SSL query params for psycopg2 (Alembic uses psycopg2 for sync migrations).
 url_without_ssl, ssl_params = extract_ssl_params_from_url(DB_URL)
 DB_URL = reattach_ssl_params_to_url(url_without_ssl, ssl_params) if ssl_params else DB_URL
 
