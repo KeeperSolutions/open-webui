@@ -238,9 +238,13 @@ async def fetch_url(
         content, _ = await asyncio.to_thread(get_content_from_url, __request__, url)
 
         # Truncate if configured (WEB_FETCH_MAX_CONTENT_LENGTH)
-        max_length = getattr(__request__.app.state.config, 'WEB_FETCH_MAX_CONTENT_LENGTH', None)
-        if max_length and max_length > 0 and len(content) > max_length:
-            content = content[:max_length] + '\n\n[Content truncated...]'
+        # Guard: content may be None if the web loader silently failed
+        if content is not None:
+            max_length = getattr(__request__.app.state.config, 'WEB_FETCH_MAX_CONTENT_LENGTH', None)
+            if max_length and max_length > 0 and len(content) > max_length:
+                content = content[:max_length] + '\n\n[Content truncated...]'
+        else:
+            content = ''
 
         return content
     except Exception as e:

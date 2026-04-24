@@ -1550,11 +1550,11 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
 
     except Exception as e:
         log.exception(e)
-        queries = [user_message]
+        queries = [user_message or '']
 
     # Check if generated queries are empty
     if len(queries) == 1 and queries[0].strip() == '':
-        queries = [user_message]
+        queries = [user_message or '']
 
     # Check if queries are not found
     if len(queries) == 0:
@@ -1995,7 +1995,7 @@ async def chat_completion_files_handler(
             )
 
         if len(queries) == 0:
-            queries = [get_last_user_message(body['messages'])]
+            queries = [get_last_user_message(body['messages']) or '']
 
         try:
             # Directly await async get_sources_from_items (no thread needed - fully async now)

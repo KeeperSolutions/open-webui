@@ -566,6 +566,13 @@ async def query_collection(
             log.exception(f'Error when querying the collection: {e}')
             return None, e
 
+    # Sanitize: filter out None/empty queries to prevent embedding crashes
+    # (e.g. when get_last_user_message returns None)
+    queries = [q for q in queries if q]
+    if not queries:
+        log.warning('query_collection: all queries were None or empty, returning empty results')
+        return {'distances': [[]], 'documents': [[]], 'metadatas': [[]]}
+
     # Generate all query embeddings (in one call)
     query_embeddings = await embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
     log.debug(f'query_collection: processing {len(queries)} queries across {len(collection_names)} collections')
