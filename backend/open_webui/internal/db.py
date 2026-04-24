@@ -3,6 +3,7 @@ import json
 import logging
 import ssl as _stdlib_ssl
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -37,90 +38,154 @@ from typing_extensions import Self
 log = logging.getLogger(__name__)
 
 
-def extract_ssl_mode_from_url(url: str) -> tuple[str, str | None]:
-    """Strip SSL query-string parameters from a PostgreSQL URL.
+@dataclass
+class SSLParams:
+    """SSL parameters extracted from a PostgreSQL ``DATABASE_URL``.
 
-    asyncpg and psycopg2 use different query-string keys for SSL
-    (``ssl`` vs ``sslmode``).  This helper removes **both** from the
-    URL so that each driver can receive the correct parameter through
-    its own mechanism (query-string re-injection for psycopg2,
-    ``connect_args`` for asyncpg).
-
-    Returns
-    -------
-    (url_without_ssl, ssl_mode)
-        *url_without_ssl* is the original URL with ``ssl`` / ``sslmode``
-        query parameters removed.  *ssl_mode* is the extracted mode
-        string (e.g. ``'require'``), or ``None`` if neither parameter
-        was present.
-
-    Non-PostgreSQL URLs are returned unchanged with ``ssl_mode=None``.
+    Holds the connection-mode flag and optional certificate file paths
+    so that each driver (asyncpg, psycopg2/libpq) can receive them in
+    the format it expects.
     """
-    if not url or not any(url.startswith(prefix) for prefix in ('postgresql://', 'postgresql+', 'postgres://')):
-        return url, None
+
+    mode: str | None = None
+    rootcert: str | None = None
+    cert: str | None = None
+    key: str | None = None
+    crl: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.mode is not None
+
+    @property
+    def has_any(self) -> bool:
+        """True when *any* SSL-related field is set (mode or cert files)."""
+        return any((self.mode, self.rootcert, self.cert, self.key, self.crl))
+
+
+# ── URL extraction / reattachment ────────────────────────────────────
+
+
+def _pop_first(params: dict[str, list[str]], key: str) -> str | None:
+    """Pop a single-valued query param, returning ``None`` if absent."""
+    values = params.pop(key, None)
+    return values[0] if values else None
+
+
+def extract_ssl_params_from_url(url: str) -> tuple[str, SSLParams]:
+    """Strip all SSL query-string parameters from a PostgreSQL URL.
+
+    asyncpg does not accept libpq-style certificate-file keys
+    (``sslrootcert``, ``sslcert``, ``sslkey``, ``sslcrl``), so every
+    SSL-related key is removed and returned as a structured
+    :class:`SSLParams` object.
+
+    Returns ``(url_without_ssl, ssl_params)``.  Non-PostgreSQL URLs are
+    returned unchanged with an empty ``SSLParams``.
+    """
+    if not url or not any(
+        url.startswith(p) for p in ('postgresql://', 'postgresql+', 'postgres://')
+    ):
+        return url, SSLParams()
 
     parsed = urlparse(url)
-    query_params = parse_qs(parsed.query, keep_blank_values=True)
+    qp = parse_qs(parsed.query, keep_blank_values=True)
 
-    # Prefer sslmode (libpq canonical) over the asyncpg-only ssl key.
-    ssl_mode: str | None = None
-    for key in ('sslmode', 'ssl'):
-        values = query_params.pop(key, None)
-        if values and ssl_mode is None:
-            ssl_mode = values[0]
+    # Prefer sslmode (libpq canonical) over the asyncpg-only ``ssl`` key.
+    # Both must be popped unconditionally so neither leaks into the cleaned URL.
+    sslmode_val = _pop_first(qp, 'sslmode')
+    ssl_val = _pop_first(qp, 'ssl')
+    ssl_mode = sslmode_val or ssl_val
 
-    if ssl_mode is None:
-        # Nothing to strip — return the URL untouched.
-        return url, None
+    params = SSLParams(
+        mode=ssl_mode,
+        rootcert=_pop_first(qp, 'sslrootcert'),
+        cert=_pop_first(qp, 'sslcert'),
+        key=_pop_first(qp, 'sslkey'),
+        crl=_pop_first(qp, 'sslcrl'),
+    )
 
-    # Rebuild the query string without the SSL keys.
-    remaining_query = urlencode(query_params, doseq=True)
-    url_without_ssl = urlunparse(parsed._replace(query=remaining_query))
-    return url_without_ssl, ssl_mode
+    if not params.has_any:
+        return url, params
+
+    cleaned_query = urlencode(qp, doseq=True)
+    return urlunparse(parsed._replace(query=cleaned_query)), params
 
 
-def build_asyncpg_ssl_args(ssl_mode: str | None) -> dict:
-    """Convert a libpq-style SSL mode value to asyncpg ``connect_args``.
+def reattach_ssl_params_to_url(url_without_ssl: str, ssl_params: SSLParams) -> str:
+    """Re-append SSL query-string parameters to a cleaned PostgreSQL URL.
+
+    Used for psycopg2/libpq consumers that expect ``sslmode`` and the
+    certificate-file keys in the connection string.
+    """
+    if not ssl_params:
+        return url_without_ssl
+
+    mapping = (
+        ('sslmode', ssl_params.mode),
+        ('sslrootcert', ssl_params.rootcert),
+        ('sslcert', ssl_params.cert),
+        ('sslkey', ssl_params.key),
+        ('sslcrl', ssl_params.crl),
+    )
+    parts = [f'{k}={v}' for k, v in mapping if v]
+    if not parts:
+        return url_without_ssl
+
+    sep = '&' if '?' in url_without_ssl else '?'
+    return f'{url_without_ssl}{sep}{"&".join(parts)}'
+
+
+# ── asyncpg SSLContext builder ───────────────────────────────────────
+
+
+def _make_ssl_context(ssl_params: SSLParams, *, verify: bool) -> _stdlib_ssl.SSLContext:
+    """Create an :class:`ssl.SSLContext` from *ssl_params*.
+
+    When *verify* is ``False``, hostname checking and certificate
+    verification are disabled (matching libpq ``require`` semantics).
+    """
+    ctx = _stdlib_ssl.create_default_context(cafile=ssl_params.rootcert)
+    if not verify:
+        ctx.check_hostname = False
+        ctx.verify_mode = _stdlib_ssl.CERT_NONE
+    if ssl_params.cert and ssl_params.key:
+        ctx.load_cert_chain(certfile=ssl_params.cert, keyfile=ssl_params.key)
+    if verify and ssl_params.crl:
+        ctx.load_verify_locations(cafile=ssl_params.crl)
+        ctx.verify_flags |= _stdlib_ssl.VERIFY_CRL_CHECK_LEAF
+    return ctx
+
+
+def build_asyncpg_ssl_args(ssl_params: SSLParams) -> dict:
+    """Convert :class:`SSLParams` to asyncpg-compatible ``connect_args``.
 
     Returns a dict suitable for unpacking into
-    ``create_async_engine(..., connect_args=...)``.
+    ``create_async_engine(...)``.
     """
-    if ssl_mode is None:
+    if not ssl_params:
         return {}
 
-    mode = ssl_mode.lower()
+    mode = (ssl_params.mode or 'require').lower()
+
     if mode == 'disable':
         return {'connect_args': {'ssl': False}}
     if mode in ('allow', 'prefer'):
-        # asyncpg has no direct equivalent — omit to let it try without.
         return {}
     if mode == 'require':
-        # SSL required but no certificate verification (matches libpq).
-        ctx = _stdlib_ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = _stdlib_ssl.CERT_NONE
-        return {'connect_args': {'ssl': ctx}}
+        return {'connect_args': {'ssl': _make_ssl_context(ssl_params, verify=False)}}
     if mode in ('verify-ca', 'verify-full'):
-        # Full verification — use the system trust store.
-        ctx = _stdlib_ssl.create_default_context()
+        ctx = _make_ssl_context(ssl_params, verify=True)
         if mode == 'verify-ca':
             ctx.check_hostname = False
         return {'connect_args': {'ssl': ctx}}
 
     # Unknown value — pass through as-is and let asyncpg decide.
-    return {'connect_args': {'ssl': ssl_mode}}
+    return {'connect_args': {'ssl': ssl_params.mode}}
 
 
-def reattach_ssl_mode_to_url(url_without_ssl: str, ssl_mode: str | None) -> str:
-    """Re-append ``sslmode=<value>`` to a cleaned PostgreSQL URL.
-
-    Used for psycopg2 / libpq consumers that expect the canonical
-    ``sslmode`` query-string key.
-    """
-    if ssl_mode is None:
-        return url_without_ssl
-    separator = '&' if '?' in url_without_ssl else '?'
-    return f'{url_without_ssl}{separator}sslmode={ssl_mode}'
+# Backwards-compatible aliases for external callers.
+extract_ssl_mode_from_url = extract_ssl_params_from_url
+reattach_ssl_mode_to_url = reattach_ssl_params_to_url
 
 
 class JSONField(types.TypeDecorator):
@@ -193,9 +258,10 @@ class EncryptedJSONField(types.TypeDecorator):
 def handle_peewee_migration(DATABASE_URL):
     db = None
     try:
-        # Normalize SSL params so psycopg2 always sees `sslmode=` (never `ssl=`).
-        url_without_ssl, ssl_mode = extract_ssl_mode_from_url(DATABASE_URL)
-        normalized_url = reattach_ssl_mode_to_url(url_without_ssl, ssl_mode)
+        # Normalize SSL params so psycopg2 always sees `sslmode=` (never `ssl=`)
+        # and cert-file params are preserved in the connection string.
+        url_without_ssl, ssl_params = extract_ssl_params_from_url(DATABASE_URL)
+        normalized_url = reattach_ssl_params_to_url(url_without_ssl, ssl_params)
 
         # Replace the postgresql:// with postgres:// to handle the peewee migration
         db = register_connection(normalized_url.replace('postgresql://', 'postgres://'))
@@ -224,11 +290,11 @@ if ENABLE_DB_MIGRATIONS:
 
 # Normalize SSL params from the URL once; each engine branch re-injects
 # the driver-appropriate form.
-DATABASE_URL_WITHOUT_SSL, DATABASE_SSL_MODE = extract_ssl_mode_from_url(DATABASE_URL)
+DATABASE_URL_WITHOUT_SSL, DATABASE_SSL_PARAMS = extract_ssl_params_from_url(DATABASE_URL)
 
-# For psycopg2 (sync engine), re-append sslmode=<value>.
+# For psycopg2 (sync engine), re-append sslmode + cert-file params.
 SQLALCHEMY_DATABASE_URL = (
-    reattach_ssl_mode_to_url(DATABASE_URL_WITHOUT_SSL, DATABASE_SSL_MODE) if DATABASE_SSL_MODE else DATABASE_URL
+    reattach_ssl_params_to_url(DATABASE_URL_WITHOUT_SSL, DATABASE_SSL_PARAMS) if DATABASE_SSL_PARAMS else DATABASE_URL
 )
 
 
@@ -374,7 +440,7 @@ get_db = contextmanager(get_session)
 
 # Use the SSL-stripped URL for asyncpg — SSL is injected via connect_args.
 ASYNC_SQLALCHEMY_DATABASE_URL = _make_async_url(
-    DATABASE_URL_WITHOUT_SSL if DATABASE_SSL_MODE else SQLALCHEMY_DATABASE_URL
+    DATABASE_URL_WITHOUT_SSL if DATABASE_SSL_PARAMS else SQLALCHEMY_DATABASE_URL
 )
 
 if 'sqlite' in ASYNC_SQLALCHEMY_DATABASE_URL:
@@ -395,7 +461,7 @@ if 'sqlite' in ASYNC_SQLALCHEMY_DATABASE_URL:
 else:
     # Inject asyncpg-compatible SSL connect_args when the user specified
     # sslmode/ssl in DATABASE_URL.
-    asyncpg_ssl_args = build_asyncpg_ssl_args(DATABASE_SSL_MODE)
+    asyncpg_ssl_args = build_asyncpg_ssl_args(DATABASE_SSL_PARAMS)
 
     if isinstance(DATABASE_POOL_SIZE, int):
         if DATABASE_POOL_SIZE > 0:
