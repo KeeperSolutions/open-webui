@@ -1916,17 +1916,15 @@ async def chat_completion(
         except asyncio.CancelledError:
             log.info('Chat processing was cancelled')
             try:
-                event_emitter = await get_event_emitter(metadata)
-                if event_emitter:
-                    await asyncio.shield(
-                        event_emitter(
-                            {'type': 'chat:tasks:cancel'},
-                        )
-                    )
-            except Exception as e:
+                async def emit_cancel_event():
+                    event_emitter = await get_event_emitter(metadata)
+                    if event_emitter:
+                        await event_emitter({'type': 'chat:tasks:cancel'})
+
+                await asyncio.shield(emit_cancel_event())
+            except Exception:
                 pass
-            finally:
-                raise  # re-raise to ensure proper task cancellation handling
+            raise  # re-raise to ensure proper task cancellation handling
         except Exception as e:
             error_detail = e.detail if isinstance(e, HTTPException) else str(e)
             log.error('Error processing chat payload: %s', error_detail)
@@ -1958,36 +1956,38 @@ async def chat_completion(
                 except Exception:
                     pass
         finally:
-            # Clean up MCP clients.  Shield the entire block from
-            # CancelledError so disconnect() can finish even when the
-            # task is being stopped.  Each client is isolated so one
-            # failure doesn't skip the rest.
-            try:
-                if mcp_clients := metadata.get('mcp_clients'):
+            # Clean up MCP clients and emit chat:active=false.
+            # Shield the entire block from CancelledError so cleanup
+            # can finish even when the task is being stopped.
+            async def cleanup_process_chat():
+                try:
+                    if mcp_clients := metadata.get('mcp_clients'):
 
-                    async def _cleanup_mcp():
-                        for client in reversed(list(mcp_clients.values())):
-                            try:
-                                await client.disconnect()
-                            except Exception as e:
-                                log.debug(f'Error disconnecting MCP client: {e}')
+                        async def cleanup_mcp_clients():
+                            for client in reversed(list(mcp_clients.values())):
+                                try:
+                                    await client.disconnect()
+                                except Exception as e:
+                                    log.debug(f'Error disconnecting MCP client: {e}')
 
-                    await asyncio.wait_for(
-                        asyncio.shield(_cleanup_mcp()),
-                        timeout=10.0,
-                    )
-            except asyncio.TimeoutError:
-                log.warning('MCP client cleanup timed out after 10 s')
-            except Exception as e:
-                log.debug(f'Error cleaning up MCP clients: {e}')
-            # Emit chat:active=false when task completes
+                        await asyncio.wait_for(cleanup_mcp_clients(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    log.warning('MCP client cleanup timed out after 10 s')
+                except Exception as e:
+                    log.debug(f'Error cleaning up MCP clients: {e}')
+
+                try:
+                    if metadata.get('chat_id'):
+                        event_emitter = await get_event_emitter(metadata, update_db=False)
+                        if event_emitter:
+                            await event_emitter({'type': 'chat:active', 'data': {'active': False}})
+                except Exception as e:
+                    log.debug(f'Error emitting chat:active: {e}')
+
             try:
-                if metadata.get('chat_id'):
-                    event_emitter = await get_event_emitter(metadata, update_db=False)
-                    if event_emitter:
-                        await event_emitter({'type': 'chat:active', 'data': {'active': False}})
-            except Exception as e:
-                log.debug(f'Error emitting chat:active: {e}')
+                await asyncio.shield(cleanup_process_chat())
+            except (asyncio.CancelledError, Exception):
+                pass
 
     # Fan out: one task per model
     if metadata.get('session_id') and metadata.get('chat_id'):

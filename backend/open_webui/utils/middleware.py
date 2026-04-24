@@ -4340,6 +4340,8 @@ async def streaming_chat_response_handler(response, ctx):
                                             'data': data,
                                         }
                                     )
+                        except (asyncio.CancelledError, KeyboardInterrupt):
+                            raise
                         except Exception as e:
                             done = 'data: [DONE]' in line
                             if done:
@@ -5064,31 +5066,39 @@ async def streaming_chat_response_handler(response, ctx):
                 await outlet_filter_handler(ctx)
             except asyncio.CancelledError:
                 log.warning('Task was cancelled!')
-                try:
-                    await asyncio.shield(event_emitter({'type': 'chat:tasks:cancel'}))
 
+                # Close the response body iterator to trigger cleanup
+                # in stream_wrapper's finally block and release the
+                # upstream connection.  Without this, the async
+                # generator is orphaned and may spin in anyio internals.
+                if hasattr(response, 'body_iterator') and hasattr(response.body_iterator, 'aclose'):
+                    try:
+                        await asyncio.shield(response.body_iterator.aclose())
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+                async def save_cancelled_state():
+                    await event_emitter({'type': 'chat:tasks:cancel'})
                     if not ENABLE_REALTIME_CHAT_SAVE:
-                        # Save message in the database
-                        await asyncio.shield(
-                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                metadata['chat_id'],
-                                metadata['message_id'],
-                                {
-                                    'done': True,
-                                    'content': serialize_output(output),
-                                    'output': output,
-                                },
-                            )
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {
+                                'done': True,
+                                'content': serialize_output(output),
+                                'output': output,
+                            },
                         )
                     else:
-                        await asyncio.shield(
-                            Chats.upsert_message_to_chat_by_id_and_message_id(
-                                metadata['chat_id'],
-                                metadata['message_id'],
-                                {'done': True},
-                            )
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {'done': True},
                         )
-                except Exception:
+
+                try:
+                    await asyncio.shield(save_cancelled_state())
+                except (asyncio.CancelledError, Exception):
                     pass
                 raise  # re-raise CancelledError for proper propagation
 
