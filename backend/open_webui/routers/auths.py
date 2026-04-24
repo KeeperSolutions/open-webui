@@ -976,9 +976,7 @@ async def delete_oauth_session_by_provider(
     The provider string matches the 'provider' field in the oauth_session table
     (e.g. 'mcp:server-id' for MCP connections).
     """
-    result = await OAuthSessions.delete_sessions_by_user_id_and_provider(
-        user.id, provider, db=db
-    )
+    result = await OAuthSessions.delete_sessions_by_user_id_and_provider(user.id, provider, db=db)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

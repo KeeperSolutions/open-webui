@@ -326,9 +326,7 @@ class OAuthSessionTable:
         """Delete all OAuth sessions for a specific user and provider"""
         try:
             async with get_async_db_context(db) as db:
-                result = await db.execute(
-                    delete(OAuthSession).filter_by(user_id=user_id, provider=provider)
-                )
+                result = await db.execute(delete(OAuthSession).filter_by(user_id=user_id, provider=provider))
                 await db.commit()
                 return result.rowcount > 0
         except Exception as e:

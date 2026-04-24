@@ -1916,6 +1916,7 @@ async def chat_completion(
         except asyncio.CancelledError:
             log.info('Chat processing was cancelled')
             try:
+
                 async def emit_cancel_event():
                     event_emitter = await get_event_emitter(metadata)
                     if event_emitter:
@@ -1987,6 +1988,7 @@ async def chat_completion(
 
             try:
                 if metadata.get('chat_id'):
+
                     async def emit_inactive_event():
                         try:
                             event_emitter = await get_event_emitter(metadata, update_db=False)
@@ -1994,7 +1996,7 @@ async def chat_completion(
                                 await event_emitter({'type': 'chat:active', 'data': {'active': False}})
                         except Exception:
                             pass
-                    
+
                     try:
                         # Shield the event emission so it finishes even if the main task is cancelled
                         await asyncio.shield(emit_inactive_event())

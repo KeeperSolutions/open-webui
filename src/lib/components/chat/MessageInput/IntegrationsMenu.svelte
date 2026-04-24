@@ -406,7 +406,7 @@
 												}
 											}}
 										>
-									<LinkSlash className="size-3.5" />
+											<LinkSlash className="size-3.5" />
 										</button>
 									</Tooltip>
 								</div>

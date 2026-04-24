@@ -50,7 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔑 **Brotli dependency update.** Brotli has been updated to address CVE-2025-6176.
 - 🖥️ **Windows startup script.** The Windows startup batch script has been updated for improved compatibility.
 
-
 ## [0.9.1] - 2026-04-21
 
 ### Fixed

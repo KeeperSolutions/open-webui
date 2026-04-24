@@ -57,9 +57,7 @@ def _pop_first(params: dict[str, list[str]], key: str) -> str | None:
 
 def _is_postgres_url(url: str) -> bool:
     """Return True if *url* looks like a PostgreSQL connection string."""
-    return bool(url) and any(
-        url.startswith(p) for p in ('postgresql://', 'postgresql+', 'postgres://')
-    )
+    return bool(url) and any(url.startswith(p) for p in ('postgresql://', 'postgresql+', 'postgres://'))
 
 
 def extract_ssl_params_from_url(url: str) -> tuple[str, dict[str, str]]:
@@ -223,9 +221,7 @@ if ENABLE_DB_MIGRATIONS:
 _url_without_ssl, _ssl_dict = extract_ssl_params_from_url(DATABASE_URL)
 
 # For psycopg2 (sync engine), re-append sslmode + cert-file params.
-SQLALCHEMY_DATABASE_URL = (
-    reattach_ssl_params_to_url(_url_without_ssl, _ssl_dict) if _ssl_dict else DATABASE_URL
-)
+SQLALCHEMY_DATABASE_URL = reattach_ssl_params_to_url(_url_without_ssl, _ssl_dict) if _ssl_dict else DATABASE_URL
 
 
 def _make_async_url(url: str) -> str:

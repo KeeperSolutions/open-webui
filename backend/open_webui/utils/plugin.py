@@ -335,7 +335,9 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
     return tool_module, frontmatter
 
 
-async def get_function_module_from_cache(request, function_id, function: FunctionModel | None = None, load_from_db=True):
+async def get_function_module_from_cache(
+    request, function_id, function: FunctionModel | None = None, load_from_db=True
+):
     if load_from_db:
         # Always load from the database by default
         # This is useful for hooks like "inlet" or "outlet" where the content might change
