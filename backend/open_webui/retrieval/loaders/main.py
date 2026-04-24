@@ -25,7 +25,7 @@ from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.mineru import MinerULoader
 from open_webui.retrieval.loaders.paddleocr_vl import PaddleOCRVLLoader
 
-from open_webui.env import GLOBAL_LOG_LEVEL, REQUESTS_VERIFY
+from open_webui.env import GLOBAL_LOG_LEVEL, REQUESTS_VERIFY, AIOHTTP_CLIENT_SESSION_SSL
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -205,6 +205,7 @@ class DoclingLoader:
                     **self.params,
                 },
                 headers=headers,
+                verify=AIOHTTP_CLIENT_SESSION_SSL,
             )
         if r.ok:
             result = r.json()
