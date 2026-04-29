@@ -15,6 +15,12 @@
 		incomplete: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
 	};
 
+	const TIER_COLORS: Record<string, string> = {
+		internal: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+		trial: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+		paid: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+	};
+
 	onMount(async () => {
 		if (!localStorage.token) {
 			loading = false;
@@ -31,7 +37,8 @@
 	});
 
 	$: totalCost = rows.reduce((s, r) => s + r.current_month_cost_eur, 0);
-	$: activeCount = rows.filter((r) => r.subscription_status === 'active').length;
+	$: paidCount = rows.filter((r) => r.plan_tier === 'paid' && r.subscription_status === 'active').length;
+	$: trialCount = rows.filter((r) => r.plan_tier === 'trial').length;
 	$: pastDueCount = rows.filter((r) => r.subscription_status === 'past_due').length;
 </script>
 
@@ -48,12 +55,12 @@
 				<div class="text-2xl font-semibold">{rows.length}</div>
 			</div>
 			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-1">
-				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Active subscriptions')}</div>
-				<div class="text-2xl font-semibold text-green-600 dark:text-green-400">{activeCount}</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Paid (active)')}</div>
+				<div class="text-2xl font-semibold text-green-600 dark:text-green-400">{paidCount}</div>
 			</div>
 			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-1">
-				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Past due')}</div>
-				<div class="text-2xl font-semibold {pastDueCount > 0 ? 'text-red-600 dark:text-red-400' : ''}">{pastDueCount}</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Trial')}</div>
+				<div class="text-2xl font-semibold text-blue-600 dark:text-blue-400">{trialCount}</div>
 			</div>
 			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-1">
 				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('This month total')}</div>
@@ -73,9 +80,9 @@
 						<tr>
 							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('User')}</th>
 							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Email')}</th>
-							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Status')}</th>
+							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Plan')}</th>
+							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Sub. Status')}</th>
 							<th class="text-right px-4 py-2.5 font-medium">{$i18n.t('This month')}</th>
-							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Free tier')}</th>
 							<th class="text-left px-4 py-2.5 font-medium">{$i18n.t('Stripe')}</th>
 						</tr>
 					</thead>
@@ -85,23 +92,25 @@
 								<td class="px-4 py-2.5 font-medium truncate max-w-[140px]">{row.name}</td>
 								<td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 font-mono text-xs">{row.email}</td>
 								<td class="px-4 py-2.5">
+									{#if row.plan_tier}
+										<span class="text-xs px-2 py-0.5 rounded-full font-medium {TIER_COLORS[row.plan_tier] ?? ''}">
+											{$i18n.t(row.plan_tier)}
+										</span>
+									{:else}
+										<span class="text-xs text-gray-400 dark:text-gray-600">—</span>
+									{/if}
+								</td>
+								<td class="px-4 py-2.5">
 									{#if row.subscription_status}
 										<span class="text-xs px-2 py-0.5 rounded-full font-medium {STATUS_COLORS[row.subscription_status] ?? STATUS_COLORS.incomplete}">
 											{$i18n.t(row.subscription_status)}
 										</span>
 									{:else}
-										<span class="text-xs text-gray-400 dark:text-gray-600">{$i18n.t('No account')}</span>
+										<span class="text-xs text-gray-400 dark:text-gray-600">—</span>
 									{/if}
 								</td>
 								<td class="px-4 py-2.5 text-right font-medium">
 									€{row.current_month_cost_eur.toFixed(4)}
-								</td>
-								<td class="px-4 py-2.5 text-xs">
-									{#if row.free_tier_credit_applied}
-										<span class="text-green-600 dark:text-green-400">✓</span>
-									{:else}
-										<span class="text-gray-400">—</span>
-									{/if}
 								</td>
 								<td class="px-4 py-2.5">
 									{#if row.stripe_customer_id}
@@ -117,9 +126,9 @@
 					</tbody>
 					<tfoot class="bg-gray-50 dark:bg-gray-850 font-medium text-sm">
 						<tr>
-							<td class="px-4 py-2.5 text-gray-500 dark:text-gray-400" colspan="3">{$i18n.t('Total')}</td>
+							<td class="px-4 py-2.5 text-gray-500 dark:text-gray-400" colspan="4">{$i18n.t('Total')}</td>
 							<td class="px-4 py-2.5 text-right">€{totalCost.toFixed(4)}</td>
-							<td colspan="2"></td>
+							<td></td>
 						</tr>
 					</tfoot>
 				</table>

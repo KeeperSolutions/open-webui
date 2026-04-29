@@ -64,7 +64,10 @@
 		if ($user?.role === 'admin') return;
 		try {
 			billingStatus = await getBillingStatus(localStorage.token);
-			showPastDueBanner = billingStatus?.subscription_status === 'past_due';
+			const isPastDue = billingStatus?.subscription_status === 'past_due';
+			const isCreditExhausted =
+				billingStatus?.plan_tier === 'trial' && (billingStatus?.credit_remaining_eur ?? 1) <= 0;
+			showPastDueBanner = isPastDue || isCreditExhausted;
 		} catch {
 			// Billing unavailable — don't block the user
 		}
@@ -405,11 +408,19 @@
 				{#if showPastDueBanner}
 					<div class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm">
 						<span>
-							{$i18n.t('Your payment is past due. Please')}
-							<a href="/billing" class="underline font-semibold hover:opacity-80">
-								{$i18n.t('update your billing details')}
-							</a>
-							{$i18n.t('to avoid service interruption.')}
+							{#if billingStatus?.plan_tier === 'trial'}
+								{$i18n.t('Your trial credit is used up. Please')}
+								<a href="/billing" class="underline font-semibold hover:opacity-80">
+									{$i18n.t('upgrade your plan')}
+								</a>
+								{$i18n.t('to continue.')}
+							{:else}
+								{$i18n.t('Your payment is past due. Please')}
+								<a href="/billing" class="underline font-semibold hover:opacity-80">
+									{$i18n.t('update your billing details')}
+								</a>
+								{$i18n.t('to avoid service interruption.')}
+							{/if}
 						</span>
 						<button
 							on:click={() => (showPastDueBanner = false)}

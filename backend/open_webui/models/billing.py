@@ -29,6 +29,8 @@ class StripeBilling(Base):
 
     subscription_status = Column(Text, nullable=True)  # active | past_due | canceled | incomplete
     free_tier_credit_applied = Column(Boolean, default=False, nullable=False)
+    plan_tier = Column(Text, nullable=True)  # internal | trial | paid
+    checkout_session_id = Column(Text, nullable=True)
 
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -47,6 +49,8 @@ class StripeBillingModel(BaseModel):
 
     subscription_status: Optional[str] = None
     free_tier_credit_applied: bool = False
+    plan_tier: Optional[str] = None  # internal | trial | paid
+    checkout_session_id: Optional[str] = None
 
     created_at: int
     updated_at: int
@@ -63,6 +67,11 @@ class StripeBillingTable:
             row = db.query(StripeBilling).filter_by(user_id=user_id).first()
             return StripeBillingModel.model_validate(row) if row else None
 
+    def get_by_checkout_session_id(self, session_id: str) -> Optional[StripeBillingModel]:
+        with get_db() as db:
+            row = db.query(StripeBilling).filter_by(checkout_session_id=session_id).first()
+            return StripeBillingModel.model_validate(row) if row else None
+
     def get_by_customer_id(self, customer_id: str) -> Optional[StripeBillingModel]:
         with get_db() as db:
             row = db.query(StripeBilling).filter_by(stripe_customer_id=customer_id).first()
@@ -76,7 +85,9 @@ class StripeBillingTable:
         stripe_subscription_item_id: Optional[str] = None,
         stripe_payment_method_id: Optional[str] = None,
         subscription_status: Optional[str] = None,
-        free_tier_credit_applied: bool = False,
+        free_tier_credit_applied: Optional[bool] = None,
+        plan_tier: Optional[str] = None,
+        checkout_session_id: Optional[str] = None,
     ) -> StripeBillingModel:
         with get_db() as db:
             row = db.query(StripeBilling).filter_by(user_id=user_id).first()
@@ -90,7 +101,9 @@ class StripeBillingTable:
                     stripe_subscription_item_id=stripe_subscription_item_id,
                     stripe_payment_method_id=stripe_payment_method_id,
                     subscription_status=subscription_status,
-                    free_tier_credit_applied=free_tier_credit_applied,
+                    free_tier_credit_applied=free_tier_credit_applied or False,
+                    plan_tier=plan_tier,
+                    checkout_session_id=checkout_session_id,
                     created_at=now,
                     updated_at=now,
                 )
@@ -106,7 +119,12 @@ class StripeBillingTable:
                     row.stripe_payment_method_id = stripe_payment_method_id
                 if subscription_status is not None:
                     row.subscription_status = subscription_status
-                row.free_tier_credit_applied = free_tier_credit_applied
+                if plan_tier is not None:
+                    row.plan_tier = plan_tier
+                if checkout_session_id is not None:
+                    row.checkout_session_id = checkout_session_id
+                if free_tier_credit_applied is not None:
+                    row.free_tier_credit_applied = free_tier_credit_applied
                 row.updated_at = now
             db.commit()
             db.refresh(row)

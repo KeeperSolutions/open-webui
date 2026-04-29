@@ -67,7 +67,6 @@ from open_webui.socket.main import (
     get_event_emitter,
     get_models_in_use,
 )
-from open_webui.tasks.billing import periodic_billing_usage_reporter
 from open_webui.routers import (
     audio,
     images,
@@ -521,6 +520,7 @@ from open_webui.utils.auth import (
     get_verified_user,
     create_admin_user,
 )
+from open_webui.routers.billing import check_billing_access
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.oauth import (
     get_oauth_client_info_with_dynamic_client_registration,
@@ -628,7 +628,6 @@ async def lifespan(app: FastAPI):
         limiter.total_tokens = THREAD_POOL_SIZE
 
     asyncio.create_task(periodic_usage_pool_cleanup())
-    asyncio.create_task(periodic_billing_usage_reporter())
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
         log.info("Pre-loading base models cache...")
@@ -1582,7 +1581,7 @@ async def embeddings(
 async def chat_completion(
     request: Request,
     form_data: dict,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
