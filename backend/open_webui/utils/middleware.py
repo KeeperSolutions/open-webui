@@ -4003,6 +4003,12 @@ async def streaming_chat_response_handler(response, ctx):
                                             response_id = response_metadata.pop('response_id', None)
                                             if response_id:
                                                 last_response_id = response_id
+
+                                        # Normalize and capture usage for DB persistence
+                                        if response_metadata.get('usage'):
+                                            response_metadata['usage'] = normalize_usage(response_metadata['usage'])
+                                            usage = response_metadata['usage']
+
                                         processed_data.update(response_metadata)
                                         processed_data.pop('done', None)
 
