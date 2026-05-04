@@ -2406,6 +2406,22 @@
 						window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
 						currentChatPage.set(1);
 						await chats.set(await getChatList(localStorage.token, $currentChatPage));
+
+						// Persist chat-level params (system prompt, advanced
+						// params) and files that the backend doesn't have when
+						// it creates the chat shell.  Without this, reloading
+						// loses them.  Only patch these fields — avoid writing
+						// history/messages which the backend is updating
+						// concurrently via streaming.
+						if (
+							Object.keys(params).length > 0 ||
+							chatFiles.length > 0
+						) {
+							await updateChatById(localStorage.token, res.chat_id, {
+								params: params,
+								files: chatFiles
+							});
+						}
 					}
 				}
 			}
