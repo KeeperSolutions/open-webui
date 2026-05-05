@@ -131,7 +131,7 @@
 			</div>
 
 			<p class="text-sm text-gray-500 dark:text-gray-400">
-				{$i18n.t('You have a €{limit} trial credit. Upgrade to continue after it runs out.', { limit: status.credit_limit_eur.toFixed(2) })}
+				{$i18n.t('You have a €{{limit}} trial credit. Upgrade to continue after it runs out.', { limit: status.credit_limit_eur.toFixed(2) })}
 			</p>
 
 			<!-- Credit progress bar -->
