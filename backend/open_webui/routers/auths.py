@@ -840,12 +840,17 @@ async def signup(
                 form_data.email.lower(), user.id, "Manchester Roundtable"
             )
 
-            # Auto-onboard user for billing (no-op if BILLING_ENABLED=false)
-            try:
-                from open_webui.routers.billing import auto_onboard_user
-                await auto_onboard_user(user, request)
-            except Exception as e:
-                log.warning(f"Could not auto-onboard user {user.email} for billing: {e}")
+            # Auto-onboard user for billing in the background so signup isn't blocked by Stripe latency
+            from open_webui.routers.billing import auto_onboard_user
+            import asyncio
+
+            async def _onboard():
+                try:
+                    await auto_onboard_user(user, request)
+                except Exception as e:
+                    log.warning(f"Could not auto-onboard user {user.email} for billing: {e}")
+
+            asyncio.create_task(_onboard())
 
             expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
             expires_at = None

@@ -1552,7 +1552,7 @@ async def get_base_models(request: Request, user=Depends(get_admin_user)):
 @app.post("/api/embeddings")
 @app.post("/api/v1/embeddings")  # Experimental: Compatibility with OpenAI API
 async def embeddings(
-    request: Request, form_data: dict, user=Depends(get_verified_user)
+    request: Request, form_data: dict, user=Depends(check_billing_access)
 ):
     """
     OpenAI-compatible embeddings endpoint.

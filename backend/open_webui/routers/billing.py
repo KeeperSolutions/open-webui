@@ -52,11 +52,11 @@ def _get_user_alltime_cost(email: str, created_at: int) -> float:
     try:
         from open_webui.langfuse.metrics import get_alltime_since
 
-        # Use the earlier of: billing record created_at or start of current year
-        # This ensures we don't miss usage that predates the billing record
+        # Use the later of: billing record created_at or start of current year.
+        # This caps the lookback to the current year while never querying before account creation.
         year_start = datetime.datetime(datetime.datetime.utcnow().year, 1, 1)
         record_start = datetime.datetime.utcfromtimestamp(created_at)
-        since = min(year_start, record_start)
+        since = max(year_start, record_start)
 
         rows = get_alltime_since(since)
         return sum(r["cost"] for r in rows if r.get("user") == email)
@@ -100,17 +100,17 @@ async def check_billing_access(user=Depends(get_verified_user)):
         return user
 
     if record.plan_tier == "paid":
-        if record.subscription_status in ("past_due",):
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Your payment is past due. Please update your billing details at /billing.",
-            )
+        if record.subscription_status in ("active", "trialing"):
+            return user
         if record.subscription_status == "canceled":
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Your subscription has been canceled. Please visit /billing to reactivate.",
             )
-        return user
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Your payment is past due. Please update your billing details at /billing.",
+        )
 
     if record.plan_tier == "trial":
         cost_used = _get_user_alltime_cost(user.email, record.created_at)
@@ -451,21 +451,26 @@ async def stripe_webhook(request: Request):
     data = event.data.object
 
     if event_type == "checkout.session.completed":
+        session_id = getattr(data, "id", None)
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
 
-        if customer_id:
+        record = None
+        if session_id:
+            record = StripeBillings.get_by_checkout_session_id(session_id)
+        if record is None and customer_id:
             record = StripeBillings.get_by_customer_id(customer_id)
-            if record:
-                StripeBillings.upsert(
-                    user_id=record.user_id,
-                    stripe_customer_id=customer_id,
-                    stripe_subscription_id=subscription_id,
-                    plan_tier="paid",
-                    subscription_status="active",
-                    free_tier_credit_applied=record.free_tier_credit_applied,
-                )
-                log.info(f"[billing] Checkout completed: user_id={record.user_id} → paid plan")
+
+        if record:
+            StripeBillings.upsert(
+                user_id=record.user_id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                plan_tier="paid",
+                subscription_status="active",
+                free_tier_credit_applied=record.free_tier_credit_applied,
+            )
+            log.info(f"[billing] Checkout completed: user_id={record.user_id} → paid plan")
 
     elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
         customer_id = getattr(data, "customer", None)
