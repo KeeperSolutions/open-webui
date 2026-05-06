@@ -155,6 +155,15 @@ def get_current_month() -> List[Dict[str, Any]]:
     return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
 
 
+def get_alltime_since(since: dt.datetime) -> List[Dict[str, Any]]:
+    """Fetch all Langfuse metrics from `since` up to now."""
+    pk, sk, host = load_env()
+    headers = auth_header(pk, sk)
+    from_ts = _isoformat_utc(since)
+    to_ts = _isoformat_utc(dt.datetime.utcnow())
+    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+
+
 def read_custom_days_env() -> Optional[int]:
     raw = os.getenv("CUSTOM_DAYS", "").strip()
     if not raw:

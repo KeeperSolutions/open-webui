@@ -2,11 +2,20 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export type BillingStatus = {
 	enabled: boolean;
+	plan_tier: 'internal' | 'trial' | 'paid' | null;
 	is_configured: boolean;
+
+	// Trial
+	credit_limit_eur: number;
+	credit_used_eur: number;
+	credit_remaining_eur: number;
+
+	// Paid
 	subscription_status: string | null;
-	current_month_cost_eur: number;
 	upcoming_invoice_eur: number | null;
-	has_payment_method: boolean;
+
+	// All tiers
+	current_month_cost_eur: number;
 };
 
 export type Invoice = {
@@ -40,12 +49,8 @@ async function request<T>(url: string, token: string, options: RequestInit = {})
 export const getBillingStatus = (token: string) =>
 	request<BillingStatus>(`${base}/status`, token);
 
-export const setupBilling = (token: string) =>
-	request<{ is_configured: boolean; subscription_status: string | null }>(
-		`${base}/setup`,
-		token,
-		{ method: 'POST' }
-	);
+export const createCheckoutSession = (token: string) =>
+	request<{ url: string }>(`${base}/checkout`, token, { method: 'POST' });
 
 export const getBillingPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/portal`, token, { method: 'POST' });
@@ -56,6 +61,7 @@ export type AdminBillingRow = {
 	user_id: string;
 	name: string;
 	email: string;
+	plan_tier: string | null;
 	subscription_status: string | null;
 	stripe_customer_id: string | null;
 	current_month_cost_eur: number;

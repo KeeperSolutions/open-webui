@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import {
 		getBillingStatus,
-		setupBilling,
+		createCheckoutSession,
 		getBillingPortalUrl,
 		getInvoices,
 		type BillingStatus,
@@ -15,7 +16,7 @@
 	let status: BillingStatus | null = null;
 	let invoices: Invoice[] = [];
 	let loading = true;
-	let settingUp = false;
+	let checkingOut = false;
 	let openingPortal = false;
 
 	const STATUS_LABELS: Record<string, string> = {
@@ -35,6 +36,14 @@
 	};
 
 	onMount(async () => {
+		// Show success/cancel toast from Stripe redirect
+		const params = $page.url.searchParams;
+		if (params.get('checkout') === 'success') {
+			toast.success($i18n.t('Subscription activated! Welcome to the paid plan.'));
+		} else if (params.get('checkout') === 'canceled') {
+			toast.info($i18n.t('Checkout was canceled.'));
+		}
+
 		try {
 			[status, invoices] = await Promise.all([
 				getBillingStatus(localStorage.token),
@@ -47,16 +56,14 @@
 		}
 	});
 
-	const handleSetup = async () => {
-		settingUp = true;
+	const handleCheckout = async () => {
+		checkingOut = true;
 		try {
-			await setupBilling(localStorage.token);
-			status = await getBillingStatus(localStorage.token);
-			toast.success($i18n.t('Billing account created'));
+			const { url } = await createCheckoutSession(localStorage.token);
+			window.location.href = url;
 		} catch (e: any) {
-			toast.error(e?.message ?? $i18n.t('Failed to set up billing'));
-		} finally {
-			settingUp = false;
+			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
+			checkingOut = false;
 		}
 	};
 
@@ -77,6 +84,11 @@
 			month: 'long',
 			day: 'numeric'
 		});
+
+	$: creditPct =
+		status?.plan_tier === 'trial' && status.credit_limit_eur > 0
+			? Math.min(100, (status.credit_used_eur / status.credit_limit_eur) * 100)
+			: 0;
 </script>
 
 <div class="w-full max-w-3xl mx-auto px-4 py-8 space-y-6">
@@ -90,24 +102,76 @@
 			{$i18n.t('Billing is not enabled on this instance.')}
 		</div>
 
-	{:else if !status.is_configured}
-		<!-- Not set up yet -->
+	{:else if status.plan_tier === 'internal'}
+		<!-- Internal user -->
 		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="font-medium">{$i18n.t('Set up billing')}</div>
+			<div class="flex items-center gap-3">
+				<div class="font-medium">{$i18n.t('Internal Plan')}</div>
+				<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+					{$i18n.t('Internal')}
+				</span>
+			</div>
 			<p class="text-sm text-gray-500 dark:text-gray-400">
-				{$i18n.t('Add a payment method to continue using the service after your free credits run out.')}
+				{$i18n.t('You are on the internal plan. Usage is tracked but not billed.')}
 			</p>
+			<div class="space-y-1">
+				<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('This month usage')}</div>
+				<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(4)}</div>
+			</div>
+		</div>
+
+	{:else if status.plan_tier === 'trial'}
+		<!-- Trial user -->
+		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+			<div class="flex items-center justify-between flex-wrap gap-3">
+				<div class="font-medium">{$i18n.t('Trial Plan')}</div>
+				<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+					{$i18n.t('Trial')}
+				</span>
+			</div>
+
+			<p class="text-sm text-gray-500 dark:text-gray-400">
+				{$i18n.t('You have a €{{limit}} trial credit. Upgrade to continue after it runs out.', { limit: status.credit_limit_eur.toFixed(2) })}
+			</p>
+
+			<!-- Credit progress bar -->
+			<div class="space-y-1.5">
+				<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+					<span>{$i18n.t('Credit used')}</span>
+					<span>€{status.credit_used_eur.toFixed(4)} / €{status.credit_limit_eur.toFixed(2)}</span>
+				</div>
+				<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+					<div
+						class="h-2 rounded-full transition-all {creditPct >= 90 ? 'bg-red-500' : creditPct >= 60 ? 'bg-yellow-500' : 'bg-blue-500'}"
+						style="width: {creditPct}%"
+					></div>
+				</div>
+				<div class="text-xs font-medium {status.credit_remaining_eur <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">
+					{#if status.credit_remaining_eur <= 0}
+						{$i18n.t('Credit exhausted — upgrade to continue.')}
+					{:else}
+						€{status.credit_remaining_eur.toFixed(4)} {$i18n.t('remaining')}
+					{/if}
+				</div>
+			</div>
+
+			{#if status.credit_remaining_eur <= 0}
+				<div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+					{$i18n.t('Your trial credit is used up. Upgrade to keep using the service.')}
+				</div>
+			{/if}
+
 			<button
-				on:click={handleSetup}
-				disabled={settingUp}
+				on:click={handleCheckout}
+				disabled={checkingOut}
 				class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
 			>
-				{settingUp ? $i18n.t('Setting up...') : $i18n.t('Set up billing')}
+				{checkingOut ? $i18n.t('Redirecting...') : $i18n.t('Upgrade to €45/month')}
 			</button>
 		</div>
 
-	{:else}
-		<!-- Subscription status card -->
+	{:else if status.plan_tier === 'paid'}
+		<!-- Paid subscriber -->
 		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
 			<div class="flex items-center justify-between flex-wrap gap-3">
 				<div class="font-medium">{$i18n.t('Subscription')}</div>
@@ -121,12 +185,12 @@
 			<div class="grid grid-cols-2 gap-4 text-sm">
 				<div class="space-y-1">
 					<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('This month usage')}</div>
-					<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(2)}</div>
+					<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(4)}</div>
 				</div>
 				{#if status.upcoming_invoice_eur !== null}
 					<div class="space-y-1">
 						<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Upcoming invoice')}</div>
-						<div class="font-semibold text-lg">€{status.upcoming_invoice_eur.toFixed(2)}</div>
+						<div class="font-semibold text-lg">€{status.upcoming_invoice_eur?.toFixed(2)}</div>
 					</div>
 				{/if}
 			</div>
@@ -142,11 +206,11 @@
 					{$i18n.t('Your subscription has been canceled.')}
 				</div>
 				<button
-					on:click={handleSetup}
-					disabled={settingUp}
+					on:click={handleCheckout}
+					disabled={checkingOut}
 					class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
 				>
-					{settingUp ? $i18n.t('Setting up...') : $i18n.t('Resubscribe')}
+					{checkingOut ? $i18n.t('Redirecting...') : $i18n.t('Resubscribe')}
 				</button>
 			{:else}
 				<button
@@ -202,5 +266,11 @@
 				</div>
 			</div>
 		{/if}
+
+	{:else}
+		<!-- No billing record yet (unconfigured) -->
+		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-500 dark:text-gray-400">
+			{$i18n.t('Your billing account is being set up. Please refresh the page in a moment.')}
+		</div>
 	{/if}
 </div>

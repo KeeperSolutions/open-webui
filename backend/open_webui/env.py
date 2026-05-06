@@ -932,6 +932,14 @@ EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
 BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")
-STRIPE_FREE_TIER_CENTS = int(os.environ.get("STRIPE_FREE_TIER_CENTS", "500"))
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")  # €45/month flat subscription price
+STRIPE_FREE_TIER_CENTS = int(os.environ.get("STRIPE_FREE_TIER_CENTS", "200"))  # €2.00 trial credit
 BILLING_GRACE_PERIOD_DAYS = int(os.environ.get("BILLING_GRACE_PERIOD_DAYS", "3"))
+
+# Comma-separated list of email domains considered internal (e.g. "keepersolutions.com")
+INTERNAL_EMAIL_DOMAINS = [
+    d.strip().lower()
+    for d in os.environ.get("INTERNAL_EMAIL_DOMAINS", "").split(",")
+    if d.strip()
+]
+TRIAL_CREDIT_EUR = float(os.environ.get("TRIAL_CREDIT_EUR", "2.0"))
