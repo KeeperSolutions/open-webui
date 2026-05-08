@@ -460,6 +460,18 @@ class ChatTable:
             return row[0] or 'New Chat'
 
     async def get_messages_map_by_chat_id(self, id: str) -> Optional[dict]:
+        """Message map for walking history (see ``get_message_list``).
+
+        Prefer ``chat_message`` rows to avoid loading the large ``chat``
+        JSON blob; fall back to embedded history when no rows exist
+        (legacy chats).
+        """
+        # Fast path: build from normalized chat_message rows.
+        messages_map = await ChatMessages.get_messages_map_by_chat_id(id)
+        if messages_map is not None:
+            return messages_map
+
+        # No rows — fall back to the embedded JSON blob for legacy chats.
         chat = await self.get_chat_by_id(id)
         if chat is None:
             return None
