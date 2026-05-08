@@ -28,8 +28,8 @@ from fastapi import (
     Depends,
     HTTPException,
     Request,
-    status,
     Response,
+    status,
 )
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
@@ -37,6 +37,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission, filter_allowed_access_grants
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING
 from open_webui.internal.db import get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -509,10 +510,14 @@ async def get_model_profile_image(
                     return Response(status_code=status.HTTP_304_NOT_MODIFIED)
 
                 if image_url.startswith("http"):
-                    return Response(
-                        status_code=status.HTTP_302_FOUND,
-                        headers={"Location": image_url},
-                    )
+                    if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                        return Response(
+                            status_code=status.HTTP_302_FOUND,
+                            headers={"Location": image_url},
+                        )
+                    # When forwarding is disabled, fall through to provider
+                    # detection / the default image to prevent client-side
+                    # IP/UA/Referer leaks via 302 redirect to external origins.
                 elif image_url.startswith("data:image"):
                     try:
                         header, base64_data = image_url.split(",", 1)
@@ -627,10 +632,14 @@ async def get_model_profile_image(
                 arena_image_url = arena_model.get("meta", {}).get("profile_image_url")
                 if arena_image_url:
                     if arena_image_url.startswith("http"):
-                        return Response(
-                            status_code=status.HTTP_302_FOUND,
-                            headers={"Location": arena_image_url},
-                        )
+                        if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                            return Response(
+                                status_code=status.HTTP_302_FOUND,
+                                headers={"Location": arena_image_url},
+                            )
+                        # When forwarding is disabled, fall through to
+                        # prevent client-side IP/UA/Referer leaks via 302
+                        # redirect to external origins.
                     elif arena_image_url.startswith("data:image"):
                         try:
                             header, base64_data = arena_image_url.split(",", 1)
@@ -731,10 +740,14 @@ def get_model_profile_image_preview(
 
         if not is_default_favicon:
             if preview_url.startswith("http"):
-                return Response(
-                    status_code=status.HTTP_302_FOUND,
-                    headers={"Location": preview_url},
-                )
+                if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                    return Response(
+                        status_code=status.HTTP_302_FOUND,
+                        headers={"Location": preview_url},
+                    )
+                # When forwarding is disabled, fall through to provider
+                # detection to prevent client-side IP/UA/Referer leaks via
+                # 302 redirect to external origins.
             elif preview_url.startswith("data:image"):
                 try:
                     header, base64_data = preview_url.split(",", 1)

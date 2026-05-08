@@ -29,7 +29,7 @@ from open_webui.models.users import (
 )
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import STATIC_DIR
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, STATIC_DIR
 from open_webui.internal.db import get_async_session
 
 
@@ -492,10 +492,14 @@ async def get_user_profile_image_by_id(
         if user_obj.profile_image_url:
             # check if it's url or base64
             if user_obj.profile_image_url.startswith("http"):
-                return Response(
-                    status_code=status.HTTP_302_FOUND,
-                    headers={"Location": user_obj.profile_image_url},
-                )
+                if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                    return Response(
+                        status_code=status.HTTP_302_FOUND,
+                        headers={"Location": user_obj.profile_image_url},
+                    )
+                # When forwarding is disabled, fall through to the
+                # default image to prevent client-side IP/UA/Referer
+                # leaks via 302 redirect to external origins.
             elif user_obj.profile_image_url.startswith("data:image"):
                 try:
                     header, base64_data = user_obj.profile_image_url.split(",", 1)
