@@ -519,28 +519,32 @@ export const copyToClipboard = async (text, html = null, formatted = false) => {
 	} else {
 		let result = false;
 		if (!navigator.clipboard) {
-			const textArea = document.createElement('textarea');
-			textArea.value = text;
+			const span = document.createElement('span');
+			span.textContent = text;
+			span.style.whiteSpace = 'pre';
+			span.style.position = 'fixed';
+			span.style.top = '0';
+			span.style.left = '0';
+			span.style.opacity = '0';
+			document.body.appendChild(span);
 
-			// Avoid scrolling to bottom
-			textArea.style.top = '0';
-			textArea.style.left = '0';
-			textArea.style.position = 'fixed';
-
-			document.body.appendChild(textArea);
-			textArea.focus({ preventScroll: true });
-			textArea.select();
+			const range = document.createRange();
+			range.selectNodeContents(span);
+			const selection = window.getSelection();
+			selection?.removeAllRanges();
+			selection?.addRange(range);
 
 			try {
 				const successful = document.execCommand('copy');
 				const msg = successful ? 'successful' : 'unsuccessful';
 				console.log('Fallback: Copying text command was ' + msg);
-				result = true;
+				result = successful;
 			} catch (err) {
 				console.error('Fallback: Oops, unable to copy', err);
 			}
 
-			document.body.removeChild(textArea);
+			selection?.removeAllRanges();
+			document.body.removeChild(span);
 			return result;
 		}
 
