@@ -190,6 +190,12 @@
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
 	}
 
+	let saveControlsTimer;
+	$: if (!loading && !$temporaryChatEnabled && $chatId && params && chatFiles) {
+		clearTimeout(saveControlsTimer);
+		saveControlsTimer = setTimeout(saveControls, 400);
+	}
+
 	const navigateHandler = async () => {
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
@@ -197,6 +203,8 @@
 			updateLastReadAt($chatId);
 		}
 
+		clearTimeout(saveControlsTimer);
+		await saveControls();
 		loading = true;
 
 		prompt = '';
@@ -833,6 +841,8 @@
 
 		return () => {
 			try {
+				clearTimeout(saveControlsTimer);
+				saveControls();
 				if (chatIdProp && !$temporaryChatEnabled) {
 					updateLastReadAt(chatIdProp);
 				}
@@ -2742,6 +2752,13 @@
 				});
 			}
 		}
+	};
+
+	const saveControls = async () => {
+		if (!$chatId || $temporaryChatEnabled) return;
+		await updateChatById(localStorage.token, $chatId, { params, files: chatFiles }).catch(
+			(err) => console.error('[controls autosave]', err)
+		);
 	};
 
 	const MAX_DRAFT_LENGTH = 5000;
