@@ -24,6 +24,7 @@
 	export let paragraphTag = 'p';
 	export let editCodeBlock = true;
 	export let topPadding = false;
+	export let allowEmbeds = true;
 
 	export let sourceIds = [];
 
@@ -104,6 +105,7 @@
 		{editCodeBlock}
 		{sourceIds}
 		{topPadding}
+		{allowEmbeds}
 		{onTaskClick}
 		{onSourceClick}
 		{onSave}
