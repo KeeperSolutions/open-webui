@@ -96,8 +96,11 @@ async def check_billing_access(user=Depends(get_verified_user)):
 
     record = StripeBillings.get_by_user_id(user.id)
     if record is None:
-        # No billing record yet — allow (will be created on next explicit action)
-        return user
+        # No billing record — onboard now (covers existing users who never signed up through billing flow)
+        await auto_onboard_user(user)
+        record = StripeBillings.get_by_user_id(user.id)
+        if record is None:
+            return user  # Stripe unreachable, allow through
 
     if record.plan_tier == "paid":
         if record.subscription_status in ("active", "trialing"):
