@@ -203,6 +203,7 @@ from open_webui.config import (
     AUDIO_STT_ENGINE,
     AUDIO_STT_MODEL,
     AUDIO_STT_SUPPORTED_CONTENT_TYPES,
+    AUDIO_STT_ALLOWED_EXTENSIONS,
     AUDIO_STT_OPENAI_API_BASE_URL,
     AUDIO_STT_OPENAI_API_KEY,
     AUDIO_STT_AZURE_API_KEY,
@@ -1330,6 +1331,7 @@ app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = IMAGES_EDIT_COMFYUI_WORKFL
 app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
 app.state.config.STT_MODEL = AUDIO_STT_MODEL
 app.state.config.STT_SUPPORTED_CONTENT_TYPES = AUDIO_STT_SUPPORTED_CONTENT_TYPES
+app.state.config.STT_ALLOWED_EXTENSIONS = AUDIO_STT_ALLOWED_EXTENSIONS
 
 app.state.config.STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
 app.state.config.STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
@@ -2925,7 +2927,13 @@ async def serve_cache_file(
         raise HTTPException(status_code=404, detail='File not found')
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')
-    return FileResponse(file_path)
+
+    mime, _ = mimetypes.guess_type(file_path)
+    inline_safe = mime and mime.split('/', 1)[0] in {'image', 'audio', 'video'}
+    headers = {'X-Content-Type-Options': 'nosniff'}
+    if not inline_safe:
+        headers['Content-Disposition'] = f'attachment; filename="{os.path.basename(file_path)}"'
+    return FileResponse(file_path, headers=headers)
 
 
 def swagger_ui_html(*args, **kwargs):

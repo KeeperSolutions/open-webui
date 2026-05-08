@@ -178,6 +178,7 @@ class STTConfigForm(BaseModel):
     ENGINE: str
     MODEL: str
     SUPPORTED_CONTENT_TYPES: list[str] = []
+    ALLOWED_EXTENSIONS: list[str] = []
     WHISPER_MODEL: str
     DEEPGRAM_API_KEY: str
     AZURE_API_KEY: str
@@ -219,6 +220,7 @@ async def get_audio_config(request: Request, user=Depends(get_admin_user)):
             'ENGINE': request.app.state.config.STT_ENGINE,
             'MODEL': request.app.state.config.STT_MODEL,
             'SUPPORTED_CONTENT_TYPES': request.app.state.config.STT_SUPPORTED_CONTENT_TYPES,
+            'ALLOWED_EXTENSIONS': request.app.state.config.STT_ALLOWED_EXTENSIONS,
             'WHISPER_MODEL': request.app.state.config.WHISPER_MODEL,
             'DEEPGRAM_API_KEY': request.app.state.config.DEEPGRAM_API_KEY,
             'AZURE_API_KEY': request.app.state.config.AUDIO_STT_AZURE_API_KEY,
@@ -254,6 +256,7 @@ async def update_audio_config(request: Request, form_data: AudioConfigUpdateForm
     request.app.state.config.STT_ENGINE = form_data.stt.ENGINE
     request.app.state.config.STT_MODEL = form_data.stt.MODEL
     request.app.state.config.STT_SUPPORTED_CONTENT_TYPES = form_data.stt.SUPPORTED_CONTENT_TYPES
+    request.app.state.config.STT_ALLOWED_EXTENSIONS = form_data.stt.ALLOWED_EXTENSIONS
 
     request.app.state.config.WHISPER_MODEL = form_data.stt.WHISPER_MODEL
     request.app.state.config.DEEPGRAM_API_KEY = form_data.stt.DEEPGRAM_API_KEY
@@ -295,6 +298,7 @@ async def update_audio_config(request: Request, form_data: AudioConfigUpdateForm
             'ENGINE': request.app.state.config.STT_ENGINE,
             'MODEL': request.app.state.config.STT_MODEL,
             'SUPPORTED_CONTENT_TYPES': request.app.state.config.STT_SUPPORTED_CONTENT_TYPES,
+            'ALLOWED_EXTENSIONS': request.app.state.config.STT_ALLOWED_EXTENSIONS,
             'WHISPER_MODEL': request.app.state.config.WHISPER_MODEL,
             'DEEPGRAM_API_KEY': request.app.state.config.DEEPGRAM_API_KEY,
             'AZURE_API_KEY': request.app.state.config.AUDIO_STT_AZURE_API_KEY,
@@ -1242,7 +1246,14 @@ async def transcription(
 
     try:
         safe_name = os.path.basename(file.filename) if file.filename else ''
-        ext = safe_name.rsplit('.', 1)[-1] if '.' in safe_name else ''
+        ext = safe_name.rsplit('.', 1)[-1].lower() if '.' in safe_name else ''
+
+        allowed_extensions = getattr(request.app.state.config, 'STT_ALLOWED_EXTENSIONS', [])
+        if allowed_extensions and ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Invalid audio file extension',
+            )
 
         id = uuid.uuid4()
 

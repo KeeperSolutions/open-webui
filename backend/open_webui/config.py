@@ -3969,6 +3969,19 @@ AUDIO_STT_SUPPORTED_CONTENT_TYPES = PersistentConfig(
     ],
 )
 
+AUDIO_STT_ALLOWED_EXTENSIONS = PersistentConfig(
+    'AUDIO_STT_ALLOWED_EXTENSIONS',
+    'audio.stt.allowed_extensions',
+    [
+        ext.strip()
+        for ext in os.environ.get(
+            'AUDIO_STT_ALLOWED_EXTENSIONS',
+            'mp3,wav,m4a,webm,ogg,flac,mp4,mpga,mpeg',
+        ).split(',')
+        if ext.strip()
+    ],
+)
+
 AUDIO_STT_AZURE_API_KEY = PersistentConfig(
     'AUDIO_STT_AZURE_API_KEY',
     'audio.stt.azure.api_key',
