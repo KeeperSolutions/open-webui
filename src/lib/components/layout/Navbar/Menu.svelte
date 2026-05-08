@@ -32,6 +32,7 @@
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import Share from '$lib/components/icons/Share.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 
@@ -43,6 +44,7 @@
 	export let moveChatHandler: Function;
 
 	export let archiveChatHandler: Function;
+	export let deleteChatHandler: Function;
 
 	// export let tagHandler: Function;
 
@@ -444,6 +446,17 @@
 				>
 					<ArchiveBox className="size-4" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Archive')}</div>
+				</button>
+
+				<button
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+					on:click={() => {
+						deleteChatHandler();
+					}}
+				>
+					<GarbageBin strokeWidth="1.5" />
+					<div class="flex items-center">{$i18n.t('Delete')}</div>
 				</button>
 
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />

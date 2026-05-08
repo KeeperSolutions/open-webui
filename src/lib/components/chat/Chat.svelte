@@ -70,6 +70,7 @@
 	import {
 		archiveChatById,
 		createNewChat,
+		deleteChatById,
 		getAllTags,
 		getChatById,
 		getChatList,
@@ -101,6 +102,7 @@
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
+	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
@@ -2779,6 +2781,33 @@
 			toast.error($i18n.t('Failed to archive chat.'));
 		}
 	};
+
+	let showDeleteConfirm = false;
+
+	const deleteChatHandler = async (id: string) => {
+		showDeleteConfirm = true;
+	};
+
+	const confirmDeleteChat = async () => {
+		const id = $chatId;
+		if (!id) return;
+
+		try {
+			const res = await deleteChatById(localStorage.token, id);
+			if (res) {
+				currentChatPage.set(1);
+				initNewChat();
+				await goto('/');
+				chats.set(await getChatList(localStorage.token, $currentChatPage));
+				pinnedChats.set(await getPinnedChatList(localStorage.token));
+				allTags.set(await getAllTags(localStorage.token));
+				toast.success($i18n.t('Chat deleted.'));
+			}
+		} catch (error) {
+			console.error('Error deleting chat:', error);
+			toast.error(`${error}`);
+		}
+	};
 </script>
 
 <svelte:head>
@@ -2790,6 +2819,18 @@
 </svelte:head>
 
 <audio id="audioElement" src="" style="display: none;"></audio>
+
+<DeleteConfirmDialog
+	bind:show={showDeleteConfirm}
+	title={$i18n.t('Delete chat?')}
+	on:confirm={() => {
+		confirmDeleteChat();
+	}}
+>
+	<div class=" text-sm text-gray-500 flex-1 line-clamp-3">
+		{$i18n.t('This will delete')} <span class="  font-semibold">{$chatTitle}</span>.
+	</div>
+</DeleteConfirmDialog>
 
 <EventConfirmDialog
 	bind:show={showEventConfirmation}
@@ -2862,6 +2903,7 @@
 						shareEnabled={!!history.currentId}
 						{initNewChat}
 						{archiveChatHandler}
+						{deleteChatHandler}
 						{moveChatHandler}
 						onSaveTempChat={async () => {
 							try {
