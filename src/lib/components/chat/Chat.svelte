@@ -2171,7 +2171,7 @@
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'collection'].includes(item.type) ||
+					['doc', 'text', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -2423,18 +2423,12 @@
 						await chats.set(await getChatList(localStorage.token, $currentChatPage));
 
 						// Persist chat-level params (system prompt, advanced
-						// params) and files that the backend doesn't have when
-						// it creates the chat shell.  Without this, reloading
-						// loses them.  Only patch these fields — avoid writing
-						// history/messages which the backend is updating
-						// concurrently via streaming.
-						if (
-							Object.keys(params).length > 0 ||
-							chatFiles.length > 0
-						) {
+						// params) that the backend doesn't receive in the
+						// chat completion request.  Files are now persisted
+						// by the backend at chat creation time.
+						if (Object.keys(params).length > 0) {
 							await updateChatById(localStorage.token, res.chat_id, {
-								params: params,
-								files: chatFiles
+								params: params
 							});
 						}
 					}

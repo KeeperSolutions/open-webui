@@ -1876,6 +1876,7 @@ async def chat_completion(
                                 ]
                                 if user_message_id
                                 else [],
+                                'files': metadata.get('files') or [],
                                 'tags': [],
                                 'timestamp': int(time.time() * 1000),
                             },
@@ -1907,6 +1908,16 @@ async def chat_completion(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
                         )
+
+                    # Persist chat-level files (knowledge collections, docs, etc.)
+                    # The old frontend saveChatHandler did this on every message;
+                    # now the backend owns persistence.
+                    chat_files = metadata.get('files')
+                    if chat_files is not None:
+                        existing_chat = await Chats.get_chat_by_id(chat_id)
+                        if existing_chat:
+                            updated = {**existing_chat.chat, 'files': chat_files}
+                            await Chats.update_chat_by_id(chat_id, updated)
 
                     # Save user message to DB
                     user_message = metadata.get('user_message') or {}
