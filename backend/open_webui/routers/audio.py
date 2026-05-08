@@ -1190,7 +1190,12 @@ def transcribe(request: Request, file_path: str, metadata: Optional[dict] = None
 
     results = []
     try:
-        with ThreadPoolExecutor() as executor:
+        if getattr(request.app.state.config, "STT_ENGINE", "") == "":
+            max_workers = 1
+        else:
+            max_workers = None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit tasks for each chunk_path
             futures = [
                 executor.submit(transcription_handler, request, chunk_path, metadata, user)
