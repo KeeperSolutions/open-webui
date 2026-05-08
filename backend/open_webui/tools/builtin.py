@@ -2678,7 +2678,7 @@ async def update_automation(
             is_active=automation.is_active,
         )
 
-        updated = await Automations.update(automation_id, form, next_run_ns(new_rrule, tz=tz))
+        updated = await Automations.update_by_id(automation_id, form, next_run_ns(new_rrule, tz=tz))
 
         return json.dumps(
             {
