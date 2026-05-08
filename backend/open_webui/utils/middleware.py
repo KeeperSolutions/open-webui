@@ -2455,8 +2455,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     extra_params['__features__'] = features
     if features:
         if 'voice' in features and features['voice']:
-            if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != None:
-                if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != '':
+            if getattr(request.app.state.config, "ENABLE_VOICE_MODE_PROMPT", True):
+                if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE:
                     template = request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE
                 else:
                     template = DEFAULT_VOICE_MODE_PROMPT_TEMPLATE

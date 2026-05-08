@@ -2102,6 +2102,12 @@ VOICE_MODE_PROMPT_TEMPLATE = PersistentConfig(
     os.environ.get('VOICE_MODE_PROMPT_TEMPLATE', ''),
 )
 
+ENABLE_VOICE_MODE_PROMPT = PersistentConfig(
+    'ENABLE_VOICE_MODE_PROMPT',
+    'task.voice.prompt.enable',
+    os.environ.get('ENABLE_VOICE_MODE_PROMPT', 'True').lower() == 'true',
+)
+
 DEFAULT_VOICE_MODE_PROMPT_TEMPLATE = """You are a friendly, concise voice assistant.
 
 Everything you say will be spoken aloud.
