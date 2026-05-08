@@ -64,7 +64,12 @@
 
 		console.log(videoInputDevices);
 		if (selectedVideoInputDeviceId === null && videoInputDevices.length > 0) {
-			selectedVideoInputDeviceId = videoInputDevices[0].deviceId;
+			const savedDeviceId = localStorage.getItem('selectedVideoInputDeviceId');
+			if (savedDeviceId && videoInputDevices.some((d) => d.deviceId === savedDeviceId)) {
+				selectedVideoInputDeviceId = savedDeviceId;
+			} else {
+				selectedVideoInputDeviceId = videoInputDevices[0].deviceId;
+			}
 		}
 	};
 
@@ -892,6 +897,7 @@
 						on:change={async (e) => {
 							console.log(e.detail);
 							selectedVideoInputDeviceId = e.detail;
+							localStorage.setItem('selectedVideoInputDeviceId', e.detail);
 							await stopVideoStream();
 							await startVideoStream();
 						}}
