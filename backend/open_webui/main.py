@@ -597,6 +597,8 @@ from open_webui.utils.redis import get_redis_connection
 from open_webui.tasks import (
     redis_task_command_listener,
     list_task_ids_by_item_id,
+    has_active_tasks,
+    cleanup_task,
     create_task,
     stop_task,
     stop_item_tasks,
@@ -2110,22 +2112,21 @@ async def chat_completion(
             except BaseException as e:
                 log.debug(f'Error cleaning up MCP clients: {e}')
 
+            # Deregister this task, then emit chat:active=false if no others remain
             try:
-                if metadata.get('chat_id'):
-
-                    async def emit_inactive_event():
-                        try:
-                            event_emitter = await get_event_emitter(metadata, update_db=False)
-                            if event_emitter:
-                                await event_emitter({'type': 'chat:active', 'data': {'active': False}})
-                        except Exception:
-                            pass
-
-                    try:
-                        # Shield the event emission so it finishes even if the main task is cancelled
-                        await asyncio.shield(emit_inactive_event())
-                    except asyncio.CancelledError:
-                        pass
+                chat_id = metadata.get('chat_id')
+                task_id = metadata.get('task_id')
+                if chat_id and task_id:
+                    await cleanup_task(request.app.state.redis, task_id, chat_id)
+                    if not await has_active_tasks(request.app.state.redis, chat_id):
+                        event_emitter = await get_event_emitter(metadata, update_db=False)
+                        if event_emitter:
+                            try:
+                                await asyncio.shield(
+                                    event_emitter({'type': 'chat:active', 'data': {'active': False}})
+                                )
+                            except asyncio.CancelledError:
+                                pass
             except Exception:
                 pass
 
@@ -2175,6 +2176,7 @@ async def chat_completion(
                 ),
                 id=chat_id,
             )
+            per_model_metadata['task_id'] = task_id
             task_ids.append(task_id)
 
         # Emit chat:active=true

@@ -1390,6 +1390,7 @@
 				autoScroll = true;
 				await tick();
 
+				// Mark all non-current assistant messages as done
 				if (history.currentId) {
 					for (const message of Object.values(history.messages)) {
 						if (
@@ -1403,23 +1404,23 @@
 					}
 				}
 
-				const taskRes = await getTaskIdsByChatId(localStorage.token, $chatId).catch((error) => {
-					return null;
-				});
-
-				if (taskRes) {
-					taskIds = taskRes.task_ids;
-				}
-
-				// If no active tasks and current message is incomplete, generation was interrupted
+				// Reconcile active tasks with message state:
+				// If the response is already done, remaining tasks are just background
+				// work (follow-ups, title gen) that shouldn't block the input.
+				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, $chatId)
+					.then((res) => res?.task_ids ?? [])
+					.catch(() => []);
 				const currentMessage = history.currentId ? history.messages[history.currentId] : null;
-				if (
-					currentMessage &&
-					currentMessage.role === 'assistant' &&
-					!currentMessage.done &&
-					(!taskIds || taskIds.length === 0)
-				) {
-					currentMessage.done = true;
+				const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
+
+				if (pendingTaskIds.length > 0 && !responseComplete) {
+					taskIds = pendingTaskIds;
+				} else {
+					taskIds = null;
+					// No active tasks and message incomplete → generation was interrupted
+					if (currentMessage?.role === 'assistant' && !currentMessage.done) {
+						currentMessage.done = true;
+					}
 				}
 
 				await tick();
