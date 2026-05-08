@@ -2861,6 +2861,14 @@ async def get_opensearch_xml():
     return Response(content=xml_content, media_type='application/xml')
 
 
+def _sync_db_ping() -> None:
+    ScopedSession.execute(text('SELECT 1;')).all()
+
+
+async def async_db_ping() -> None:
+    await asyncio.to_thread(_sync_db_ping)
+
+
 @app.get('/health')
 async def healthcheck():
     return {'status': True}
@@ -2882,7 +2890,7 @@ async def readiness_check():
 
     # Check database connectivity
     try:
-        ScopedSession.execute(text('SELECT 1;')).all()
+        await async_db_ping()
     except Exception as e:
         log.warning(f'Readiness check DB ping failed: {e!r}')
         raise HTTPException(
@@ -2909,7 +2917,7 @@ async def readiness_check():
 
 @app.get('/health/db')
 async def healthcheck_with_db():
-    ScopedSession.execute(text('SELECT 1;')).all()
+    await async_db_ping()
     return {'status': True}
 
 
