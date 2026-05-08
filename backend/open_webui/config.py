@@ -172,6 +172,7 @@ def get_config_value(config_path: str):
 PERSISTENT_CONFIG_REGISTRY = []
 
 
+
 def save_config(config):
     """Sync save — used ONLY at startup/import time."""
     global CONFIG_DATA
@@ -327,6 +328,17 @@ class AppConfig:
             await self._state[key].async_save()
         except Exception as e:
             log.error(f'Failed to async-persist config key {key}: {e}')
+
+    def _sync_to_redis(self):
+        """Push all in-memory config values to Redis, e.g. after a bulk import."""
+        if not self._redis or not ENABLE_PERSISTENT_CONFIG:
+            return
+        for key, pc in self._state.items():
+            redis_key = f'{self._redis_key_prefix}:config:{key}'
+            try:
+                self._redis.set(redis_key, json.dumps(pc.value))
+            except Exception as e:
+                log.error(f'Failed to sync config key {key} to Redis: {e}')
 
     def __getattr__(self, key):
         if key not in self._state:
