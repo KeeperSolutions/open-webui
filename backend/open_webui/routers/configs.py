@@ -49,8 +49,9 @@ class ImportConfigForm(BaseModel):
 
 
 @router.post('/import', response_model=dict)
-async def import_config(form_data: ImportConfigForm, user=Depends(get_admin_user)):
+async def import_config(request: Request, form_data: ImportConfigForm, user=Depends(get_admin_user)):
     await async_save_config(form_data.config)
+    request.app.state.config._sync_to_redis()
     return get_config()
 
 
