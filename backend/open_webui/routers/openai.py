@@ -70,7 +70,7 @@ from open_webui.utils.session_pool import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.routers.billing import check_billing_access
 from open_webui.utils.access_control import has_access
-from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.headers import include_user_info_headers, get_custom_headers
 from open_webui.utils.anthropic import is_anthropic_url, get_anthropic_models
 
 log = logging.getLogger(__name__)
@@ -262,7 +262,8 @@ async def get_headers_and_cookies(
         headers['Authorization'] = f'Bearer {token}'
 
     if config.get('headers') and isinstance(config.get('headers'), dict):
-        headers = {**headers, **config.get('headers')}
+        custom_headers = get_custom_headers(config.get('headers'), user, metadata)
+        headers.update(custom_headers)
 
     return headers, cookies
 

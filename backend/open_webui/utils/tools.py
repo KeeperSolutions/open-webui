@@ -54,7 +54,7 @@ from open_webui.env import (
     FORWARD_SESSION_INFO_HEADER_MESSAGE_ID,
     REDIS_KEY_PREFIX,
 )
-from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.headers import include_user_info_headers, get_custom_headers
 from open_webui.tools.builtin import (
     search_web,
     fetch_url,
@@ -337,8 +337,9 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
 
                         connection_headers = tool_server_connection.get('headers', None)
                         if connection_headers and isinstance(connection_headers, dict):
-                            for key, value in connection_headers.items():
-                                headers[key] = value
+                            metadata = extra_params.get('__metadata__', {})
+                            custom_headers = get_custom_headers(connection_headers, user, metadata)
+                            headers.update(custom_headers)
 
                         # Add user info headers if enabled
                         if ENABLE_FORWARD_USER_INFO_HEADERS and user:
