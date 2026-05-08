@@ -324,7 +324,9 @@
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close')}
-				on:click={() => { showControls = false; }}
+				on:click={() => {
+					showControls = false;
+				}}
 			>
 				<XMark className="size-5" />
 			</button>

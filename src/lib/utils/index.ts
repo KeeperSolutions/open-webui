@@ -758,8 +758,7 @@ const convertOpenAIMessages = (convo) => {
 					continue;
 				}
 
-				const model =
-					message['message']?.['metadata']?.['model_slug'] || 'gpt-3.5-turbo';
+				const model = message['message']?.['metadata']?.['model_slug'] || 'gpt-3.5-turbo';
 				const timestamp = message['message']?.['create_time']
 					? Math.floor(message['message']['create_time'])
 					: undefined;

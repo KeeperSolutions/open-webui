@@ -39,7 +39,9 @@
 	let provider = '';
 	$: azure =
 		provider === 'azure' ||
-		((url.includes('azure.') || url.includes('cognitive.microsoft.com')) && !direct && provider === '');
+		((url.includes('azure.') || url.includes('cognitive.microsoft.com')) &&
+			!direct &&
+			provider === '');
 
 	let prefixId = '';
 	let enable = true;

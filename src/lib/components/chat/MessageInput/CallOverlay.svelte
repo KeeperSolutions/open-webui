@@ -672,7 +672,11 @@
 		// Only handle M key when not typing in an input/textarea
 		if (e.key === 'm' || e.key === 'M') {
 			const target = e.target as HTMLElement;
-			if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && !target.isContentEditable) {
+			if (
+				target.tagName !== 'INPUT' &&
+				target.tagName !== 'TEXTAREA' &&
+				!target.isContentEditable
+			) {
 				e.preventDefault();
 				toggleMute();
 			}
@@ -1034,7 +1038,9 @@
 
 				<Tooltip content={muted ? $i18n.t('Unmute') + ' (M)' : $i18n.t('Mute') + ' (M)'}>
 					<button
-						class="p-3 rounded-full transition-colors duration-200 {muted ? 'bg-red-500 text-white' : 'bg-gray-50 dark:bg-gray-900'}"
+						class="p-3 rounded-full transition-colors duration-200 {muted
+							? 'bg-red-500 text-white'
+							: 'bg-gray-50 dark:bg-gray-900'}"
 						type="button"
 						aria-label={muted ? $i18n.t('Unmute') : $i18n.t('Mute')}
 						on:click={toggleMute}
@@ -1054,7 +1060,15 @@
 									stroke-linejoin="round"
 									d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z"
 								/>
-								<line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+								<line
+									x1="3"
+									y1="3"
+									x2="21"
+									y2="21"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/>
 							</svg>
 						{:else}
 							<!-- Mic On icon -->
