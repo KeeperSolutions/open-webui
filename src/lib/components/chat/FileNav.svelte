@@ -466,7 +466,8 @@
 							selectedExcelSheet = excelSheetNames[0];
 							const { excelToTable } = await import('$lib/utils/excelToTable');
 							const result = await excelToTable(wb.Sheets[selectedExcelSheet]);
-							fileOfficeHtml = result.html;
+							const DOMPurify = (await import('dompurify')).default;
+							fileOfficeHtml = DOMPurify.sanitize(result.html);
 						}
 					} else if (ext === 'pptx') {
 						const { pptxToImages } = await import('$lib/utils/pptxToHtml');
@@ -1297,7 +1298,8 @@
 						selectedExcelSheet = sheet;
 						const { excelToTable } = await import('$lib/utils/excelToTable');
 						const result = await excelToTable(excelWorkbook.Sheets[sheet]);
-						fileOfficeHtml = result.html;
+						const DOMPurify = (await import('dompurify')).default;
+						fileOfficeHtml = DOMPurify.sanitize(result.html);
 					}}
 					baseUrl={selectedTerminal?.url ?? ''}
 					apiKey={selectedTerminal?.key ?? ''}
