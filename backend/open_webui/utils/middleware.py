@@ -2427,6 +2427,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         form_data['files'] = files
 
     variables = form_data.pop('variables', None)
+    payload_tools = form_data.get('tools', None)  # snapshot before filters
 
     # Process the form_data through the pipeline. The fail-closed PII guard
     # (refuse when masking is requested but no PII filter can be applied) lives
@@ -2520,9 +2521,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     files = form_data.pop('files', None)
     form_data.pop('folder_id', None)
 
-    # Caller-provided OpenAI-style tools take precedence over server-side
-    # tool resolution (tool_ids, MCP servers, builtin tools).
-    payload_tools = form_data.get('tools', None)
+    # If the original caller provided tools, use them as-is (skip resolution).
+    # Otherwise, save any tools that filter inlets added for merging later.
+    inlet_filter_tools = None if payload_tools else form_data.get('tools', None)
 
     # Skills — extract IDs from message content (<$skillId|label> tags) so
     # persisted chats work without relying on the frontend to send skill_ids.
@@ -2859,6 +2860,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data['tools'] = [
                     {'type': 'function', 'function': tool.get('spec', {})} for tool in tools_dict.values()
                 ]
+                if inlet_filter_tools:
+                    form_data['tools'].extend(inlet_filter_tools)
             else:
                 # If the function calling is not native, then call the tools function calling handler
                 try:
