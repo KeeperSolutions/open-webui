@@ -343,21 +343,24 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
     # Reuse existing Stripe customer if available
     customer_id = record.stripe_customer_id if record else None
 
+    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+
+    def _create_customer() -> str:
+        customer = client.v1.customers.create(
+            params={
+                "email": user.email,
+                "name": user.name,
+                "metadata": {"user_id": user.id},
+            }
+        )
+        return customer.id
+
     if not customer_id:
         try:
-            customer = client.v1.customers.create(
-                params={
-                    "email": user.email,
-                    "name": user.name,
-                    "metadata": {"user_id": user.id},
-                }
-            )
-            customer_id = customer.id
+            customer_id = _create_customer()
         except stripe.StripeError as e:
             log.error(f"Stripe customer create error: {e}")
             raise HTTPException(status_code=502, detail="Failed to create Stripe customer.")
-
-    webui_url = request.app.state.config.WEBUI_URL or str(request.base_url).rstrip("/")
 
     try:
         session = client.v1.checkout.sessions.create(
@@ -371,8 +374,28 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
             }
         )
     except stripe.StripeError as e:
-        log.error(f"Stripe checkout session create error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+        error_str = str(e)
+        if "No such customer" in error_str:
+            # Customer exists in DB but not in this Stripe environment (e.g. test vs live)
+            log.warning(f"[billing] Customer {customer_id} not found in Stripe, creating a new one.")
+            try:
+                customer_id = _create_customer()
+                session = client.v1.checkout.sessions.create(
+                    params={
+                        "customer": customer_id,
+                        "mode": "subscription",
+                        "line_items": [{"price": STRIPE_PRICE_ID, "quantity": 1}],
+                        "success_url": f"{webui_url}/billing?checkout=success",
+                        "cancel_url": f"{webui_url}/billing?checkout=canceled",
+                        "metadata": {"user_id": user.id},
+                    }
+                )
+            except stripe.StripeError as e2:
+                log.error(f"Stripe checkout session create error after customer retry: {e2}")
+                raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+        else:
+            log.error(f"Stripe checkout session create error: {e}")
+            raise HTTPException(status_code=502, detail="Failed to create checkout session.")
 
     # Store checkout session ID so webhook can match it
     StripeBillings.upsert(
@@ -398,7 +421,7 @@ async def billing_portal(request: Request, user=Depends(get_verified_user)):
             detail="No billing account found.",
         )
 
-    webui_url = request.app.state.config.WEBUI_URL or str(request.base_url).rstrip("/")
+    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
     try:
         session = client.v1.billing_portal.sessions.create(
             params={
