@@ -1166,6 +1166,11 @@ def transcribe(request: Request, file_path: str, metadata: Optional[dict] = None
     else:
         if is_audio_conversion_required(file_path):
             file_path = convert_audio_to_mp3(file_path)
+            if not file_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Audio conversion failed. The audio file may be corrupted or empty.',
+                )
 
         try:
             file_path = compress_audio(file_path)
