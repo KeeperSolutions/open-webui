@@ -237,7 +237,7 @@
 
 				<div class="mb-2.5 flex w-full items-center justify-between">
 					<div class=" self-center text-xs font-medium">
-						{$i18n.t('Voice Mode Custom Prompt')}
+						{$i18n.t('Voice Mode Prompt')}
 					</div>
 
 					<Switch bind:state={taskConfig.ENABLE_VOICE_MODE_PROMPT} />
@@ -245,7 +245,7 @@
 
 				{#if taskConfig.ENABLE_VOICE_MODE_PROMPT}
 					<div class="mb-2.5">
-						<div class=" mb-1 text-xs font-medium">{$i18n.t('Voice Mode Prompt')}</div>
+						<div class=" mb-1 text-xs font-medium">{$i18n.t('Prompt Template')}</div>
 
 						<Tooltip
 							content={$i18n.t('Leave empty to use the default prompt, or enter a custom prompt')}
