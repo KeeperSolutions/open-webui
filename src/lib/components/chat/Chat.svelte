@@ -1345,6 +1345,30 @@
 						? chatContent.history
 						: convertMessagesToHistory(chatContent.messages);
 
+				// Sanitize history: repair orphaned references from failed regenerations (#24424)
+				for (const message of Object.values(history.messages)) {
+					if (message.childrenIds) {
+						message.childrenIds = message.childrenIds.filter(
+							(childId) => history.messages[childId]
+						);
+					}
+				}
+				if (history.currentId && !history.messages[history.currentId]) {
+					const messageIds = Object.keys(history.messages);
+					let lastMessageId = null;
+					for (const messageId of messageIds) {
+						const message = history.messages[messageId];
+						if (
+							(message.childrenIds ?? []).length === 0 &&
+							(!lastMessageId ||
+								(message.timestamp ?? 0) > (history.messages[lastMessageId].timestamp ?? 0))
+						) {
+							lastMessageId = messageId;
+						}
+					}
+					history.currentId = lastMessageId ?? messageIds[0] ?? null;
+				}
+
 				chatTitle.set(chatContent.title);
 
 				params = chatContent?.params ?? {};
