@@ -737,6 +737,7 @@ const convertOpenAIMessages = (convo) => {
 	const messages = [];
 	let currentId = '';
 	let lastId = null;
+	const uniqueModels = new Set<string>();
 
 	for (const message_id in mapping) {
 		const message = mapping[message_id];
@@ -757,16 +758,28 @@ const convertOpenAIMessages = (convo) => {
 					continue;
 				}
 
-				const new_chat = {
+				const model =
+					message['message']?.['metadata']?.['model_slug'] || 'gpt-3.5-turbo';
+				const timestamp = message['message']?.['create_time']
+					? Math.floor(message['message']['create_time'])
+					: undefined;
+
+				const new_chat: Record<string, any> = {
 					id: message_id,
 					parentId: lastId,
 					childrenIds: message['children'] || [],
 					role: role !== 'user' ? 'assistant' : 'user',
 					content: extractOpenAIMessageContent(message['message']),
-					model: 'gpt-3.5-turbo',
+					model,
 					done: true,
-					context: null
+					context: null,
+					...(timestamp !== undefined && { timestamp })
 				};
+
+				if (role !== 'user') {
+					uniqueModels.add(model);
+				}
+
 				messages.push(new_chat);
 				lastId = currentId;
 			}
@@ -789,7 +802,7 @@ const convertOpenAIMessages = (convo) => {
 			currentId: currentId,
 			messages: history // Need to convert this to not a list and instead a json object
 		},
-		models: ['gpt-3.5-turbo'],
+		models: uniqueModels.size > 0 ? [...uniqueModels] : ['gpt-3.5-turbo'],
 		messages: messages,
 		options: {},
 		timestamp: convo['create_time'],
@@ -836,12 +849,17 @@ export const convertOpenAIChats = (_chats) => {
 		const chat = convertOpenAIMessages(convo);
 
 		if (validateChat(chat)) {
+			// Use created_at/updated_at keys so importChatsHandler passes them
+			// to the backend correctly (previously used 'timestamp' which was ignored)
+			const createdAt = convo['create_time'] ? Math.floor(convo['create_time']) : null;
+			const updatedAt = convo['update_time'] ? Math.floor(convo['update_time']) : createdAt;
 			chats.push({
 				id: convo['id'],
 				user_id: '',
 				title: convo['title'],
 				chat: chat,
-				timestamp: convo['create_time']
+				created_at: createdAt,
+				updated_at: updatedAt
 			});
 		} else {
 			failed++;
