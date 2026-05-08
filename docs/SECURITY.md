@@ -138,6 +138,20 @@ Due to the very high volume of incoming vulnerability reports, issues, discussio
 
 **Please expect several weeks** for your report to be triaged, investigated, fixed, and published. While we aim to respond to every report as quickly as possible, it is normal to experience periods of silence lasting up to several weeks. **This does not mean your report has been ignored** — it means we have not yet had the capacity to address it. The entire process can realistically take multiple weeks from initial submission to final publication. We appreciate your patience and understanding.
 
+## Report Handling
+
+If you report a valid vulnerability that somebody else reported before you, we will close your report as a duplicate. The earliest filing is the one we will handle going forward, and we will not publish multiple advisories for the same vulnerability.
+
+When multiple independent reporters describe the same vulnerability class but each demonstrates a **distinct and separate exploitation vector** — for example, the same missing authorization check reached through different endpoints — we will consolidate them into the earliest filing and credit every reporter who demonstrated a distinct path. Only one CVE will be issued for the consolidated advisory.
+
+### Why duplicate reports don't receive credit
+
+We credit only the earliest filer of a given vulnerability:
+
+1. **The first report did the work.** By the time a later report arrives, triage and fix are already in motion. Later reports don't change the outcome or timeline; crediting them would misrepresent what moved the fix.
+2. **Credit-for-duplicates incentivizes flooding.** If similar-but-later filings earn credit, the rational play is to skim open advisories and file variations. We already see this pressure — the first-filer rule is what limits it.
+3. **Co-discovery is different from duplication.** Multiple reporters **are credited** on one advisory **when each contributes a *distinct* finding** — different vector, different affected component, different sub-path the earlier filing does not cover. That is the consolidation rule above. Filing a duplicate of an existing report is not co-discovery.
+
 ## Confidential Disclosure
 
 Vulnerability reports submitted through GitHub Security Advisories are **private and confidential**. Public disclosure of **ANY** details related to a submitted vulnerability report is **STRICTLY PROHIBITED** until the advisory has been **fully published** — not merely when a CVE ID has been assigned, but when the advisory itself is publicly visible.
