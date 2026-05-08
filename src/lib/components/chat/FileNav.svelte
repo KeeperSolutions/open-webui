@@ -92,6 +92,35 @@
 	let loading = false;
 	let error: string | null = null;
 
+	// ── Sort state ──────────────────────────────────────────────────────
+	type SortMode = 'name' | 'date';
+	let sortBy: SortMode = 'name';
+	let sortAsc = true;
+
+	const sortEntries = (items: FileEntry[]): FileEntry[] => {
+		return [...items].sort((a, b) => {
+			// Directories always first
+			if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+			if (sortBy === 'date') {
+				const aTime = a.modified ?? 0;
+				const bTime = b.modified ?? 0;
+				return sortAsc ? aTime - bTime : bTime - aTime;
+			}
+			const cmp = a.name.localeCompare(b.name);
+			return sortAsc ? cmp : -cmp;
+		});
+	};
+
+	const toggleSort = (mode: SortMode) => {
+		if (sortBy === mode) {
+			sortAsc = !sortAsc;
+		} else {
+			sortBy = mode;
+			sortAsc = mode === 'name'; // name defaults asc, date defaults asc (oldest first)
+		}
+		entries = sortEntries(entries);
+	};
+
 	// ── Navigation history ──────────────────────────────────────────────
 	type NavEntry = { path: string; file: string | null };
 	let navHistory: NavEntry[] = [];
@@ -352,10 +381,7 @@
 				'Failed to load directory. Check your Terminal connection in Settings → Integrations.';
 			entries = [];
 		} else {
-			entries = result.sort((a, b) => {
-				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
-				return a.name.localeCompare(b.name);
-			});
+			entries = sortEntries(result);
 		}
 	};
 
@@ -929,6 +955,8 @@
 				{loading}
 				{canGoBack}
 				{canGoForward}
+				{sortBy}
+				{sortAsc}
 				onGoBack={goBack}
 				onGoForward={goForward}
 				onNavigate={loadDir}
@@ -945,6 +973,7 @@
 				onUploadFiles={handleUploadFiles}
 				onDownloadDir={() => downloadFile(currentPath)}
 				onMove={handleMove}
+				onSort={toggleSort}
 			>
 				{#if fileImageUrl !== null || (fileOfficeSlides !== null && fileOfficeSlides.length > 0)}
 					<Tooltip content={$i18n.t('Reset view')}>
@@ -1370,6 +1399,7 @@
 									onRename={handleRename}
 									onSelect={handleSelect}
 									onLongPress={enterSelectionMode}
+									showDate={sortBy === 'date'}
 								/>
 							{/each}
 						</ul>
