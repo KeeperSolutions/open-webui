@@ -714,30 +714,34 @@ async def lifespan(app: FastAPI):
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
     if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
+        mock_request = Request(
+            {
+                'type': 'http',
+                'asgi.version': '3.0',
+                'asgi.spec_version': '2.0',
+                'method': 'GET',
+                'path': '/internal',
+                'query_string': b'',
+                'headers': Headers({}).raw,
+                'client': ('127.0.0.1', 12345),
+                'server': ('127.0.0.1', 80),
+                'scheme': 'http',
+                'app': app,
+            }
+        )
+
         log.info('Initializing tool servers...')
         try:
-            mock_request = Request(
-                {
-                    'type': 'http',
-                    'asgi.version': '3.0',
-                    'asgi.spec_version': '2.0',
-                    'method': 'GET',
-                    'path': '/internal',
-                    'query_string': b'',
-                    'headers': Headers({}).raw,
-                    'client': ('127.0.0.1', 12345),
-                    'server': ('127.0.0.1', 80),
-                    'scheme': 'http',
-                    'app': app,
-                }
-            )
             await set_tool_servers(mock_request)
             log.info(f'Initialized {len(app.state.TOOL_SERVERS)} tool server(s)')
+        except Exception as e:
+            log.warning(f'Failed to initialize tool servers at startup: {e}')
 
+        try:
             await set_terminal_servers(mock_request)
             log.info(f'Initialized {len(app.state.TERMINAL_SERVERS)} terminal server(s)')
         except Exception as e:
-            log.warning(f'Failed to initialize tool/terminal servers at startup: {e}')
+            log.warning(f'Failed to initialize terminal servers at startup: {e}')
 
     # Mark application as ready to accept traffic from a startup perspective.
     app.state.startup_complete = True
