@@ -613,6 +613,43 @@ async def get_model_profile_image(
                         headers["ETag"] = etag
                     return FileResponse(str(file_path), headers=headers)
 
+    # Priority 2a: arena models are stored in config, not the DB — check them
+    # before falling through to runtime-MODELS provider detection, since an
+    # arena model's profile_image_url (if any) is its only source of a logo.
+    if not model:
+        arena_models = getattr(
+            getattr(request.app.state, "config", None),
+            "EVALUATION_ARENA_MODELS",
+            [],
+        )
+        for arena_model in arena_models:
+            if arena_model.get("id") == id:
+                arena_image_url = arena_model.get("meta", {}).get("profile_image_url")
+                if arena_image_url:
+                    if arena_image_url.startswith("http"):
+                        return Response(
+                            status_code=status.HTTP_302_FOUND,
+                            headers={"Location": arena_image_url},
+                        )
+                    elif arena_image_url.startswith("data:image"):
+                        try:
+                            header, base64_data = arena_image_url.split(",", 1)
+                            image_data = base64.b64decode(base64_data)
+                            image_buffer = io.BytesIO(image_data)
+                            media_type = header.split(";")[0].lstrip("data:")
+                            return StreamingResponse(
+                                image_buffer,
+                                media_type=media_type,
+                                headers={"Content-Disposition": "inline"},
+                            )
+                        except Exception as e:
+                            log.warning(f"Error decoding arena model profile image: {e}")
+                    else:
+                        safe_static = _safe_static_redirect_path(arena_image_url)
+                        if safe_static:
+                            return RedirectResponse(url=safe_static, status_code=status.HTTP_302_FOUND)
+                break
+
     # Priority 2b: model has no DB row — detect provider from runtime MODELS state only.
     # (Models with a DB row that fell through Priority 2 have no provider logo configured
     # and won't produce a different result here, so skip the redundant lookup.)
