@@ -2820,7 +2820,7 @@
 	</title>
 </svelte:head>
 
-<audio id="audioElement" src="" style="display: none;"></audio>
+<audio id="audioElement" style="display: none;"></audio>
 
 <DeleteConfirmDialog
 	bind:show={showDeleteConfirm}
