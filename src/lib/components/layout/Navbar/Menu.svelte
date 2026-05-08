@@ -105,8 +105,8 @@
 						el.style.contentVisibility = 'visible';
 					});
 
-					// Wait for DOM update/layout
-					await new Promise((r) => setTimeout(r, 100));
+					// Let the browser compute layout for the cloned element
+					await new Promise((r) => requestAnimationFrame(r));
 
 					// Render entire content once
 					const canvas = await html2canvas(clonedElement, {
