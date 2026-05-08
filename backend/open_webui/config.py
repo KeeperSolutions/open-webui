@@ -3367,6 +3367,12 @@ BRAVE_SEARCH_API_KEY = PersistentConfig(
     os.getenv('BRAVE_SEARCH_API_KEY', ''),
 )
 
+BRAVE_SEARCH_CONTEXT_TOKENS = PersistentConfig(
+    'BRAVE_SEARCH_CONTEXT_TOKENS',
+    'rag.web.search.brave_search_context_tokens',
+    int(os.getenv('BRAVE_SEARCH_CONTEXT_TOKENS', '8192')),
+)
+
 KAGI_SEARCH_API_KEY = PersistentConfig(
     'KAGI_SEARCH_API_KEY',
     'rag.web.search.kagi_search_api_key',
