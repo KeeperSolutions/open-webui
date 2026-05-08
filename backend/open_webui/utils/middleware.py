@@ -973,7 +973,7 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     return context_string
 
 
-def apply_source_context_to_messages(
+async def apply_source_context_to_messages(
     request: Request,
     messages: list,
     sources: list,
@@ -999,13 +999,13 @@ def apply_source_context_to_messages(
 
     if RAG_SYSTEM_CONTEXT:
         return add_or_update_system_message(
-            rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
+            await rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
             messages,
             append=True,
         )
     else:
         return add_or_update_user_message(
-            rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
+            await rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
             messages,
             append=False,
         )
@@ -2314,7 +2314,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     system_message = get_system_message(form_data.get('messages', []))
     if system_message:  # Chat Controls/User Settings
         try:
-            form_data = apply_system_prompt_to_body(
+            form_data = await apply_system_prompt_to_body(
                 system_message.get('content'), form_data, metadata, user, replace=True
             )  # Required to handle system prompt variables
         except Exception:
@@ -2372,7 +2372,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if folder and folder.data:
             if 'system_prompt' in folder.data:
-                form_data = apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
+                form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
             if 'files' in folder.data:
                 if metadata.get('params', {}).get('function_calling') != 'native':
                     form_data['files'] = [
@@ -2889,7 +2889,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     # If context is not empty, insert it into the messages
     if sources and prompt:
-        form_data['messages'] = apply_source_context_to_messages(request, form_data['messages'], sources, prompt)
+        form_data['messages'] = await apply_source_context_to_messages(request, form_data['messages'], sources, prompt)
 
     # If there are citations, add them to the data_items
     sources = [
@@ -4769,7 +4769,7 @@ async def streaming_chat_response_handler(response, ctx):
                             )
                             source_context = source_context.strip()
                             if source_context:
-                                rag_content = rag_template(
+                                rag_content = await rag_template(
                                     request.app.state.config.RAG_TEMPLATE,
                                     source_context,
                                     user_message,
