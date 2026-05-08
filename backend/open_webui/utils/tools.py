@@ -189,10 +189,11 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
                 log.warning(f'Access denied to tool {tool_id} for user {user.id}')
                 continue
 
-            module = request.app.state.TOOLS.get(tool_id, None)
-            if module is None:
-                module, _ = await load_tool_module_by_id(tool_id)
+            module = request.app.state.TOOLS.get(tool_id)
+            if module is None or request.app.state.TOOL_CONTENTS.get(tool_id) != tool.content:
+                module, _ = await load_tool_module_by_id(tool_id, content=tool.content)
                 request.app.state.TOOLS[tool_id] = module
+                request.app.state.TOOL_CONTENTS[tool_id] = tool.content
 
             __user__ = {
                 **extra_params['__user__'],
