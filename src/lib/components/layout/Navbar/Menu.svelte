@@ -50,6 +50,7 @@
 
 	export let chat;
 	export let onClose: Function = () => {};
+	export let scrollToTop: (() => void) | null = null;
 
 	let showFullMessages = false;
 
@@ -310,6 +311,35 @@
 				</svg>
 				<div class="flex items-center">{$i18n.t('Settings')}</div>
 			</DropdownMenu.Item> -->
+			<!-- Settings commented out block above -->
+
+			{#if scrollToTop}
+				<button
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+					on:click={() => {
+						scrollToTop();
+					}}
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="1.5"
+						stroke="currentColor"
+						class="size-4"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18"
+						/>
+					</svg>
+					<div class="flex items-center">{$i18n.t('Scroll to Top')}</div>
+				</button>
+
+				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
+			{/if}
 
 			{#if ($artifactContents ?? []).length > 0}
 				<button
