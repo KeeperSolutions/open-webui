@@ -1,4 +1,5 @@
 import asyncio
+import io
 import hashlib
 import json
 import logging
@@ -126,6 +127,55 @@ def convert_audio_to_mp3(file_path):
     except Exception as e:
         log.error(f'Error converting audio file: {e}')
         return None
+
+
+def transcode_audio_to_mp3(audio_data: bytes, content_type_header: str, output_path: str) -> bool:
+    """
+    Transcode audio bytes to MP3 if the Content-Type indicates a non-MP3 format.
+
+    Handles raw PCM audio (e.g. Gemini-TTS via OpenRouter/LiteLLM) by parsing
+    optional rate/channels from the Content-Type params, defaulting to 24kHz,
+    16-bit, mono. For other non-MP3 formats, uses pydub auto-detection.
+
+    Returns True if transcoding was performed, False if the data is already MP3.
+    Respects BYPASS_PYDUB_PREPROCESSING — when set, writes raw bytes and logs a warning.
+    """
+    mime_type = content_type_header.split(';')[0].strip().lower()
+
+    if mime_type in ('audio/mpeg', 'audio/mp3'):
+        return False
+
+    if BYPASS_PYDUB_PREPROCESSING:
+        log.warning(
+            f'TTS returned {mime_type} but BYPASS_PYDUB_PREPROCESSING is set; '
+            f'writing raw audio without transcoding'
+        )
+        return False
+
+    if mime_type in ('audio/pcm', 'audio/l16', 'audio/raw'):
+        # Parse optional rate/channels from Content-Type params,
+        # default: 24kHz, 16-bit, mono (standard for Gemini TTS).
+        ct_params = {}
+        for part in content_type_header.split(';')[1:]:
+            key_val = part.strip().split('=')
+            if len(key_val) == 2:
+                ct_params[key_val[0].strip().lower()] = key_val[1].strip()
+
+        sample_rate = int(ct_params.get('rate', 24000))
+        channels = int(ct_params.get('channels', 1))
+
+        audio_segment = AudioSegment.from_raw(
+            io.BytesIO(audio_data),
+            sample_width=2,
+            frame_rate=sample_rate,
+            channels=channels,
+        )
+    else:
+        audio_segment = AudioSegment.from_file(io.BytesIO(audio_data))
+
+    audio_segment.export(str(output_path), format='mp3')
+    log.info(f'Transcoded {mime_type} audio to MP3: {output_path}')
+    return True
 
 
 def set_faster_whisper_model(model: str, auto_update: bool = False):
@@ -392,8 +442,12 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
                 r.raise_for_status()
 
-                async with aiofiles.open(file_path, 'wb') as f:
-                    await f.write(await r.read())
+                audio_data = await r.read()
+                content_type_header = r.headers.get('Content-Type', 'audio/mpeg')
+
+                if not transcode_audio_to_mp3(audio_data, content_type_header, file_path):
+                    async with aiofiles.open(file_path, 'wb') as f:
+                        await f.write(audio_data)
 
                 async with aiofiles.open(file_body_path, 'w') as f:
                     await f.write(json.dumps(payload))
