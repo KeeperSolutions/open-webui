@@ -1385,7 +1385,33 @@ function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
 				// for primitive types (string, integer, etc.), just use as is
 				break;
 		}
+
+		// Resolve composition keywords (oneOf, anyOf, allOf) which may contain $ref
+		for (const keyword of ['oneOf', 'anyOf', 'allOf']) {
+			if (Array.isArray(schemaRef[keyword])) {
+				schemaObj[keyword] = schemaRef[keyword].map((inner) =>
+					resolveSchema(inner, components, resolvedSchemas)
+				);
+			}
+		}
+
 		return schemaObj;
+	}
+
+	// Handle schemas that only have composition keywords without an explicit type
+	const compositionObj: Record<string, any> = {};
+	let hasComposition = false;
+	for (const keyword of ['oneOf', 'anyOf', 'allOf']) {
+		if (Array.isArray(schemaRef[keyword])) {
+			compositionObj[keyword] = schemaRef[keyword].map((inner) =>
+				resolveSchema(inner, components, resolvedSchemas)
+			);
+			hasComposition = true;
+		}
+	}
+	if (hasComposition) {
+		if (schemaRef.description) compositionObj.description = schemaRef.description;
+		return compositionObj;
 	}
 
 	// fallback for schemas without explicit type

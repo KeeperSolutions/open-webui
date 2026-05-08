@@ -802,6 +802,13 @@ def resolve_schema(schema, components, resolved_schemas=None):
     if 'items' in resolved_schema:
         resolved_schema['items'] = resolve_schema(resolved_schema['items'], components)
 
+    # Resolve composition keywords (oneOf, anyOf, allOf) which may contain $ref
+    for keyword in ('oneOf', 'anyOf', 'allOf'):
+        if keyword in resolved_schema and isinstance(resolved_schema[keyword], list):
+            resolved_schema[keyword] = [
+                resolve_schema(inner, components, resolved_schemas) for inner in resolved_schema[keyword]
+            ]
+
     return resolved_schema
 
 
