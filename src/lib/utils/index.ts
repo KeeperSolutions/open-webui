@@ -1392,6 +1392,10 @@ function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
 	return {};
 }
 
+// Valid HTTP methods per OpenAPI 3.x – used to skip extension keys (x-*)
+// and non-operation path-item fields (summary, description, servers, parameters).
+const OPENAPI_HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace']);
+
 // Main conversion function
 export const convertOpenApiToToolPayload = (openApiSpec) => {
 	const toolPayload = [];
@@ -1402,12 +1406,24 @@ export const convertOpenApiToToolPayload = (openApiSpec) => {
 	}
 
 	for (const [path, methods] of Object.entries(openApiSpec.paths)) {
+		if (!methods || typeof methods !== 'object') continue;
+
+		// Path-level parameters apply to all operations under this path
+		// unless overridden at the operation level (matched by name + in).
+		const pathLevelParams: any[] = Array.isArray((methods as any).parameters)
+			? (methods as any).parameters
+			: [];
+
 		for (const [method, operation] of Object.entries(methods)) {
+			if (!OPENAPI_HTTP_METHODS.has(method)) continue;
 			if (!operation || typeof operation !== 'object') continue;
 			if ((operation as any)?.operationId) {
 				const tool = {
-					name: operation.operationId,
-					description: operation.description || operation.summary || 'No description available.',
+					name: (operation as any).operationId,
+					description:
+						(operation as any).description ||
+						(operation as any).summary ||
+						'No description available.',
 					parameters: {
 						type: 'object',
 						properties: {},
@@ -1415,30 +1431,42 @@ export const convertOpenApiToToolPayload = (openApiSpec) => {
 					}
 				};
 
-				// Extract path and query parameters
-				if (operation.parameters) {
-					operation.parameters.forEach((param) => {
-						const paramName = param?.name;
-						if (!paramName) return;
-						const paramSchema = param?.schema ?? {};
-						let description = paramSchema.description || param.description || '';
-						if (paramSchema.enum && Array.isArray(paramSchema.enum)) {
-							description += `. Possible values: ${paramSchema.enum.join(', ')}`;
-						}
-						tool.parameters.properties[paramName] = {
-							type: paramSchema.type,
-							description: description
-						};
+				// Merge path-level and operation-level parameters.
+				// Operation-level params override path-level params with the
+				// same (name, in) pair per the OpenAPI spec.
+				const opParams: any[] = Array.isArray((operation as any).parameters)
+					? (operation as any).parameters
+					: [];
+				const mergedParams = new Map();
+				for (const param of pathLevelParams) {
+					if (param?.name) mergedParams.set(`${param.name}:${param.in ?? ''}`, param);
+				}
+				for (const param of opParams) {
+					if (param?.name) mergedParams.set(`${param.name}:${param.in ?? ''}`, param);
+				}
 
-						if (param.required) {
-							tool.parameters.required.push(paramName);
-						}
-					});
+				// Extract path and query parameters
+				for (const param of mergedParams.values()) {
+					const paramName = param?.name;
+					if (!paramName) continue;
+					const paramSchema = param?.schema ?? {};
+					let description = paramSchema.description || param.description || '';
+					if (paramSchema.enum && Array.isArray(paramSchema.enum)) {
+						description += `. Possible values: ${paramSchema.enum.join(', ')}`;
+					}
+					tool.parameters.properties[paramName] = {
+						type: paramSchema.type,
+						description: description
+					};
+
+					if (param.required) {
+						tool.parameters.required.push(paramName);
+					}
 				}
 
 				// Extract and recursively resolve requestBody if available
-				if (operation.requestBody) {
-					const content = operation.requestBody.content;
+				if ((operation as any).requestBody) {
+					const content = (operation as any).requestBody.content;
 					if (content && content['application/json']) {
 						const requestSchema = content['application/json'].schema;
 						const resolvedRequestSchema = resolveSchema(requestSchema, openApiSpec.components);
