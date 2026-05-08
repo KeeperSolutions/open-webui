@@ -298,7 +298,7 @@
 		oldSelectedModelIds = structuredClone(selectedModelIds);
 	};
 
-	const resetInput = () => {
+	const resetInput = async () => {
 		selectedToolIds = [];
 		selectedFilterIds = [];
 		pendingOAuthTools = [];
@@ -308,7 +308,7 @@
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
-			setDefaults();
+			await setDefaults();
 		}
 	};
 
@@ -1186,7 +1186,7 @@
 
 		autoScroll = true;
 
-		resetInput();
+		await resetInput();
 		prompt = '';
 		messageInput?.setText('');
 		await chatId.set('');
@@ -2208,7 +2208,6 @@
 				? { role: 'system', content: `${params?.system ?? $settings?.system ?? ''}` }
 				: undefined
 		].filter(Boolean);
-
 
 		if ($temporaryChatEnabled) {
 			messages = [
