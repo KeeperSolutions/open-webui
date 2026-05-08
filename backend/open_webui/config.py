@@ -3309,7 +3309,7 @@ ENABLE_WEB_LOADER_SSL_VERIFICATION = PersistentConfig(
 WEB_SEARCH_TRUST_ENV = PersistentConfig(
     'WEB_SEARCH_TRUST_ENV',
     'rag.web.search.trust_env',
-    os.getenv('WEB_SEARCH_TRUST_ENV', 'False').lower() == 'true',
+    os.getenv('WEB_SEARCH_TRUST_ENV', 'True').lower() == 'true',
 )
 
 

@@ -1,4 +1,5 @@
 import logging
+import urllib.request
 from typing import Optional
 
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
@@ -25,9 +26,12 @@ def search_duckduckgo(
     Returns:
         list[SearchResult]: A list of search results
     """
-    # Use the DDGS context manager to create a DDGS object
+    # The ddgs library (primp-based) does not auto-detect proxy env vars.
+    # Resolve via stdlib getproxies() — same pattern as the other loaders.
+    env_proxies = urllib.request.getproxies()
+    proxy = env_proxies.get('https') or env_proxies.get('http')
     search_results = []
-    with DDGS() as ddgs:
+    with DDGS(proxy=proxy) as ddgs:
         if concurrent_requests:
             ddgs.threads = concurrent_requests
 
