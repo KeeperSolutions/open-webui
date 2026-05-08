@@ -814,6 +814,8 @@ def convert_openapi_to_tool_payload(openapi_spec):
 
     for path, methods in openapi_spec.get('paths', {}).items():
         for method, operation in methods.items():
+            if not isinstance(operation, dict):
+                continue
             if operation.get('operationId'):
                 tool = {
                     'name': operation.get('operationId'),
@@ -1324,6 +1326,8 @@ async def execute_tool_server(
 
         method_entry = None
         for http_method, operation in methods.items():
+            if not isinstance(operation, dict):
+                continue
             if operation.get('operationId') == name:
                 method_entry = (http_method.lower(), operation)
                 break
