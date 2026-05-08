@@ -719,6 +719,29 @@ else:
         AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST = 10
 
 
+_sock_read_env = os.environ.get("AIOHTTP_CLIENT_TIMEOUT_SOCK_READ")
+_sock_read_source = "configured" if _sock_read_env is not None else "default"
+AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = _sock_read_env if _sock_read_env is not None else "60"
+
+if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == "":
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = None
+else:
+    try:
+        AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = int(AIOHTTP_CLIENT_TIMEOUT_SOCK_READ)
+    except ValueError:
+        log.warning(
+            f"[aiohttp] Invalid AIOHTTP_CLIENT_TIMEOUT_SOCK_READ value "
+            f"'{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}', falling back to 60s."
+        )
+        AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 60
+
+# SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s
+# Must stay under 30s (Google Cloud frontend proxy idle stream timeout)
+_sse_keepalive_base = AIOHTTP_CLIENT_TIMEOUT_SOCK_READ if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None else 60
+SSE_KEEPALIVE_INTERVAL = min(_sse_keepalive_base // 4, 20)
+_sse_keepalive_source = "derived" if _sock_read_source == "default" else f"derived from AIOHTTP_CLIENT_TIMEOUT_SOCK_READ={AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s"
+
+
 AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA = os.environ.get(
     "AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA", "10"
 )

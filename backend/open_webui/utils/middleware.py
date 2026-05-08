@@ -117,6 +117,8 @@ from open_webui.config import (
 )
 from open_webui.env import (
     GLOBAL_LOG_LEVEL,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+    SSE_KEEPALIVE_INTERVAL,
     ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES,
@@ -130,6 +132,27 @@ from open_webui.constants import TASKS
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
+
+
+_KEEPALIVE = object()
+
+
+async def _keepalive_iter(gen, interval: float):
+    it = gen.__aiter__()
+    pending = asyncio.create_task(it.__anext__())
+    try:
+        while True:
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if done:
+                try:
+                    yield pending.result()
+                except StopAsyncIteration:
+                    break
+                pending = asyncio.create_task(it.__anext__())
+            else:
+                yield _KEEPALIVE
+    finally:
+        pending.cancel()
 
 
 DEFAULT_REASONING_TAGS = [
@@ -2861,6 +2884,12 @@ async def process_chat_response(
                                     if not choices:
                                         error = data.get("error", {})
                                         if error:
+                                            log.warning(
+                                                f"[stream] Upstream error in SSE body: "
+                                                f"chat_id={metadata.get('chat_id')} "
+                                                f"model={model_id} "
+                                                f"error={error}"
+                                            )
                                             await event_emitter(
                                                 {
                                                     "type": "chat:completion",
@@ -3199,7 +3228,27 @@ async def process_chat_response(
                     if response.background:
                         await response.background()
 
-                await stream_body_handler(response, form_data)
+                try:
+                    await stream_body_handler(response, form_data)
+                except asyncio.TimeoutError:
+                    log.warning(
+                        f"[stream] Upstream idle timeout (sock_read) after "
+                        f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
+                        f"chat_id={metadata.get('chat_id')} model={model_id}"
+                    )
+                    await event_emitter(
+                        {
+                            "type": "chat:message:error",
+                            "data": {
+                                "error": {
+                                    "content": (
+                                        "Stream timed out — the model stopped responding. "
+                                        "Please try again."
+                                    )
+                                }
+                            },
+                        }
+                    )
 
                 tool_call_retries = 0
                 tool_call_sources = []  # Track citation sources from tool results
@@ -3694,7 +3743,11 @@ async def process_chat_response(
                 if event:
                     yield wrap_item(json.dumps(event))
 
-            async for data in original_generator:
+            async for data in _keepalive_iter(original_generator, SSE_KEEPALIVE_INTERVAL):
+                if data is _KEEPALIVE:
+                    yield ": keepalive\n\n"
+                    continue
+
                 data, _ = await process_filter_functions(
                     request=request,
                     filter_functions=filter_functions,

@@ -488,6 +488,10 @@ from open_webui.env import (
     ENABLE_OTEL,
     EXTERNAL_PWA_MANIFEST_URL,
     AIOHTTP_CLIENT_SESSION_SSL,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+    _sock_read_source,
+    SSE_KEEPALIVE_INTERVAL,
+    _sse_keepalive_source,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     # Admin Account Runtime Creation
@@ -591,6 +595,15 @@ https://github.com/open-webui/open-webui
 async def lifespan(app: FastAPI):
     app.state.instance_id = INSTANCE_ID
     start_logger()
+
+    log.info(
+        f"[aiohttp] Stream idle timeout (sock_read): {AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s ({_sock_read_source}). "
+        f"Override via AIOHTTP_CLIENT_TIMEOUT_SOCK_READ env var (minimum recommended: 30s)."
+    )
+    log.info(
+        f"[sse] Keepalive interval: {SSE_KEEPALIVE_INTERVAL}s ({_sse_keepalive_source}). "
+        f"Derived as min(sock_read/4, 20s) to stay under Google Cloud proxy 30s idle timeout."
+    )
 
     if RESET_CONFIG_ON_START:
         reset_config()

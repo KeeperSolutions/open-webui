@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 from typing import Optional
 
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
+from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 
@@ -65,7 +65,10 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     if "pipeline" in model:
         sorted_filters.append(model)
 
-    async with aiohttp.ClientSession(trust_env=True) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ),
+    ) as session:
         for filter in sorted_filters:
             urlIdx = filter.get("urlIdx")
 
@@ -118,7 +121,10 @@ async def process_pipeline_outlet_filter(request, payload, user, models):
     if "pipeline" in model:
         sorted_filters = [model] + sorted_filters
 
-    async with aiohttp.ClientSession(trust_env=True) as session:
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ),
+    ) as session:
         for filter in sorted_filters:
             urlIdx = filter.get("urlIdx")
 
