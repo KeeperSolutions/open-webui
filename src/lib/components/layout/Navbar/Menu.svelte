@@ -100,6 +100,11 @@
 					clonedElement.style.height = 'auto';
 					document.body.appendChild(clonedElement);
 
+					// Override content-visibility so html2canvas can capture all messages
+					clonedElement.querySelectorAll('.message-listitem').forEach((el) => {
+						el.style.contentVisibility = 'visible';
+					});
+
 					// Wait for DOM update/layout
 					await new Promise((r) => setTimeout(r, 100));
 
