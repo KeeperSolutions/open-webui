@@ -2928,8 +2928,9 @@ async def search_calendar_events(
     __user__: dict = None,
 ) -> str:
     """
-    Search calendar events by text and/or date range.
-    Returns matching events across all accessible calendars.
+    Search calendar events, reminders, and scheduled items by text and/or date range.
+    Use this to check what's coming up, find a specific event or reminder, or list
+    the user's schedule for a time period.
 
     :param query: Search text to match against event title, description, or location (optional)
     :param start: Only return events starting at or after this datetime, e.g. "2026-04-20 00:00" (optional)
@@ -3025,17 +3026,19 @@ async def create_calendar_event(
     __user__: dict = None,
 ) -> str:
     """
-    Create a new calendar event. If no calendar_id is provided, the event is
-    added to the user's default calendar.
+    Create a calendar event, reminder, or alarm. Use this when the user wants to
+    schedule an event, set a reminder, create an alarm, or says things like
+    "remind me", "don't let me forget", "notify me at", or "add to my calendar".
+    For simple reminders, omit end/location/all_day and set reminder_minutes to 0.
 
-    :param title: Event title
-    :param start: Start datetime string in your local time (e.g. "2026-04-20 09:00" or "2026-04-20T09:00:00")
-    :param end: End datetime string in your local time (optional, omit for point-in-time events)
-    :param description: Event description (optional)
+    :param title: Event or reminder title (e.g. "Team standup", "Take medicine", "Call mom")
+    :param start: Start datetime in the user's local time (e.g. "2026-04-20 09:00")
+    :param end: End datetime in the user's local time (optional — omit for reminders or point-in-time events)
+    :param description: Event description or notes (optional)
     :param calendar_id: Target calendar ID (optional, uses default calendar if omitted)
     :param all_day: Whether this is an all-day event (default: false)
     :param location: Event location (optional)
-    :param reminder_minutes: Minutes before the event to send a reminder notification (optional, default: 10). Use 0 for "at time of event", -1 for no reminder. Accepts any positive integer for custom timing (e.g. 120 for 2 hours before).
+    :param reminder_minutes: Minutes before the event to send a notification (optional, default: 10). Use 0 for "at time of event", -1 for no notification.
     :return: JSON with the created event details including id
     """
     if __request__ is None:
@@ -3135,6 +3138,8 @@ async def create_calendar_event(
     except Exception as e:
         log.exception(f'create_calendar_event error: {e}')
         return json.dumps({'error': str(e)})
+
+
 
 
 async def update_calendar_event(
