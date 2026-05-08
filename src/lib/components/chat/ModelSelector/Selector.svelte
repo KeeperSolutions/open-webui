@@ -13,7 +13,8 @@
 
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
-	import { deleteModel, getOllamaVersion, pullModel, unloadModel } from '$lib/apis/ollama';
+	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
+	import { unloadModel } from '$lib/apis';
 
 	import { user, MODEL_DOWNLOAD_POOL, models, mobile, settings, config, theme } from '$lib/stores';
 	import type { Model } from '$lib/stores';

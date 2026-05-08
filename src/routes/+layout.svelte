@@ -829,7 +829,8 @@
 				if (event.data.action === 'add') {
 					await addOpenAIConnection(token, {
 						url: event.data.url,
-						key: event.data.key
+						key: event.data.key,
+						config: event.data.config
 					});
 				} else if (event.data.action === 'remove') {
 					await removeOpenAIConnection(token, event.data.url);

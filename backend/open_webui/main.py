@@ -1569,6 +1569,106 @@ async def get_base_models(request: Request, user=Depends(get_admin_user)):
     return {'data': models}
 
 
+class ModelUnloadForm(BaseModel):
+    model: str
+
+
+@app.post('/api/models/unload')
+async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depends(get_admin_user)):
+    """
+    Unified model unload endpoint.
+    Resolves the provider that owns the model and calls its native unload mechanism.
+    Supports: Ollama (keep_alive=0) and llama.cpp (/models/unload).
+    """
+    model_id = form_data.model
+
+    # --- Ollama provider ---
+    ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
+    if model_id in ollama_models:
+        url_indices = ollama_models[model_id].get('urls', [])
+        errors = []
+        for idx in url_indices:
+            url = request.app.state.config.OLLAMA_BASE_URLS[idx]
+            api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
+                str(idx),
+                request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+            )
+            key = api_config.get('key', None)
+
+            prefix_id = api_config.get('prefix_id', None)
+            actual_model = model_id
+            if prefix_id and actual_model.startswith(f'{prefix_id}.'):
+                actual_model = actual_model[len(f'{prefix_id}.'):]
+
+            payload = json.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
+
+            try:
+                timeout = aiohttp.ClientTimeout(total=30)
+                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+                    headers = {
+                        'Content-Type': 'application/json',
+                        **({"Authorization": f"Bearer {key}"} if key else {}),
+                    }
+                    async with session.post(
+                        f'{url}/api/generate',
+                        data=payload,
+                        headers=headers,
+                    ) as r:
+                        if not r.ok:
+                            errors.append({'url_idx': idx, 'error': await r.text()})
+            except Exception as e:
+                log.exception(f'Failed to unload model on Ollama node {idx}: {e}')
+                errors.append({'url_idx': idx, 'error': str(e)})
+
+        if errors:
+            raise HTTPException(
+                status_code=500,
+                detail=f'Failed to unload model on {len(errors)} node(s): {errors}',
+            )
+        return {'status': True}
+
+    # --- OpenAI-compatible providers ---
+    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
+    if model_id in openai_models:
+        model_info = openai_models[model_id]
+        idx = model_info.get('urlIdx')
+        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(str(idx), {})
+        provider = api_config.get('provider', '')
+        base_url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
+        key = request.app.state.config.OPENAI_API_KEYS[idx] if idx < len(request.app.state.config.OPENAI_API_KEYS) else ''
+
+        if provider == 'llama.cpp':
+            root_url = base_url.rstrip('/').removesuffix('/v1')
+            try:
+                timeout = aiohttp.ClientTimeout(total=30)
+                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+                    headers = {
+                        'Content-Type': 'application/json',
+                        **({"Authorization": f"Bearer {key}"} if key else {}),
+                    }
+                    async with session.post(
+                        f'{root_url}/models/unload',
+                        json={'model': model_id},
+                        headers=headers,
+                    ) as r:
+                        if not r.ok:
+                            detail = await r.text()
+                            raise HTTPException(status_code=r.status, detail=detail)
+                        return await r.json()
+            except HTTPException:
+                raise
+            except Exception as e:
+                log.exception(f'Failed to unload model via llama.cpp: {e}')
+                raise HTTPException(status_code=500, detail=str(e))
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f'Provider "{provider or "default"}" does not support model unloading',
+            )
+
+    raise HTTPException(status_code=404, detail=f'Model "{model_id}" not found')
+
+
 ##################################
 # Embeddings
 ##################################
