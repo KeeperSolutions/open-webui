@@ -2202,7 +2202,9 @@ def process_messages_with_output(
         if message.get('role') == 'assistant' and message.get('output'):
             # Use output items for clean OpenAI-format messages
             output_messages = convert_output_to_messages(
-                message['output'], raw=True, reasoning_format=reasoning_format,
+                message['output'],
+                raw=True,
+                reasoning_format=reasoning_format,
             )
             if output_messages:
                 processed.extend(output_messages)
@@ -4859,10 +4861,14 @@ async def streaming_chat_response_handler(response, ctx):
                             system_message = get_system_message(form_data['messages'])
                             new_form_data['messages'] = (
                                 [system_message] if system_message else []
-                            ) + convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model))
+                            ) + convert_output_to_messages(
+                                output, raw=True, reasoning_format=get_reasoning_format(model)
+                            )
                             new_form_data['previous_response_id'] = last_response_id
                         else:
-                            tool_messages = convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model))
+                            tool_messages = convert_output_to_messages(
+                                output, raw=True, reasoning_format=get_reasoning_format(model)
+                            )
 
                             # Chat Completions providers don't support multimodal
                             # tool messages.  Extract images into a user message.
@@ -5082,7 +5088,9 @@ async def streaming_chat_response_handler(response, ctx):
                                 'metadata': metadata,
                                 'messages': [
                                     *form_data['messages'],
-                                    *convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model)),
+                                    *convert_output_to_messages(
+                                        output, raw=True, reasoning_format=get_reasoning_format(model)
+                                    ),
                                 ],
                             }
 

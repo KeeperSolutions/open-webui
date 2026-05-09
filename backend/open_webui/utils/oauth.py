@@ -295,6 +295,7 @@ def get_parsed_and_base_url(server_url) -> tuple[urllib.parse.ParseResult, str]:
 @dataclass
 class ProtectedResourceMetadata:
     """RFC 9728 Protected Resource Metadata fields relevant to OAuth flows."""
+
     resource: str | None = None
     authorization_servers: list[str] = field(default_factory=list)
 
