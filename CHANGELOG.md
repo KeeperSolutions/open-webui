@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - 📝 **Notes create and open reliability.** Creating new notes and opening existing notes no longer fails with a TypeError caused by `is_pinned` being passed to the SQLAlchemy model on create, and passed twice to `NoteResponse` on read. [#24484](https://github.com/open-webui/open-webui/issues/24484), [#24486](https://github.com/open-webui/open-webui/pull/24486)
+- 🔐 **Skill public sharing permission enforcement.** Creating or updating skills now filters access grants through the `sharing.public_skills` permission, preventing non-admin users from making skills publicly accessible without the required permission. [#24494](https://github.com/open-webui/open-webui/pull/24494)
+- 🔐 **Calendar public sharing permission enforcement.** Creating or updating calendars now filters access grants through a new `sharing.public_calendars` permission, preventing users from making calendars publicly readable or writable without explicit admin-granted sharing permission. [#24493](https://github.com/open-webui/open-webui/pull/24493)
+
+### Changed
+
+- 🧹 **Removed unauthenticated retrieval status endpoint.** The unauthenticated `GET /api/v1/retrieval/` status endpoint has been removed as dead code — retrieval configuration is already available through authenticated admin endpoints. [#24497](https://github.com/open-webui/open-webui/pull/24497)
+- 📋 **PR template issue requirement.** Pull requests now require a linked Issue or Discussion reference, ensuring better traceability for all contributions. PRs without a linked issue or discussion may be closed without review.
 
 ## [0.9.4] - 2026-05-09
 
