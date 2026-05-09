@@ -2169,7 +2169,27 @@ async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[
     return [{k: v for k, v in msg.items() if k in ('role', 'content', 'output', 'files')} for msg in db_messages]
 
 
-def process_messages_with_output(messages: list[dict]) -> list[dict]:
+def get_reasoning_format(model: dict) -> str | None:
+    """
+    Determine how reasoning should be included in reconstructed messages.
+
+    Returns:
+        'think_tags': Ollama expects <think> tags in content.
+        'reasoning_content': llama.cpp supports reasoning_content as a top-level field.
+        None: skip reasoning (safe default for strict providers).
+    """
+    provider = model.get('provider', '')
+    if provider == 'ollama':
+        return 'think_tags'
+    if provider == 'llama.cpp':
+        return 'reasoning_content'
+    return None
+
+
+def process_messages_with_output(
+    messages: list[dict],
+    reasoning_format: str | None = None,
+) -> list[dict]:
     """
     Process messages with OR-aligned output items for LLM consumption.
 
@@ -2181,7 +2201,9 @@ def process_messages_with_output(messages: list[dict]) -> list[dict]:
     for message in messages:
         if message.get('role') == 'assistant' and message.get('output'):
             # Use output items for clean OpenAI-format messages
-            output_messages = convert_output_to_messages(message['output'], raw=True)
+            output_messages = convert_output_to_messages(
+                message['output'], raw=True, reasoning_format=reasoning_format,
+            )
             if output_messages:
                 processed.extend(output_messages)
                 continue
@@ -2319,7 +2341,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         form_data['messages'].append({'role': 'user', 'content': regeneration_prompt})
 
     # Process messages with OR-aligned output items for clean LLM messages
-    form_data['messages'] = process_messages_with_output(form_data.get('messages', []))
+    form_data['messages'] = process_messages_with_output(
+        form_data.get('messages', []),
+        reasoning_format=get_reasoning_format(model),
+    )
 
     system_message = get_system_message(form_data.get('messages', []))
     if system_message:  # Chat Controls/User Settings
@@ -4834,10 +4859,10 @@ async def streaming_chat_response_handler(response, ctx):
                             system_message = get_system_message(form_data['messages'])
                             new_form_data['messages'] = (
                                 [system_message] if system_message else []
-                            ) + convert_output_to_messages(output, raw=True)
+                            ) + convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model))
                             new_form_data['previous_response_id'] = last_response_id
                         else:
-                            tool_messages = convert_output_to_messages(output, raw=True)
+                            tool_messages = convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model))
 
                             # Chat Completions providers don't support multimodal
                             # tool messages.  Extract images into a user message.
@@ -5057,7 +5082,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 'metadata': metadata,
                                 'messages': [
                                     *form_data['messages'],
-                                    *convert_output_to_messages(output, raw=True),
+                                    *convert_output_to_messages(output, raw=True, reasoning_format=get_reasoning_format(model)),
                                 ],
                             }
 
