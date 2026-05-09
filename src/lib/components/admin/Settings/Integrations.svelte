@@ -22,7 +22,7 @@
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+
 
 	import {
 		getToolServerConnections,
@@ -40,8 +40,7 @@
 	let terminalConnections = [];
 	let showAddTerminalModal = false;
 	let editTerminalIdx: number | null = null;
-	let showDeleteTerminalConfirm = false;
-	let deleteTerminalIdx: number | null = null;
+
 
 	const addConnectionHandler = async (server) => {
 		servers = [...servers, server];
@@ -135,19 +134,8 @@
 	}}
 	onDelete={() => {
 		if (editTerminalIdx !== null) {
-			deleteTerminalIdx = editTerminalIdx;
-			showDeleteTerminalConfirm = true;
+			removeTerminalConnection(editTerminalIdx);
 			editTerminalIdx = null;
-		}
-	}}
-/>
-
-<ConfirmDialog
-	bind:show={showDeleteTerminalConfirm}
-	on:confirm={() => {
-		if (deleteTerminalIdx !== null) {
-			removeTerminalConnection(deleteTerminalIdx);
-			deleteTerminalIdx = null;
 		}
 	}}
 />
