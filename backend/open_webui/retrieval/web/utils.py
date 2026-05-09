@@ -48,7 +48,7 @@ from open_webui.config import (
     WEB_FETCH_FILTER_LIST,
 )
 from open_webui.utils.misc import is_string_allowed
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
+from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_ALLOW_REDIRECTS
 
 log = logging.getLogger(__name__)
 
@@ -494,7 +494,7 @@ class SafeWebBaseLoader(WebBaseLoader):
         # re-validation. Matches the policy enforced on the async _fetch() path below.
         self.requests_kwargs = {
             **(self.requests_kwargs or {}),
-            'allow_redirects': False,
+            'allow_redirects': AIOHTTP_CLIENT_ALLOW_REDIRECTS,
         }
 
     async def _fetch(self, url: str, retries: int = 3, cooldown: int = 2, backoff: float = 1.5) -> str:
@@ -513,7 +513,7 @@ class SafeWebBaseLoader(WebBaseLoader):
                     async with session.get(
                         url,
                         **(self.requests_kwargs | kwargs),
-                        allow_redirects=False,
+                        allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS,
                     ) as response:
                         if self.raise_for_status:
                             response.raise_for_status()

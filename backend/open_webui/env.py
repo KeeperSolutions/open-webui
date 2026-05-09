@@ -839,6 +839,13 @@ else:
 
 AIOHTTP_CLIENT_SESSION_SSL = os.environ.get('AIOHTTP_CLIENT_SESSION_SSL', 'True').lower() == 'true'
 
+# When False (default), outbound HTTP requests do not follow 3xx redirects.
+# This prevents redirect-based SSRF where a public URL 302-redirects to an
+# internal address (RFC 1918, loopback, cloud-metadata 169.254.169.254).
+# Set to True only if your deployment requires redirect following and you
+# have other SSRF protections in place (e.g. egress firewall).
+AIOHTTP_CLIENT_ALLOW_REDIRECTS = os.environ.get('AIOHTTP_CLIENT_ALLOW_REDIRECTS', 'False').lower() == 'true'
+
 AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST = os.environ.get(
     'AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST',
     os.environ.get('AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST', '10'),
