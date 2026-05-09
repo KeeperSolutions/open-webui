@@ -1810,6 +1810,7 @@ async def chat_completion(
             'chat_id': form_data.pop('chat_id', None),
             'user_message': user_message,
             'user_message_id': user_message.get('id') if user_message else None,
+            'assistant_message_id': form_data.pop('assistant_message_id', None),
             'session_id': form_data.pop('session_id', None),
             'folder_id': form_data.pop('folder_id', None),
             'filter_ids': form_data.pop('filter_ids', []),
