@@ -23,7 +23,6 @@
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
 
-
 	import {
 		getToolServerConnections,
 		setToolServerConnections,
@@ -40,7 +39,6 @@
 	let terminalConnections = [];
 	let showAddTerminalModal = false;
 	let editTerminalIdx: number | null = null;
-
 
 	const addConnectionHandler = async (server) => {
 		servers = [...servers, server];

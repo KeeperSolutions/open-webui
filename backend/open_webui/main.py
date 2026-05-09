@@ -1610,7 +1610,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
             prefix_id = api_config.get('prefix_id', None)
             actual_model = model_id
             if prefix_id and actual_model.startswith(f'{prefix_id}.'):
-                actual_model = actual_model[len(f'{prefix_id}.'):]
+                actual_model = actual_model[len(f'{prefix_id}.') :]
 
             payload = json.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
 
@@ -1619,7 +1619,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
                 async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
                     headers = {
                         'Content-Type': 'application/json',
-                        **({"Authorization": f"Bearer {key}"} if key else {}),
+                        **({'Authorization': f'Bearer {key}'} if key else {}),
                     }
                     async with session.post(
                         f'{url}/api/generate',
@@ -1647,7 +1647,9 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
         api_config = request.app.state.config.OPENAI_API_CONFIGS.get(str(idx), {})
         provider = api_config.get('provider', '')
         base_url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-        key = request.app.state.config.OPENAI_API_KEYS[idx] if idx < len(request.app.state.config.OPENAI_API_KEYS) else ''
+        key = (
+            request.app.state.config.OPENAI_API_KEYS[idx] if idx < len(request.app.state.config.OPENAI_API_KEYS) else ''
+        )
 
         if provider == 'llama.cpp':
             root_url = base_url.rstrip('/').removesuffix('/v1')
@@ -1656,7 +1658,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
                 async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
                     headers = {
                         'Content-Type': 'application/json',
-                        **({"Authorization": f"Bearer {key}"} if key else {}),
+                        **({'Authorization': f'Bearer {key}'} if key else {}),
                     }
                     async with session.post(
                         f'{root_url}/models/unload',
@@ -2123,9 +2125,7 @@ async def chat_completion(
                         event_emitter = await get_event_emitter(metadata, update_db=False)
                         if event_emitter:
                             try:
-                                await asyncio.shield(
-                                    event_emitter({'type': 'chat:active', 'data': {'active': False}})
-                                )
+                                await asyncio.shield(event_emitter({'type': 'chat:active', 'data': {'active': False}}))
                             except asyncio.CancelledError:
                                 pass
             except Exception:

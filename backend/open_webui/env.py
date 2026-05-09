@@ -256,9 +256,7 @@ ENABLE_EASTER_EGGS = os.environ.get('ENABLE_EASTER_EGGS', 'True').lower() == 'tr
 # 302 redirect to the original origin.  Set to False to suppress the
 # redirect (prevents client-side IP/UA/Referer leaks to attacker-
 # controlled origins) and fall through to the default image instead.
-ENABLE_PROFILE_IMAGE_URL_FORWARDING = os.environ.get(
-    'ENABLE_PROFILE_IMAGE_URL_FORWARDING', 'True'
-).lower() == 'true'
+ENABLE_PROFILE_IMAGE_URL_FORWARDING = os.environ.get('ENABLE_PROFILE_IMAGE_URL_FORWARDING', 'True').lower() == 'true'
 
 ####################################
 # WEBUI_BUILD_HASH

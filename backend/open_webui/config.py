@@ -172,7 +172,6 @@ def get_config_value(config_path: str):
 PERSISTENT_CONFIG_REGISTRY = []
 
 
-
 def save_config(config):
     """Sync save — used ONLY at startup/import time."""
     global CONFIG_DATA
@@ -2688,8 +2687,12 @@ ONEDRIVE_CLIENT_ID = os.environ.get('ONEDRIVE_CLIENT_ID', '')
 ONEDRIVE_CLIENT_ID_PERSONAL = os.environ.get('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID)
 ONEDRIVE_CLIENT_ID_BUSINESS = os.environ.get('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID)
 
-ENABLE_ONEDRIVE_PERSONAL = os.environ.get('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true' and bool(ONEDRIVE_CLIENT_ID_PERSONAL)
-ENABLE_ONEDRIVE_BUSINESS = os.environ.get('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true' and bool(ONEDRIVE_CLIENT_ID_BUSINESS)
+ENABLE_ONEDRIVE_PERSONAL = os.environ.get('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true' and bool(
+    ONEDRIVE_CLIENT_ID_PERSONAL
+)
+ENABLE_ONEDRIVE_BUSINESS = os.environ.get('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true' and bool(
+    ONEDRIVE_CLIENT_ID_BUSINESS
+)
 
 ONEDRIVE_SHAREPOINT_URL = PersistentConfig(
     'ONEDRIVE_SHAREPOINT_URL',

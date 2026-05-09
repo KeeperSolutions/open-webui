@@ -2466,7 +2466,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     extra_params['__features__'] = features
     if features:
         if 'voice' in features and features['voice']:
-            if getattr(request.app.state.config, "ENABLE_VOICE_MODE_PROMPT", True):
+            if getattr(request.app.state.config, 'ENABLE_VOICE_MODE_PROMPT', True):
                 if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE:
                     template = request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE
                 else:
@@ -4156,9 +4156,9 @@ async def streaming_chat_response_handler(response, ctx):
                                                         current_response_tool_call['function']['name'] = delta_name
 
                                                     if delta_arguments:
-                                                        current_response_tool_call['function'][
-                                                            'arguments'
-                                                        ] += delta_arguments
+                                                        current_response_tool_call['function']['arguments'] += (
+                                                            delta_arguments
+                                                        )
 
                                         # Emit pending tool calls in real-time
                                         if response_tool_calls:
