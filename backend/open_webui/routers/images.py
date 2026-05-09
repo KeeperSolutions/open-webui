@@ -814,7 +814,9 @@ async def image_edits(
                 # public host that redirects internally (e.g. cloud-metadata exfil).
                 validate_url(data)
                 session = await get_session()
-                async with session.get(data, ssl=AIOHTTP_CLIENT_SESSION_SSL, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS) as r:
+                async with session.get(
+                    data, ssl=AIOHTTP_CLIENT_SESSION_SSL, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS
+                ) as r:
                     r.raise_for_status()
 
                     image_data = base64.b64encode(await r.read()).decode('utf-8')
