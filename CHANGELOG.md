@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.5] - 2026-05-09
 
+### Added
+
+- 🛡️ **Redirect-based SSRF protection.** All outbound HTTP requests now block 3xx redirects by default via a new `AIOHTTP_CLIENT_ALLOW_REDIRECTS` environment variable, preventing redirect-based SSRF where a public URL silently redirects to internal addresses (RFC 1918, loopback, cloud-metadata endpoints). Affected call sites include web fetch, image loading, OAuth discovery, tool server execution, and code interpreter login. [#24491](https://github.com/open-webui/open-webui/pull/24491)
+
 ### Fixed
 
 - 📝 **Notes create and open reliability.** Creating new notes and opening existing notes no longer fails with a TypeError caused by `is_pinned` being passed to the SQLAlchemy model on create, and passed twice to `NoteResponse` on read. [#24484](https://github.com/open-webui/open-webui/issues/24484), [#24486](https://github.com/open-webui/open-webui/pull/24486)
