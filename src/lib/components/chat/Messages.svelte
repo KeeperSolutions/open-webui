@@ -139,7 +139,16 @@
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
-		element.scrollTop = element.scrollHeight;
+		if (element) {
+			element.scrollTop = element.scrollHeight;
+
+			// Follow-up scroll to account for content-visibility: auto re-layouts
+			requestAnimationFrame(() => {
+				if (element) {
+					element.scrollTop = element.scrollHeight;
+				}
+			});
+		}
 	};
 
 	export const scrollToTop = async () => {

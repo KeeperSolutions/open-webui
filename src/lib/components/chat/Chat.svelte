@@ -1455,6 +1455,29 @@
 				top: messagesContainerElement.scrollHeight,
 				behavior
 			});
+
+			// content-visibility: auto causes the initial scrollHeight to be based on
+			// estimated sizes (contain-intrinsic-size). After we scroll, previously
+			// off-screen messages become visible and the browser resolves their actual
+			// heights, which shifts scrollHeight. Re-layouts can cascade across frames
+			// (new sizes reveal more content, triggering further size resolution), so
+			// we re-scroll across two animation frames to land at the true bottom.
+			requestAnimationFrame(() => {
+				if (messagesContainerElement) {
+					messagesContainerElement.scrollTo({
+						top: messagesContainerElement.scrollHeight,
+						behavior
+					});
+					requestAnimationFrame(() => {
+						if (messagesContainerElement) {
+							messagesContainerElement.scrollTo({
+								top: messagesContainerElement.scrollHeight,
+								behavior
+							});
+						}
+					});
+				}
+			});
 		}
 	};
 
