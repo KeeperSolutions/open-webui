@@ -1228,6 +1228,11 @@ TERMINAL_SERVER_CONNECTIONS = PersistentConfig(
     terminal_server_connections,
 )
 
+try:
+    TERMINAL_PROXY_HEADERS = json.loads(os.environ.get('TERMINAL_PROXY_HEADERS', '{}'))
+except Exception:
+    TERMINAL_PROXY_HEADERS = {}
+
 ####################################
 # WEBUI
 ####################################
