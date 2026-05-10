@@ -442,6 +442,8 @@ GenerateImageForm = CreateImageForm  # Alias for backward compatibility
 async def get_image_data(data: str, headers=None):
     try:
         if data.startswith('http://') or data.startswith('https://'):
+            # Defense-in-depth: gate before fetch (mirrors load_url_image).
+            validate_url(data)
             session = await get_session()
             async with session.get(
                 data,
