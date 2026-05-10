@@ -59,7 +59,6 @@ from open_webui.utils.models import (
 )
 
 
-
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission, filter_allowed_access_grants
 from open_webui.utils.webhook import post_webhook
@@ -1017,9 +1016,7 @@ async def model_response_handler(request, channel, message, user, db=None):
                 # tools, filters, RAG — everything. The pipeline runs as
                 # an async task; the channel emitter handles progressive
                 # message updates via socket events.
-                await request.app.state.CHAT_COMPLETION_HANDLER(
-                    request, form_data, user=user
-                )
+                await request.app.state.CHAT_COMPLETION_HANDLER(request, form_data, user=user)
 
             except Exception as e:
                 log.exception(e)

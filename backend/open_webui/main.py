@@ -1843,7 +1843,9 @@ async def chat_completion(
 
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
-            if not chat_id.startswith('local:') and not chat_id.startswith('channel:'):  # temporary/channel chats are not stored
+            if not chat_id.startswith('local:') and not chat_id.startswith(
+                'channel:'
+            ):  # temporary/channel chats are not stored
                 if is_new_chat:
                     # Build the full history upfront with ALL assistant placeholders
                     user_message = metadata.get('user_message') or {}

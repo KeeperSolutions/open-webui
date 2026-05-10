@@ -891,11 +891,7 @@ async def _make_channel_emitter(request_info):
 
         elif event_type == 'chat:message:error':
             error = event_data.get('data', {}).get('error', {})
-            error_content = (
-                error.get('content', 'An error occurred')
-                if isinstance(error, dict)
-                else str(error)
-            )
+            error_content = error.get('content', 'An error occurred') if isinstance(error, dict) else str(error)
             await _emit_channel_update(f'Error: {error_content}', done=True)
 
     return __channel_emitter__
