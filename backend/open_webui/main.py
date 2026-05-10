@@ -1843,7 +1843,7 @@ async def chat_completion(
 
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
-            if not chat_id.startswith('local:'):  # temporary chats are not stored
+            if not chat_id.startswith('local:') and not chat_id.startswith('channel:'):  # temporary/channel chats are not stored
                 if is_new_chat:
                     # Build the full history upfront with ALL assistant placeholders
                     user_message = metadata.get('user_message') or {}
@@ -2059,7 +2059,7 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
-                    if not metadata['chat_id'].startswith('local:'):
+                    if not metadata['chat_id'].startswith('local:') and not metadata['chat_id'].startswith('channel:'):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -2322,7 +2322,7 @@ async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
 
 @app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-    if chat_id.startswith('local:'):
+    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
         socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
@@ -2340,7 +2340,7 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-    if chat_id.startswith('local:'):
+    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
         socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':

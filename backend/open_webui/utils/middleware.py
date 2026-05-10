@@ -1712,7 +1712,7 @@ async def add_file_context(messages: list, chat_id: str, user) -> list:
     """
     Add file URLs to messages for native function calling.
     """
-    if not chat_id or chat_id.startswith('local:'):
+    if not chat_id or chat_id.startswith('local:') or chat_id.startswith('channel:'):
         return messages
 
     chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
@@ -1768,7 +1768,7 @@ async def chat_image_generation_handler(request: Request, form_data: dict, extra
     if not chat_id or not isinstance(chat_id, str) or not __event_emitter__:
         return form_data
 
-    if chat_id.startswith('local:'):
+    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
         message_list = form_data.get('messages', [])
     else:
         chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
@@ -2300,7 +2300,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     chat_id = metadata.get('chat_id')
     user_message_id = metadata.get('user_message_id')
 
-    if chat_id and user_message_id and not chat_id.startswith('local:'):
+    if chat_id and user_message_id and not chat_id.startswith('local:') and not chat_id.startswith('channel:'):
         db_messages = await load_messages_from_db(chat_id, user_message_id)
         if db_messages:
             # Continue: frontend sends assistant_message_id when continuing
@@ -3116,7 +3116,7 @@ async def background_tasks_handler(ctx):
     message = None
     messages = []
 
-    if 'chat_id' in metadata and not metadata['chat_id'].startswith('local:'):
+    if 'chat_id' in metadata and not metadata['chat_id'].startswith('local:') and not metadata['chat_id'].startswith('channel:'):
         messages_map = await Chats.get_messages_map_by_chat_id(metadata['chat_id'])
         message = messages_map.get(metadata['message_id']) if messages_map else None
 
@@ -3196,7 +3196,7 @@ async def background_tasks_handler(ctx):
                             }
                         )
 
-                        if not metadata.get('chat_id', '').startswith('local:'):
+                        if not metadata.get('chat_id', '').startswith('local:') and not metadata.get('chat_id', '').startswith('channel:'):
                             await Chats.upsert_message_to_chat_by_id_and_message_id(
                                 metadata['chat_id'],
                                 metadata['message_id'],
@@ -3208,7 +3208,7 @@ async def background_tasks_handler(ctx):
                     except Exception as e:
                         pass
 
-            if not metadata.get('chat_id', '').startswith('local:'):  # Only update titles and tags for non-temp chats
+            if not metadata.get('chat_id', '').startswith('local:') and not metadata.get('chat_id', '').startswith('channel:'):  # Only update titles and tags for non-temp chats
                 if TASKS.TITLE_GENERATION in tasks:
                     user_message = get_last_user_message(messages)
                     if user_message and len(user_message) > 100:
@@ -3332,7 +3332,7 @@ async def outlet_filter_handler(ctx):
     if not chat_id or not message_id:
         return
 
-    is_temp_chat = chat_id.startswith('local:')
+    is_temp_chat = chat_id.startswith('local:') or chat_id.startswith('channel:')
 
     try:
         messages_map = None
@@ -3474,13 +3474,14 @@ async def non_streaming_chat_response_handler(response, ctx):
 
                 log.error('Provider returned error (non-streaming): %s', error)
 
-                await Chats.upsert_message_to_chat_by_id_and_message_id(
-                    metadata['chat_id'],
-                    metadata['message_id'],
-                    {
-                        'error': {'content': error},
-                    },
-                )
+                if not metadata['chat_id'].startswith('channel:'):
+                    await Chats.upsert_message_to_chat_by_id_and_message_id(
+                        metadata['chat_id'],
+                        metadata['message_id'],
+                        {
+                            'error': {'content': error},
+                        },
+                    )
                 if isinstance(error, str) or isinstance(error, dict):
                     await event_emitter(
                         {
@@ -3489,7 +3490,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                         }
                     )
 
-            if 'selected_model_id' in response_data:
+            if 'selected_model_id' in response_data and not metadata['chat_id'].startswith('channel:'):
                 await Chats.upsert_message_to_chat_by_id_and_message_id(
                     metadata['chat_id'],
                     metadata['message_id'],
@@ -3510,7 +3511,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                         }
                     )
 
-                    title = await Chats.get_chat_title_by_id(metadata['chat_id'])
+                    title = await Chats.get_chat_title_by_id(metadata['chat_id']) if not metadata['chat_id'].startswith('channel:') else ''
 
                     # Use output from backend if provided (OR-compliant backends),
                     # otherwise generate from response content
@@ -3541,17 +3542,18 @@ async def non_streaming_chat_response_handler(response, ctx):
                     # Save message in the database
                     usage = normalize_usage(response_data.get('usage', {}) or {})
 
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {
-                            'done': True,
-                            'role': 'assistant',
-                            'content': content,
-                            'output': response_output,
-                            **({'usage': usage} if usage else {}),
-                        },
-                    )
+                    if not metadata['chat_id'].startswith('channel:'):
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {
+                                'done': True,
+                                'role': 'assistant',
+                                'content': content,
+                                'output': response_output,
+                                **({'usage': usage} if usage else {}),
+                            },
+                        )
 
                     # Send a webhook notification if the user is not active
                     if request.app.state.config.ENABLE_USER_WEBHOOKS and not await Users.is_user_active(user.id):
@@ -4419,7 +4421,7 @@ async def streaming_chat_response_handler(response, ctx):
                                             if end:
                                                 break
 
-                                        if ENABLE_REALTIME_CHAT_SAVE:
+                                        if ENABLE_REALTIME_CHAT_SAVE and not metadata['chat_id'].startswith('channel:'):
                                             # Save message in the database
                                             await Chats.upsert_message_to_chat_by_id_and_message_id(
                                                 metadata['chat_id'],
@@ -5117,7 +5119,7 @@ async def streaming_chat_response_handler(response, ctx):
                     if item.get('status') == 'in_progress':
                         item['status'] = 'completed'
 
-                title = await Chats.get_chat_title_by_id(metadata['chat_id'])
+                title = await Chats.get_chat_title_by_id(metadata['chat_id']) if not metadata['chat_id'].startswith('channel:') else ''
                 data = {
                     'done': True,
                     'content': serialize_output(output),
@@ -5126,30 +5128,31 @@ async def streaming_chat_response_handler(response, ctx):
                     **({'usage': usage} if usage else {}),
                 }
 
-                if not ENABLE_REALTIME_CHAT_SAVE:
-                    # Save message in the database
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {
-                            'done': True,
-                            'content': serialize_output(output),
-                            'output': output,
-                            **({'usage': usage} if usage else {}),
-                        },
-                    )
-                elif usage:
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {'done': True, 'usage': usage},
-                    )
-                else:
-                    await Chats.upsert_message_to_chat_by_id_and_message_id(
-                        metadata['chat_id'],
-                        metadata['message_id'],
-                        {'done': True},
-                    )
+                if not metadata['chat_id'].startswith('channel:'):
+                    if not ENABLE_REALTIME_CHAT_SAVE:
+                        # Save message in the database
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {
+                                'done': True,
+                                'content': serialize_output(output),
+                                'output': output,
+                                **({'usage': usage} if usage else {}),
+                            },
+                        )
+                    elif usage:
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {'done': True, 'usage': usage},
+                        )
+                    else:
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {'done': True},
+                        )
 
                 # Send a webhook notification if the user is not active
                 if request.app.state.config.ENABLE_USER_WEBHOOKS and not await Users.is_user_active(user.id):
@@ -5196,22 +5199,23 @@ async def streaming_chat_response_handler(response, ctx):
 
                 async def save_cancelled_state():
                     await event_emitter({'type': 'chat:tasks:cancel'})
-                    if not ENABLE_REALTIME_CHAT_SAVE:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {
-                                'done': True,
-                                'content': serialize_output(output),
-                                'output': output,
-                            },
-                        )
-                    else:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {'done': True},
-                        )
+                    if not metadata['chat_id'].startswith('channel:'):
+                        if not ENABLE_REALTIME_CHAT_SAVE:
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {
+                                    'done': True,
+                                    'content': serialize_output(output),
+                                    'output': output,
+                                },
+                            )
+                        else:
+                            await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                metadata['chat_id'],
+                                metadata['message_id'],
+                                {'done': True},
+                            )
 
                 try:
                     await asyncio.shield(save_cancelled_state())
