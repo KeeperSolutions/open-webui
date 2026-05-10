@@ -29,7 +29,7 @@ from open_webui.models.users import (
 )
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, STATIC_DIR
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
 from open_webui.internal.db import get_async_session
 
 
@@ -507,11 +507,15 @@ async def get_user_profile_image_by_id(
                     header, base64_data = user_obj.profile_image_url.split(",", 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(';')[0].lstrip('data:')
+                    media_type = header.split(';')[0].lstrip('data:').lower()
+
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return FileResponse(f'{STATIC_DIR}/user.png')
 
                     headers = {
                         "Content-Disposition": "inline",
                         "Cache-Control": "public, max-age=86400",  # Cache 24 hours
+                        "X-Content-Type-Options": "nosniff",
                     }
                     if etag:
                         headers["ETag"] = etag

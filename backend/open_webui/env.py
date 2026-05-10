@@ -258,6 +258,15 @@ ENABLE_EASTER_EGGS = os.environ.get('ENABLE_EASTER_EGGS', 'True').lower() == 'tr
 # controlled origins) and fall through to the default image instead.
 ENABLE_PROFILE_IMAGE_URL_FORWARDING = os.environ.get('ENABLE_PROFILE_IMAGE_URL_FORWARDING', 'True').lower() == 'true'
 
+PROFILE_IMAGE_ALLOWED_MIME_TYPES = frozenset(
+    t.strip()
+    for t in os.environ.get(
+        'PROFILE_IMAGE_ALLOWED_MIME_TYPES',
+        'image/png,image/jpeg,image/gif,image/webp',
+    ).split(',')
+    if t.strip()
+)
+
 ####################################
 # WEBUI_BUILD_HASH
 ####################################
