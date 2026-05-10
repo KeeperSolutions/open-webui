@@ -877,7 +877,7 @@ async def get_shared_chat_by_id(
     # Look up the original chat_id to check access grants (admins bypass)
     if user.role != 'admin' or not ENABLE_ADMIN_CHAT_ACCESS:
         shared = await SharedChats.get_by_id(share_id, db=db)
-        if shared:
+        if shared and shared.user_id != user.id:
             has_grant = await AccessGrants.has_access(
                 user_id=user.id,
                 resource_type='shared_chat',
@@ -1241,9 +1241,9 @@ async def clone_shared_chat_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    # Enforce access grants
+    # Enforce access grants (owner and admins bypass)
     shared = await SharedChats.get_by_id(id, db=db)
-    if shared and user.role != 'admin':
+    if shared and user.role != 'admin' and shared.user_id != user.id:
         has_grant = await AccessGrants.has_access(
             user_id=user.id,
             resource_type='shared_chat',
