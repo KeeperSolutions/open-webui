@@ -465,6 +465,7 @@ from open_webui.config import (
     OAUTH_PROVIDERS,
     WEBUI_URL,
     RESPONSE_WATERMARK,
+    IFRAME_CSP,
     # Admin
     ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_ADMIN_ANALYTICS,
@@ -2493,6 +2494,7 @@ async def get_app_config(request: Request):
                     'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
                     'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     'response_watermark': app.state.config.RESPONSE_WATERMARK,
+                    'iframe_csp': IFRAME_CSP,
                 },
                 'license_metadata': app.state.LICENSE_METADATA,
                 **(

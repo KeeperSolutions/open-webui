@@ -1394,6 +1394,7 @@ RESPONSE_WATERMARK = PersistentConfig(
     os.environ.get('RESPONSE_WATERMARK', ''),
 )
 
+IFRAME_CSP = os.environ.get('IFRAME_CSP', '')
 
 USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS = (
     os.environ.get('USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS', 'False').lower() == 'true'
