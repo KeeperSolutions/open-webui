@@ -106,6 +106,7 @@ from open_webui.utils.tools import (
     get_terminal_tools,
 )
 from open_webui.utils.access_control import has_connection_access
+from open_webui.utils.access_control.files import get_accessible_folder_files
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
     get_sorted_filter_ids,
@@ -2411,15 +2412,17 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             if 'system_prompt' in folder.data:
                 form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
             if 'files' in folder.data:
+                # Defensive: filter to entries the caller can still read.
+                allowed_files = await get_accessible_folder_files(folder.data['files'], user)
                 if metadata.get('params', {}).get('function_calling') != 'native':
                     form_data['files'] = [
-                        *folder.data['files'],
+                        *allowed_files,
                         *form_data.get('files', []),
                     ]
                 else:
                     # Native FC: skip RAG injection, builtin tools
                     # will read folder knowledge from metadata.
-                    metadata['folder_knowledge'] = folder.data['files']
+                    metadata['folder_knowledge'] = allowed_files
 
     # Model "Knowledge" handling
     user_message = get_last_user_message(form_data['messages'])
@@ -2622,7 +2625,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     folder = await Folders.get_folder_by_id_and_user_id(folder_id, user.id)
                     if folder and folder.data and 'files' in folder.data:
                         files = [f for f in files if f.get('id', None) != folder_id]
-                        files = [*files, *folder.data['files']]
+                        files = [*files, *await get_accessible_folder_files(folder.data['files'], user)]
 
         # files = [*files, *[{"type": "url", "url": url, "name": url} for url in urls]]
         # Remove duplicate files based on their content
