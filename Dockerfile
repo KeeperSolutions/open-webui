@@ -48,7 +48,7 @@ ENV PUBLIC_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}
 RUN npm run build
 
 ######## WebUI backend ########
-FROM python:3.11.14-slim-bookworm AS base
+FROM python:3.11-slim-bookworm AS base
 
 # Use args
 ARG USE_CUDA
