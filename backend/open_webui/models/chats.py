@@ -471,9 +471,7 @@ class ChatTable:
             if msg.get('parentId') and msg['parentId'] not in messages_map
         }
 
-    async def backfill_messages_by_chat_id(
-        self, chat_id: str, user_id: str, messages: dict[str, dict]
-    ) -> None:
+    async def backfill_messages_by_chat_id(self, chat_id: str, user_id: str, messages: dict[str, dict]) -> None:
         """Write messages to the ``chat_message`` table so future lookups
         use the fast path.  Errors are logged but never raised.
         """
@@ -509,9 +507,9 @@ class ChatTable:
 
             # Graph has gaps — enrich from the legacy embedded history.
             log.info(
-                'Chat %s: %d unresolved parent reference(s) in chat_message — '
-                'enriching from legacy history',
-                id, len(unresolved_ids),
+                'Chat %s: %d unresolved parent reference(s) in chat_message — enriching from legacy history',
+                id,
+                len(unresolved_ids),
             )
             chat = await self.get_chat_by_id(id)
             if chat:

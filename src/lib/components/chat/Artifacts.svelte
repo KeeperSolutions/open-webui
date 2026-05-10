@@ -246,7 +246,10 @@
 							<iframe
 								bind:this={iframeElement}
 								title="Content"
-								srcdoc={injectCsp(contents[selectedContentIdx].content, $config?.ui?.iframe_csp ?? '')}
+								srcdoc={injectCsp(
+									contents[selectedContentIdx].content,
+									$config?.ui?.iframe_csp ?? ''
+								)}
 								class="w-full border-0 h-full rounded-none"
 								sandbox="allow-scripts allow-downloads{($settings?.iframeSandboxAllowForms ?? false)
 									? ' allow-forms'

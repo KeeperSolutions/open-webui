@@ -268,11 +268,7 @@
 
 		{#if extracted.detailsContent}
 			<!-- Render structural blocks (tool calls, reasoning, etc.) through Markdown -->
-			<Markdown
-				{id}
-				content={extracted.detailsContent}
-				{done}
-			/>
+			<Markdown {id} content={extracted.detailsContent} {done} />
 		{/if}
 		{#if extracted.plainContent}
 			<div class="whitespace-pre-wrap">{extracted.plainContent}</div>

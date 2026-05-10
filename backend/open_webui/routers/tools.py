@@ -484,9 +484,7 @@ async def update_tools_by_id(
     if form_data.content != tools.content:
         if user.role != 'admin' and not (
             await has_permission(user.id, 'workspace.tools', request.app.state.config.USER_PERMISSIONS, db=db)
-            or await has_permission(
-                user.id, 'workspace.tools_import', request.app.state.config.USER_PERMISSIONS, db=db
-            )
+            or await has_permission(user.id, 'workspace.tools_import', request.app.state.config.USER_PERMISSIONS, db=db)
         ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

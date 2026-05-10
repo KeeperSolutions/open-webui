@@ -446,15 +446,12 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             )
         )
 
-        if (
-            write_access
-            or await AccessGrants.has_access(
-                user_id=user.id,
-                resource_type='model',
-                resource_id=model.id,
-                permission='read',
-                db=db,
-            )
+        if write_access or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='model',
+            resource_id=model.id,
+            permission='read',
+            db=db,
         ):
             model_dict = model.model_dump()
             # Strip params (system prompt and other admin-curated config)

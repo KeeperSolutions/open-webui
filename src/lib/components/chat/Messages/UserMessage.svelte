@@ -403,7 +403,9 @@
 										{topPadding}
 									/>
 								{:else}
-									<div class="whitespace-pre-wrap" dir={$settings?.chatDirection ?? 'auto'}>{message.content}</div>
+									<div class="whitespace-pre-wrap" dir={$settings?.chatDirection ?? 'auto'}>
+										{message.content}
+									</div>
 								{/if}
 							{/if}
 						</div>
