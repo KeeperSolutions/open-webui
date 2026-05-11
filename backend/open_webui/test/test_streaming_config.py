@@ -5,36 +5,17 @@ _keepalive_iter async generator.
 """
 
 import asyncio
-import importlib
 import sys
 import pytest
 
-
-_KEEPALIVE = object()
-
-
-async def _keepalive_iter(gen, interval):
-    it = gen.__aiter__()
-    pending = asyncio.create_task(it.__anext__())
-    try:
-        while True:
-            done, _ = await asyncio.wait({pending}, timeout=interval)
-            if done:
-                try:
-                    yield pending.result()
-                except StopAsyncIteration:
-                    break
-                pending = asyncio.create_task(it.__anext__())
-            else:
-                yield _KEEPALIVE
-    finally:
-        pending.cancel()
+from open_webui.utils.sse import _KEEPALIVE, _keepalive_iter
 
 
 def _reload_env(monkeypatch, env_vars: dict):
     """
-    Apply env_vars, reload open_webui.env, return the reloaded module.
-    Cleans up by restoring the original module after each test.
+    Apply env_vars, force-reload open_webui.env, return the reloaded module.
+    monkeypatch restores env vars after each test; the module stays evicted
+    from sys.modules and is re-imported fresh on the next _reload_env call.
     """
     for key, value in env_vars.items():
         if value is None:
@@ -74,6 +55,10 @@ class TestSockReadTimeout:
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": ""})
         assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is None
 
+    def test_empty_string_source_is_disabled(self, monkeypatch):
+        env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": ""})
+        assert env._sock_read_source == "disabled"
+
     def test_garbage_value_falls_back_to_60(self, monkeypatch):
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "notanumber"})
         assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == 60
@@ -83,9 +68,13 @@ class TestSockReadTimeout:
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "60.5"})
         assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == 60
 
-    def test_zero_is_parsed_as_zero(self, monkeypatch):
+    def test_zero_falls_back_to_60(self, monkeypatch):
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "0"})
-        assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == 0
+        assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == 60
+
+    def test_negative_falls_back_to_60(self, monkeypatch):
+        env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "-5"})
+        assert env.AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == 60
 
     def test_large_value(self, monkeypatch):
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "300"})
@@ -116,12 +105,21 @@ class TestSseKeepaliveInterval:
         env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": "30"})
         assert env.SSE_KEEPALIVE_INTERVAL == 7
 
-    def test_keepalive_always_under_30s_proxy_timeout(self, monkeypatch):
-        # For any sock_read >= 1, keepalive must be < 30s (Google proxy timeout)
-        for sock_read in [1, 10, 30, 60, 120, 300, 900]:
+    def test_keepalive_always_under_20s_when_set(self, monkeypatch):
+        # When set, SSE_KEEPALIVE_INTERVAL must be positive and <= 20
+        for sock_read in [4, 10, 30, 60, 120, 300, 900]:
             env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": str(sock_read)})
-            assert env.SSE_KEEPALIVE_INTERVAL < 30, (
-                f"keepalive={env.SSE_KEEPALIVE_INTERVAL}s >= 30s for sock_read={sock_read}s"
+            assert env.SSE_KEEPALIVE_INTERVAL is not None
+            assert 1 <= env.SSE_KEEPALIVE_INTERVAL <= 20, (
+                f"keepalive={env.SSE_KEEPALIVE_INTERVAL} out of range for sock_read={sock_read}"
+            )
+
+    def test_small_sock_read_disables_keepalive(self, monkeypatch):
+        # sock_read 1-3 are valid positive ints but sock_read//4 == 0, so keepalives disabled
+        for sock_read in [1, 2, 3]:
+            env = _reload_env(monkeypatch, {"AIOHTTP_CLIENT_TIMEOUT_SOCK_READ": str(sock_read)})
+            assert env.SSE_KEEPALIVE_INTERVAL is None, (
+                f"expected None for sock_read={sock_read}, got {env.SSE_KEEPALIVE_INTERVAL}"
             )
 
     def test_none_sock_read_uses_60_as_base(self, monkeypatch):

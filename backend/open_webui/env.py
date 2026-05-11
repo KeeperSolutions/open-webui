@@ -720,26 +720,38 @@ else:
 
 
 _sock_read_env = os.environ.get("AIOHTTP_CLIENT_TIMEOUT_SOCK_READ")
-_sock_read_source = "configured" if _sock_read_env is not None else "default"
-AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = _sock_read_env if _sock_read_env is not None else "60"
 
-if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ == "":
+if _sock_read_env is None:
+    _sock_read_source = "default"
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 60
+elif _sock_read_env == "":
+    _sock_read_source = "disabled"
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = None
 else:
     try:
-        AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = int(AIOHTTP_CLIENT_TIMEOUT_SOCK_READ)
+        _parsed = int(_sock_read_env)
+        if _parsed < 1:
+            raise ValueError("must be a positive integer")
+        _sock_read_source = "configured"
+        AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = _parsed
     except ValueError:
         log.warning(
             f"[aiohttp] Invalid AIOHTTP_CLIENT_TIMEOUT_SOCK_READ value "
-            f"'{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}', falling back to 60s."
+            f"'{_sock_read_env}', falling back to 60s."
         )
+        _sock_read_source = "default"
         AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 60
 
-# SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s
-# Must stay under 30s (Google Cloud frontend proxy idle stream timeout)
+# SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s.
+# None (keepalives disabled) when sock_read < 4 — interval would be 0 and busy-loop.
 _sse_keepalive_base = AIOHTTP_CLIENT_TIMEOUT_SOCK_READ if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None else 60
-SSE_KEEPALIVE_INTERVAL = min(_sse_keepalive_base // 4, 20)
-_sse_keepalive_source = "derived" if _sock_read_source == "default" else f"derived from AIOHTTP_CLIENT_TIMEOUT_SOCK_READ={AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s"
+_sse_keepalive_raw = _sse_keepalive_base // 4
+SSE_KEEPALIVE_INTERVAL = min(_sse_keepalive_raw, 20) if _sse_keepalive_raw >= 1 else None
+_sse_keepalive_source = (
+    "derived from default 60s"
+    if _sock_read_source in ("default", "disabled")
+    else f"derived from AIOHTTP_CLIENT_TIMEOUT_SOCK_READ={AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s"
+)
 
 
 AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA = os.environ.get(

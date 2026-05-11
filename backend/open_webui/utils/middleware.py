@@ -134,25 +134,7 @@ logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 
 
-_KEEPALIVE = object()
-
-
-async def _keepalive_iter(gen, interval: float):
-    it = gen.__aiter__()
-    pending = asyncio.create_task(it.__anext__())
-    try:
-        while True:
-            done, _ = await asyncio.wait({pending}, timeout=interval)
-            if done:
-                try:
-                    yield pending.result()
-                except StopAsyncIteration:
-                    break
-                pending = asyncio.create_task(it.__anext__())
-            else:
-                yield _KEEPALIVE
-    finally:
-        pending.cancel()
+from open_webui.utils.sse import _KEEPALIVE, _keepalive_iter
 
 
 DEFAULT_REASONING_TAGS = [
@@ -3231,22 +3213,24 @@ async def process_chat_response(
                 try:
                     await stream_body_handler(response, form_data)
                 except asyncio.TimeoutError:
+                    _timeout_error = (
+                        "Stream timed out — the model stopped responding. "
+                        "Please try again."
+                    )
                     log.warning(
                         f"[stream] Upstream idle timeout (sock_read) after "
                         f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
                         f"chat_id={metadata.get('chat_id')} model={model_id}"
                     )
+                    Chats.upsert_message_to_chat_by_id_and_message_id(
+                        metadata["chat_id"],
+                        metadata["message_id"],
+                        {"error": {"content": _timeout_error}},
+                    )
                     await event_emitter(
                         {
                             "type": "chat:message:error",
-                            "data": {
-                                "error": {
-                                    "content": (
-                                        "Stream timed out — the model stopped responding. "
-                                        "Please try again."
-                                    )
-                                }
-                            },
+                            "data": {"error": {"content": _timeout_error}},
                         }
                     )
 
@@ -3743,7 +3727,12 @@ async def process_chat_response(
                 if event:
                     yield wrap_item(json.dumps(event))
 
-            async for data in _keepalive_iter(original_generator, SSE_KEEPALIVE_INTERVAL):
+            _source = (
+                _keepalive_iter(original_generator, SSE_KEEPALIVE_INTERVAL)
+                if SSE_KEEPALIVE_INTERVAL is not None
+                else original_generator
+            )
+            async for data in _source:
                 if data is _KEEPALIVE:
                     yield ": keepalive\n\n"
                     continue
