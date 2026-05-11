@@ -915,7 +915,7 @@ app.state.BASE_MODELS = []
 #
 ########################################
 
-app.state.WEBUI_URL = WEBUI_URL
+app.state.WEBUI_URL = WEBUI_URL.value
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 app.state.config.ENABLE_PASSWORD_CHANGE_FORM = ENABLE_PASSWORD_CHANGE_FORM
@@ -2727,7 +2727,7 @@ async def register_client(request, client_id: str) -> bool:
                 'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
             },
         }
-        # Re-assign the full list to trigger AppConfig.__setattr__ → PersistentConfig.save()
+        # Re-assign the full list to trigger AppConfig.__setattr__ → ConfigVar.save()
         # (in-place list mutation via list[idx] = ... does not trigger __setattr__)
         request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
     except Exception as e:
