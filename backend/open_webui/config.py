@@ -1,20 +1,19 @@
+import base64
 import json
 import logging
 import os
 import shutil
 import socket
-import base64
 from concurrent.futures import ThreadPoolExecutor
-
 from datetime import datetime
 from pathlib import Path
-from typing import Union, Optional
+from typing import Optional, Union
 from urllib.parse import urlparse
 
 import redis
 import requests
-from pydantic import BaseModel
 from authlib.integrations.starlette_client import OAuth
+from pydantic import BaseModel
 
 from open_webui.env import (
     DATA_DIR,
@@ -97,11 +96,10 @@ class EndpointFilter(logging.Filter):
         return record.getMessage().find('/health') == -1
 
 
-# Filter out /health endpoint noise
 logging.getLogger('uvicorn.access').addFilter(EndpointFilter())
 
 ####################################
-# Config helpers
+# Initialization
 ####################################
 
 
@@ -140,547 +138,6 @@ CONFIG_DATA = _initialize_config(
     enable_persistent=ENABLE_PERSISTENT_CONFIG,
     enable_oauth_persistent=ENABLE_OAUTH_PERSISTENT_CONFIG,
 )
-
-
-ENABLE_API_KEYS = ConfigVar(
-    'ENABLE_API_KEYS',
-    'auth.enable_api_keys',
-    os.environ.get('ENABLE_API_KEYS', 'False').lower() == 'true',
-)
-
-ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ConfigVar(
-    'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
-    'auth.api_key.endpoint_restrictions',
-    os.environ.get(
-        'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
-        os.environ.get('ENABLE_API_KEY_ENDPOINT_RESTRICTIONS', 'False'),
-    ).lower()
-    == 'true',
-)
-
-API_KEYS_ALLOWED_ENDPOINTS = ConfigVar(
-    'API_KEYS_ALLOWED_ENDPOINTS',
-    'auth.api_key.allowed_endpoints',
-    os.environ.get('API_KEYS_ALLOWED_ENDPOINTS', os.environ.get('API_KEY_ALLOWED_ENDPOINTS', '')),
-)
-
-JWT_EXPIRES_IN = ConfigVar('JWT_EXPIRES_IN', 'auth.jwt_expiry', os.environ.get('JWT_EXPIRES_IN', '4w'))
-
-if JWT_EXPIRES_IN.value == '-1':
-    log.warning(
-        "⚠️  SECURITY WARNING: JWT_EXPIRES_IN is set to '-1'\n"
-        '    See: https://docs.openwebui.com/reference/env-configuration\n'
-    )
-
-####################################
-# OAuth config
-####################################
-
-ENABLE_OAUTH_SIGNUP = ConfigVar(
-    'ENABLE_OAUTH_SIGNUP',
-    'oauth.enable_signup',
-    os.environ.get('ENABLE_OAUTH_SIGNUP', 'False').lower() == 'true',
-)
-
-OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = ConfigVar(
-    'OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE',
-    'oauth.refresh_token_include_scope',
-    os.environ.get('OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE', 'False').lower() == 'true',
-)
-
-
-OAUTH_MERGE_ACCOUNTS_BY_EMAIL = ConfigVar(
-    'OAUTH_MERGE_ACCOUNTS_BY_EMAIL',
-    'oauth.merge_accounts_by_email',
-    os.environ.get('OAUTH_MERGE_ACCOUNTS_BY_EMAIL', 'False').lower() == 'true',
-)
-
-OAUTH_PROVIDERS = {}
-
-GOOGLE_CLIENT_ID = ConfigVar(
-    'GOOGLE_CLIENT_ID',
-    'oauth.google.client_id',
-    os.environ.get('GOOGLE_CLIENT_ID', ''),
-)
-
-GOOGLE_CLIENT_SECRET = ConfigVar(
-    'GOOGLE_CLIENT_SECRET',
-    'oauth.google.client_secret',
-    os.environ.get('GOOGLE_CLIENT_SECRET', ''),
-)
-
-
-GOOGLE_OAUTH_SCOPE = ConfigVar(
-    'GOOGLE_OAUTH_SCOPE',
-    'oauth.google.scope',
-    os.environ.get('GOOGLE_OAUTH_SCOPE', 'openid email profile'),
-)
-
-GOOGLE_REDIRECT_URI = ConfigVar(
-    'GOOGLE_REDIRECT_URI',
-    'oauth.google.redirect_uri',
-    os.environ.get('GOOGLE_REDIRECT_URI', ''),
-)
-
-GOOGLE_OAUTH_AUTHORIZE_PARAMS = {}
-_google_oauth_authorize_params = os.environ.get('GOOGLE_OAUTH_AUTHORIZE_PARAMS', '')
-if _google_oauth_authorize_params:
-    try:
-        _parsed = json.loads(_google_oauth_authorize_params)
-        if isinstance(_parsed, dict):
-            GOOGLE_OAUTH_AUTHORIZE_PARAMS = _parsed
-        else:
-            log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS must be a JSON object, ignoring')
-    except (json.JSONDecodeError, TypeError):
-        log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
-
-MICROSOFT_CLIENT_ID = ConfigVar(
-    'MICROSOFT_CLIENT_ID',
-    'oauth.microsoft.client_id',
-    os.environ.get('MICROSOFT_CLIENT_ID', ''),
-)
-
-MICROSOFT_CLIENT_SECRET = ConfigVar(
-    'MICROSOFT_CLIENT_SECRET',
-    'oauth.microsoft.client_secret',
-    os.environ.get('MICROSOFT_CLIENT_SECRET', ''),
-)
-
-MICROSOFT_CLIENT_TENANT_ID = ConfigVar(
-    'MICROSOFT_CLIENT_TENANT_ID',
-    'oauth.microsoft.tenant_id',
-    os.environ.get('MICROSOFT_CLIENT_TENANT_ID', ''),
-)
-
-MICROSOFT_CLIENT_LOGIN_BASE_URL = ConfigVar(
-    'MICROSOFT_CLIENT_LOGIN_BASE_URL',
-    'oauth.microsoft.login_base_url',
-    os.environ.get('MICROSOFT_CLIENT_LOGIN_BASE_URL', 'https://login.microsoftonline.com'),
-)
-
-MICROSOFT_CLIENT_PICTURE_URL = ConfigVar(
-    'MICROSOFT_CLIENT_PICTURE_URL',
-    'oauth.microsoft.picture_url',
-    os.environ.get(
-        'MICROSOFT_CLIENT_PICTURE_URL',
-        'https://graph.microsoft.com/v1.0/me/photo/$value',
-    ),
-)
-
-
-MICROSOFT_OAUTH_SCOPE = ConfigVar(
-    'MICROSOFT_OAUTH_SCOPE',
-    'oauth.microsoft.scope',
-    os.environ.get('MICROSOFT_OAUTH_SCOPE', 'openid email profile'),
-)
-
-MICROSOFT_REDIRECT_URI = ConfigVar(
-    'MICROSOFT_REDIRECT_URI',
-    'oauth.microsoft.redirect_uri',
-    os.environ.get('MICROSOFT_REDIRECT_URI', ''),
-)
-
-GITHUB_CLIENT_ID = ConfigVar(
-    'GITHUB_CLIENT_ID',
-    'oauth.github.client_id',
-    os.environ.get('GITHUB_CLIENT_ID', ''),
-)
-
-GITHUB_CLIENT_SECRET = ConfigVar(
-    'GITHUB_CLIENT_SECRET',
-    'oauth.github.client_secret',
-    os.environ.get('GITHUB_CLIENT_SECRET', ''),
-)
-
-GITHUB_CLIENT_SCOPE = ConfigVar(
-    'GITHUB_CLIENT_SCOPE',
-    'oauth.github.scope',
-    os.environ.get('GITHUB_CLIENT_SCOPE', 'user:email'),
-)
-
-GITHUB_CLIENT_REDIRECT_URI = ConfigVar(
-    'GITHUB_CLIENT_REDIRECT_URI',
-    'oauth.github.redirect_uri',
-    os.environ.get('GITHUB_CLIENT_REDIRECT_URI', ''),
-)
-
-OAUTH_CLIENT_ID = ConfigVar(
-    'OAUTH_CLIENT_ID',
-    'oauth.oidc.client_id',
-    os.environ.get('OAUTH_CLIENT_ID', ''),
-)
-
-OAUTH_CLIENT_SECRET = ConfigVar(
-    'OAUTH_CLIENT_SECRET',
-    'oauth.oidc.client_secret',
-    os.environ.get('OAUTH_CLIENT_SECRET', ''),
-)
-
-OPENID_PROVIDER_URL = ConfigVar(
-    'OPENID_PROVIDER_URL',
-    'oauth.oidc.provider_url',
-    os.environ.get('OPENID_PROVIDER_URL', ''),
-)
-
-OPENID_END_SESSION_ENDPOINT = ConfigVar(
-    'OPENID_END_SESSION_ENDPOINT',
-    'oauth.oidc.end_session_endpoint',
-    os.environ.get('OPENID_END_SESSION_ENDPOINT', ''),
-)
-
-OPENID_REDIRECT_URI = ConfigVar(
-    'OPENID_REDIRECT_URI',
-    'oauth.oidc.redirect_uri',
-    os.environ.get('OPENID_REDIRECT_URI', ''),
-)
-
-OAUTH_SCOPES = ConfigVar(
-    'OAUTH_SCOPES',
-    'oauth.oidc.scopes',
-    os.environ.get('OAUTH_SCOPES', 'openid email profile'),
-)
-
-OAUTH_TIMEOUT = ConfigVar(
-    'OAUTH_TIMEOUT',
-    'oauth.oidc.oauth_timeout',
-    os.environ.get('OAUTH_TIMEOUT', ''),
-)
-
-OAUTH_TOKEN_ENDPOINT_AUTH_METHOD = ConfigVar(
-    'OAUTH_TOKEN_ENDPOINT_AUTH_METHOD',
-    'oauth.oidc.token_endpoint_auth_method',
-    os.environ.get('OAUTH_TOKEN_ENDPOINT_AUTH_METHOD', None),
-)
-
-OAUTH_CODE_CHALLENGE_METHOD = ConfigVar(
-    'OAUTH_CODE_CHALLENGE_METHOD',
-    'oauth.oidc.code_challenge_method',
-    os.environ.get('OAUTH_CODE_CHALLENGE_METHOD', None),
-)
-
-OAUTH_PROVIDER_NAME = ConfigVar(
-    'OAUTH_PROVIDER_NAME',
-    'oauth.oidc.provider_name',
-    os.environ.get('OAUTH_PROVIDER_NAME', 'SSO'),
-)
-
-OAUTH_SUB_CLAIM = ConfigVar(
-    'OAUTH_SUB_CLAIM',
-    'oauth.oidc.sub_claim',
-    os.environ.get('OAUTH_SUB_CLAIM', None),
-)
-
-OAUTH_USERNAME_CLAIM = ConfigVar(
-    'OAUTH_USERNAME_CLAIM',
-    'oauth.oidc.username_claim',
-    os.environ.get('OAUTH_USERNAME_CLAIM', 'name'),
-)
-
-
-OAUTH_PICTURE_CLAIM = ConfigVar(
-    'OAUTH_PICTURE_CLAIM',
-    'oauth.oidc.avatar_claim',
-    os.environ.get('OAUTH_PICTURE_CLAIM', 'picture'),
-)
-
-OAUTH_EMAIL_CLAIM = ConfigVar(
-    'OAUTH_EMAIL_CLAIM',
-    'oauth.oidc.email_claim',
-    os.environ.get('OAUTH_EMAIL_CLAIM', 'email'),
-)
-
-OAUTH_GROUPS_CLAIM = ConfigVar(
-    'OAUTH_GROUPS_CLAIM',
-    'oauth.oidc.group_claim',
-    os.environ.get('OAUTH_GROUPS_CLAIM', os.environ.get('OAUTH_GROUP_CLAIM', 'groups')),
-)
-
-FEISHU_CLIENT_ID = ConfigVar(
-    'FEISHU_CLIENT_ID',
-    'oauth.feishu.client_id',
-    os.environ.get('FEISHU_CLIENT_ID', ''),
-)
-
-FEISHU_CLIENT_SECRET = ConfigVar(
-    'FEISHU_CLIENT_SECRET',
-    'oauth.feishu.client_secret',
-    os.environ.get('FEISHU_CLIENT_SECRET', ''),
-)
-
-FEISHU_OAUTH_SCOPE = ConfigVar(
-    'FEISHU_OAUTH_SCOPE',
-    'oauth.feishu.scope',
-    os.environ.get('FEISHU_OAUTH_SCOPE', 'contact:user.base:readonly'),
-)
-
-FEISHU_REDIRECT_URI = ConfigVar(
-    'FEISHU_REDIRECT_URI',
-    'oauth.feishu.redirect_uri',
-    os.environ.get('FEISHU_REDIRECT_URI', ''),
-)
-
-ENABLE_OAUTH_ROLE_MANAGEMENT = ConfigVar(
-    'ENABLE_OAUTH_ROLE_MANAGEMENT',
-    'oauth.enable_role_mapping',
-    os.environ.get('ENABLE_OAUTH_ROLE_MANAGEMENT', 'False').lower() == 'true',
-)
-
-ENABLE_OAUTH_GROUP_MANAGEMENT = ConfigVar(
-    'ENABLE_OAUTH_GROUP_MANAGEMENT',
-    'oauth.enable_group_mapping',
-    os.environ.get('ENABLE_OAUTH_GROUP_MANAGEMENT', 'False').lower() == 'true',
-)
-
-ENABLE_OAUTH_GROUP_CREATION = ConfigVar(
-    'ENABLE_OAUTH_GROUP_CREATION',
-    'oauth.enable_group_creation',
-    os.environ.get('ENABLE_OAUTH_GROUP_CREATION', 'False').lower() == 'true',
-)
-
-
-oauth_group_default_share = os.environ.get('OAUTH_GROUP_DEFAULT_SHARE', 'true').strip().lower()
-OAUTH_GROUP_DEFAULT_SHARE = ConfigVar(
-    'OAUTH_GROUP_DEFAULT_SHARE',
-    'oauth.group_default_share',
-    ('members' if oauth_group_default_share == 'members' else oauth_group_default_share == 'true'),
-)
-
-
-OAUTH_BLOCKED_GROUPS = ConfigVar(
-    'OAUTH_BLOCKED_GROUPS',
-    'oauth.blocked_groups',
-    os.environ.get('OAUTH_BLOCKED_GROUPS', '[]'),
-)
-
-OAUTH_GROUPS_SEPARATOR = os.environ.get('OAUTH_GROUPS_SEPARATOR', ';')
-
-OAUTH_ROLES_CLAIM = ConfigVar(
-    'OAUTH_ROLES_CLAIM',
-    'oauth.roles_claim',
-    os.environ.get('OAUTH_ROLES_CLAIM', 'roles'),
-)
-
-OAUTH_ROLES_SEPARATOR = os.environ.get('OAUTH_ROLES_SEPARATOR', ',')
-
-OAUTH_ALLOWED_ROLES = ConfigVar(
-    'OAUTH_ALLOWED_ROLES',
-    'oauth.allowed_roles',
-    [
-        role.strip()
-        for role in os.environ.get('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(
-            OAUTH_ROLES_SEPARATOR
-        )
-        if role
-    ],
-)
-
-OAUTH_ADMIN_ROLES = ConfigVar(
-    'OAUTH_ADMIN_ROLES',
-    'oauth.admin_roles',
-    [role.strip() for role in os.environ.get('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role],
-)
-
-OAUTH_ALLOWED_DOMAINS = ConfigVar(
-    'OAUTH_ALLOWED_DOMAINS',
-    'oauth.allowed_domains',
-    [domain.strip() for domain in os.environ.get('OAUTH_ALLOWED_DOMAINS', '*').split(',')],
-)
-
-OAUTH_UPDATE_PICTURE_ON_LOGIN = ConfigVar(
-    'OAUTH_UPDATE_PICTURE_ON_LOGIN',
-    'oauth.update_picture_on_login',
-    os.environ.get('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true',
-)
-
-OAUTH_UPDATE_NAME_ON_LOGIN = ConfigVar(
-    'OAUTH_UPDATE_NAME_ON_LOGIN',
-    'oauth.update_name_on_login',
-    os.environ.get('OAUTH_UPDATE_NAME_ON_LOGIN', 'False').lower() == 'true',
-)
-
-OAUTH_UPDATE_EMAIL_ON_LOGIN = ConfigVar(
-    'OAUTH_UPDATE_EMAIL_ON_LOGIN',
-    'oauth.update_email_on_login',
-    os.environ.get('OAUTH_UPDATE_EMAIL_ON_LOGIN', 'False').lower() == 'true',
-)
-
-OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID = (
-    os.environ.get('OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID', 'False').lower() == 'true'
-)
-
-OAUTH_AUDIENCE = ConfigVar(
-    'OAUTH_AUDIENCE',
-    'oauth.audience',
-    os.environ.get('OAUTH_AUDIENCE', ''),
-)
-
-OAUTH_AUTHORIZE_PARAMS = {}
-_oauth_authorize_params = os.environ.get('OAUTH_AUTHORIZE_PARAMS', '')
-if _oauth_authorize_params:
-    try:
-        _parsed = json.loads(_oauth_authorize_params)
-        if isinstance(_parsed, dict):
-            OAUTH_AUTHORIZE_PARAMS = _parsed
-        else:
-            log.warning('OAUTH_AUTHORIZE_PARAMS must be a JSON object, ignoring')
-    except (json.JSONDecodeError, TypeError):
-        log.warning('OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
-
-
-def load_oauth_providers():
-    OAUTH_PROVIDERS.clear()
-    if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
-
-        def google_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='google',
-                client_id=GOOGLE_CLIENT_ID.value,
-                client_secret=GOOGLE_CLIENT_SECRET.value,
-                server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-                client_kwargs={
-                    'scope': GOOGLE_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
-                redirect_uri=GOOGLE_REDIRECT_URI.value,
-                **({'authorize_params': GOOGLE_OAUTH_AUTHORIZE_PARAMS} if GOOGLE_OAUTH_AUTHORIZE_PARAMS else {}),
-            )
-            return client
-
-        OAUTH_PROVIDERS['google'] = {
-            'register': google_oauth_register,
-        }
-
-    if MICROSOFT_CLIENT_ID.value and MICROSOFT_CLIENT_SECRET.value and MICROSOFT_CLIENT_TENANT_ID.value:
-
-        def microsoft_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='microsoft',
-                client_id=MICROSOFT_CLIENT_ID.value,
-                client_secret=MICROSOFT_CLIENT_SECRET.value,
-                server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL.value}/{MICROSOFT_CLIENT_TENANT_ID.value}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID.value}',
-                client_kwargs={
-                    'scope': MICROSOFT_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
-                redirect_uri=MICROSOFT_REDIRECT_URI.value,
-            )
-            return client
-
-        OAUTH_PROVIDERS['microsoft'] = {
-            'picture_url': MICROSOFT_CLIENT_PICTURE_URL.value,
-            'register': microsoft_oauth_register,
-        }
-
-    if GITHUB_CLIENT_ID.value and GITHUB_CLIENT_SECRET.value:
-
-        def github_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='github',
-                client_id=GITHUB_CLIENT_ID.value,
-                client_secret=GITHUB_CLIENT_SECRET.value,
-                access_token_url='https://github.com/login/oauth/access_token',
-                authorize_url='https://github.com/login/oauth/authorize',
-                api_base_url='https://api.github.com',
-                userinfo_endpoint='https://api.github.com/user',
-                client_kwargs={
-                    'scope': GITHUB_CLIENT_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
-                redirect_uri=GITHUB_CLIENT_REDIRECT_URI.value,
-            )
-            return client
-
-        OAUTH_PROVIDERS['github'] = {
-            'register': github_oauth_register,
-            'sub_claim': 'id',
-        }
-
-    if (
-        OAUTH_CLIENT_ID.value
-        and (OAUTH_CLIENT_SECRET.value or OAUTH_CODE_CHALLENGE_METHOD.value)
-        and OPENID_PROVIDER_URL.value
-    ):
-
-        def oidc_oauth_register(oauth: OAuth):
-            client_kwargs = {
-                'scope': OAUTH_SCOPES.value,
-                **(
-                    {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
-                    if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
-                    else {}
-                ),
-                **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-            }
-
-            if OAUTH_CODE_CHALLENGE_METHOD.value and OAUTH_CODE_CHALLENGE_METHOD.value == 'S256':
-                client_kwargs['code_challenge_method'] = 'S256'
-            elif OAUTH_CODE_CHALLENGE_METHOD.value:
-                raise Exception(
-                    'Code challenge methods other than "%s" not supported. Given: "%s"'
-                    % ('S256', OAUTH_CODE_CHALLENGE_METHOD.value)
-                )
-
-            client = oauth.register(
-                name='oidc',
-                client_id=OAUTH_CLIENT_ID.value,
-                client_secret=OAUTH_CLIENT_SECRET.value,
-                server_metadata_url=OPENID_PROVIDER_URL.value,
-                client_kwargs=client_kwargs,
-                redirect_uri=OPENID_REDIRECT_URI.value,
-            )
-            return client
-
-        OAUTH_PROVIDERS['oidc'] = {
-            'name': OAUTH_PROVIDER_NAME.value,
-            'register': oidc_oauth_register,
-        }
-
-    if FEISHU_CLIENT_ID.value and FEISHU_CLIENT_SECRET.value:
-
-        def feishu_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='feishu',
-                client_id=FEISHU_CLIENT_ID.value,
-                client_secret=FEISHU_CLIENT_SECRET.value,
-                access_token_url='https://open.feishu.cn/open-apis/authen/v2/oauth/token',
-                authorize_url='https://accounts.feishu.cn/open-apis/authen/v1/authorize',
-                api_base_url='https://open.feishu.cn/open-apis',
-                userinfo_endpoint='https://open.feishu.cn/open-apis/authen/v1/user_info',
-                client_kwargs={
-                    'scope': FEISHU_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
-                redirect_uri=FEISHU_REDIRECT_URI.value,
-            )
-            return client
-
-        OAUTH_PROVIDERS['feishu'] = {
-            'register': feishu_oauth_register,
-            'sub_claim': 'user_id',
-        }
-
-    configured_providers = []
-    if GOOGLE_CLIENT_ID.value:
-        configured_providers.append('Google')
-    if MICROSOFT_CLIENT_ID.value:
-        configured_providers.append('Microsoft')
-    if GITHUB_CLIENT_ID.value:
-        configured_providers.append('GitHub')
-    if FEISHU_CLIENT_ID.value:
-        configured_providers.append('Feishu')
-
-    if configured_providers and not OPENID_PROVIDER_URL.value and not OPENID_END_SESSION_ENDPOINT.value:
-        provider_list = ', '.join(configured_providers)
-        log.warning(
-            f'⚠️  OAuth providers configured ({provider_list}) but OPENID_PROVIDER_URL not set - logout will not work!'
-        )
-        log.warning(
-            f"Set OPENID_PROVIDER_URL to your OAuth provider's OpenID Connect discovery endpoint,"
-            f' or set OPENID_END_SESSION_ENDPOINT to a custom logout URL to fix logout functionality.'
-        )
-
-
-load_oauth_providers()
 
 ####################################
 # Static DIR
@@ -736,43 +193,6 @@ if frontend_loader.exists():
 
 
 ####################################
-# CUSTOM_NAME (Legacy)
-####################################
-
-CUSTOM_NAME = os.environ.get('CUSTOM_NAME', '')
-
-if CUSTOM_NAME:
-    try:
-        r = requests.get(f'https://api.openwebui.com/api/v1/custom/{CUSTOM_NAME}')
-        data = r.json()
-        if r.ok:
-            if 'logo' in data:
-                WEBUI_FAVICON_URL = url = (
-                    f'https://api.openwebui.com{data["logo"]}' if data['logo'][0] == '/' else data['logo']
-                )
-
-                r = requests.get(url, stream=True)
-                if r.status_code == 200:
-                    with open(f'{STATIC_DIR}/favicon.png', 'wb') as f:
-                        r.raw.decode_content = True
-                        shutil.copyfileobj(r.raw, f)
-
-            if 'splash' in data:
-                url = f'https://api.openwebui.com{data["splash"]}' if data['splash'][0] == '/' else data['splash']
-
-                r = requests.get(url, stream=True)
-                if r.status_code == 200:
-                    with open(f'{STATIC_DIR}/splash.png', 'wb') as f:
-                        r.raw.decode_content = True
-                        shutil.copyfileobj(r.raw, f)
-
-            WEBUI_NAME = data['name']
-    except Exception as e:
-        log.exception(e)
-        pass
-
-
-####################################
 # STORAGE PROVIDER
 ####################################
 
@@ -810,6 +230,43 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 CACHE_DIR = DATA_DIR / 'cache'
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+####################################
+# CUSTOM_NAME (Legacy)
+####################################
+
+CUSTOM_NAME = os.environ.get('CUSTOM_NAME', '')
+
+if CUSTOM_NAME:
+    try:
+        r = requests.get(f'https://api.openwebui.com/api/v1/custom/{CUSTOM_NAME}')
+        data = r.json()
+        if r.ok:
+            if 'logo' in data:
+                WEBUI_FAVICON_URL = url = (
+                    f'https://api.openwebui.com{data["logo"]}' if data['logo'][0] == '/' else data['logo']
+                )
+
+                r = requests.get(url, stream=True)
+                if r.status_code == 200:
+                    with open(f'{STATIC_DIR}/favicon.png', 'wb') as f:
+                        r.raw.decode_content = True
+                        shutil.copyfileobj(r.raw, f)
+
+            if 'splash' in data:
+                url = f'https://api.openwebui.com{data["splash"]}' if data['splash'][0] == '/' else data['splash']
+
+                r = requests.get(url, stream=True)
+                if r.status_code == 200:
+                    with open(f'{STATIC_DIR}/splash.png', 'wb') as f:
+                        r.raw.decode_content = True
+                        shutil.copyfileobj(r.raw, f)
+
+            WEBUI_NAME = data['name']
+    except Exception as e:
+        log.exception(e)
+        pass
 
 
 ####################################
@@ -3943,6 +3400,549 @@ AUDIO_TTS_MISTRAL_API_BASE_URL = ConfigVar(
     os.getenv('AUDIO_TTS_MISTRAL_API_BASE_URL', 'https://api.mistral.ai/v1'),
 )
 
+####################################
+# Auth
+####################################
+
+ENABLE_API_KEYS = ConfigVar(
+    'ENABLE_API_KEYS',
+    'auth.enable_api_keys',
+    os.environ.get('ENABLE_API_KEYS', 'False').lower() == 'true',
+)
+
+ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ConfigVar(
+    'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
+    'auth.api_key.endpoint_restrictions',
+    os.environ.get(
+        'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
+        os.environ.get('ENABLE_API_KEY_ENDPOINT_RESTRICTIONS', 'False'),
+    ).lower()
+    == 'true',
+)
+
+API_KEYS_ALLOWED_ENDPOINTS = ConfigVar(
+    'API_KEYS_ALLOWED_ENDPOINTS',
+    'auth.api_key.allowed_endpoints',
+    os.environ.get('API_KEYS_ALLOWED_ENDPOINTS', os.environ.get('API_KEY_ALLOWED_ENDPOINTS', '')),
+)
+
+JWT_EXPIRES_IN = ConfigVar('JWT_EXPIRES_IN', 'auth.jwt_expiry', os.environ.get('JWT_EXPIRES_IN', '4w'))
+
+if JWT_EXPIRES_IN.value == '-1':
+    log.warning(
+        "⚠️  SECURITY WARNING: JWT_EXPIRES_IN is set to '-1'\n"
+        '    See: https://docs.openwebui.com/reference/env-configuration\n'
+    )
+
+####################################
+# OAuth config
+####################################
+
+ENABLE_OAUTH_SIGNUP = ConfigVar(
+    'ENABLE_OAUTH_SIGNUP',
+    'oauth.enable_signup',
+    os.environ.get('ENABLE_OAUTH_SIGNUP', 'False').lower() == 'true',
+)
+
+OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = ConfigVar(
+    'OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE',
+    'oauth.refresh_token_include_scope',
+    os.environ.get('OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE', 'False').lower() == 'true',
+)
+
+
+OAUTH_MERGE_ACCOUNTS_BY_EMAIL = ConfigVar(
+    'OAUTH_MERGE_ACCOUNTS_BY_EMAIL',
+    'oauth.merge_accounts_by_email',
+    os.environ.get('OAUTH_MERGE_ACCOUNTS_BY_EMAIL', 'False').lower() == 'true',
+)
+
+OAUTH_PROVIDERS = {}
+
+GOOGLE_CLIENT_ID = ConfigVar(
+    'GOOGLE_CLIENT_ID',
+    'oauth.google.client_id',
+    os.environ.get('GOOGLE_CLIENT_ID', ''),
+)
+
+GOOGLE_CLIENT_SECRET = ConfigVar(
+    'GOOGLE_CLIENT_SECRET',
+    'oauth.google.client_secret',
+    os.environ.get('GOOGLE_CLIENT_SECRET', ''),
+)
+
+
+GOOGLE_OAUTH_SCOPE = ConfigVar(
+    'GOOGLE_OAUTH_SCOPE',
+    'oauth.google.scope',
+    os.environ.get('GOOGLE_OAUTH_SCOPE', 'openid email profile'),
+)
+
+GOOGLE_REDIRECT_URI = ConfigVar(
+    'GOOGLE_REDIRECT_URI',
+    'oauth.google.redirect_uri',
+    os.environ.get('GOOGLE_REDIRECT_URI', ''),
+)
+
+GOOGLE_OAUTH_AUTHORIZE_PARAMS = {}
+_google_oauth_authorize_params = os.environ.get('GOOGLE_OAUTH_AUTHORIZE_PARAMS', '')
+if _google_oauth_authorize_params:
+    try:
+        _parsed = json.loads(_google_oauth_authorize_params)
+        if isinstance(_parsed, dict):
+            GOOGLE_OAUTH_AUTHORIZE_PARAMS = _parsed
+        else:
+            log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS must be a JSON object, ignoring')
+    except (json.JSONDecodeError, TypeError):
+        log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
+
+MICROSOFT_CLIENT_ID = ConfigVar(
+    'MICROSOFT_CLIENT_ID',
+    'oauth.microsoft.client_id',
+    os.environ.get('MICROSOFT_CLIENT_ID', ''),
+)
+
+MICROSOFT_CLIENT_SECRET = ConfigVar(
+    'MICROSOFT_CLIENT_SECRET',
+    'oauth.microsoft.client_secret',
+    os.environ.get('MICROSOFT_CLIENT_SECRET', ''),
+)
+
+MICROSOFT_CLIENT_TENANT_ID = ConfigVar(
+    'MICROSOFT_CLIENT_TENANT_ID',
+    'oauth.microsoft.tenant_id',
+    os.environ.get('MICROSOFT_CLIENT_TENANT_ID', ''),
+)
+
+MICROSOFT_CLIENT_LOGIN_BASE_URL = ConfigVar(
+    'MICROSOFT_CLIENT_LOGIN_BASE_URL',
+    'oauth.microsoft.login_base_url',
+    os.environ.get('MICROSOFT_CLIENT_LOGIN_BASE_URL', 'https://login.microsoftonline.com'),
+)
+
+MICROSOFT_CLIENT_PICTURE_URL = ConfigVar(
+    'MICROSOFT_CLIENT_PICTURE_URL',
+    'oauth.microsoft.picture_url',
+    os.environ.get(
+        'MICROSOFT_CLIENT_PICTURE_URL',
+        'https://graph.microsoft.com/v1.0/me/photo/$value',
+    ),
+)
+
+
+MICROSOFT_OAUTH_SCOPE = ConfigVar(
+    'MICROSOFT_OAUTH_SCOPE',
+    'oauth.microsoft.scope',
+    os.environ.get('MICROSOFT_OAUTH_SCOPE', 'openid email profile'),
+)
+
+MICROSOFT_REDIRECT_URI = ConfigVar(
+    'MICROSOFT_REDIRECT_URI',
+    'oauth.microsoft.redirect_uri',
+    os.environ.get('MICROSOFT_REDIRECT_URI', ''),
+)
+
+GITHUB_CLIENT_ID = ConfigVar(
+    'GITHUB_CLIENT_ID',
+    'oauth.github.client_id',
+    os.environ.get('GITHUB_CLIENT_ID', ''),
+)
+
+GITHUB_CLIENT_SECRET = ConfigVar(
+    'GITHUB_CLIENT_SECRET',
+    'oauth.github.client_secret',
+    os.environ.get('GITHUB_CLIENT_SECRET', ''),
+)
+
+GITHUB_CLIENT_SCOPE = ConfigVar(
+    'GITHUB_CLIENT_SCOPE',
+    'oauth.github.scope',
+    os.environ.get('GITHUB_CLIENT_SCOPE', 'user:email'),
+)
+
+GITHUB_CLIENT_REDIRECT_URI = ConfigVar(
+    'GITHUB_CLIENT_REDIRECT_URI',
+    'oauth.github.redirect_uri',
+    os.environ.get('GITHUB_CLIENT_REDIRECT_URI', ''),
+)
+
+OAUTH_CLIENT_ID = ConfigVar(
+    'OAUTH_CLIENT_ID',
+    'oauth.oidc.client_id',
+    os.environ.get('OAUTH_CLIENT_ID', ''),
+)
+
+OAUTH_CLIENT_SECRET = ConfigVar(
+    'OAUTH_CLIENT_SECRET',
+    'oauth.oidc.client_secret',
+    os.environ.get('OAUTH_CLIENT_SECRET', ''),
+)
+
+OPENID_PROVIDER_URL = ConfigVar(
+    'OPENID_PROVIDER_URL',
+    'oauth.oidc.provider_url',
+    os.environ.get('OPENID_PROVIDER_URL', ''),
+)
+
+OPENID_END_SESSION_ENDPOINT = ConfigVar(
+    'OPENID_END_SESSION_ENDPOINT',
+    'oauth.oidc.end_session_endpoint',
+    os.environ.get('OPENID_END_SESSION_ENDPOINT', ''),
+)
+
+OPENID_REDIRECT_URI = ConfigVar(
+    'OPENID_REDIRECT_URI',
+    'oauth.oidc.redirect_uri',
+    os.environ.get('OPENID_REDIRECT_URI', ''),
+)
+
+OAUTH_SCOPES = ConfigVar(
+    'OAUTH_SCOPES',
+    'oauth.oidc.scopes',
+    os.environ.get('OAUTH_SCOPES', 'openid email profile'),
+)
+
+OAUTH_TIMEOUT = ConfigVar(
+    'OAUTH_TIMEOUT',
+    'oauth.oidc.oauth_timeout',
+    os.environ.get('OAUTH_TIMEOUT', ''),
+)
+
+OAUTH_TOKEN_ENDPOINT_AUTH_METHOD = ConfigVar(
+    'OAUTH_TOKEN_ENDPOINT_AUTH_METHOD',
+    'oauth.oidc.token_endpoint_auth_method',
+    os.environ.get('OAUTH_TOKEN_ENDPOINT_AUTH_METHOD', None),
+)
+
+OAUTH_CODE_CHALLENGE_METHOD = ConfigVar(
+    'OAUTH_CODE_CHALLENGE_METHOD',
+    'oauth.oidc.code_challenge_method',
+    os.environ.get('OAUTH_CODE_CHALLENGE_METHOD', None),
+)
+
+OAUTH_PROVIDER_NAME = ConfigVar(
+    'OAUTH_PROVIDER_NAME',
+    'oauth.oidc.provider_name',
+    os.environ.get('OAUTH_PROVIDER_NAME', 'SSO'),
+)
+
+OAUTH_SUB_CLAIM = ConfigVar(
+    'OAUTH_SUB_CLAIM',
+    'oauth.oidc.sub_claim',
+    os.environ.get('OAUTH_SUB_CLAIM', None),
+)
+
+OAUTH_USERNAME_CLAIM = ConfigVar(
+    'OAUTH_USERNAME_CLAIM',
+    'oauth.oidc.username_claim',
+    os.environ.get('OAUTH_USERNAME_CLAIM', 'name'),
+)
+
+
+OAUTH_PICTURE_CLAIM = ConfigVar(
+    'OAUTH_PICTURE_CLAIM',
+    'oauth.oidc.avatar_claim',
+    os.environ.get('OAUTH_PICTURE_CLAIM', 'picture'),
+)
+
+OAUTH_EMAIL_CLAIM = ConfigVar(
+    'OAUTH_EMAIL_CLAIM',
+    'oauth.oidc.email_claim',
+    os.environ.get('OAUTH_EMAIL_CLAIM', 'email'),
+)
+
+OAUTH_GROUPS_CLAIM = ConfigVar(
+    'OAUTH_GROUPS_CLAIM',
+    'oauth.oidc.group_claim',
+    os.environ.get('OAUTH_GROUPS_CLAIM', os.environ.get('OAUTH_GROUP_CLAIM', 'groups')),
+)
+
+FEISHU_CLIENT_ID = ConfigVar(
+    'FEISHU_CLIENT_ID',
+    'oauth.feishu.client_id',
+    os.environ.get('FEISHU_CLIENT_ID', ''),
+)
+
+FEISHU_CLIENT_SECRET = ConfigVar(
+    'FEISHU_CLIENT_SECRET',
+    'oauth.feishu.client_secret',
+    os.environ.get('FEISHU_CLIENT_SECRET', ''),
+)
+
+FEISHU_OAUTH_SCOPE = ConfigVar(
+    'FEISHU_OAUTH_SCOPE',
+    'oauth.feishu.scope',
+    os.environ.get('FEISHU_OAUTH_SCOPE', 'contact:user.base:readonly'),
+)
+
+FEISHU_REDIRECT_URI = ConfigVar(
+    'FEISHU_REDIRECT_URI',
+    'oauth.feishu.redirect_uri',
+    os.environ.get('FEISHU_REDIRECT_URI', ''),
+)
+
+ENABLE_OAUTH_ROLE_MANAGEMENT = ConfigVar(
+    'ENABLE_OAUTH_ROLE_MANAGEMENT',
+    'oauth.enable_role_mapping',
+    os.environ.get('ENABLE_OAUTH_ROLE_MANAGEMENT', 'False').lower() == 'true',
+)
+
+ENABLE_OAUTH_GROUP_MANAGEMENT = ConfigVar(
+    'ENABLE_OAUTH_GROUP_MANAGEMENT',
+    'oauth.enable_group_mapping',
+    os.environ.get('ENABLE_OAUTH_GROUP_MANAGEMENT', 'False').lower() == 'true',
+)
+
+ENABLE_OAUTH_GROUP_CREATION = ConfigVar(
+    'ENABLE_OAUTH_GROUP_CREATION',
+    'oauth.enable_group_creation',
+    os.environ.get('ENABLE_OAUTH_GROUP_CREATION', 'False').lower() == 'true',
+)
+
+
+oauth_group_default_share = os.environ.get('OAUTH_GROUP_DEFAULT_SHARE', 'true').strip().lower()
+OAUTH_GROUP_DEFAULT_SHARE = ConfigVar(
+    'OAUTH_GROUP_DEFAULT_SHARE',
+    'oauth.group_default_share',
+    ('members' if oauth_group_default_share == 'members' else oauth_group_default_share == 'true'),
+)
+
+
+OAUTH_BLOCKED_GROUPS = ConfigVar(
+    'OAUTH_BLOCKED_GROUPS',
+    'oauth.blocked_groups',
+    os.environ.get('OAUTH_BLOCKED_GROUPS', '[]'),
+)
+
+OAUTH_GROUPS_SEPARATOR = os.environ.get('OAUTH_GROUPS_SEPARATOR', ';')
+
+OAUTH_ROLES_CLAIM = ConfigVar(
+    'OAUTH_ROLES_CLAIM',
+    'oauth.roles_claim',
+    os.environ.get('OAUTH_ROLES_CLAIM', 'roles'),
+)
+
+OAUTH_ROLES_SEPARATOR = os.environ.get('OAUTH_ROLES_SEPARATOR', ',')
+
+OAUTH_ALLOWED_ROLES = ConfigVar(
+    'OAUTH_ALLOWED_ROLES',
+    'oauth.allowed_roles',
+    [
+        role.strip()
+        for role in os.environ.get('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(
+            OAUTH_ROLES_SEPARATOR
+        )
+        if role
+    ],
+)
+
+OAUTH_ADMIN_ROLES = ConfigVar(
+    'OAUTH_ADMIN_ROLES',
+    'oauth.admin_roles',
+    [role.strip() for role in os.environ.get('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role],
+)
+
+OAUTH_ALLOWED_DOMAINS = ConfigVar(
+    'OAUTH_ALLOWED_DOMAINS',
+    'oauth.allowed_domains',
+    [domain.strip() for domain in os.environ.get('OAUTH_ALLOWED_DOMAINS', '*').split(',')],
+)
+
+OAUTH_UPDATE_PICTURE_ON_LOGIN = ConfigVar(
+    'OAUTH_UPDATE_PICTURE_ON_LOGIN',
+    'oauth.update_picture_on_login',
+    os.environ.get('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true',
+)
+
+OAUTH_UPDATE_NAME_ON_LOGIN = ConfigVar(
+    'OAUTH_UPDATE_NAME_ON_LOGIN',
+    'oauth.update_name_on_login',
+    os.environ.get('OAUTH_UPDATE_NAME_ON_LOGIN', 'False').lower() == 'true',
+)
+
+OAUTH_UPDATE_EMAIL_ON_LOGIN = ConfigVar(
+    'OAUTH_UPDATE_EMAIL_ON_LOGIN',
+    'oauth.update_email_on_login',
+    os.environ.get('OAUTH_UPDATE_EMAIL_ON_LOGIN', 'False').lower() == 'true',
+)
+
+OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID = (
+    os.environ.get('OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID', 'False').lower() == 'true'
+)
+
+OAUTH_AUDIENCE = ConfigVar(
+    'OAUTH_AUDIENCE',
+    'oauth.audience',
+    os.environ.get('OAUTH_AUDIENCE', ''),
+)
+
+OAUTH_AUTHORIZE_PARAMS = {}
+_oauth_authorize_params = os.environ.get('OAUTH_AUTHORIZE_PARAMS', '')
+if _oauth_authorize_params:
+    try:
+        _parsed = json.loads(_oauth_authorize_params)
+        if isinstance(_parsed, dict):
+            OAUTH_AUTHORIZE_PARAMS = _parsed
+        else:
+            log.warning('OAUTH_AUTHORIZE_PARAMS must be a JSON object, ignoring')
+    except (json.JSONDecodeError, TypeError):
+        log.warning('OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
+
+
+def load_oauth_providers():
+    OAUTH_PROVIDERS.clear()
+    if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
+
+        def google_oauth_register(oauth: OAuth):
+            client = oauth.register(
+                name='google',
+                client_id=GOOGLE_CLIENT_ID.value,
+                client_secret=GOOGLE_CLIENT_SECRET.value,
+                server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+                client_kwargs={
+                    'scope': GOOGLE_OAUTH_SCOPE.value,
+                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
+                },
+                redirect_uri=GOOGLE_REDIRECT_URI.value,
+                **({'authorize_params': GOOGLE_OAUTH_AUTHORIZE_PARAMS} if GOOGLE_OAUTH_AUTHORIZE_PARAMS else {}),
+            )
+            return client
+
+        OAUTH_PROVIDERS['google'] = {
+            'register': google_oauth_register,
+        }
+
+    if MICROSOFT_CLIENT_ID.value and MICROSOFT_CLIENT_SECRET.value and MICROSOFT_CLIENT_TENANT_ID.value:
+
+        def microsoft_oauth_register(oauth: OAuth):
+            client = oauth.register(
+                name='microsoft',
+                client_id=MICROSOFT_CLIENT_ID.value,
+                client_secret=MICROSOFT_CLIENT_SECRET.value,
+                server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL.value}/{MICROSOFT_CLIENT_TENANT_ID.value}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID.value}',
+                client_kwargs={
+                    'scope': MICROSOFT_OAUTH_SCOPE.value,
+                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
+                },
+                redirect_uri=MICROSOFT_REDIRECT_URI.value,
+            )
+            return client
+
+        OAUTH_PROVIDERS['microsoft'] = {
+            'picture_url': MICROSOFT_CLIENT_PICTURE_URL.value,
+            'register': microsoft_oauth_register,
+        }
+
+    if GITHUB_CLIENT_ID.value and GITHUB_CLIENT_SECRET.value:
+
+        def github_oauth_register(oauth: OAuth):
+            client = oauth.register(
+                name='github',
+                client_id=GITHUB_CLIENT_ID.value,
+                client_secret=GITHUB_CLIENT_SECRET.value,
+                access_token_url='https://github.com/login/oauth/access_token',
+                authorize_url='https://github.com/login/oauth/authorize',
+                api_base_url='https://api.github.com',
+                userinfo_endpoint='https://api.github.com/user',
+                client_kwargs={
+                    'scope': GITHUB_CLIENT_SCOPE.value,
+                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
+                },
+                redirect_uri=GITHUB_CLIENT_REDIRECT_URI.value,
+            )
+            return client
+
+        OAUTH_PROVIDERS['github'] = {
+            'register': github_oauth_register,
+            'sub_claim': 'id',
+        }
+
+    if (
+        OAUTH_CLIENT_ID.value
+        and (OAUTH_CLIENT_SECRET.value or OAUTH_CODE_CHALLENGE_METHOD.value)
+        and OPENID_PROVIDER_URL.value
+    ):
+
+        def oidc_oauth_register(oauth: OAuth):
+            client_kwargs = {
+                'scope': OAUTH_SCOPES.value,
+                **(
+                    {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
+                    if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
+                    else {}
+                ),
+                **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
+            }
+
+            if OAUTH_CODE_CHALLENGE_METHOD.value and OAUTH_CODE_CHALLENGE_METHOD.value == 'S256':
+                client_kwargs['code_challenge_method'] = 'S256'
+            elif OAUTH_CODE_CHALLENGE_METHOD.value:
+                raise Exception(
+                    'Code challenge methods other than "%s" not supported. Given: "%s"'
+                    % ('S256', OAUTH_CODE_CHALLENGE_METHOD.value)
+                )
+
+            client = oauth.register(
+                name='oidc',
+                client_id=OAUTH_CLIENT_ID.value,
+                client_secret=OAUTH_CLIENT_SECRET.value,
+                server_metadata_url=OPENID_PROVIDER_URL.value,
+                client_kwargs=client_kwargs,
+                redirect_uri=OPENID_REDIRECT_URI.value,
+            )
+            return client
+
+        OAUTH_PROVIDERS['oidc'] = {
+            'name': OAUTH_PROVIDER_NAME.value,
+            'register': oidc_oauth_register,
+        }
+
+    if FEISHU_CLIENT_ID.value and FEISHU_CLIENT_SECRET.value:
+
+        def feishu_oauth_register(oauth: OAuth):
+            client = oauth.register(
+                name='feishu',
+                client_id=FEISHU_CLIENT_ID.value,
+                client_secret=FEISHU_CLIENT_SECRET.value,
+                access_token_url='https://open.feishu.cn/open-apis/authen/v2/oauth/token',
+                authorize_url='https://accounts.feishu.cn/open-apis/authen/v1/authorize',
+                api_base_url='https://open.feishu.cn/open-apis',
+                userinfo_endpoint='https://open.feishu.cn/open-apis/authen/v1/user_info',
+                client_kwargs={
+                    'scope': FEISHU_OAUTH_SCOPE.value,
+                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
+                },
+                redirect_uri=FEISHU_REDIRECT_URI.value,
+            )
+            return client
+
+        OAUTH_PROVIDERS['feishu'] = {
+            'register': feishu_oauth_register,
+            'sub_claim': 'user_id',
+        }
+
+    configured_providers = []
+    if GOOGLE_CLIENT_ID.value:
+        configured_providers.append('Google')
+    if MICROSOFT_CLIENT_ID.value:
+        configured_providers.append('Microsoft')
+    if GITHUB_CLIENT_ID.value:
+        configured_providers.append('GitHub')
+    if FEISHU_CLIENT_ID.value:
+        configured_providers.append('Feishu')
+
+    if configured_providers and not OPENID_PROVIDER_URL.value and not OPENID_END_SESSION_ENDPOINT.value:
+        provider_list = ', '.join(configured_providers)
+        log.warning(
+            f'⚠️  OAuth providers configured ({provider_list}) but OPENID_PROVIDER_URL not set - logout will not work!'
+        )
+        log.warning(
+            f"Set OPENID_PROVIDER_URL to your OAuth provider's OpenID Connect discovery endpoint,"
+            f' or set OPENID_END_SESSION_ENDPOINT to a custom logout URL to fix logout functionality.'
+        )
+
+
+load_oauth_providers()
 
 ####################################
 # LDAP
@@ -4020,7 +4020,6 @@ LDAP_VALIDATE_CERT = ConfigVar(
 
 LDAP_CIPHERS = ConfigVar('LDAP_CIPHERS', 'ldap.server.ciphers', os.environ.get('LDAP_CIPHERS', 'ALL'))
 
-# For LDAP Group Management
 ENABLE_LDAP_GROUP_MANAGEMENT = ConfigVar(
     'ENABLE_LDAP_GROUP_MANAGEMENT',
     'ldap.group.enable_management',
