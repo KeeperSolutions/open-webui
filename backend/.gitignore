@@ -10,3 +10,15 @@ Pipfile
 /data/*
 /open_webui/data/*
 .webui_secret_key
+
+# Runtime-generated static files (copied from frontend build or downloaded on startup)
+/open_webui/static/favicon.png
+/open_webui/static/favicon-dark.png
+/open_webui/static/logo.png
+/open_webui/static/splash.png
+/open_webui/static/splash-dark.png
+/open_webui/static/loader.js
+/open_webui/static/custom.css
+/open_webui/static/site.webmanifest
+/open_webui/static/user.png
+/open_webui/static/user-import.csv
