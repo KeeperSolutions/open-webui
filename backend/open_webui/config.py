@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import json
 import logging
@@ -20,28 +22,35 @@ from open_webui.env import (
     DATABASE_URL,
     ENABLE_DB_MIGRATIONS,
     ENV,
-    REDIS_URL,
-    REDIS_KEY_PREFIX,
-    REDIS_SENTINEL_HOSTS,
-    REDIS_SENTINEL_PORT,
     FRONTEND_BUILD_DIR,
     OFFLINE_MODE,
     OPEN_WEBUI_DIR,
+    REDIS_KEY_PREFIX,
+    REDIS_SENTINEL_HOSTS,
+    REDIS_SENTINEL_PORT,
+    REDIS_URL,
     WEBUI_AUTH,
     WEBUI_FAVICON_URL,
     WEBUI_NAME,
     log,
 )
+from open_webui.internal.config import (
+    STATE as _state,
+)
+from open_webui.internal.config import (
+    AppConfig,
+    ConfigVar,
+)
 
 # ── Persistent configuration layer ──────────────────────────────────────────
-
 from open_webui.internal.config import (  # noqa: F401
     ConfigTable as Config,
-    ConfigVar,
-    AppConfig,
-    STATE as _state,
-    initialize as _initialize_config,
+)
+from open_webui.internal.config import (
     _all_configs as PERSISTENT_CONFIG_REGISTRY,
+)
+from open_webui.internal.config import (
+    initialize as _initialize_config,
 )
 
 
@@ -2242,9 +2251,7 @@ RAG_EMBEDDING_MODEL_AUTO_UPDATE = (
     not OFFLINE_MODE and os.getenv('RAG_EMBEDDING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
 )
 
-RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = (
-    os.getenv('RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-)
+RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
 
 RAG_EMBEDDING_BATCH_SIZE = ConfigVar(
     'RAG_EMBEDDING_BATCH_SIZE',
@@ -2289,9 +2296,7 @@ RAG_RERANKING_MODEL_AUTO_UPDATE = (
     not OFFLINE_MODE and os.getenv('RAG_RERANKING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
 )
 
-RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = (
-    os.getenv('RAG_RERANKING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-)
+RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_RERANKING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
 
 RAG_RERANKING_BATCH_SIZE = ConfigVar(
     'RAG_RERANKING_BATCH_SIZE',
@@ -3727,9 +3732,7 @@ OAUTH_ALLOWED_ROLES = ConfigVar(
     'oauth.allowed_roles',
     [
         role.strip()
-        for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(
-            OAUTH_ROLES_SEPARATOR
-        )
+        for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(OAUTH_ROLES_SEPARATOR)
         if role
     ],
 )
