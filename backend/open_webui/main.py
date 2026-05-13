@@ -2384,6 +2384,7 @@ async def get_app_config(request: Request):
         **({'onboarding': True} if onboarding else {}),
         'status': True,
         'name': app.state.WEBUI_NAME,
+        'version': VERSION,
         'default_locale': str(DEFAULT_LOCALE),
         'oauth': {'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()}},
         'features': {
@@ -2442,7 +2443,6 @@ async def get_app_config(request: Request):
         },
         **(
             {
-                'version': VERSION,
                 'default_models': app.state.config.DEFAULT_MODELS,
                 'default_pinned_models': app.state.config.DEFAULT_PINNED_MODELS,
                 'default_prompt_suggestions': app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
@@ -2541,7 +2541,7 @@ async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
 
 
 @app.get('/api/version')
-async def get_app_version(user=Depends(get_verified_user)):
+async def get_app_version():
     return {
         'version': VERSION,
         'deployment_id': DEPLOYMENT_ID,
