@@ -57,6 +57,13 @@ def _flush_batch(conn, table, batch):
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+
+    if 'chat_message' in existing_tables:
+        return  # Already created — skip everything
+
     # Step 1: Create table
     op.create_table(
         'chat_message',
