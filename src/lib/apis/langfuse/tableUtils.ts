@@ -36,13 +36,11 @@ export function totalCost(rows: MetricRow[]): number {
 }
 
 export function formatCost(c: number): string {
-	return '$' + (c === 0 ? c.toFixed(2) : c.toFixed(4));
+	const abs = Math.abs(c);
+	const formatted = '$' + (abs === 0 ? abs.toFixed(2) : abs.toFixed(4));
+	return c < 0 ? '-' + formatted : formatted;
 }
 
-export function stripNonDigits(value: string): number {
-	const digits = value.replace(/\D/g, '');
-	return digits ? parseInt(digits, 10) : 1;
-}
 
 export function buildCsvLines(rows: MetricRow[]): string[] {
 	const escapeCell = (v: string | number): string => {

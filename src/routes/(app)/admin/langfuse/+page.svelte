@@ -105,9 +105,7 @@
 			<select
 				id="period-select"
 				bind:value={period}
-				on:change={() => {
-					if (period !== 'custom') loadMetrics(period);
-				}}
+				on:change={() => loadMetrics(period)}
 				class="text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-3 pr-8 py-1.5"
 			>
 				{#each PERIODS as p}
@@ -123,15 +121,13 @@
 				>
 				<input
 					id="custom-days"
-					type="text"
-					inputmode="numeric"
+					type="number"
+					min="1"
 					bind:value={customDays}
-					on:input={(e) => {
-						const digits = e.currentTarget.value.replace(/\D/g, '');
-						customDays = digits ? parseInt(digits, 10) : 1;
-						e.currentTarget.value = String(customDays);
+					on:change={() => {
+						if (!customDays || customDays < 1) customDays = 1;
+						loadMetrics(period);
 					}}
-					on:change={() => loadMetrics(period)}
 					class="w-24 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5"
 				/>
 			</div>
@@ -177,11 +173,16 @@
 						<th class="px-4 py-2 font-medium text-left w-16 text-gray-400 dark:text-gray-500">#</th>
 						{#each [['user', 'User', 'left'], ['model', 'Model', 'left'], ['tokens', 'Tokens', 'right'], ['cost', 'Cost', 'right']] as const as [key, label, align]}
 							<th
-								class="px-4 py-2 font-medium cursor-pointer select-none text-{align} hover:text-gray-700 dark:hover:text-gray-200"
-								on:click={() => setSort(key)}
+								class="px-4 py-2 font-medium text-{align}"
+								aria-sort={sortKey === key ? (sortAsc ? 'ascending' : 'descending') : 'none'}
 							>
-								{$i18n.t(label)}
-								{#if sortKey === key}{sortAsc ? '↑' : '↓'}{/if}
+								<button
+									class="w-full text-{align} cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-200"
+									on:click={() => setSort(key)}
+								>
+									{$i18n.t(label)}
+									{#if sortKey === key}{sortAsc ? '↑' : '↓'}{/if}
+								</button>
 							</th>
 						{/each}
 					</tr>
@@ -204,8 +205,8 @@
 						<td class="px-4 py-2 text-gray-500 dark:text-gray-400" colspan="3"
 							>{$i18n.t('Total')}</td
 						>
-						<td class="px-4 py-2 text-right">{totalTokens(rows).toLocaleString()}</td>
-						<td class="px-4 py-2 text-right">{formatCost(totalCost(rows))}</td>
+						<td class="px-4 py-2 text-right">{totalTokens(sortedRows).toLocaleString()}</td>
+						<td class="px-4 py-2 text-right">{formatCost(totalCost(sortedRows))}</td>
 					</tr>
 				</tfoot>
 			</table>
@@ -221,6 +222,7 @@
 					<button
 						on:click={() => (currentPage -= 1)}
 						disabled={currentPage === 1}
+						aria-label={$i18n.t('Previous page')}
 						class="px-3 py-1 rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 					>
 						&larr;
@@ -228,6 +230,7 @@
 					<button
 						on:click={() => (currentPage += 1)}
 						disabled={currentPage === numPages}
+						aria-label={$i18n.t('Next page')}
 						class="px-3 py-1 rounded-lg border border-gray-200 dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 					>
 						&rarr;

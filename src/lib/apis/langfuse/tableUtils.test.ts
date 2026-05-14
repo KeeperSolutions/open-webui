@@ -7,7 +7,6 @@ import {
 	totalTokens,
 	totalCost,
 	formatCost,
-	stripNonDigits,
 	buildCsvLines,
 	rowNumber,
 	effectivePageSize
@@ -240,39 +239,7 @@ describe('formatCost', () => {
 	});
 
 	it('handles negative cost (refund)', () => {
-		expect(formatCost(-0.0050)).toBe('$-0.0050');
-	});
-});
-
-// ─── stripNonDigits ──────────────────────────────────────────────────────────
-
-describe('stripNonDigits', () => {
-	it('returns number as-is', () => {
-		expect(stripNonDigits('42')).toBe(42);
-	});
-
-	it('strips leading minus', () => {
-		expect(stripNonDigits('-9')).toBe(9);
-	});
-
-	it('strips dashes in middle: 767-23 → 76723', () => {
-		expect(stripNonDigits('767-23')).toBe(76723);
-	});
-
-	it('strips all non-digits', () => {
-		expect(stripNonDigits('abc123def')).toBe(123);
-	});
-
-	it('returns 1 for empty string', () => {
-		expect(stripNonDigits('')).toBe(1);
-	});
-
-	it('returns 1 for string with no digits', () => {
-		expect(stripNonDigits('---')).toBe(1);
-	});
-
-	it('handles leading zeros', () => {
-		expect(stripNonDigits('007')).toBe(7);
+		expect(formatCost(-0.0050)).toBe('-$0.0050');
 	});
 });
 

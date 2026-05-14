@@ -139,6 +139,19 @@ def test_parse_rows_filters_zero_tokens_and_cost():
     assert parse_rows(raw) == []
 
 
+def test_parse_rows_filters_rounding_noise():
+    # Sub-epsilon cost with zero tokens is API noise, should be filtered
+    raw = [{"userId": "a@b.com", "providedModelName": "gpt-4", "sum_totalTokens": "0", "sum_totalCost": "1e-12"}]
+    assert parse_rows(raw) == []
+
+
+def test_parse_rows_keeps_meaningful_small_cost():
+    # Cost above epsilon with zero tokens should be kept (e.g. image generation)
+    raw = [{"userId": "a@b.com", "providedModelName": "dall-e", "sum_totalTokens": "0", "sum_totalCost": "0.001"}]
+    result = parse_rows(raw)
+    assert len(result) == 1
+
+
 def test_parse_rows_keeps_zero_tokens_with_cost():
     raw = [{"userId": "a@b.com", "providedModelName": "img-gen", "sum_totalTokens": "0", "sum_totalCost": "0.05"}]
     result = parse_rows(raw)
@@ -306,36 +319,40 @@ def test_build_metrics_query_structure():
 
 # ---------- load_env fallbacks ----------
 
-def test_load_env_uses_langfuse_pk_over_pk(monkeypatch):
-    from open_webui.langfuse.metrics import load_env
+_LANGFUSE_ENV_VARS = ["LANGFUSE_PK", "LANGFUSE_SK", "LANGFUSE_HOST", "PK", "SK", "HOST"]
+
+
+@pytest.fixture
+def clean_langfuse_env(monkeypatch):
+    for var in _LANGFUSE_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
     with patch("open_webui.langfuse.metrics.load_dotenv"):
-        monkeypatch.setenv("LANGFUSE_PK", "langfuse-pk")
-        monkeypatch.setenv("PK", "fallback-pk")
-        pk, _, _ = load_env()
+        yield
+
+
+def test_load_env_uses_langfuse_pk_over_pk(clean_langfuse_env, monkeypatch):
+    from open_webui.langfuse.metrics import load_env
+    monkeypatch.setenv("LANGFUSE_PK", "langfuse-pk")
+    monkeypatch.setenv("PK", "fallback-pk")
+    pk, _, _ = load_env()
     assert pk == "langfuse-pk"
 
 
-def test_load_env_falls_back_to_pk(monkeypatch):
+def test_load_env_falls_back_to_pk(clean_langfuse_env, monkeypatch):
     from open_webui.langfuse.metrics import load_env
-    with patch("open_webui.langfuse.metrics.load_dotenv"):
-        monkeypatch.delenv("LANGFUSE_PK", raising=False)
-        monkeypatch.setenv("PK", "fallback-pk")
-        pk, _, _ = load_env()
+    monkeypatch.setenv("PK", "fallback-pk")
+    pk, _, _ = load_env()
     assert pk == "fallback-pk"
 
 
-def test_load_env_default_host(monkeypatch):
+def test_load_env_default_host(clean_langfuse_env):
     from open_webui.langfuse.metrics import load_env
-    with patch("open_webui.langfuse.metrics.load_dotenv"):
-        monkeypatch.delenv("LANGFUSE_HOST", raising=False)
-        monkeypatch.delenv("HOST", raising=False)
-        _, _, host = load_env()
+    _, _, host = load_env()
     assert host == "https://cloud.langfuse.com"
 
 
-def test_load_env_custom_host(monkeypatch):
+def test_load_env_custom_host(clean_langfuse_env, monkeypatch):
     from open_webui.langfuse.metrics import load_env
-    with patch("open_webui.langfuse.metrics.load_dotenv"):
-        monkeypatch.setenv("LANGFUSE_HOST", "https://my-langfuse.internal")
-        _, _, host = load_env()
+    monkeypatch.setenv("LANGFUSE_HOST", "https://my-langfuse.internal")
+    _, _, host = load_env()
     assert host == "https://my-langfuse.internal"
