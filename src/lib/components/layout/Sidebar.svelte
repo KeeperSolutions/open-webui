@@ -1249,9 +1249,9 @@
 							}}
 						>
 							<div
-								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
+								class=" flex items-start rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
 							>
-								<div class=" self-center mr-3">
+								<div class=" mt-0.5 mr-3 shrink-0">
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
@@ -1259,8 +1259,8 @@
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
 								</div>
-								<div class="flex flex-col flex-1 min-w-0">
-									<div class="flex font-medium truncate">{$user?.name}</div>
+								<div class="flex flex-col flex-1 min-w-0 text-left">
+									<div class="font-medium truncate">{$user?.name}</div>
 									{#if myUsageLoading}
 										<div class="text-xs text-gray-400 dark:text-gray-500 animate-pulse">
 											{$i18n.t('Loading...')}
@@ -1276,8 +1276,11 @@
 												{$i18n.t('This month')}: <span class="font-medium text-gray-700 dark:text-gray-300">€{myUsage.total_cost.toFixed(2)}</span>
 											</div>
 										</Tooltip>
+										<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
+											{$i18n.t('Remaining')}: <span class="font-medium {Math.max(0, 2 - myUsage.total_cost) <= 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">€{Math.max(0, 2 - myUsage.total_cost).toFixed(2)}</span>
+										</div>
 									{:else}
-										<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
+										<div class="text-xs text-gray-400 dark:text-gray-500">
 											{$i18n.t('Usage unavailable')}
 										</div>
 									{/if}
