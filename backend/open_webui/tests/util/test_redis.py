@@ -6,7 +6,7 @@ from open_webui.utils.redis import (
     parse_redis_service_url,
     get_redis_connection,
     get_sentinels_from_env,
-    MAX_RETRY_COUNT,
+    REDIS_SENTINEL_MAX_RETRY_COUNT as MAX_RETRY_COUNT,
 )
 import inspect
 

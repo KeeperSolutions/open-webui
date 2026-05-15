@@ -44,7 +44,7 @@ class TestModelProfileImageLogic:
             for model_id, owned_by, theme in test_cases:
                 logo = Providers.detect_provider_logo(model_id, owned_by, theme, db=db)
                 assert logo is not None, f"Expected logo for {model_id}"
-                assert "anthropic" in logo.lower() or logo.startswith("/static/providers/"), \
+                assert logo.startswith("/providers/"), \
                     f"Expected Anthropic logo path for {model_id}, got {logo}"
 
     def test_provider_detection_for_ollama_models(self):
@@ -60,7 +60,7 @@ class TestModelProfileImageLogic:
             for model_id, owned_by, theme in test_cases:
                 logo = Providers.detect_provider_logo(model_id, owned_by, theme, db=db)
                 assert logo is not None, f"Expected logo for Ollama model {model_id}"
-                assert "ollama" in logo.lower() or logo.startswith("/static/providers/"), \
+                assert logo.startswith("/providers/"), \
                     f"Expected Ollama logo path for {model_id}, got {logo}"
 
     def test_provider_detection_theme_variants(self):

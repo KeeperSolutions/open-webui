@@ -19,7 +19,7 @@ from open_webui.env import (
 )
 from peewee_migrate import Router
 from sqlalchemy import Dialect, create_engine, MetaData, event, types
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker, Session
 from sqlalchemy.pool import QueuePool, NullPool
 from sqlalchemy.sql.type_api import _T
@@ -48,6 +48,49 @@ class JSONField(types.TypeDecorator):
     def python_value(self, value):
         if value is not None:
             return json.loads(value)
+
+
+class EncryptedJSONField(types.TypeDecorator):
+    """JSONField that transparently encrypts/decrypts using the app-level KMS key.
+
+    Plaintext fallback: rows that don't start with ENC1: are returned as-is so
+    legacy rows remain readable during the migration window (Phase 3 backfill).
+    """
+
+    impl = types.Text
+    cache_ok = True
+
+    def process_bind_param(self, value: Optional[_T], dialect: Dialect) -> Any:
+        from open_webui import kms
+        from open_webui import crypto
+
+        serialized = json.dumps(value)
+        if kms.is_enabled():
+            return crypto.encrypt(serialized.encode(), kms.get_key())
+        return serialized
+
+    def process_result_value(self, value: Optional[_T], dialect: Dialect) -> Any:
+        if value is None:
+            return None
+        # Already a Python object (e.g. native JSON/JSONB column on PostgreSQL)
+        if not isinstance(value, str):
+            return value
+        from open_webui import crypto
+
+        if crypto.is_encrypted(value):
+            from open_webui import kms
+
+            if not kms.is_enabled():
+                raise RuntimeError(
+                    "Encrypted data found in database but CHAT_ENCRYPTION_ENABLED is false. "
+                    "Set CHAT_ENCRYPTION_ENABLED=true and provide the key, or run the "
+                    "decryption backfill to convert rows back to plaintext."
+                )
+            return json.loads(crypto.decrypt(value, kms.get_key()))
+        return json.loads(value)
+
+    def copy(self, **kw: Any) -> Self:
+        return EncryptedJSONField()
 
 
 # Workaround to handle the peewee migration
@@ -79,6 +122,16 @@ def handle_peewee_migration(DATABASE_URL):
 
 if ENABLE_DB_MIGRATIONS:
     handle_peewee_migration(DATABASE_URL)
+
+
+def run_alembic_migrations():
+    from alembic.config import Config
+    from alembic import command
+
+    alembic_cfg = Config(str(OPEN_WEBUI_DIR / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    alembic_cfg.set_main_option("script_location", str(OPEN_WEBUI_DIR / "migrations"))
+    command.upgrade(alembic_cfg, "head")
 
 
 SQLALCHEMY_DATABASE_URL = DATABASE_URL

@@ -1,9 +1,8 @@
 from typing import Optional
 import io
 import base64
-import json
-import asyncio
 import logging
+from pathlib import Path
 
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
@@ -37,11 +36,19 @@ from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
+
+def _safe_static_path(static_dir, url_path: str) -> Optional[Path]:
+    """Resolve url_path relative to static_dir and reject path traversal attempts."""
+    resolved = (Path(static_dir) / url_path.lstrip("/")).resolve()
+    if not resolved.is_relative_to(Path(static_dir).resolve()):
+        return None
+    return resolved
+
 router = APIRouter()
 
 
 def is_valid_model_id(model_id: str) -> bool:
-    return model_id and len(model_id) <= 256
+    return bool(model_id) and len(model_id) <= 256
 
 
 ###########################
@@ -401,13 +408,12 @@ def get_model_profile_image(
                     except Exception as e:
                         log.warning(f"Error decoding profile image: {e}")
                 elif image_url.startswith("/"):
-                    headers = {"Cache-Control": "public, max-age=3600"}
-                    if etag:
-                        headers["ETag"] = etag
-                    return FileResponse(
-                        f"{STATIC_DIR}{image_url}",
-                        headers=headers,
-                    )
+                    file_path = _safe_static_path(STATIC_DIR, image_url)
+                    if file_path and file_path.exists():
+                        headers = {"Cache-Control": "public, max-age=3600"}
+                        if etag:
+                            headers["ETag"] = etag
+                        return FileResponse(str(file_path), headers=headers)
 
         # Priority 2: Automatic provider logo detection
         # Determine owned_by from runtime model state or base_model_id
@@ -471,13 +477,12 @@ def get_model_profile_image(
                     log.warning(f"Error decoding provider logo: {e}")
             # Provider logo is relative path
             elif provider_logo.startswith("/"):
-                headers = {"Cache-Control": "public, max-age=3600"}
-                if etag:
-                    headers["ETag"] = etag
-                return FileResponse(
-                    f"{STATIC_DIR}{provider_logo}",
-                    headers=headers,
-                )
+                file_path = _safe_static_path(STATIC_DIR, provider_logo)
+                if file_path and file_path.exists():
+                    headers = {"Cache-Control": "public, max-age=3600"}
+                    if etag:
+                        headers["ETag"] = etag
+                    return FileResponse(str(file_path), headers=headers)
 
     # Priority 3: Default fallback
     return FileResponse(f"{STATIC_DIR}/favicon.png")
@@ -533,10 +538,9 @@ def get_model_profile_image_preview(
                 except Exception as e:
                     log.warning(f"Error decoding preview image: {e}")
             elif preview_url.startswith("/"):
-                return FileResponse(
-                    f"{STATIC_DIR}{preview_url}",
-                    headers={"Cache-Control": "no-cache"},
-                )
+                file_path = _safe_static_path(STATIC_DIR, preview_url)
+                if file_path and file_path.exists():
+                    return FileResponse(str(file_path), headers={"Cache-Control": "no-cache"})
 
     # Priority 2: Provider logo detection
     owned_by = "openai"
@@ -574,10 +578,9 @@ def get_model_profile_image_preview(
             except Exception as e:
                 log.warning(f"Error decoding provider logo: {e}")
         elif provider_logo.startswith("/"):
-            return FileResponse(
-                f"{STATIC_DIR}{provider_logo}",
-                headers={"Cache-Control": "no-cache"},
-            )
+            file_path = _safe_static_path(STATIC_DIR, provider_logo)
+            if file_path and file_path.exists():
+                return FileResponse(str(file_path), headers={"Cache-Control": "no-cache"})
 
     # Priority 3: Default fallback
     return FileResponse(f"{STATIC_DIR}/favicon.png")

@@ -5,7 +5,7 @@ import uuid
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from open_webui.internal.db import Base, JSONField, get_db, get_db_context
+from open_webui.internal.db import Base, JSONField, EncryptedJSONField, get_db, get_db_context
 from open_webui.models.tags import TagModel, Tag, Tags
 from open_webui.models.folders import Folders
 from open_webui.utils.misc import sanitize_data_for_db, sanitize_text_for_db
@@ -24,7 +24,6 @@ from sqlalchemy import (
 )
 from sqlalchemy import or_, func, select, and_, text
 from sqlalchemy.sql import exists
-from sqlalchemy.sql.expression import bindparam
 
 ####################
 # Chat DB Schema
@@ -39,7 +38,7 @@ class Chat(Base):
     id = Column(String, primary_key=True, unique=True)
     user_id = Column(String)
     title = Column(Text)
-    chat = Column(JSON)
+    chat = Column(EncryptedJSONField)
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
@@ -993,23 +992,13 @@ class ChatTable:
 
             query = query.order_by(Chat.updated_at.desc())
 
+            # Title-only search — message body is encrypted and unsearchable
+            if search_text:
+                query = query.filter(Chat.title.ilike(f"%{search_text}%"))
+
             # Check if the database dialect is either 'sqlite' or 'postgresql'
             dialect_name = db.bind.dialect.name
             if dialect_name == "sqlite":
-                # SQLite case: using JSON1 extension for JSON searching
-                sqlite_content_sql = (
-                    "EXISTS ("
-                    "    SELECT 1 "
-                    "    FROM json_each(Chat.chat, '$.messages') AS message "
-                    "    WHERE LOWER(message.value->>'content') LIKE '%' || :content_key || '%'"
-                    ")"
-                )
-                sqlite_content_clause = text(sqlite_content_sql)
-                query = query.filter(
-                    or_(
-                        Chat.title.ilike(bindparam("title_key")), sqlite_content_clause
-                    ).params(title_key=f"%{search_text}%", content_key=search_text)
-                )
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
@@ -1042,33 +1031,6 @@ class ChatTable:
                     )
 
             elif dialect_name == "postgresql":
-                # PostgreSQL doesn't allow null bytes in text. We filter those out by checking
-                # the JSON representation for \u0000 before attempting text extraction
-
-                # Safety filter: JSON field must not contain \u0000
-                query = query.filter(text("Chat.chat::text NOT LIKE '%\\\\u0000%'"))
-
-                # Safety filter: title must not contain actual null bytes
-                query = query.filter(text("Chat.title::text NOT LIKE '%\\x00%'"))
-
-                postgres_content_sql = """
-                EXISTS (
-                    SELECT 1
-                    FROM json_array_elements(Chat.chat->'messages') AS message
-                    WHERE json_typeof(message->'content') = 'string'
-                    AND LOWER(message->>'content') LIKE '%' || :content_key || '%'
-                )
-                """
-
-                postgres_content_clause = text(postgres_content_sql)
-
-                query = query.filter(
-                    or_(
-                        Chat.title.ilike(bindparam("title_key")),
-                        postgres_content_clause,
-                    )
-                ).params(title_key=f"%{search_text}%", content_key=search_text.lower())
-
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
                     query = query.filter(

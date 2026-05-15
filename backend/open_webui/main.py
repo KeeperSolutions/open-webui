@@ -525,6 +525,8 @@ from open_webui.utils.auth import (
     create_admin_user,
 )
 from open_webui.routers.billing import check_billing_access
+from open_webui import kms
+
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.oauth import (
     get_oauth_client_info_with_dynamic_client_registration,
@@ -552,7 +554,7 @@ from open_webui.constants import ERROR_MESSAGES
 
 
 if SAFE_MODE:
-    print("SAFE MODE ENABLED")
+    print("SAFE MODE ENABLED")  # allow-print
     Functions.deactivate_all_functions()
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -574,7 +576,7 @@ class SPAStaticFiles(StaticFiles):
                 raise ex
 
 
-print(
+print(  # allow-print
     rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
 ██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
@@ -595,6 +597,9 @@ https://github.com/open-webui/open-webui
 async def lifespan(app: FastAPI):
     app.state.instance_id = INSTANCE_ID
     start_logger()
+
+    if kms.is_enabled():
+        kms.load_key()
 
     log.info(
         f"[aiohttp] Stream idle timeout (sock_read): {AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s ({_sock_read_source}). "
