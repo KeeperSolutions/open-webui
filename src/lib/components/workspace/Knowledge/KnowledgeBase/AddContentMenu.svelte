@@ -91,7 +91,7 @@
 
 			<Tooltip
 				content={$i18n.t(
-					'This option will delete all existing files in the collection and replace them with newly uploaded files.'
+					'Sync a local directory with this knowledge base. Only new and modified files will be uploaded. The directory structure will be mirrored.'
 				)}
 				className="w-full"
 			>
