@@ -149,10 +149,10 @@ class TestKeepaliveIter:
     def test_injects_keepalive_on_stall(self):
         async def slow_gen():
             yield "first"
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.05)
             yield "second"
 
-        results = asyncio.run(self._collect(_keepalive_iter(slow_gen(), interval=0.05)))
+        results = asyncio.run(self._collect(_keepalive_iter(slow_gen(), interval=0.01)))
         assert results[0] == "first"
         assert _KEEPALIVE in results
         assert results[-1] == "second"
