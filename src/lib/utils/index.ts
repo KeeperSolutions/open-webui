@@ -31,6 +31,11 @@ export const isDev = () => {
 	return window.location.hostname === 'localhost' || window.location.hostname.startsWith('127.');
 };
 
+export const isStaging = () => {
+	if (typeof window === 'undefined') return false;
+	return window.location.hostname.includes('staging');
+};
+
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function escapeRegExp(string: string): string {
