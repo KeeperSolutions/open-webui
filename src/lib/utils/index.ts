@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { PUBLIC_DEPLOY_ENVIRONMENT } from '$env/static/public';
 import sha256 from 'js-sha256';
 import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -31,10 +32,7 @@ export const isDev = () => {
 	return window.location.hostname === 'localhost' || window.location.hostname.startsWith('127.');
 };
 
-export const isStaging = () => {
-	if (typeof window === 'undefined') return false;
-	return window.location.hostname.includes('staging');
-};
+export const isStaging = () => PUBLIC_DEPLOY_ENVIRONMENT === 'staging';
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

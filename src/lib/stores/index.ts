@@ -10,10 +10,10 @@ import emojiShortCodes from '$lib/emoji-shortcodes.json';
 // Backend
 const _WEBUI_NAME = writable(APP_NAME);
 
-// Add [DEV] or [STAGING] prefix based on environment
+// Add [STAGING] or [DEV] prefix based on environment
 export const WEBUI_NAME = derived(_WEBUI_NAME, ($name) => {
-	if (isDev()) return `[DEV] ${$name}`;
 	if (isStaging()) return `[STAGING] ${$name}`;
+	if (isDev()) return `[DEV] ${$name}`;
 	return $name;
 });
 

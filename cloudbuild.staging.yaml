@@ -14,6 +14,8 @@ steps:
       - '${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:latest'
       - '-f'
       - 'Dockerfile'
+      - '--build-arg'
+      - 'DEPLOY_ENVIRONMENT=staging'
       - '.'
     id: Build
 

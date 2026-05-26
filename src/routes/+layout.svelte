@@ -865,8 +865,8 @@
 	<link
 		crossorigin="anonymous"
 		rel="icon"
-		type={isDev() || isStaging() ? 'image/svg+xml' : 'image/png'}
-		href={isDev() ? '/favicon-dev.svg' : isStaging() ? '/favicon-staging.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
+		type={isStaging() || isDev() ? 'image/svg+xml' : 'image/png'}
+		href={isStaging() ? '/favicon-staging.svg' : isDev() ? '/favicon-dev.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
 	/>
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
