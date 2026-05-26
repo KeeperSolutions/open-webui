@@ -50,7 +50,7 @@
 	import { chatCompletion } from '$lib/apis/openai';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { bestMatchingLanguage, isDev } from '$lib/utils';
+	import { bestMatchingLanguage, isDev, isStaging } from '$lib/utils';
 	import { setTextScale } from '$lib/utils/text-scale';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
@@ -865,8 +865,8 @@
 	<link
 		crossorigin="anonymous"
 		rel="icon"
-		type={isDev() ? 'image/svg+xml' : 'image/png'}
-		href={isDev() ? '/favicon-dev.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
+		type={isStaging() || isDev() ? 'image/svg+xml' : 'image/png'}
+		href={isStaging() ? '/favicon-staging.svg' : isDev() ? '/favicon-dev.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
 	/>
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
