@@ -1436,6 +1436,26 @@ class OAuthManager:
                 or (auth_manager_config.OAUTH_USERNAME_CLAIM not in user_data)
             ):
                 user_data: UserInfo = await client.userinfo(token=token)
+
+            # Microsoft's /oidc/userinfo endpoint omits email; fall back to the ID token claims
+            if user_data and auth_manager_config.OAUTH_EMAIL_CLAIM not in user_data:
+                id_token_claims = token.get("id_token_claims") or {}
+                # Authlib may not auto-parse the ID token — decode it manually if needed
+                if not id_token_claims and token.get("id_token"):
+                    try:
+                        import jwt as pyjwt
+                        id_token_claims = pyjwt.decode(
+                            token["id_token"], options={"verify_signature": False}
+                        )
+                    except Exception as jwt_err:
+                        log.warning(f"OAuth failed to decode id_token for {provider}: {jwt_err}")
+                if auth_manager_config.OAUTH_EMAIL_CLAIM in id_token_claims:
+                    user_data = {**user_data, **id_token_claims}
+                elif "preferred_username" in id_token_claims:
+                    # Microsoft uses preferred_username when email optional claim is not present
+                    user_data = {**user_data, auth_manager_config.OAUTH_EMAIL_CLAIM: id_token_claims["preferred_username"]}
+                else:
+                    log.warning(f"OAuth id_token_claims missing email for {provider}: {list(id_token_claims.keys())}")
             if (
                 provider == "feishu"
                 and isinstance(user_data, dict)
