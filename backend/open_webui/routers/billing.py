@@ -12,10 +12,12 @@ from open_webui.env import (
     STRIPE_FREE_TIER_CENTS,
     STRIPE_PRICE_ID,
     STRIPE_SECRET_KEY,
+    STRIPE_TEAM_TIERS,
+    STRIPE_TOPUP_AMOUNTS,
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
 )
-from open_webui.models.billing import StripeBillings
+from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
 log = logging.getLogger(__name__)
@@ -76,6 +78,30 @@ def _get_user_current_month_cost(email: str) -> float:
         return 0.0
 
 
+def _get_team_current_month_cost(team_id: str) -> float:
+    """Return aggregate current-month Langfuse cost (EUR) for all members of a team."""
+    try:
+        from open_webui.langfuse.metrics import get_current_month
+        from open_webui.models.users import Users as UsersModel
+
+        members = TeamMembers.get_by_team_id(team_id)
+        if not members:
+            return 0.0
+
+        rows = get_current_month()
+        cost_by_email = {r.get("user", ""): r.get("cost", 0.0) for r in rows if r.get("user")}
+
+        total = 0.0
+        for m in members:
+            u = UsersModel.get_user_by_id(m.user_id)
+            if u:
+                total += cost_by_email.get(u.email, 0.0)
+        return total
+    except Exception as e:
+        log.warning(f"Could not fetch team monthly cost for team_id={team_id}: {e}")
+        return 0.0
+
+
 async def check_billing_access(user=Depends(get_verified_user)):
     """
     Dependency that blocks users from making AI completions based on billing state.
@@ -114,6 +140,51 @@ async def check_billing_access(user=Depends(get_verified_user)):
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Your payment is past due. Please update your billing details at /billing.",
         )
+
+    if record.plan_tier == "team":
+        team = Teams.get_by_owner_user_id(user.id)
+        if not team or team.subscription_status not in ("active", "trialing"):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Your team subscription is not active. Please visit /billing.",
+            )
+        if team.monthly_usage_budget_eur > 0:
+            used = _get_team_current_month_cost(team.id)
+            total_budget = team.monthly_usage_budget_eur + (team.extra_usage_credit_eur or 0.0)
+            if used >= total_budget:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=(
+                        f"Team usage budget of €{total_budget:.2f} exceeded "
+                        f"(used €{used:.4f}). Buy more usage at /billing."
+                    ),
+                )
+        return user
+
+    if record.plan_tier == "team_member":
+        if not record.team_id:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="You are not part of an active team. Please contact your team owner.",
+            )
+        team = Teams.get_by_id(record.team_id)
+        if not team or team.subscription_status not in ("active", "trialing"):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Your team subscription is not active. Please contact your team owner.",
+            )
+        if team.monthly_usage_budget_eur > 0:
+            used = _get_team_current_month_cost(team.id)
+            total_budget = team.monthly_usage_budget_eur + (team.extra_usage_credit_eur or 0.0)
+            if used >= total_budget:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=(
+                        "Your team's usage budget has been exceeded. "
+                        "Ask your team owner to buy more usage at /billing."
+                    ),
+                )
+        return user
 
     if record.plan_tier == "trial":
         cost_used = _get_user_alltime_cost(user.email, record.created_at)
@@ -204,18 +275,33 @@ async def auto_onboard_user(user, request=None):
 
 class BillingStatusResponse(BaseModel):
     enabled: bool
-    plan_tier: Optional[str] = None  # internal | trial | paid | None
+    plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member | None
 
     # Trial fields
     credit_limit_eur: float = 0.0
     credit_used_eur: float = 0.0
     credit_remaining_eur: float = 0.0
 
-    # Paid subscription fields
+    # Paid / team subscription fields
     subscription_status: Optional[str] = None
     upcoming_invoice_eur: Optional[float] = None
 
-    # Current month usage (all tiers)
+    # Team fields (owner view)
+    team_id: Optional[str] = None
+    team_name: Optional[str] = None
+    seat_limit: Optional[int] = None
+    seat_used: Optional[int] = None
+    team_month_cost_eur: Optional[float] = None  # aggregate cost for owner view
+
+    # Team usage budget fields (owner + member view)
+    usage_budget_eur: Optional[float] = None       # monthly included budget
+    extra_credit_eur: Optional[float] = None       # purchased top-up credits
+    usage_budget_remaining_eur: Optional[float] = None  # budget + extra - used
+
+    # Team member view
+    team_owner_name: Optional[str] = None
+
+    # Current month usage (all tiers — individual for members)
     current_month_cost_eur: float = 0.0
 
     is_configured: bool = False
@@ -307,6 +393,113 @@ async def get_billing_status(user=Depends(get_verified_user)):
             is_configured=True,
             subscription_status=sub_status,
             upcoming_invoice_eur=upcoming_eur,
+            current_month_cost_eur=current_month_cost,
+        )
+
+    if record.plan_tier == "team":
+        team = Teams.get_by_owner_user_id(user.id)
+        if not team:
+            return BillingStatusResponse(
+                enabled=True,
+                plan_tier="team",
+                is_configured=False,
+                current_month_cost_eur=current_month_cost,
+            )
+
+        seat_used = TeamMembers.count_members(team.id)
+
+        # Aggregate team usage: sum costs for all team member billing records
+        team_billing_rows = StripeBillings.get_team_members(team.id)
+        from open_webui.models.users import Users as UsersModel
+
+        team_month_cost = 0.0
+        try:
+            from open_webui.langfuse.metrics import get_current_month
+
+            month_rows = get_current_month()
+            cost_by_email = {r.get("user", ""): r.get("cost", 0.0) for r in month_rows if r.get("user")}
+            for br in team_billing_rows:
+                u = UsersModel.get_user_by_id(br.user_id)
+                if u:
+                    team_month_cost += cost_by_email.get(u.email, 0.0)
+            # Also include owner's own usage
+            team_month_cost += cost_by_email.get(user.email, 0.0)
+        except Exception:
+            team_month_cost = current_month_cost
+
+        upcoming_eur: Optional[float] = None
+        sub_status = team.subscription_status
+        if team.stripe_subscription_id:
+            try:
+                client = get_stripe_client()
+                sub = client.v1.subscriptions.retrieve(team.stripe_subscription_id)
+                sub_status = sub.status
+            except stripe.StripeError:
+                pass
+            try:
+                client = get_stripe_client()
+                invoice = client.v1.invoices.create_preview(
+                    params={"customer": team.stripe_customer_id}
+                )
+                upcoming_eur = invoice.amount_due / 100
+            except stripe.StripeError:
+                pass
+
+        budget = team.monthly_usage_budget_eur or 0.0
+        extra = team.extra_usage_credit_eur or 0.0
+        remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
+
+        return BillingStatusResponse(
+            enabled=True,
+            plan_tier="team",
+            is_configured=True,
+            subscription_status=sub_status,
+            upcoming_invoice_eur=upcoming_eur,
+            team_id=team.id,
+            team_name=team.name,
+            seat_limit=team.seat_limit,
+            seat_used=seat_used,
+            team_month_cost_eur=round(team_month_cost, 4),
+            usage_budget_eur=budget if budget > 0 else None,
+            extra_credit_eur=extra if extra > 0 else None,
+            usage_budget_remaining_eur=round(remaining, 4) if remaining is not None else None,
+            current_month_cost_eur=current_month_cost,
+        )
+
+    if record.plan_tier == "team_member":
+        if not record.team_id:
+            return BillingStatusResponse(
+                enabled=True,
+                plan_tier="team_member",
+                is_configured=False,
+                current_month_cost_eur=current_month_cost,
+            )
+        team = Teams.get_by_id(record.team_id)
+        if not team:
+            return BillingStatusResponse(
+                enabled=True,
+                plan_tier="team_member",
+                is_configured=False,
+                current_month_cost_eur=current_month_cost,
+            )
+        from open_webui.models.users import Users as UsersModel
+
+        owner = UsersModel.get_user_by_id(team.owner_user_id)
+        budget = team.monthly_usage_budget_eur or 0.0
+        extra = team.extra_usage_credit_eur or 0.0
+        team_month_cost = _get_team_current_month_cost(team.id)
+        remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
+        return BillingStatusResponse(
+            enabled=True,
+            plan_tier="team_member",
+            is_configured=True,
+            subscription_status=team.subscription_status,
+            team_id=team.id,
+            team_name=team.name,
+            team_owner_name=owner.name if owner else None,
+            usage_budget_eur=budget if budget > 0 else None,
+            extra_credit_eur=extra if extra > 0 else None,
+            usage_budget_remaining_eur=round(remaining, 4) if remaining is not None else None,
             current_month_cost_eur=current_month_cost,
         )
 
@@ -466,6 +659,527 @@ async def get_invoices(user=Depends(get_verified_user)):
     ]
 
 
+def _revert_team_members_to_trial(stripe_customer_id: str) -> None:
+    """Revert all members of a team to trial when the team subscription is canceled."""
+    team = Teams.get_by_customer_id(stripe_customer_id)
+    if not team:
+        return
+    members = TeamMembers.get_by_team_id(team.id)
+    for m in members:
+        if m.role != "owner":
+            StripeBillings.revert_to_trial(m.user_id)
+    log.info(f"[billing] Reverted {len(members)} team members to trial for team {team.id}")
+
+
+# ---------- Team response models ----------
+
+
+class TeamCreateRequest(BaseModel):
+    name: str
+    seat_count: int
+
+
+class TeamInviteRequest(BaseModel):
+    email: str
+
+
+class TeamMemberResponse(BaseModel):
+    user_id: str
+    name: str
+    email: str
+    role: str
+    current_month_cost_eur: float = 0.0
+
+
+class TeamInviteResponse(BaseModel):
+    id: str
+    invited_email: str
+    status: str
+    token: str
+    expires_at: int
+
+
+class TeamStatusResponse(BaseModel):
+    team_id: str
+    name: str
+    seat_limit: int
+    seat_used: int
+    subscription_status: Optional[str]
+    members: list[TeamMemberResponse]
+    pending_invites: list[TeamInviteResponse]
+    team_month_cost_eur: float = 0.0
+
+
+# ---------- Team endpoints ----------
+
+
+@router.get("/team/tiers")
+async def get_team_tiers(user=Depends(get_verified_user)):
+    """Return available team subscription tiers (seat count + price)."""
+    require_billing_enabled()
+    return [
+        {"seat_count": int(seats), "price_eur": float(cfg.get("price_eur", 0))}
+        for seats, cfg in STRIPE_TEAM_TIERS.items()
+        if cfg.get("price_id")
+    ]
+
+
+@router.post("/team/create", response_model=CheckoutResponse)
+async def create_team(body: TeamCreateRequest, request: Request, user=Depends(get_verified_user)):
+    """Create a team and return a Stripe checkout URL for the team subscription."""
+    require_billing_enabled()
+
+    if not STRIPE_TEAM_TIERS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STRIPE_TEAM_TIERS is not configured.",
+        )
+
+    seat_count = body.seat_count
+    tier_config = STRIPE_TEAM_TIERS.get(str(seat_count))
+    if not tier_config or not tier_config.get("price_id"):
+        available = list(STRIPE_TEAM_TIERS.keys())
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid seat count. Available tiers: {available}",
+        )
+
+    # Prevent creating multiple teams
+    existing_team = Teams.get_by_owner_user_id(user.id)
+    if existing_team:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You already have a team. Manage it at /billing.",
+        )
+
+    client = get_stripe_client()
+    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+
+    # Create Stripe customer for the team
+    try:
+        customer = client.v1.customers.create(
+            params={
+                "email": user.email,
+                "name": f"{body.name} (Team)",
+                "metadata": {"user_id": user.id, "team_name": body.name},
+            }
+        )
+        customer_id = customer.id
+    except stripe.StripeError as e:
+        log.error(f"[billing] Team customer create error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to create Stripe customer.")
+
+    usage_budget = float(tier_config.get("usage_budget_eur", 0))
+
+    # Create team record
+    team = Teams.create(
+        name=body.name,
+        owner_user_id=user.id,
+        seat_limit=seat_count,
+        monthly_usage_budget_eur=usage_budget,
+    )
+    Teams.update(team.id, stripe_customer_id=customer_id)
+
+    # Add owner as team member
+    TeamMembers.add(team.id, user.id, role="owner")
+
+    # Create checkout session
+    try:
+        session = client.v1.checkout.sessions.create(
+            params={
+                "customer": customer_id,
+                "mode": "subscription",
+                "line_items": [{"price": tier_config["price_id"], "quantity": 1}],
+                "success_url": f"{webui_url}/billing?checkout=success",
+                "cancel_url": f"{webui_url}/billing?checkout=canceled",
+                "metadata": {"user_id": user.id, "team_id": team.id},
+            }
+        )
+    except stripe.StripeError as e:
+        log.error(f"[billing] Team checkout session error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+
+    Teams.update(team.id, checkout_session_id=session.id)
+
+    return CheckoutResponse(url=session.url)
+
+
+@router.get("/team", response_model=TeamStatusResponse)
+async def get_team_status(user=Depends(get_verified_user)):
+    """Get team info for the team owner."""
+    require_billing_enabled()
+
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team:
+        raise HTTPException(status_code=404, detail="No team found.")
+
+    from open_webui.models.users import Users as UsersModel
+
+    members_db = TeamMembers.get_by_team_id(team.id)
+    pending_invites = TeamInvites.get_by_team_id(team.id)
+
+    cost_by_email: dict[str, float] = {}
+    try:
+        from open_webui.langfuse.metrics import get_current_month
+
+        rows = get_current_month()
+        for r in rows:
+            email = r.get("user", "")
+            if email:
+                cost_by_email[email] = cost_by_email.get(email, 0.0) + r.get("cost", 0.0)
+    except Exception:
+        pass
+
+    members_out: list[TeamMemberResponse] = []
+    team_month_cost = 0.0
+    for m in members_db:
+        u = UsersModel.get_user_by_id(m.user_id)
+        if not u:
+            continue
+        cost = cost_by_email.get(u.email, 0.0)
+        team_month_cost += cost
+        members_out.append(
+            TeamMemberResponse(
+                user_id=u.id,
+                name=u.name,
+                email=u.email,
+                role=m.role,
+                current_month_cost_eur=round(cost, 4),
+            )
+        )
+
+    invites_out = [
+        TeamInviteResponse(
+            id=inv.id,
+            invited_email=inv.invited_email,
+            status=inv.status,
+            token=inv.token,
+            expires_at=inv.expires_at,
+        )
+        for inv in pending_invites
+        if inv.status == "pending"
+    ]
+
+    return TeamStatusResponse(
+        team_id=team.id,
+        name=team.name,
+        seat_limit=team.seat_limit,
+        seat_used=len(members_db),
+        subscription_status=team.subscription_status,
+        members=members_out,
+        pending_invites=invites_out,
+        team_month_cost_eur=round(team_month_cost, 4),
+    )
+
+
+@router.post("/team/invite")
+async def invite_team_member(body: TeamInviteRequest, user=Depends(get_verified_user)):
+    """Invite a user to the team by email."""
+    require_billing_enabled()
+
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team:
+        raise HTTPException(status_code=404, detail="No team found.")
+
+    if team.subscription_status not in ("active", "trialing"):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Team subscription is not active.",
+        )
+
+    current_member_count = TeamMembers.count_members(team.id)
+    if current_member_count >= team.seat_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Seat limit reached ({team.seat_limit} seats).",
+        )
+
+    email = body.email.lower().strip()
+
+    # Check if already a member
+    from open_webui.models.users import Users as UsersModel
+
+    existing_user = UsersModel.get_user_by_email(email)
+    if existing_user:
+        existing_member = TeamMembers.get_by_user_id(existing_user.id)
+        if existing_member and existing_member.team_id == team.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This user is already a team member.",
+            )
+
+    # Remove any previous pending invite for the same email
+    TeamInvites.delete_pending_by_email_and_team(team.id, email)
+
+    invite = TeamInvites.create(
+        team_id=team.id,
+        invited_email=email,
+        invited_by=user.id,
+    )
+
+    return {
+        "invite_id": invite.id,
+        "token": invite.token,
+        "invited_email": invite.invited_email,
+        "expires_at": invite.expires_at,
+    }
+
+
+@router.delete("/team/members/{member_user_id}")
+async def remove_team_member(member_user_id: str, user=Depends(get_verified_user)):
+    """Remove a member from the team and revert them to trial."""
+    require_billing_enabled()
+
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team:
+        raise HTTPException(status_code=404, detail="No team found.")
+
+    if member_user_id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner cannot remove themselves from the team.",
+        )
+
+    removed = TeamMembers.remove(team.id, member_user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    StripeBillings.revert_to_trial(member_user_id)
+
+    return {"removed": True}
+
+
+@router.post("/team/portal", response_model=PortalResponse)
+async def team_billing_portal(request: Request, user=Depends(get_verified_user)):
+    """Stripe billing portal for the team owner."""
+    require_billing_enabled()
+
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team or not team.stripe_customer_id:
+        raise HTTPException(status_code=404, detail="No team billing account found.")
+
+    client = get_stripe_client()
+    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    try:
+        session = client.v1.billing_portal.sessions.create(
+            params={
+                "customer": team.stripe_customer_id,
+                "return_url": f"{webui_url}/billing",
+            }
+        )
+    except stripe.StripeError as e:
+        log.error(f"[billing] Team portal error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+
+    return PortalResponse(url=session.url)
+
+
+# ---------- Team top-up ----------
+
+
+class TopupRequest(BaseModel):
+    amount_eur: float
+
+
+@router.get("/team/topup/options")
+async def get_topup_options(user=Depends(get_verified_user)):
+    """Return available top-up amounts configured in STRIPE_TOPUP_AMOUNTS."""
+    require_billing_enabled()
+    return STRIPE_TOPUP_AMOUNTS
+
+
+@router.post("/team/topup", response_model=CheckoutResponse)
+async def create_team_topup(body: TopupRequest, request: Request, user=Depends(get_verified_user)):
+    """Create a one-time Stripe checkout for purchasing extra team usage credits."""
+    require_billing_enabled()
+
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team:
+        raise HTTPException(status_code=404, detail="No team found.")
+
+    if team.subscription_status not in ("active", "trialing"):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Team subscription is not active.",
+        )
+
+    if not STRIPE_TOPUP_AMOUNTS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STRIPE_TOPUP_AMOUNTS is not configured.",
+        )
+
+    # Find the matching top-up option
+    option = next(
+        (o for o in STRIPE_TOPUP_AMOUNTS if float(o.get("amount_eur", 0)) == body.amount_eur),
+        None,
+    )
+    if not option or not option.get("price_id"):
+        available = [o.get("amount_eur") for o in STRIPE_TOPUP_AMOUNTS]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid top-up amount. Available options: {available}",
+        )
+
+    if not team.stripe_customer_id:
+        raise HTTPException(status_code=400, detail="Team has no billing account.")
+
+    client = get_stripe_client()
+    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+
+    try:
+        session = client.v1.checkout.sessions.create(
+            params={
+                "customer": team.stripe_customer_id,
+                "mode": "payment",
+                "line_items": [{"price": option["price_id"], "quantity": 1}],
+                "success_url": f"{webui_url}/billing?topup=success",
+                "cancel_url": f"{webui_url}/billing?topup=canceled",
+                "metadata": {
+                    "team_id": team.id,
+                    "topup_amount_eur": str(body.amount_eur),
+                    "type": "team_topup",
+                },
+            }
+        )
+    except stripe.StripeError as e:
+        log.error(f"[billing] Team topup checkout error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to create top-up checkout.")
+
+    Teams.update(team.id, topup_checkout_session_id=session.id)
+    return CheckoutResponse(url=session.url)
+
+
+# ---------- Team invite acceptance ----------
+
+
+@router.get("/invite/{token}")
+async def get_invite_info(token: str, user=Depends(get_verified_user)):
+    """Return invite metadata so the frontend can display team name before accepting."""
+    require_billing_enabled()
+
+    invite = TeamInvites.get_by_token(token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    if invite.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invite is already {invite.status}.",
+        )
+
+    import time as _time
+
+    if _time.time() > invite.expires_at:
+        TeamInvites.update_status(token, "expired")
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired.")
+
+    if user.email.lower() != invite.invited_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This invite is for a different email address.",
+        )
+
+    team = Teams.get_by_id(invite.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    from open_webui.models.users import Users as UsersModel
+
+    owner = UsersModel.get_user_by_id(team.owner_user_id)
+    return {
+        "team_id": team.id,
+        "team_name": team.name,
+        "owner_name": owner.name if owner else None,
+        "invited_email": invite.invited_email,
+        "expires_at": invite.expires_at,
+    }
+
+
+@router.post("/invite/{token}/accept")
+async def accept_invite(token: str, user=Depends(get_verified_user)):
+    """Accept a team invite — adds user to the team."""
+    require_billing_enabled()
+
+    invite = TeamInvites.get_by_token(token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    if invite.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invite is already {invite.status}.",
+        )
+
+    import time as _time
+
+    if _time.time() > invite.expires_at:
+        TeamInvites.update_status(token, "expired")
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired.")
+
+    if user.email.lower() != invite.invited_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This invite is for a different email address.",
+        )
+
+    team = Teams.get_by_id(invite.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    if team.subscription_status not in ("active", "trialing"):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Team subscription is not active.",
+        )
+
+    current_count = TeamMembers.count_members(team.id)
+    if current_count >= team.seat_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Team has no available seats.",
+        )
+
+    # Check not already a member
+    existing = TeamMembers.get_by_user_id(user.id)
+    if not existing:
+        TeamMembers.add(team.id, user.id, role="member")
+
+    # Update user's billing record
+    StripeBillings.upsert(
+        user_id=user.id,
+        plan_tier="team_member",
+        team_id=team.id,
+        free_tier_credit_applied=True,  # preserve flag so they don't get another trial credit
+    )
+
+    TeamInvites.update_status(token, "accepted")
+
+    return {"accepted": True, "team_id": team.id, "team_name": team.name}
+
+
+@router.post("/invite/{token}/decline")
+async def decline_invite(token: str, user=Depends(get_verified_user)):
+    """Decline a team invite."""
+    require_billing_enabled()
+
+    invite = TeamInvites.get_by_token(token)
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    if invite.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invite is already {invite.status}.",
+        )
+
+    if user.email.lower() != invite.invited_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This invite is for a different email address.",
+        )
+
+    TeamInvites.update_status(token, "declined")
+    return {"declined": True}
+
+
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
     payload = await request.body()
@@ -482,61 +1196,118 @@ async def stripe_webhook(request: Request):
     event_type = event.type
     data = event.data.object
 
+    try:
+        return await _handle_stripe_event(event_type, data)
+    except Exception as exc:
+        log.exception(f"[billing] Webhook handler crashed for event_type={event_type}: {exc}")
+        raise HTTPException(status_code=500, detail="Webhook handler error")
+
+
+async def _handle_stripe_event(event_type: str, data):
     if event_type == "checkout.session.completed":
         session_id = getattr(data, "id", None)
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
+        raw_meta = getattr(data, "metadata", None)
+        metadata = getattr(raw_meta, "_data", {}) or {}
 
-        record = None
+        # Check if this is a team top-up (one-time payment)
+        if metadata.get("type") == "team_topup":
+            team_id = metadata.get("team_id")
+            amount_eur = float(metadata.get("topup_amount_eur", 0))
+            if team_id and amount_eur > 0:
+                Teams.add_usage_credit(team_id, amount_eur)
+                log.info(f"[billing] Team top-up: team_id={team_id} +€{amount_eur:.2f}")
+            return {"received": True}
+
+        # Check if this is a team subscription checkout
+        team = None
         if session_id:
-            record = StripeBillings.get_by_checkout_session_id(session_id)
-        if record is None and customer_id:
-            record = StripeBillings.get_by_customer_id(customer_id)
+            team = Teams.get_by_checkout_session_id(session_id)
+        if team is None and customer_id:
+            team = Teams.get_by_customer_id(customer_id)
 
-        if record:
-            StripeBillings.upsert(
-                user_id=record.user_id,
+        if team:
+            Teams.update(
+                team.id,
                 stripe_customer_id=customer_id,
                 stripe_subscription_id=subscription_id,
-                plan_tier="paid",
                 subscription_status="active",
-                free_tier_credit_applied=record.free_tier_credit_applied,
             )
-            log.info(f"[billing] Checkout completed: user_id={record.user_id} → paid plan")
+            StripeBillings.upsert(
+                user_id=team.owner_user_id,
+                stripe_customer_id=customer_id,
+                plan_tier="team",
+                subscription_status="active",
+                team_id=team.id,
+            )
+            log.info(f"[billing] Team checkout completed: team_id={team.id} → active")
+        else:
+            # Individual user checkout
+            record = None
+            if session_id:
+                record = StripeBillings.get_by_checkout_session_id(session_id)
+            if record is None and customer_id:
+                record = StripeBillings.get_by_customer_id(customer_id)
+
+            if record:
+                StripeBillings.upsert(
+                    user_id=record.user_id,
+                    stripe_customer_id=customer_id,
+                    stripe_subscription_id=subscription_id,
+                    plan_tier="paid",
+                    subscription_status="active",
+                    free_tier_credit_applied=record.free_tier_credit_applied,
+                )
+                log.info(f"[billing] Checkout completed: user_id={record.user_id} → paid plan")
 
     elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
         customer_id = getattr(data, "customer", None)
         new_status = getattr(data, "status", None)
-        subscription_id = getattr(data, "id", None)
         if customer_id and new_status:
-            StripeBillings.update_subscription_status(customer_id, new_status)
+            # Update team subscription if applicable
+            if not Teams.update_subscription_status(customer_id, new_status):
+                # Fall back to individual billing
+                StripeBillings.update_subscription_status(customer_id, new_status)
+            if event_type == "customer.subscription.deleted" or new_status == "canceled":
+                _revert_team_members_to_trial(customer_id)
             log.info(f"[billing] Subscription updated: customer={customer_id} status={new_status}")
 
     elif event_type == "invoice.payment_failed":
         customer_id = getattr(data, "customer", None)
         if customer_id:
-            StripeBillings.update_subscription_status(customer_id, "past_due")
+            if not Teams.update_subscription_status(customer_id, "past_due"):
+                StripeBillings.update_subscription_status(customer_id, "past_due")
             log.warning(f"[billing] Payment failed: customer={customer_id}")
 
     elif event_type == "invoice.paid":
         customer_id = getattr(data, "customer", None)
         if customer_id:
-            record = StripeBillings.get_by_customer_id(customer_id)
-            if record and record.subscription_status == "past_due":
-                StripeBillings.update_subscription_status(customer_id, "active")
-                log.info(f"[billing] Payment recovered: customer={customer_id}")
+            team = Teams.get_by_customer_id(customer_id)
+            if team and team.subscription_status == "past_due":
+                Teams.update_subscription_status(customer_id, "active")
+                log.info(f"[billing] Team payment recovered: customer={customer_id}")
+            else:
+                record = StripeBillings.get_by_customer_id(customer_id)
+                if record and record.subscription_status == "past_due":
+                    StripeBillings.update_subscription_status(customer_id, "active")
+                    log.info(f"[billing] Payment recovered: customer={customer_id}")
 
     elif event_type == "payment_method.attached":
         customer_id = getattr(data, "customer", None)
         pm_id = getattr(data, "id", None)
         if customer_id and pm_id:
-            record = StripeBillings.get_by_customer_id(customer_id)
-            if record:
-                StripeBillings.upsert(
-                    user_id=record.user_id,
-                    stripe_payment_method_id=pm_id,
-                    free_tier_credit_applied=record.free_tier_credit_applied,
-                )
+            team = Teams.get_by_customer_id(customer_id)
+            if team:
+                Teams.update(team.id, stripe_payment_method_id=pm_id)
+            else:
+                record = StripeBillings.get_by_customer_id(customer_id)
+                if record:
+                    StripeBillings.upsert(
+                        user_id=record.user_id,
+                        stripe_payment_method_id=pm_id,
+                        free_tier_credit_applied=record.free_tier_credit_applied,
+                    )
 
     return {"received": True}
 

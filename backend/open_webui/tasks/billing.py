@@ -34,19 +34,17 @@ async def _run_usage_report():
         log.error(f"[billing-reporter] Failed to fetch Langfuse metrics: {e}")
         return
 
+    # --- Individual paid subscribers ---
     active_records = StripeBillings.get_all_active()
-    if not active_records:
-        log.info("[billing-reporter] No active billing records, skipping.")
-        return
+    individual_paid = [r for r in active_records if r.plan_tier == "paid"]
 
-    log.info(f"[billing-reporter] Reporting usage for {len(active_records)} subscribers.")
+    log.info(f"[billing-reporter] Reporting usage for {len(individual_paid)} individual subscribers.")
 
-    for record in active_records:
+    for record in individual_paid:
         if not record.stripe_subscription_item_id:
             log.warning(f"[billing-reporter] user_id={record.user_id} has no subscription item ID, skipping.")
             continue
 
-        # Resolve email from user_id
         try:
             user = Users.get_user_by_id(record.user_id)
             if not user:
@@ -58,7 +56,6 @@ async def _run_usage_report():
             continue
 
         cost_eur = cost_by_email.get(email, 0.0)
-        # Stripe quantity = integer euro cents
         quantity = max(0, int(round(cost_eur * 100)))
 
         try:
@@ -66,17 +63,26 @@ async def _run_usage_report():
                 record.stripe_subscription_item_id,
                 quantity=quantity,
                 timestamp="now",
-                action="set",  # snapshot — safe to run multiple times per day
+                action="set",
             )
             log.info(
                 f"[billing-reporter] Reported {quantity} cents (€{cost_eur:.4f}) "
                 f"for {email} (sub_item={record.stripe_subscription_item_id})"
             )
         except Exception as e:
-            log.error(
-                f"[billing-reporter] Failed to report usage for {email}: {e}"
-            )
-            # Continue — don't abort the entire job for one user
+            log.error(f"[billing-reporter] Failed to report usage for {email}: {e}")
+
+    # --- Teams use flat billing; no Stripe usage reporting needed.
+    # Reset extra_usage_credit_eur monthly so purchased credits don't roll over. ---
+    from open_webui.models.billing import Teams
+
+    active_teams = Teams.get_all_active()
+    now = datetime.datetime.utcnow()
+    # Only reset on the first run of each month (day == 1)
+    if now.day == 1:
+        for team in active_teams:
+            Teams.reset_extra_credit(team.id)
+            log.info(f"[billing-reporter] Reset extra credit for team_id={team.id}")
 
 
 def _seconds_until_next_midnight_utc() -> float:

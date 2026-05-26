@@ -2,7 +2,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export type BillingStatus = {
 	enabled: boolean;
-	plan_tier: 'internal' | 'trial' | 'paid' | null;
+	plan_tier: 'internal' | 'trial' | 'paid' | 'team' | 'team_member' | null;
 	is_configured: boolean;
 
 	// Trial
@@ -10,9 +10,24 @@ export type BillingStatus = {
 	credit_used_eur: number;
 	credit_remaining_eur: number;
 
-	// Paid
+	// Paid / team subscription
 	subscription_status: string | null;
 	upcoming_invoice_eur: number | null;
+
+	// Team owner fields
+	team_id: string | null;
+	team_name: string | null;
+	seat_limit: number | null;
+	seat_used: number | null;
+	team_month_cost_eur: number | null;
+
+	// Team usage budget (owner + member view)
+	usage_budget_eur: number | null;
+	extra_credit_eur: number | null;
+	usage_budget_remaining_eur: number | null;
+
+	// Team member fields
+	team_owner_name: string | null;
 
 	// All tiers
 	current_month_cost_eur: number;
@@ -70,3 +85,103 @@ export type AdminBillingRow = {
 
 export const getAdminBillingSummary = (token: string) =>
 	request<AdminBillingRow[]>(`${base}/admin/summary`, token);
+
+// --- Team types ---
+
+export type TeamMember = {
+	user_id: string;
+	name: string;
+	email: string;
+	role: string;
+	current_month_cost_eur: number;
+};
+
+export type TeamInvite = {
+	id: string;
+	invited_email: string;
+	status: string;
+	token: string;
+	expires_at: number;
+};
+
+export type TeamStatus = {
+	team_id: string;
+	name: string;
+	seat_limit: number;
+	seat_used: number;
+	subscription_status: string | null;
+	members: TeamMember[];
+	pending_invites: TeamInvite[];
+	team_month_cost_eur: number;
+};
+
+export type InviteInfo = {
+	team_id: string;
+	team_name: string;
+	owner_name: string | null;
+	invited_email: string;
+	expires_at: number;
+};
+
+// --- Team API functions ---
+
+export type TeamTier = {
+	seat_count: number;
+	price_eur: number;
+};
+
+export const getTeamTiers = (token: string) =>
+	request<TeamTier[]>(`${base}/team/tiers`, token);
+
+export const createTeam = (token: string, name: string, seat_count: number) =>
+	request<{ url: string }>(`${base}/team/create`, token, {
+		method: 'POST',
+		body: JSON.stringify({ name, seat_count })
+	});
+
+export const getTeamStatus = (token: string) =>
+	request<TeamStatus>(`${base}/team`, token);
+
+export const inviteTeamMember = (token: string, email: string) =>
+	request<{ invite_id: string; token: string; invited_email: string; expires_at: number }>(
+		`${base}/team/invite`,
+		token,
+		{ method: 'POST', body: JSON.stringify({ email }) }
+	);
+
+export const removeTeamMember = (token: string, userId: string) =>
+	request<{ removed: boolean }>(`${base}/team/members/${userId}`, token, { method: 'DELETE' });
+
+export const getTeamPortalUrl = (token: string) =>
+	request<{ url: string }>(`${base}/team/portal`, token, { method: 'POST' });
+
+export const getInviteInfo = (token: string, inviteToken: string) =>
+	request<InviteInfo>(`${base}/invite/${inviteToken}`, token);
+
+export const acceptInvite = (token: string, inviteToken: string) =>
+	request<{ accepted: boolean; team_id: string; team_name: string }>(
+		`${base}/invite/${inviteToken}/accept`,
+		token,
+		{ method: 'POST' }
+	);
+
+export const declineInvite = (token: string, inviteToken: string) =>
+	request<{ declined: boolean }>(`${base}/invite/${inviteToken}/decline`, token, {
+		method: 'POST'
+	});
+
+// --- Top-up ---
+
+export type TopupOption = {
+	price_id: string;
+	amount_eur: number;
+};
+
+export const getTopupOptions = (token: string) =>
+	request<TopupOption[]>(`${base}/team/topup/options`, token);
+
+export const createTeamTopup = (token: string, amount_eur: number) =>
+	request<{ url: string }>(`${base}/team/topup`, token, {
+		method: 'POST',
+		body: JSON.stringify({ amount_eur })
+	});
