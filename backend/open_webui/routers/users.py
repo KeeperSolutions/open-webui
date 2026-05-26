@@ -661,11 +661,13 @@ async def delete_user_by_id(
     # Prevent deletion of the primary admin user
     try:
         first_user = Users.get_first_user(db=db)
-        if first_user and user_id == first_user.id:
+        if first_user and first_user.role == "admin" and user_id == first_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACTION_PROHIBITED,
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Error checking primary admin status: {e}")
         raise HTTPException(
