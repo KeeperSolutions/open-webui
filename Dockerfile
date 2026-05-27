@@ -19,6 +19,7 @@ ARG USE_AUXILIARY_EMBEDDING_MODEL=TaylorAI/bge-micro-v2
 ARG USE_TIKTOKEN_ENCODING_NAME="cl100k_base"
 
 ARG BUILD_HASH=dev-build
+ARG DEPLOY_ENVIRONMENT=production
 # Override at your own risk - non-root configurations are untested
 ARG UID=0
 ARG GID=0
@@ -26,6 +27,7 @@ ARG GID=0
 ######## WebUI frontend ########
 FROM node:22-alpine3.20 AS build
 ARG BUILD_HASH
+ARG DEPLOY_ENVIRONMENT=production
 ENV NODE_OPTIONS=--max_old_space_size=4096
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
@@ -42,6 +44,7 @@ RUN npm install --force --no-save @rollup/rollup-linux-x64-musl @tailwindcss/oxi
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
+ENV PUBLIC_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}
 RUN npm run build
 
 ######## WebUI backend ########
