@@ -1437,20 +1437,22 @@ class OAuthManager:
             ):
                 user_data: UserInfo = await client.userinfo(token=token)
 
-            # Microsoft's /oidc/userinfo endpoint omits email; fall back to the ID token claims
+            # Microsoft's /oidc/userinfo endpoint omits email; fall back to verified ID token claims.
+            # Authlib only auto-parses the ID token when a nonce is present — Microsoft may omit it,
+            # so we call parse_id_token explicitly with nonce validation relaxed.
             if user_data and auth_manager_config.OAUTH_EMAIL_CLAIM not in user_data:
-                id_token_claims = token.get("id_token_claims") or {}
-                # Authlib may not auto-parse the ID token — decode it manually if needed
+                id_token_claims = token.get("userinfo") or {}
                 if not id_token_claims and token.get("id_token"):
                     try:
-                        import jwt as pyjwt
-                        id_token_claims = pyjwt.decode(
-                            token["id_token"], options={"verify_signature": False}
+                        id_token_claims = await client.parse_id_token(
+                            token,
+                            nonce=None,
+                            claims_options={"nonce": {"essential": False}},
                         )
-                    except Exception as jwt_err:
-                        log.warning(f"OAuth failed to decode id_token for {provider}: {jwt_err}")
+                    except Exception as id_token_err:
+                        log.warning(f"OAuth failed to parse id_token for {provider}: {id_token_err}")
                 if auth_manager_config.OAUTH_EMAIL_CLAIM in id_token_claims:
-                    user_data = {**user_data, **id_token_claims}
+                    user_data = {**user_data, auth_manager_config.OAUTH_EMAIL_CLAIM: id_token_claims[auth_manager_config.OAUTH_EMAIL_CLAIM]}
                 elif "preferred_username" in id_token_claims:
                     # Microsoft uses preferred_username when email optional claim is not present
                     user_data = {**user_data, auth_manager_config.OAUTH_EMAIL_CLAIM: id_token_claims["preferred_username"]}
