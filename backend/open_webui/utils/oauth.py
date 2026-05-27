@@ -1436,6 +1436,28 @@ class OAuthManager:
                 or (auth_manager_config.OAUTH_USERNAME_CLAIM not in user_data)
             ):
                 user_data: UserInfo = await client.userinfo(token=token)
+
+            # Microsoft's /oidc/userinfo endpoint omits email; fall back to verified ID token claims.
+            # Authlib only auto-parses the ID token when a nonce is present — Microsoft may omit it,
+            # so we call parse_id_token explicitly with nonce validation relaxed.
+            if user_data and auth_manager_config.OAUTH_EMAIL_CLAIM not in user_data:
+                id_token_claims = token.get("userinfo") or {}
+                if not id_token_claims and token.get("id_token"):
+                    try:
+                        id_token_claims = await client.parse_id_token(
+                            token,
+                            nonce=None,
+                            claims_options={"nonce": {"essential": False}},
+                        )
+                    except Exception as id_token_err:
+                        log.warning(f"OAuth failed to parse id_token for {provider}: {id_token_err}")
+                if auth_manager_config.OAUTH_EMAIL_CLAIM in id_token_claims:
+                    user_data = {**user_data, auth_manager_config.OAUTH_EMAIL_CLAIM: id_token_claims[auth_manager_config.OAUTH_EMAIL_CLAIM]}
+                elif "preferred_username" in id_token_claims:
+                    # Microsoft uses preferred_username when email optional claim is not present
+                    user_data = {**user_data, auth_manager_config.OAUTH_EMAIL_CLAIM: id_token_claims["preferred_username"]}
+                else:
+                    log.warning(f"OAuth id_token_claims missing email for {provider}: {list(id_token_claims.keys())}")
             if (
                 provider == "feishu"
                 and isinstance(user_data, dict)
