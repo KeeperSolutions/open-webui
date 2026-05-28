@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
 from open_webui.internal.db import get_async_session, get_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
@@ -531,11 +531,16 @@ async def get_model_profile_image(
                         header, base64_data = image_url.split(",", 1)
                         image_data = base64.b64decode(base64_data)
                         image_buffer = io.BytesIO(image_data)
-                        media_type = header.split(";")[0].lstrip("data:")
+                        media_type = header.split(";")[0].lstrip("data:").lower()
+
+                        # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                        if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                            return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
 
                         headers = {
                             "Content-Disposition": "inline",
                             "Cache-Control": "public, max-age=3600",
+                            "X-Content-Type-Options": "nosniff",
                         }
                         if etag:
                             headers["ETag"] = etag
@@ -604,9 +609,13 @@ async def get_model_profile_image(
                     header, base64_data = provider_logo.split(",", 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(";")[0].lstrip("data:")
+                    media_type = header.split(";")[0].lstrip("data:").lower()
 
-                    headers = {"Cache-Control": "public, max-age=3600"}
+                    # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
+                    headers = {"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"}
                     if etag:
                         headers["ETag"] = etag
 
@@ -653,11 +662,19 @@ async def get_model_profile_image(
                             header, base64_data = arena_image_url.split(",", 1)
                             image_data = base64.b64decode(base64_data)
                             image_buffer = io.BytesIO(image_data)
-                            media_type = header.split(";")[0].lstrip("data:")
+                            media_type = header.split(";")[0].lstrip("data:").lower()
+
+                            # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                            if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                                return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
                             return StreamingResponse(
                                 image_buffer,
                                 media_type=media_type,
-                                headers={"Content-Disposition": "inline"},
+                                headers={
+                                    "Content-Disposition": "inline",
+                                    "X-Content-Type-Options": "nosniff",
+                                },
                             )
                         except Exception as e:
                             log.warning(f"Error decoding arena model profile image: {e}")
@@ -692,8 +709,10 @@ async def get_model_profile_image(
                         header, base64_data = provider_logo.split(",", 1)
                         image_data = base64.b64decode(base64_data)
                         image_buffer = io.BytesIO(image_data)
-                        media_type = header.split(";")[0].lstrip("data:")
-                        headers = {"Cache-Control": "public, max-age=3600"}
+                        media_type = header.split(";")[0].lstrip("data:").lower()
+                        if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                            return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+                        headers = {"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"}
                         if etag:
                             headers["ETag"] = etag
                         return StreamingResponse(image_buffer, media_type=media_type, headers=headers)
@@ -761,11 +780,19 @@ def get_model_profile_image_preview(
                     header, base64_data = preview_url.split(",", 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(";")[0].lstrip("data:")
+                    media_type = header.split(";")[0].lstrip("data:").lower()
+
+                    # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
                     return StreamingResponse(
                         image_buffer,
                         media_type=media_type,
-                        headers={"Cache-Control": "no-cache"},
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "X-Content-Type-Options": "nosniff",
+                        },
                     )
                 except Exception as e:
                     log.warning(f"Error decoding preview image: {e}")
@@ -801,11 +828,19 @@ def get_model_profile_image_preview(
                 header, base64_data = provider_logo.split(",", 1)
                 image_data = base64.b64decode(base64_data)
                 image_buffer = io.BytesIO(image_data)
-                media_type = header.split(";")[0].lstrip("data:")
+                media_type = header.split(";")[0].lstrip("data:").lower()
+
+                # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                    return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
                 return StreamingResponse(
                     image_buffer,
                     media_type=media_type,
-                    headers={"Cache-Control": "no-cache"},
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "X-Content-Type-Options": "nosniff",
+                    },
                 )
             except Exception as e:
                 log.warning(f"Error decoding provider logo: {e}")
