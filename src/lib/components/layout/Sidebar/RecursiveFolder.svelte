@@ -482,7 +482,10 @@
 				role="button"
 				tabindex="0"
 				on:keydown={(e) => {
-					if (e.key === 'Enter' || e.key === ' ') e.currentTarget.click();
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						e.currentTarget.click();
+					}
 				}}
 				on:dblclick={(e) => {
 					if (clickTimer) {

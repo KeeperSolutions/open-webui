@@ -339,7 +339,10 @@
 								onGroupClick(_messageId, modelIdx);
 							}}
 							on:keydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') onGroupClick(_messageId, modelIdx);
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									onGroupClick(_messageId, modelIdx);
+								}
 							}}
 						>
 							{#key history.currentId}

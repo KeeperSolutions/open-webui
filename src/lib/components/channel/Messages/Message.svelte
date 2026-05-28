@@ -356,9 +356,8 @@
 								{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 									<Image src={fileUrl} alt={file.name} imageClassName=" max-h-96 rounded-lg" />
 								{:else if file.type === 'video' || (file?.content_type ?? '').startsWith('video/')}
-									<video src={fileUrl} controls class=" max-h-96 rounded-lg">
-										<track kind="captions" />
-									</video>
+									<!-- svelte-ignore a11y_media_has_caption -->
+									<video src={fileUrl} controls class=" max-h-96 rounded-lg"></video>
 								{:else}
 									<FileItem
 										item={file}
