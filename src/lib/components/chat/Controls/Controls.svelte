@@ -10,7 +10,6 @@
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 
 	import { user, settings } from '$lib/stores';
-	export let models = [];
 	export let chatFiles = [];
 	export let params = {};
 
@@ -83,7 +82,7 @@
 								: 'py-1.5 bg-transparent'}"
 							rows="4"
 							placeholder={$i18n.t('Enter system prompt')}
-						/>
+						></textarea>
 					</div>
 				</Collapsible>
 

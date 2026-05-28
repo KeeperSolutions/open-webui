@@ -51,11 +51,12 @@
 	<FileItemModal bind:show={showModal} bind:item {edit} />
 {/if}
 
-<button
+<div
 	class="relative group p-1.5 {className} flex items-center gap-1 {colorClassName} {small
 		? 'rounded-xl p-2'
-		: 'rounded-2xl'} text-left"
-	type="button"
+		: 'rounded-2xl'} text-left cursor-pointer"
+	role="button"
+	tabindex="0"
 	on:click={async () => {
 		if (item?.file?.data?.content || item?.type === 'file' || item?.content || modal) {
 			showModal = !showModal;
@@ -74,6 +75,12 @@
 		}
 
 		dispatch('click');
+	}}
+	on:keydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			e.currentTarget.click();
+		}
 	}}
 >
 	{#if !small}
@@ -202,4 +209,4 @@
 			</button> -->
 		</div>
 	{/if}
-</button>
+</div>

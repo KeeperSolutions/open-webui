@@ -184,10 +184,10 @@
 			<div class="flex items-start justify-between">
 				<div>
 					<div class=" font-medium text-lg dark:text-gray-100">
-						<a
-							href="#"
-							class="hover:underline line-clamp-1"
-							on:click|preventDefault={() => {
+						<button
+							type="button"
+							class="hover:underline line-clamp-1 text-left"
+							on:click={() => {
 								if (!isPDF && item.url) {
 									window.open(
 										item.type === 'file'
@@ -201,7 +201,7 @@
 							}}
 						>
 							{item?.name ?? 'File'}
-						</a>
+						</button>
 					</div>
 				</div>
 
@@ -355,13 +355,13 @@
 							class="w-full border-0 rounded-lg mb-2"
 							controls
 							playsinline
-						/>
+						></audio>
 					{:else if isPDF}
 						<iframe
 							title={item?.name}
 							src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 							class="w-full h-[70vh] border-0 rounded-lg"
-						/>
+						></iframe>
 					{:else if isExcel}
 						{#if excelError}
 							<div class="text-red-500 text-sm p-4">

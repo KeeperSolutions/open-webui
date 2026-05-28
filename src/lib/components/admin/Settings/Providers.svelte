@@ -234,7 +234,7 @@
 	<div class="flex-1 overflow-y-auto pr-1.5">
 		{#if loading}
 			<div class="flex justify-center py-8">
-				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white" />
+				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-white"></div>
 			</div>
 		{:else if providers.length === 0}
 			<div class="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -331,8 +331,10 @@
 		<div
 			class="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
 			on:click|stopPropagation
+			on:keydown|stopPropagation
 			role="dialog"
 			aria-modal="true"
+			tabindex="-1"
 		>
 			<div class="p-6">
 				<h2 class="text-lg font-semibold mb-4">
@@ -345,11 +347,12 @@
 					class="space-y-4"
 				>
 					<div>
-						<label class="block text-sm font-medium mb-1">
+						<label for="provider-id" class="block text-sm font-medium mb-1">
 							{$i18n.t('Provider ID')}
 							<span class="text-red-500">*</span>
 						</label>
 						<input
+							id="provider-id"
 							type="text"
 							bind:value={formId}
 							on:input={() => { formId = formId.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-'); }}
@@ -364,11 +367,12 @@
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium mb-1">
+						<label for="provider-name" class="block text-sm font-medium mb-1">
 							{$i18n.t('Provider Name')}
 							<span class="text-red-500">*</span>
 						</label>
 						<input
+							id="provider-name"
 							type="text"
 							bind:value={formName}
 							required
@@ -378,10 +382,11 @@
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium mb-1">
+						<label for="provider-logo-url" class="block text-sm font-medium mb-1">
 							{$i18n.t('Logo URL (default)')}
 						</label>
 						<input
+							id="provider-logo-url"
 							type="text"
 							bind:value={formLogoUrl}
 							placeholder="/providers/{formId || 'provider'}.png"
@@ -394,10 +399,11 @@
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">
+							<label for="provider-logo-light" class="block text-sm font-medium mb-1">
 								{$i18n.t('Light Theme Logo')}
 							</label>
 							<input
+								id="provider-logo-light"
 								type="text"
 								bind:value={formLogoLightUrl}
 								placeholder="/providers/{formId || 'provider'}-light.png"
@@ -409,10 +415,11 @@
 						</div>
 
 						<div>
-							<label class="block text-sm font-medium mb-1">
+							<label for="provider-logo-dark" class="block text-sm font-medium mb-1">
 								{$i18n.t('Dark Theme Logo')}
 							</label>
 							<input
+								id="provider-logo-dark"
 								type="text"
 								bind:value={formLogoDarkUrl}
 								placeholder="/providers/{formId || 'provider'}-dark.png"
@@ -425,10 +432,11 @@
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium mb-1">
+						<label for="provider-patterns" class="block text-sm font-medium mb-1">
 							{$i18n.t('Model ID Patterns')}
 						</label>
 						<input
+							id="provider-patterns"
 							type="text"
 							bind:value={formPatterns}
 							placeholder="^gpt-, ^o1-, ^text-davinci"
@@ -440,7 +448,7 @@
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium mb-1">
+						<label for="provider-model-patterns" class="block text-sm font-medium mb-1">
 							{$i18n.t('Model-Specific Logos')} <span class="text-gray-500 text-xs font-normal">({$i18n.t('Optional')})</span>
 						</label>
 
@@ -467,6 +475,7 @@
 
 							<!-- Textarea -->
 							<textarea
+								id="provider-model-patterns"
 								bind:value={formModelPatterns}
 								bind:this={jsonTextareaElement}
 								on:scroll={syncScroll}
@@ -497,10 +506,11 @@
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">
+							<label for="provider-priority" class="block text-sm font-medium mb-1">
 								{$i18n.t('Priority')}
 							</label>
 							<input
+								id="provider-priority"
 								type="number"
 								bind:value={formPriority}
 								min="0"
@@ -513,9 +523,9 @@
 						</div>
 
 						<div>
-							<label class="block text-sm font-medium mb-1">
+							<div class="block text-sm font-medium mb-1">
 								{$i18n.t('Status')}
-							</label>
+							</div>
 							<div class="flex items-center h-10">
 								<label class="flex items-center cursor-pointer">
 									<input

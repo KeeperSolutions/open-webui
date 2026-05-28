@@ -24,7 +24,6 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	export let groupId: string;
-	export let userCount = 0;
 
 	let users = null;
 	let total = null;

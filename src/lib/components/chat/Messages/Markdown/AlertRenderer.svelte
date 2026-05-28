@@ -71,7 +71,7 @@
 	import MarkdownTokens from './MarkdownTokens.svelte';
 	import type { ComponentType } from 'svelte';
 
-	export let token: Token;
+	export const token: Token = undefined;
 	export let alert: AlertData;
 	export let id = '';
 	export let tokenIdx = 0;

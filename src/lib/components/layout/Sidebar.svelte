@@ -549,7 +549,7 @@
 		on:mousedown={() => {
 			showSidebar.set(!$showSidebar);
 		}}
-	/>
+	></div>
 {/if}
 
 <SearchModal
@@ -564,11 +564,12 @@
 <button
 	id="sidebar-new-chat-button"
 	class="hidden"
+	aria-label="New Chat"
 	on:click={() => {
 		goto('/');
 		newChatHandler();
 	}}
-/>
+></button>
 
 {#if !$mobile && !$showSidebar}
 	<div

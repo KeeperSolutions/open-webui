@@ -1002,9 +1002,9 @@
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
-					<label id="floating-action-buttons-label" class=" self-center text-xs">
+					<span class=" self-center text-xs">
 						{$i18n.t('Floating Quick Actions')}
-					</label>
+					</span>
 
 					<div class="flex items-center gap-3 p-1">
 						{#if showFloatingActionButtons}

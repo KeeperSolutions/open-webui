@@ -711,6 +711,7 @@
 
 							{#if (info?.meta?.suggestion_prompts ?? null) !== null}
 								<button
+									aria-label={$i18n.t('Add suggestion prompt')}
 									class="p-1 px-2 text-xs flex rounded-sm transition"
 									type="button"
 									on:click={() => {
@@ -857,7 +858,7 @@
 									value={JSON.stringify(info, null, 2)}
 									disabled
 									readonly
-								/>
+								></textarea>
 							</div>
 						{/if}
 					</div>

@@ -241,6 +241,7 @@
 													? ''
 													: 'group-hover:visible invisible transition'}"
 												type="button"
+												aria-label={$i18n.t('Remove')}
 												on:click={() => {
 													editedFiles.splice(fileIdx, 1);
 
@@ -305,7 +306,7 @@
 									document.getElementById('confirm-edit-message-button')?.click();
 								}
 							}}
-						/>
+						></textarea>
 					</div>
 
 					<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
@@ -378,6 +379,7 @@
 							<div class="flex self-center" dir="ltr">
 								<button
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -445,6 +447,7 @@
 
 								<button
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}
@@ -473,6 +476,7 @@
 								class="{($settings?.highContrastMode ?? false)
 									? ''
 									: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition edit-user-message-button"
+								aria-label={$i18n.t('Edit')}
 								on:click={() => {
 									editMessageHandler();
 								}}
@@ -501,6 +505,7 @@
 								class="{($settings?.highContrastMode ?? false)
 									? ''
 									: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+								aria-label={$i18n.t('Copy')}
 								on:click={() => {
 									copyToClipboard(message.content);
 								}}
@@ -530,6 +535,7 @@
 									class="{($settings?.highContrastMode ?? false)
 										? ''
 										: 'invisible group-hover:visible'} p-1 rounded-sm dark:hover:text-white hover:text-black transition"
+									aria-label={$i18n.t('Delete')}
 									on:click={() => {
 										showDeleteConfirm = true;
 									}}
@@ -558,6 +564,7 @@
 							<div class="flex self-center" dir="ltr">
 								<button
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -625,6 +632,7 @@
 
 								<button
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
+									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}

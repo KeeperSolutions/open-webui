@@ -21,7 +21,7 @@
 
 	const i18n = getContext('i18n');
 
-	export let user;
+	export const user = undefined;
 	export let model;
 
 	export let exportHandler: Function;

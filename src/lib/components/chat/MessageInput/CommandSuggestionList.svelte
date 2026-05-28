@@ -13,7 +13,7 @@
 
 	export let char = '';
 	export let query = '';
-	export let command: (payload: { id: string; label: string }) => void;
+	export const command: (payload: { id: string; label: string }) => void = undefined;
 
 	export let onSelect = (e) => {};
 	export let onUpload = (e) => {};
