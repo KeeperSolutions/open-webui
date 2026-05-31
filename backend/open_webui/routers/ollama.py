@@ -15,7 +15,7 @@ import aiohttp
 from aiocache import cached
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, validator
+from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.config import UPLOAD_DIR
@@ -981,8 +981,6 @@ async def generate_chat_completion(
     form_data: dict,
     url_idx: int | None = None,
     user=Depends(check_billing_access),
-    bypass_filter: bool | None = False,
-    bypass_system_prompt: bool = False,
 ):
     """Forward a chat completion request to an Ollama backend."""
     if not request.app.state.config.ENABLE_OLLAMA_API:
@@ -993,12 +991,14 @@ async def generate_chat_completion(
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
     # which would exhaust the connection pool under concurrent load.
 
-    # bypass_filter is read from request.state to prevent external clients from
-    # setting it via query parameter (CVE fix). Only internal server-side callers
-    # (e.g. utils/chat.py) should set request.state.bypass_filter = True.
+    # bypass_filter and bypass_system_prompt are read from request.state to prevent
+    # external clients from setting them via query parameter. Only internal
+    # server-side callers (e.g. utils/chat.py) should set
+    # request.state.bypass_filter / request.state.bypass_system_prompt = True.
     bypass_filter = getattr(request.state, 'bypass_filter', False)
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
+    bypass_system_prompt = getattr(request.state, 'bypass_system_prompt', False)
 
     metadata = form_data.pop('metadata', None)
     try:
