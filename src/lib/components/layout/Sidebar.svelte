@@ -1607,7 +1607,7 @@
 							<div
 								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
 							>
-								<div class="self-center mr-3 relative">
+								<div class="self-center mr-3 relative flex-shrink-0">
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
@@ -1629,6 +1629,7 @@
 								</div>
 								<div class="flex flex-col flex-1 min-w-0">
 									<div class="flex font-medium truncate">{$user?.name}</div>
+
 									{#if myUsageLoading}
 										<div class="text-xs text-gray-400 dark:text-gray-500 animate-pulse">
 											{$i18n.t('Loading...')}
