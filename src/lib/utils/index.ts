@@ -2,6 +2,7 @@ import type { Writable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
 import { PUBLIC_DEPLOY_ENVIRONMENT } from '$env/static/public';
 import sha256 from 'js-sha256';
+import DOMPurify from 'dompurify';
 import { WEBUI_BASE_URL } from '$lib/constants';
 
 import dayjs from 'dayjs';
@@ -1919,6 +1920,44 @@ const cleanupMermaidTempElements = (id: string) => {
 	document.getElementById(`i${id}`)?.remove();
 };
 
+// Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
+// HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
+export const sanitizeSvg = (svg: string): string =>
+	DOMPurify.sanitize(svg, {
+		USE_PROFILES: { svg: true, svgFilters: true },
+		WHOLE_DOCUMENT: false,
+		ADD_TAGS: ['style', 'foreignObject'],
+		ADD_ATTR: [
+			'class',
+			'style',
+			'id',
+			'data-*',
+			'viewBox',
+			'preserveAspectRatio',
+			'markerWidth',
+			'markerHeight',
+			'markerUnits',
+			'refX',
+			'refY',
+			'orient',
+			'href',
+			'xlink:href',
+			'dominant-baseline',
+			'text-anchor',
+			'clipPathUnits',
+			'filterUnits',
+			'patternUnits',
+			'patternContentUnits',
+			'maskUnits',
+			'role',
+			'aria-label',
+			'aria-labelledby',
+			'aria-hidden',
+			'tabindex'
+		],
+		SANITIZE_DOM: true
+	});
+
 export const renderMermaidDiagram = async (
 	mermaid: typeof import('mermaid').default,
 	code: string,
@@ -1929,7 +1968,7 @@ export const renderMermaidDiagram = async (
 		const parseResult = await mermaid.parse(code, { suppressErrors: false });
 		if (parseResult) {
 			const { svg } = await mermaid.render(id, code);
-			return svg;
+			return sanitizeSvg(svg);
 		}
 		return '';
 	} finally {
