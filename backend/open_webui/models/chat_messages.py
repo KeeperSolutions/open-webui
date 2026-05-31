@@ -165,7 +165,7 @@ class ChatMessageTable:
                 # Update existing
                 if 'role' in data:
                     existing.role = data['role']
-                if 'parent_id' in data:
+                if 'parent_id' in data or 'parentId' in data:
                     existing.parent_id = data.get('parent_id') or data.get('parentId')
                 if 'model_id' in data or 'model' in data:
                     existing.model_id = data.get('model_id') or data.get('model')
