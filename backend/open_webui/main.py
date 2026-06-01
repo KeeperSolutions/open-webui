@@ -623,8 +623,7 @@ class SPAStaticFiles(StaticFiles):
 
 
 if LOG_FORMAT != 'json':
-    print(  # allow-print
-        rf"""
+    banner = rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
 ██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
 ██║   ██║██████╔╝█████╗  ██╔██╗ ██║    ██║ █╗ ██║█████╗  ██████╔╝██║   ██║██║
@@ -636,7 +635,14 @@ if LOG_FORMAT != 'json':
 v{VERSION} - building the best AI user interface.
 {f'Commit: {WEBUI_BUILD_HASH}' if WEBUI_BUILD_HASH != 'dev-build' else ''}
 https://github.com/open-webui/open-webui
-""")
+"""
+    try:
+        print(banner)  # allow-print
+    except UnicodeEncodeError:
+        # Stdout can't encode the box-drawing banner (Windows cp1252, redirected/headless stdout); fall back to ASCII.
+        print(  # allow-print
+            f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui'
+        )
 
 
 @asynccontextmanager
