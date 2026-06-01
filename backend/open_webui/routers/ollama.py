@@ -789,6 +789,7 @@ async def embed(
 
     log.info(f'generate_ollama_batch_embeddings {form_data}')
     await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await validate_ollama_backend_idx(request, form_data.model, url_idx, user)
 
     if url_idx is None:
         model = form_data.model
@@ -841,6 +842,7 @@ async def embeddings(
 
     log.info(f'generate_ollama_embeddings {form_data}')
     await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await validate_ollama_backend_idx(request, form_data.model, url_idx, user)
 
     if url_idx is None:
         model = form_data.model
@@ -900,6 +902,7 @@ async def generate_completion(
         raise HTTPException(status_code=503, detail=ERROR_MESSAGES.OLLAMA_API_DISABLED)
 
     await check_model_access(user, await Models.get_model_by_id(form_data.model), BYPASS_MODEL_ACCESS_CONTROL)
+    await validate_ollama_backend_idx(request, form_data.model, url_idx, user)
 
     if url_idx is None:
         await get_all_models(request, user=user)
@@ -961,7 +964,21 @@ class GenerateChatCompletionForm(BaseModel):
     model_config = ConfigDict(extra='allow')
 
 
-async def get_ollama_url(request: Request, model: str, url_idx: int | None = None):
+async def validate_ollama_backend_idx(request: Request, model: str, url_idx: int | None, user) -> None:
+    # A caller-supplied url_idx must point to a backend the model is actually
+    # served from; the None path is already constrained to that allow-list.
+    if url_idx is None or user is None or getattr(user, 'role', None) == 'admin' or BYPASS_MODEL_ACCESS_CONTROL:
+        return
+    models = request.app.state.OLLAMA_MODELS
+    if not models or model not in models:
+        await get_all_models(request, user=user)
+        models = request.app.state.OLLAMA_MODELS
+    if url_idx not in (models.get(model) or {}).get('urls', []):
+        raise HTTPException(status_code=403, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
+
+async def get_ollama_url(request: Request, model: str, url_idx: int | None = None, user=None):
+    await validate_ollama_backend_idx(request, model, url_idx, user)
     if url_idx is None:
         models = request.app.state.OLLAMA_MODELS
         if model not in models:
@@ -1033,7 +1050,7 @@ async def generate_chat_completion(
     else:
         await check_model_access(user, None, bypass_filter)
 
-    url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
+    url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_config = _resolve_api_config(request, url_idx, url)
 
     prefix_id = api_config.get('prefix_id')
@@ -1119,7 +1136,7 @@ async def generate_openai_completion(
     else:
         await check_model_access(user, None)
 
-    url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
+    url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_config = _resolve_api_config(request, url_idx, url)
 
     prefix_id = api_config.get('prefix_id')
@@ -1176,7 +1193,7 @@ async def generate_openai_chat_completion(
     else:
         await check_model_access(user, None)
 
-    url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
+    url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_config = _resolve_api_config(request, url_idx, url)
 
     prefix_id = api_config.get('prefix_id')
@@ -1225,7 +1242,7 @@ async def generate_anthropic_messages(
     else:
         await check_model_access(user, None)
 
-    url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
+    url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
         str(url_idx),
         request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),  # Legacy support
@@ -1283,7 +1300,7 @@ async def generate_responses(
     else:
         await check_model_access(user, None)
 
-    url, url_idx = await get_ollama_url(request, payload['model'], url_idx)
+    url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
         str(url_idx),
         request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),  # Legacy support
