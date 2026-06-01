@@ -342,9 +342,7 @@ async def get_all_models(request: Request, user: UserModel | None = None):
         allowed_model_ids = api_config.get('model_ids', [])
 
         if allowed_model_ids and 'models' in response:
-            response['models'] = [
-                m for m in response['models'] if m['model'] in allowed_model_ids
-            ]
+            response['models'] = [m for m in response['models'] if m['model'] in allowed_model_ids]
 
         for m in response.get('models', []):
             if prefix_id:
@@ -354,11 +352,7 @@ async def get_all_models(request: Request, user: UserModel | None = None):
             if connection_type:
                 m['connection_type'] = connection_type
 
-    models_dict = {
-        'models': merge_models_lists(
-            r.get('models', []) if r else None for r in responses
-        )
-    }
+    models_dict = {'models': merge_models_lists(r.get('models', []) if r else None for r in responses)}
 
     # Annotate with expiry info from loaded-model state
     try:
@@ -390,7 +384,8 @@ async def get_filtered_models(models, user, db=None):
         db=db,
     )
     return [
-        m for m in models.get('models', [])
+        m
+        for m in models.get('models', [])
         if (mi := model_infos.get(m['model'])) and (user.id == mi.user_id or mi.id in accessible_ids)
     ]
 
@@ -443,19 +438,13 @@ async def get_ollama_loaded_models(
     for idx, response in enumerate(responses):
         if not response:
             continue
-        api_config = _resolve_api_config(
-            request.app.state.config, idx, request.app.state.config.OLLAMA_BASE_URLS[idx]
-        )
+        api_config = _resolve_api_config(request.app.state.config, idx, request.app.state.config.OLLAMA_BASE_URLS[idx])
         prefix_id = api_config.get('prefix_id')
         if prefix_id:
             for m in response.get('models', []):
                 m['model'] = f'{prefix_id}.{m["model"]}'
 
-    return {
-        'models': merge_models_lists(
-            r.get('models', []) if r else None for r in responses
-        )
-    }
+    return {'models': merge_models_lists(r.get('models', []) if r else None for r in responses)}
 
 
 @router.get('/api/version')
@@ -476,7 +465,8 @@ async def get_ollama_versions(
     tasks = []
     for idx, url in enumerate(request.app.state.config.OLLAMA_BASE_URLS):
         api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
-            str(idx), request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+            str(idx),
+            request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
         )
         if api_config.get('enable', True):
             tasks.append(send_get_request(f'{url}/api/version', api_config.get('key')))
@@ -803,7 +793,8 @@ async def embed(
 
     url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
-        str(url_idx), request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+        str(url_idx),
+        request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
     )
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
@@ -856,7 +847,8 @@ async def embeddings(
 
     url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
-        str(url_idx), request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+        str(url_idx),
+        request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
     )
     key = get_api_key(url_idx, url, request.app.state.config.OLLAMA_API_CONFIGS)
 
@@ -914,7 +906,8 @@ async def generate_completion(
 
     url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
     api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
-        str(url_idx), request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+        str(url_idx),
+        request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
     )
 
     prefix_id = api_config.get('prefix_id')
@@ -1034,9 +1027,7 @@ async def generate_chat_completion(
 
     if model_info is not None:
         if model_info.base_model_id:
-            base_model_id = (
-                request.base_model_id if hasattr(request, 'base_model_id') else model_info.base_model_id
-            )
+            base_model_id = request.base_model_id if hasattr(request, 'base_model_id') else model_info.base_model_id
             payload['model'] = base_model_id
 
         params = model_info.params.model_dump()
@@ -1338,19 +1329,12 @@ async def get_openai_models(
         raw_models = model_list.get('models', [])
 
     now_ts = int(time.time())
-    models = [
-        {'id': m['model'], 'object': 'model', 'created': now_ts, 'owned_by': 'openai'}
-        for m in raw_models
-    ]
+    models = [{'id': m['model'], 'object': 'model', 'created': now_ts, 'owned_by': 'openai'} for m in raw_models]
 
     if user.role == 'user' and not BYPASS_MODEL_ACCESS_CONTROL:
         model_ids = [m['id'] for m in models]
-        model_infos = {
-            mi.id: mi for mi in await Models.get_models_by_ids(model_ids, db=db)
-        }
-        user_group_ids = {
-            g.id for g in await Groups.get_groups_by_member_id(user.id, db=db)
-        }
+        model_infos = {mi.id: mi for mi in await Models.get_models_by_ids(model_ids, db=db)}
+        user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id, db=db)}
         accessible_ids = await AccessGrants.get_accessible_resource_ids(
             user_id=user.id,
             resource_type='model',
@@ -1360,8 +1344,7 @@ async def get_openai_models(
             db=db,
         )
         models = [
-            m for m in models
-            if (mi := model_infos.get(m['id'])) and (user.id == mi.user_id or mi.id in accessible_ids)
+            m for m in models if (mi := model_infos.get(m['id'])) and (user.id == mi.user_id or mi.id in accessible_ids)
         ]
 
     return {'data': models, 'object': 'list'}

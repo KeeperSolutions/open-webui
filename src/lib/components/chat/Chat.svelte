@@ -186,7 +186,6 @@
 	let files = [];
 	let params = {};
 
-
 	$: if (chatIdProp) {
 		navigateHandler();
 	}

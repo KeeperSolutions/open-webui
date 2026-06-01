@@ -357,9 +357,7 @@ class ChatTable:
     ) -> list[ChatModel]:
         async with get_async_db_context(db) as session:
             # Validate folder_id references — clear any that don't exist
-            folder_ids = {
-                f.folder_id for f in chat_import_forms if f.folder_id
-            }
+            folder_ids = {f.folder_id for f in chat_import_forms if f.folder_id}
             existing = set()
             for fid in folder_ids:
                 if await Folders.get_folder_by_id_and_user_id(fid, user_id, db=session):
@@ -401,7 +399,10 @@ class ChatTable:
             return [ChatModel.model_validate(chat) for chat in chats]
 
     async def update_chat_by_id(
-        self, id: str, chat: dict, db: AsyncSession | None = None,
+        self,
+        id: str,
+        chat: dict,
+        db: AsyncSession | None = None,
     ) -> ChatModel | None:
         """Persist updated chat content, sanitizing null bytes."""
         try:  # load the chat record for in-place mutation
@@ -511,9 +512,7 @@ class ChatTable:
             except Exception as e:
                 log.warning('Backfill failed for message %s in chat %s: %s', message_id, chat_id, e)
 
-    async def reconcile_messages_by_chat_id(
-        self, chat_id: str, user_id: str, messages: dict[str, dict]
-    ) -> None:
+    async def reconcile_messages_by_chat_id(self, chat_id: str, user_id: str, messages: dict[str, dict]) -> None:
         """Sync ``chat_message`` rows with the committed JSON blob.
 
         Upserts current messages via ``backfill_messages_by_chat_id``
@@ -691,9 +690,12 @@ class ChatTable:
             await session.commit()
             await session.refresh(chat)
             return ChatModel.model_validate(chat)  # return the updated original
+
     # refresh helper
     async def update_shared_chat_by_chat_id(
-        self, chat_id: str, db: AsyncSession | None = None,
+        self,
+        chat_id: str,
+        db: AsyncSession | None = None,
     ) -> ChatModel | None:
         """Refresh the shared snapshot with current chat content."""
         from open_webui.models.shared_chats import SharedChats
@@ -952,9 +954,12 @@ class ChatTable:
             )
             all_chats = result.scalars().all()
             return [ChatModel.model_validate(chat) for chat in all_chats]
+
     # retrieve conversation
     async def get_chat_by_id(
-        self, id: str, db: AsyncSession | None = None,
+        self,
+        id: str,
+        db: AsyncSession | None = None,
     ) -> ChatModel | None:
         """Fetch a chat by PK, auto-sanitizing null bytes on read."""
         try:
@@ -1033,6 +1038,7 @@ class ChatTable:
             result = await session.execute(select(Chat).order_by(Chat.updated_at.desc()))
             all_chats = result.scalars().all()
             return [ChatModel.model_validate(chat) for chat in all_chats]
+
     # list user conversations
     async def get_chats_by_user_id(
         self,
@@ -1081,6 +1087,7 @@ class ChatTable:
                     'total': total,
                 }
             )
+
     # list pinned chats
     async def get_pinned_chats_by_user_id(
         self, user_id: str, db: AsyncSession | None = None
@@ -1111,6 +1118,7 @@ class ChatTable:
                 select(Chat).filter_by(user_id=user_id, archived=True).order_by(Chat.updated_at.desc())
             )
             return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
+
     # search user conversations
     async def get_chats_by_user_id_and_search_text(
         self,
