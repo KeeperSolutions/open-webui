@@ -3,8 +3,8 @@
 	import { decodeString } from '$lib/utils';
 	import Source from './Source.svelte';
 
-	export let id;
-	export let token;
+	export const id = undefined;
+	export let token = undefined;
 	export let sourceIds = [];
 	export let onClick: Function = () => {};
 

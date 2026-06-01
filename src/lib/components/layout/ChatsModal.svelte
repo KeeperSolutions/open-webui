@@ -26,7 +26,6 @@
 	export let show = false;
 
 	export let title = 'Chats';
-	export let emptyPlaceholder = '';
 	export let shareUrl = false;
 
 	export let query = '';
@@ -81,6 +80,7 @@
 			<div class=" text-lg font-medium self-center">{title}</div>
 			<button
 				class="self-center"
+				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
 				}}
@@ -262,6 +262,7 @@
 												<Tooltip content={$i18n.t('Unarchive Chat')}>
 													<button
 														class="self-center w-fit px-1 text-sm rounded-xl"
+														aria-label={$i18n.t('Unarchive Chat')}
 														on:click={async (e) => {
 															e.stopImmediatePropagation();
 															e.stopPropagation();
@@ -289,6 +290,7 @@
 											<Tooltip content={$i18n.t('Delete Chat')}>
 												<button
 													class="self-center w-fit px-1 text-sm rounded-xl"
+													aria-label={$i18n.t('Delete Chat')}
 													on:click={async (e) => {
 														e.stopImmediatePropagation();
 														e.stopPropagation();

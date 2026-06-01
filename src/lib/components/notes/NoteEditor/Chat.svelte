@@ -67,7 +67,7 @@
 	export let onStop = () => {};
 	export let onEdited = () => {};
 
-	export let insertNoteHandler = () => {};
+	export const insertNoteHandler = () => {};
 	export let scrollToBottomHandler = () => {};
 
 	let loaded = false;

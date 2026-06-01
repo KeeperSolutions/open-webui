@@ -57,6 +57,7 @@
 			if (res) {
 				users = res.users;
 				total = res.total;
+				userCount = res.total;
 			}
 		} catch (err) {
 			console.error(err);

@@ -321,8 +321,6 @@
 			{:else}
 				{#each Object.keys(groupedMessageIds) as modelIdx}
 					{#if groupedMessageIdsIdx[modelIdx] !== undefined && groupedMessageIds[modelIdx].messageIds.length > 0}
-						<!-- svelte-ignore a11y-no-static-element-interactions -->
-						<!-- svelte-ignore a11y-click-events-have-key-events -->
 						{@const _messageId =
 							groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
@@ -335,8 +333,16 @@
 								: `border-gray-100/30 dark:border-gray-850/30 border-dashed ${
 										$mobile ? 'min-w-full' : 'min-w-80'
 									}`} transition-all p-5 rounded-2xl"
+							role="button"
+							tabindex="0"
 							on:click={async () => {
 								onGroupClick(_messageId, modelIdx);
+							}}
+							on:keydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									onGroupClick(_messageId, modelIdx);
+								}
 							}}
 						>
 							{#key history.currentId}

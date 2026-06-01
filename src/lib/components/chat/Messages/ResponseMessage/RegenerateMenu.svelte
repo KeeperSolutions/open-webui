@@ -56,6 +56,7 @@
 						class="{inputValue !== ''
 							? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
 							: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1 self-center"
+						aria-label={$i18n.t('Regenerate')}
 						on:click={() => {
 							onRegenerate(inputValue);
 							show = false;

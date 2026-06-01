@@ -56,6 +56,7 @@
 			<div class=" text-lg font-medium self-center">{$i18n.t('Memory')}</div>
 			<button
 				class="self-center"
+				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
 				}}
@@ -89,7 +90,7 @@
 										<th scope="col" class="px-3 py-2 hidden md:flex">
 											{$i18n.t('Last Modified')}
 										</th>
-										<th scope="col" class="px-3 py-2 text-right" />
+										<th scope="col" class="px-3 py-2 text-right"></th>
 									</tr>
 								</thead>
 								<tbody>
@@ -110,6 +111,7 @@
 													<Tooltip content="Edit">
 														<button
 															class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+															aria-label={$i18n.t('Edit')}
 															on:click={() => {
 																selectedMemory = memory;
 																showEditMemoryModal = true;
@@ -135,6 +137,7 @@
 													<Tooltip content="Delete">
 														<button
 															class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+															aria-label={$i18n.t('Delete')}
 															on:click={async () => {
 																const res = await deleteMemoryById(
 																	localStorage.token,

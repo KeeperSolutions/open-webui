@@ -42,7 +42,7 @@
 
 	export let onShowValves: Function;
 	export let onClose: Function;
-	export let closeOnOutsideClick = true;
+	export const closeOnOutsideClick = true;
 
 	let show = false;
 	let tab = '';
@@ -356,7 +356,7 @@
 						>
 							{#if !(tools[toolId]?.authenticated ?? true)}
 								<!-- make it slighly darker and not clickable -->
-								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
+								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10"></div>
 							{/if}
 							<div class="flex-1 truncate">
 								<div class="flex flex-1 gap-2 items-center">

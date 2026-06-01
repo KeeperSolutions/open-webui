@@ -1086,7 +1086,7 @@
 											bind:value={selectedFileContent}
 											disabled={!knowledge?.write_access}
 											placeholder={$i18n.t('Add content here')}
-										/>
+										></textarea>
 									{/key}
 								</div>
 							</div>

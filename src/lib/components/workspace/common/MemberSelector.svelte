@@ -19,7 +19,6 @@
 	import { getGroups } from '$lib/apis/groups';
 
 	export let includeGroups = true;
-	export let pagination = false;
 
 	export let groupIds = [];
 	export let userIds = [];

@@ -155,13 +155,14 @@
 								placeholder={$i18n.t('Prompt')}
 								rows="2"
 								bind:value={prompt.content}
-							/>
+							></textarea>
 						</Tooltip>
 					</div>
 
 					<button
 						class="p-1 self-start"
 						type="button"
+						aria-label={$i18n.t('Remove')}
 						on:click={() => {
 							promptSuggestions.splice(promptIdx, 1);
 							promptSuggestions = promptSuggestions;
