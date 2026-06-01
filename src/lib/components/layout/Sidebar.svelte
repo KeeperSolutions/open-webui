@@ -969,8 +969,10 @@
 								}
 							}}
 						>
-							<div
+							<button
+								type="button"
 								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								aria-label={$i18n.t('User menu')}
 							>
 								<div class="self-center flex items-center justify-center size-9 relative">
 									<img
@@ -992,7 +994,7 @@
 										</div>
 									{/if}
 								</div>
-							</div>
+							</button>
 						</UserMenu>
 					{/if}
 				</div>
@@ -1604,8 +1606,10 @@
 								}
 							}}
 						>
-							<div
+							<button
+								type="button"
 								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
+								aria-label={$i18n.t('User menu')}
 							>
 								<div class="self-center mr-3 relative flex-shrink-0">
 									<img
@@ -1672,7 +1676,7 @@
 										</div>
 									{/if}
 								</div>
-							</div>
+							</button>
 						</UserMenu>
 					{/if}
 				</div>

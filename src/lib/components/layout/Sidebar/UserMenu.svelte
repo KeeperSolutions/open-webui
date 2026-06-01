@@ -118,7 +118,6 @@
 	}}
 />
 
-<!-- svelte-ignore a11y-no-static-element-interactions -->
 <Dropdown bind:show onOpenChange={handleDropdownChange} {align}>
 	<slot />
 

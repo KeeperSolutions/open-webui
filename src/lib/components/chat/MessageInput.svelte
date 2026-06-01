@@ -1684,12 +1684,14 @@
 											chatInput?.focus();
 										}}
 									>
-										<div
+										<button
+											type="button"
 											id="input-menu-button"
 											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											aria-label={$i18n.t('More')}
 										>
 											<HgIconPlus class="w-5 h-5 text-hg-text-tertiary dark:text-gray-400" />
-										</div>
+										</button>
 									</InputMenu>
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
@@ -1735,12 +1737,14 @@
 												chatInput?.focus();
 											}}
 										>
-											<div
+											<button
+												type="button"
 												id="integration-menu-button"
 												class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												aria-label={$i18n.t('Integrations')}
 											>
 												<Component className="size-4.5" strokeWidth="1.5" />
-											</div>
+											</button>
 										</IntegrationsMenu>
 									{/if}
 
