@@ -57,7 +57,33 @@ def get_sorted_filters(model_id, models):
 
 
 async def process_pipeline_inlet_filter(request, payload, user, models):
-    user = {"id": user.id, "email": user.email, "name": user.name, "role": user.role}
+    # Extract user.settings as a plain dict. user.settings is a UserSettings
+    # Pydantic instance (models/users.py:40-43) with extra="allow", so arbitrary
+    # keys like "pipelines" survive model_dump(). The isinstance(dict) branch is
+    # defense-in-depth for unusual ORM states (e.g. raw dict from legacy data).
+    if user.settings is None:
+        user_settings_dict: dict = {}
+    elif isinstance(user.settings, dict):
+        user_settings_dict = user.settings
+    else:
+        user_settings_dict = user.settings.model_dump()
+
+    pipelines_settings = user_settings_dict.get("pipelines", {})
+    if not isinstance(pipelines_settings, dict):
+        pipelines_settings = {}
+
+    all_filter_valves = pipelines_settings.get("valves", {})
+    if not isinstance(all_filter_valves, dict):
+        all_filter_valves = {}
+
+    # user dict from openai.py is intentionally rebuilt here to inject
+    # per-user, per-filter valves. See TASK-3.7a-SPEC.md §3.2.
+    base_user_dict = {
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+    }
     model_id = payload["model"]
     sorted_filters = get_sorted_filters(model_id, models)
     model = models[model_id]
@@ -83,9 +109,20 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             if not key:
                 continue
 
+            # Per-filter valves injection (TASK-3.7a). Each filter gets its own
+            # valves dict from user.settings["pipelines"]["valves"][filter_id].
+            filter_id = filter.get("id")
+            per_filter_valves = all_filter_valves.get(filter_id, {})
+            if not isinstance(per_filter_valves, dict):
+                per_filter_valves = {}
+            log.debug(
+                f"[pii_toggle] filter_id={filter_id} valves={per_filter_valves}"
+            )
+            user_with_valves = {**base_user_dict, "valves": per_filter_valves}
+
             headers = {"Authorization": f"Bearer {key}"}
             request_data = {
-                "user": user,
+                "user": user_with_valves,
                 "body": payload,
             }
 

@@ -14,11 +14,13 @@
 	import Audio from './Settings/Audio.svelte';
 	import DataControls from './Settings/DataControls.svelte';
 	import Personalization from './Settings/Personalization.svelte';
+	import Privacy from './Settings/Privacy.svelte';
 	import Search from '../icons/Search.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import Tools from './Settings/Tools.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
+	import LockClosed from '../icons/LockClosed.svelte';
 	import SettingsAlt from '../icons/SettingsAlt.svelte';
 	import Link from '../icons/Link.svelte';
 	import UserCircle from '../icons/UserCircle.svelte';
@@ -253,6 +255,27 @@
 				'profile',
 				'user preferences',
 				'userpreferences'
+			]
+		},
+		{
+			id: 'privacy',
+			title: 'Privacy & PII',
+			keywords: [
+				'pii',
+				'pii masking',
+				'piimasking',
+				'privacy',
+				'privacy settings',
+				'privacysettings',
+				'personal data',
+				'personaldata',
+				'mask',
+				'masking',
+				'oib',
+				'iban',
+				'gdpr',
+				'data protection',
+				'dataprotection'
 			]
 		},
 		{
@@ -747,6 +770,30 @@
 								</div>
 								<div class=" self-center">{$i18n.t('Personalization')}</div>
 							</button>
+						{:else if tabId === 'privacy'}
+							<button
+								role="tab"
+								aria-controls="tab-privacy"
+								aria-selected={selectedTab === 'privacy'}
+								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
+								${
+									selectedTab === 'privacy'
+										? ($settings?.highContrastMode ?? false)
+											? 'dark:bg-gray-800 bg-gray-200'
+											: ''
+										: ($settings?.highContrastMode ?? false)
+											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
+											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+								}`}
+								on:click={() => {
+									selectedTab = 'privacy';
+								}}
+							>
+								<div class=" self-center mr-2">
+									<LockClosed strokeWidth="2" />
+								</div>
+								<div class=" self-center">{$i18n.t('Privacy & PII')}</div>
+							</button>
 						{:else if tabId === 'audio'}
 							<button
 								role="tab"
@@ -906,6 +953,8 @@
 							toast.success($i18n.t('Settings saved successfully!'));
 						}}
 					/>
+				{:else if selectedTab === 'privacy'}
+					<Privacy {saveSettings} />
 				{:else if selectedTab === 'audio'}
 					<Audio
 						{saveSettings}
