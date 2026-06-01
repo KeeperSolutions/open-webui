@@ -68,7 +68,15 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     else:
         user_settings_dict = user.settings.model_dump()
 
-    pipelines_settings = user_settings_dict.get("pipelines", {})
+    # SettingsModal.saveSettings persists everything wrapped under "ui"
+    # (see routes/+layout.svelte:737 and SettingsModal.svelte:558), so the
+    # stored shape is user.settings.ui.pipelines.valves.<filter_id>.<key>
+    # — not user.settings.pipelines.* as the spec originally assumed.
+    ui_settings = user_settings_dict.get("ui", {})
+    if not isinstance(ui_settings, dict):
+        ui_settings = {}
+
+    pipelines_settings = ui_settings.get("pipelines", {})
     if not isinstance(pipelines_settings, dict):
         pipelines_settings = {}
 

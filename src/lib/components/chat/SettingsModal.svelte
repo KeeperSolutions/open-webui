@@ -954,7 +954,11 @@
 						}}
 					/>
 				{:else if selectedTab === 'privacy'}
-					<Privacy {saveSettings} />
+					<Privacy
+						on:save={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
 				{:else if selectedTab === 'audio'}
 					<Audio
 						{saveSettings}
