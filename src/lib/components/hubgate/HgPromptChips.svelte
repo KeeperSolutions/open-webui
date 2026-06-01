@@ -1,0 +1,33 @@
+<script lang="ts">
+	import { createEventDispatcher } from 'svelte';
+	import type { Component } from 'svelte';
+	import HgIconDocument from '$lib/components/icons/HgIconDocument.svelte';
+	import HgIconReview from '$lib/components/icons/HgIconReview.svelte';
+	import HgIconImage from '$lib/components/icons/HgIconImage.svelte';
+	import HgIconMeeting from '$lib/components/icons/HgIconMeeting.svelte';
+	import HgIconEye from '$lib/components/icons/HgIconEye.svelte';
+
+	const dispatch = createEventDispatcher();
+
+	const promptChips: { label: string; icon: Component }[] = [
+		{ label: 'Draft a proposal', icon: HgIconDocument },
+		{ label: 'Review a document', icon: HgIconReview },
+		{ label: 'Generate an image', icon: HgIconImage },
+		{ label: 'Summarize meeting', icon: HgIconMeeting },
+		{ label: 'Analyse a contract', icon: HgIconEye }
+	];
+</script>
+
+<div class="flex flex-wrap justify-center gap-2 mb-10 w-full max-w-[880px]">
+	{#each promptChips as chip}
+		<button
+			type="button"
+			class="inline-flex items-center gap-2 h-8 px-4 bg-white border border-hg-border rounded-full font-hg-body text-xs text-hg-text-secondary hover:border-hg-blue hover:text-hg-text-primary transition-colors"
+			on:click={() => dispatch('open')}
+		>
+			<svelte:component this={chip.icon} class="text-hg-text-primary" />
+
+			{chip.label}
+		</button>
+	{/each}
+</div>

@@ -8,6 +8,35 @@ export default {
 	theme: {
 		extend: {
 			colors: {
+				'hg-blue': {
+					DEFAULT: '#2563eb',
+					hover: '#1d4ed8'
+				},
+				'hg-orange': {
+					DEFAULT: '#f97316'
+				},
+				'hg-text': {
+					primary: '#1c1917',
+					secondary: '#57534e',
+					tertiary: '#a8a29e'
+				},
+				'hg-border': {
+					DEFAULT: '#e7e5e4',
+					focus: '#2563eb',
+					subtle: '#f5f5f4'
+				},
+				'hg-bg': {
+					surface: '#ffffff',
+					muted: '#f5f5f4'
+				},
+				'hg-error': {
+					text: '#991b1b',
+					bg: '#fef2f2'
+				},
+				'hg-success': {
+					400: '#34d399',
+					600: '#16a34a'
+				},
 				gray: {
 					50: 'var(--color-gray-50, #f9f9f9)',
 					100: 'var(--color-gray-100, #ececec)',
@@ -33,6 +62,15 @@ export default {
 						'code::after': false
 					}
 				}
+			},
+			fontFamily: {
+				'hg-heading': ['"Space Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+				'hg-body': ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif']
+			},
+			borderRadius: {
+				'hg-sm': '4px',
+				'hg-md': '8px',
+				'hg-full': '9999px'
 			},
 			padding: {
 				'safe-bottom': 'env(safe-area-inset-bottom)'

@@ -610,7 +610,7 @@
 			user.set(null);
 			localStorage.removeItem('token');
 
-			location.href = res?.redirect_url ?? '/auth';
+			location.href = res?.redirect_url ?? '/';
 		}
 	};
 
@@ -795,15 +795,16 @@
 						await user.set(sessionUser);
 						await config.set(await getBackendConfig());
 					} else {
-						// Redirect Invalid Session User to /auth Page
+						// Redirect Invalid Session User to landing page
 						localStorage.removeItem('token');
-						await goto(`/auth?redirect=${encodedUrl}`);
+						await goto('/');
 					}
 				} else {
-					// Don't redirect if we're already on the auth page
+					// Don't redirect if we're already on auth or the landing page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if ($page.url.pathname !== '/auth') {
-						await goto(`/auth?redirect=${encodedUrl}`);
+					const publicPaths = ['/', '/auth', '/landing', '/pricing', '/terms', '/privacy'];
+					if (!publicPaths.includes($page.url.pathname)) {
+						await goto('/');
 					}
 				}
 			}
@@ -865,8 +866,12 @@
 	<link
 		crossorigin="anonymous"
 		rel="icon"
-		type={isStaging() || isDev() ? 'image/svg+xml' : 'image/png'}
-		href={isStaging() ? '/favicon-staging.svg' : isDev() ? '/favicon-dev.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
+		type="image/svg+xml"
+		href={isStaging()
+			? '/favicon-staging.svg'
+			: isDev()
+				? '/favicon-dev.svg'
+				: '/hubgate/hubgate-logomark.svg'}
 	/>
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
