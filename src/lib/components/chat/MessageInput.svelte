@@ -27,6 +27,7 @@
 		config,
 		showCallOverlay,
 		tools,
+		skills,
 		toolServers,
 		terminalServers,
 		user as _user,
@@ -61,6 +62,7 @@
 	import { getChatById } from '$lib/apis/chats';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
@@ -72,6 +74,7 @@
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
+	import SkillsModal from './SkillsModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -83,6 +86,7 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Keyframes from '../icons/Keyframes.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -141,6 +145,7 @@
 	export let files = [];
 
 	export let selectedToolIds = [];
+	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 
 	export let imageGenerationEnabled = false;
@@ -186,6 +191,7 @@
 				};
 			}),
 		selectedToolIds,
+		selectedSkillIds,
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
@@ -428,6 +434,7 @@
 
 	let showTools = false;
 	export let piiMaskingEnabled = true;
+	let showSkills = false;
 
 	let loaded = false;
 	let recording = false;
@@ -517,6 +524,9 @@
 
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
+
+	let showSkillsButton = false;
+	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -1108,6 +1118,7 @@
 			}
 
 			tools.set(await getTools(localStorage.token));
+			skills.set(await getSkills(localStorage.token));
 		};
 		initialize();
 
@@ -1130,6 +1141,7 @@
 </script>
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
+<SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
@@ -1680,7 +1692,9 @@
 										</div>
 									</InputMenu>
 
-									<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"></div>
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+										<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"></div>
+									{/if}
 
 									<Tooltip content={$i18n.t('Settings')} placement="top">
 										<button
@@ -1701,6 +1715,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											bind:selectedToolIds
+											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
@@ -1767,6 +1782,29 @@
 
 													<span class="text-sm">
 														{(selectedToolIds ?? []).length}
+													</span>
+												</button>
+											</Tooltip>
+										{/if}
+
+										{#if (selectedSkillIds ?? []).length > 0}
+											<Tooltip
+												content={$i18n.t('{{COUNT}} Available Skills', {
+													COUNT: (selectedSkillIds ?? []).length
+												})}
+											>
+												<button
+													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+													aria-label="Available Skills"
+													type="button"
+													on:click={() => {
+														showSkills = !showSkills;
+													}}
+												>
+													<Keyframes className="size-4" strokeWidth="1.75" />
+
+													<span class="text-sm">
+														{(selectedSkillIds ?? []).length}
 													</span>
 												</button>
 											</Tooltip>
