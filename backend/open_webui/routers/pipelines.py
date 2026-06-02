@@ -68,10 +68,11 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     else:
         user_settings_dict = user.settings.model_dump()
 
-    # SettingsModal.saveSettings persists everything wrapped under "ui"
-    # (see routes/+layout.svelte:737 and SettingsModal.svelte:558), so the
-    # stored shape is user.settings.ui.pipelines.valves.<filter_id>.<key>
-    # — not user.settings.pipelines.* as the spec originally assumed.
+    # Settings are stored under the "ui" key (frontend sends
+    # `updateUserSettings(..., { ui: ... })`; see SettingsModal.svelte:554-559).
+    # The stored shape is:
+    #   user.settings.ui.pipelines.valves.<filter_id>.<key>
+    # (not user.settings.pipelines.* as the spec originally assumed).
     ui_settings = user_settings_dict.get("ui", {})
     if not isinstance(ui_settings, dict):
         ui_settings = {}
@@ -118,13 +119,14 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
                 continue
 
             # Per-filter valves injection (TASK-3.7a). Each filter gets its own
-            # valves dict from user.settings["pipelines"]["valves"][filter_id].
+            # valves dict from user.settings["ui"]["pipelines"]["valves"][filter_id].
             filter_id = filter.get("id")
             per_filter_valves = all_filter_valves.get(filter_id, {})
             if not isinstance(per_filter_valves, dict):
                 per_filter_valves = {}
             log.debug(
-                f"[pii_toggle] filter_id={filter_id} valves={per_filter_valves}"
+                f"[pii_toggle] filter_id={filter_id} "
+                f"pii_masking_enabled={per_filter_valves.get('pii_masking_enabled')}"
             )
             user_with_valves = {**base_user_dict, "valves": per_filter_valves}
 

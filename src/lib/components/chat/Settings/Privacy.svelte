@@ -56,12 +56,12 @@
 	<div class="py-1 overflow-y-scroll max-h-[28rem] md:max-h-full">
 		<div>
 			<div class="flex items-center justify-between mb-1">
-				<div class="text-sm font-medium">
+				<div id="pii-masking-label" class="text-sm font-medium">
 					{$i18n.t('Enable PII masking')}
 				</div>
 
 				<div class="">
-					<Switch bind:state={piiMaskingEnabled} />
+					<Switch ariaLabelledbyId="pii-masking-label" bind:state={piiMaskingEnabled} />
 				</div>
 			</div>
 
