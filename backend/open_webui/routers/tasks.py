@@ -61,7 +61,6 @@ async def _report_task_usage(
         if choices:
             assistant_content = choices[0].get("message", {}).get("content", "")
         chat_id = payload.get("metadata", {}).get("chat_id")
-        task_name = payload.get("metadata", {}).get("task", "unknown_task")
         if not chat_id:
             return
         outlet_body = {
@@ -75,6 +74,7 @@ async def _report_task_usage(
                     "usage": usage,
                 }
             ],
+            "metadata": payload.get("metadata", {}),
         }
         await process_pipeline_outlet_filter(request, outlet_body, user, models)
     except Exception as exc:
