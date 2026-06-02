@@ -71,6 +71,110 @@
 				)}
 			</div>
 		</div>
+
+		<div class="mt-6">
+			<div class="text-sm font-medium mb-3">Detected data types</div>
+
+			<div class="mb-4">
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+					Identity (10)
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>Person names</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>HR OIB</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>HR JMBG</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>IE PPSN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>RO CNP</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>UK NINO</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>UK UTR</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>UK NHS</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>US SSN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>US EIN</span
+					>
+				</div>
+			</div>
+
+			<div class="mb-4">
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+					Financial (6)
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>HR IBAN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>IE IBAN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>RO IBAN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>GB IBAN</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>EU IBANs</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>Credit cards</span
+					>
+				</div>
+			</div>
+
+			<div>
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+					Contact &amp; Location (3)
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>Email addresses</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>Phone numbers</span
+					>
+					<span
+						class="px-3.5 py-1 rounded-full text-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+						>Locations</span
+					>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<div class="flex justify-end text-sm font-medium">
