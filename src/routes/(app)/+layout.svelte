@@ -163,7 +163,7 @@
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
-			await goto('/');
+			await goto('/auth?redirect=' + encodeURIComponent($page.url.pathname + $page.url.search));
 			return;
 		}
 		if (!['user', 'admin'].includes($user?.role)) {
@@ -320,13 +320,12 @@
 			};
 		});
 	};
-
 </script>
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
 
-{#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast !== false) && $user?.role === 'admin'}
+{#if version && compareVersion(version.latest, version.current) && $settings?.showUpdateToast !== false && $user?.role === 'admin'}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
 		<UpdateInfoToast
 			{version}
@@ -337,10 +336,6 @@
 		/>
 	</div>
 {/if}
-
-
-
-
 
 {#if $user}
 	<div class="app relative">
@@ -406,7 +401,9 @@
 				{/if}
 
 				{#if showPastDueBanner}
-					<div class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm">
+					<div
+						class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm"
+					>
 						<span>
 							{#if billingStatus?.plan_tier === 'trial'}
 								{$i18n.t('Your trial credit is used up. Please')}

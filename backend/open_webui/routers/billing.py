@@ -917,6 +917,22 @@ async def invite_team_member(body: TeamInviteRequest, user=Depends(get_verified_
         invited_by=user.id,
     )
 
+    # Send invite email (silently skipped if SMTP not configured)
+    try:
+        import os
+        from open_webui.utils.email import send_team_invite_email
+
+        webui_url = os.environ.get("WEBUI_URL", "http://localhost:5173").rstrip("/")
+        invite_url = f"{webui_url}/invite/{invite.token}"
+        send_team_invite_email(
+            to=email,
+            team_name=team.name,
+            invited_by=user.name or user.email,
+            invite_url=invite_url,
+        )
+    except Exception as e:
+        log.warning(f"[billing] Could not send invite email to {email}: {e}")
+
     return {
         "invite_id": invite.id,
         "token": invite.token,
@@ -1310,6 +1326,19 @@ async def _handle_stripe_event(event_type: str, data):
                     )
 
     return {"received": True}
+
+
+@router.post("/admin/test-email")
+async def test_email(request: Request, user=Depends(get_admin_user)):
+    """Send a test email to the logged-in admin to verify SMTP config."""
+    from open_webui.utils.email import send_email
+    from open_webui.env import SMTP_HOST, SMTP_FROM_EMAIL
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        raise HTTPException(status_code=400, detail=f"SMTP not configured (SMTP_HOST={SMTP_HOST!r}, SMTP_FROM_EMAIL={SMTP_FROM_EMAIL!r})")
+    ok = send_email(user.email, "Keeper AI — SMTP test", "<p>SMTP is working correctly.</p>")
+    if not ok:
+        raise HTTPException(status_code=500, detail="Email send failed — check backend logs for [email] error")
+    return {"sent": True, "to": user.email}
 
 
 @router.get("/admin/summary")

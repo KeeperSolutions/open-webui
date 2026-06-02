@@ -19,6 +19,10 @@
 	let inviteEmail = '';
 	let inviting = false;
 	let copiedToken: string | null = null;
+	let emailError = '';
+
+	const isValidEmail = (email: string) =>
+		/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
 	const load = async () => {
 		loading = true;
@@ -35,6 +39,11 @@
 
 	const handleInvite = async () => {
 		if (!inviteEmail.trim()) return;
+		if (!isValidEmail(inviteEmail)) {
+			emailError = 'Please enter a valid email address.';
+			return;
+		}
+		emailError = '';
 		inviting = true;
 		try {
 			const res = await inviteTeamMember(localStorage.token, inviteEmail.trim());
@@ -174,8 +183,9 @@
 							<input
 								type="email"
 								bind:value={inviteEmail}
+								on:input={() => (emailError = '')}
 								placeholder={$i18n.t('Email address')}
-								class="flex-1 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+								class="flex-1 text-sm rounded-lg border {emailError ? 'border-red-400 dark:border-red-500' : 'border-gray-300 dark:border-gray-600'} bg-transparent px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
 								on:keydown={(e) => e.key === 'Enter' && handleInvite()}
 							/>
 							<button
@@ -186,6 +196,9 @@
 								{inviting ? $i18n.t('Sending...') : $i18n.t('Send invite')}
 							</button>
 						</div>
+						{#if emailError}
+							<div class="text-xs text-red-500 dark:text-red-400">{emailError}</div>
+						{/if}
 					</div>
 				{:else}
 					<div class="text-sm text-gray-500 dark:text-gray-400">

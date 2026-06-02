@@ -993,3 +993,11 @@ try:
     STRIPE_TOPUP_AMOUNTS: list = _json.loads(os.environ.get("STRIPE_TOPUP_AMOUNTS", "[]"))
 except (ValueError, TypeError):
     STRIPE_TOPUP_AMOUNTS: list = []
+
+# SMTP email config (optional — if not set, invite emails are silently skipped)
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
+SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "")
+SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Keeper AI Gateway")
