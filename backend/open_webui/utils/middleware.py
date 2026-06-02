@@ -2854,6 +2854,11 @@ async def process_chat_response(
                                     usage = data.get("usage", {}) or {}
                                     usage.update(data.get("timings", {}))  # llama.cpp
                                     if usage:
+                                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                                            metadata["chat_id"],
+                                            metadata["message_id"],
+                                            {"usage": usage},
+                                        )
                                         await event_emitter(
                                             {
                                                 "type": "chat:completion",
