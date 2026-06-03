@@ -208,7 +208,7 @@
 			const chatInput = document.getElementById('chat-input');
 			chatInput?.focus();
 		} else {
-			await goto('/');
+			await goto('/chat');
 		}
 	};
 
@@ -1079,7 +1079,7 @@
 		}
 
 		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
-			await goto('/');
+			await goto('/chat');
 			return null;
 		});
 

@@ -1,0 +1,17 @@
+<script lang="ts">
+	let { class: className = '' } = $props();
+</script>
+
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	width="24"
+	height="24"
+	viewBox="0 0 24 24"
+	fill="none"
+	class={className}
+>
+	<path
+		d="M13 16H11V14H13V16ZM11 14H9V12H11V14ZM15 14H13V12H15V14ZM9 12H7V10H9V12ZM17 12H15V10H17V12ZM7 10H5V8H7V10ZM19 10H17V8H19V10Z"
+		fill="currentColor"
+	/>
+</svg>

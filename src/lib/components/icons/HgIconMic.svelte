@@ -1,0 +1,27 @@
+<script lang="ts">
+  let className = '';
+  export { className as class };
+</script>
+
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" class={className}>
+  <path d="M14.7476 6.98108H13.8866V2.66504H13.02V10.4305H13.8866V7.84202H14.7476V11.2971H15.6085V6.12013H14.7476V6.98108Z" fill="currentColor"/>
+  <path d="M14.7462 11.2974H13.8853V12.1583H14.7462V11.2974Z" fill="currentColor"/>
+  <path d="M13.8866 12.1577H13.02V13.0243H13.8866V12.1577Z" fill="currentColor"/>
+  <path d="M13.0187 10.4307H12.1577V11.2973H13.0187V10.4307Z" fill="currentColor"/>
+  <path d="M13.0187 1.80371H12.1577V2.66465H13.0187V1.80371Z" fill="currentColor"/>
+  <path d="M6.98097 13.0244V13.8854H9.56945V16.4738H6.98097V17.3405H5.25342V19.0623H14.7464V17.3405H13.0189V16.4738H10.4304V13.8854H13.0189V13.0244H6.98097Z" fill="currentColor"/>
+  <path d="M12.1583 5.25342H11.2974V6.12002H12.1583V5.25342Z" fill="currentColor"/>
+  <path d="M12.1583 3.52588H11.2974V4.39248H12.1583V3.52588Z" fill="currentColor"/>
+  <path d="M12.1588 11.2974H7.84277V12.1583H12.1588V11.2974Z" fill="currentColor"/>
+  <path d="M10.4298 6.11963H9.56885V6.98057H10.4298V6.11963Z" fill="currentColor"/>
+  <path d="M10.4298 4.39307H9.56885V5.25401H10.4298V4.39307Z" fill="currentColor"/>
+  <path d="M10.4298 2.66504H9.56885V3.52598H10.4298V2.66504Z" fill="currentColor"/>
+  <path d="M12.1588 0.9375H7.84277V1.80411H12.1588V0.9375Z" fill="currentColor"/>
+  <path d="M8.70372 5.25342H7.84277V6.12002H8.70372V5.25342Z" fill="currentColor"/>
+  <path d="M8.70372 3.52588H7.84277V4.39248H8.70372V3.52588Z" fill="currentColor"/>
+  <path d="M7.8419 10.4307H6.98096V11.2973H7.8419V10.4307Z" fill="currentColor"/>
+  <path d="M7.8419 1.80371H6.98096V2.66465H7.8419V1.80371Z" fill="currentColor"/>
+  <path d="M6.98233 12.1577H6.11572V13.0243H6.98233V12.1577Z" fill="currentColor"/>
+  <path d="M6.11436 11.2974H5.25342V12.1583H6.11436V11.2974Z" fill="currentColor"/>
+  <path d="M5.25401 7.84202H6.11495V10.4305H6.98156V2.66504H6.11495V6.98108H5.25401V6.12013H4.39307V11.2971H5.25401V7.84202Z" fill="currentColor"/>
+</svg>

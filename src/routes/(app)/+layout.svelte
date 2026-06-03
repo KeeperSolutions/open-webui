@@ -163,7 +163,7 @@
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
-			await goto('/auth');
+			await goto('/');
 			return;
 		}
 		if (!['user', 'admin'].includes($user?.role)) {
