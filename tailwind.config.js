@@ -15,6 +15,10 @@ export default {
 				'hg-orange': {
 					DEFAULT: '#f97316'
 				},
+				'hg-accent': {
+					400: '#fb923c',
+					700: '#c2410c'
+				},
 				'hg-text': {
 					primary: '#1c1917',
 					secondary: '#57534e',
