@@ -18,7 +18,8 @@ export default {
 				'hg-text': {
 					primary: '#1c1917',
 					secondary: '#57534e',
-					tertiary: '#a8a29e'
+					tertiary: '#a8a29e',
+					emphasis: '#292524'
 				},
 				'hg-border': {
 					DEFAULT: '#e7e5e4',

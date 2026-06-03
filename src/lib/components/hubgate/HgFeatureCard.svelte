@@ -1,18 +1,19 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { createEventDispatcher, type Component } from 'svelte';
 	import HgIconChevronRight from '$lib/components/icons/HgIconChevronRight.svelte';
 	import HgIconClose from '$lib/components/icons/HgIconClose.svelte';
 
 	export let title: string;
 	export let description: string;
+	export let illustration: Component;
 
 	const dispatch = createEventDispatcher();
 </script>
 
 <div
-	class="bg-white border border-hg-border-subtle rounded-[18px] shadow-[0px_2px_12px_0px_rgba(0,0,0,0.02)] overflow-hidden flex h-[224px]"
+	class="bg-white border border-hg-border-subtle rounded-[18px] shadow-[0px_2px_12px_0px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col sm:flex-row sm:h-[224px]"
 >
-	<div class="relative shrink-0 overflow-hidden bg-[#eff6ff]" style="width:276px">
+	<div class="relative shrink-0 overflow-hidden bg-[#eff6ff] sm:h-auto sm:w-[276px]">
 		<div class="absolute inset-0" aria-hidden="true">
 			<div class="absolute w-10 h-10 bg-[#dbeafe]" style="left:40px;top:167px"></div>
 			<div class="absolute w-10 h-10 bg-[#dbeafe]" style="left:0;top:119px"></div>
@@ -26,12 +27,12 @@
 			<div class="absolute w-10 h-10 bg-[#dbeafe]" style="left:182px;top:202px"></div>
 		</div>
 
-		<div class="relative flex flex-col items-center justify-center h-full gap-4 p-5">
-			<slot name="illustration" />
+		<div class="relative flex flex-col items-center justify-center h-full gap-4 p-5 py-2 sm:py-5">
+			<svelte:component this={illustration} />
 		</div>
 	</div>
 
-	<div class="flex-1 flex flex-col justify-between p-8 text-left relative">
+	<div class="flex-1 flex flex-col justify-between p-6 sm:p-8 text-left relative">
 		<button
 			type="button"
 			class="absolute top-4 right-4 hover:opacity-70 transition-opacity"
@@ -42,17 +43,17 @@
 		</button>
 
 		<div class="flex flex-col gap-2">
-			<h3 class="font-hg-heading font-bold text-[22px] text-hg-text-primary leading-[1.3]">
+			<h3 class="font-hg-heading font-bold text-[18px] sm:text-[22px] text-hg-text-primary leading-[1.3]">
 				{title}
 			</h3>
-			<p class="font-hg-body text-sm text-hg-text-secondary leading-[1.4]">
+			<p class="hidden sm:block font-hg-body text-sm text-hg-text-secondary leading-[1.4]">
 				{description}
 			</p>
 		</div>
 
 		<button
 			type="button"
-			class="inline-flex items-center gap-1 font-hg-body font-semibold text-sm text-hg-text-primary hover:text-hg-blue transition-colors"
+			class="inline-flex items-center gap-1 font-hg-body font-semibold text-sm text-hg-text-primary hover:text-hg-blue transition-colors mt-4 sm:mt-0"
 			on:click={() => dispatch('open')}
 		>
 			Get Started

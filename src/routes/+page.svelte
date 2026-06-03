@@ -30,6 +30,7 @@
 	<title>{$WEBUI_NAME}</title>
 </svelte:head>
 
+{#if $user}{:else}
 <div class="relative min-h-screen flex flex-col font-hg-body">
 	<img
 		src="/hubgate/hubgate-pixel-pattern.svg"
@@ -65,3 +66,4 @@
 </div>
 
 <HgAuthModal bind:open={showModal} on:success={onSuccess} />
+{/if}

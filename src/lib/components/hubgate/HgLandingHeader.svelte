@@ -20,7 +20,7 @@
 		<nav class="flex items-center gap-2">
 			<button
 				type="button"
-				class="h-10 px-4 inline-flex items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full"
+				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full"
 				on:click={() => (showModal = true)}
 			>
 				Sign In

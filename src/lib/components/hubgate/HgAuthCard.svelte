@@ -70,7 +70,7 @@
 	};
 </script>
 
-<div style="display:flex;width:480px;padding:32px;flex-direction:column;justify-content:center;align-items:center;gap:24px;" class="bg-hg-bg-surface rounded-hg-md shadow-sm">
+<div class="bg-hg-bg-surface rounded-hg-md shadow-sm flex flex-col justify-center items-center gap-6 p-6 sm:p-8 w-full sm:w-[480px]">
 	<div class="w-full flex flex-col items-center gap-3">
 		<img src="/hubgate/hubgate-logomark.svg" class="size-12" alt="Hubgate" />
 

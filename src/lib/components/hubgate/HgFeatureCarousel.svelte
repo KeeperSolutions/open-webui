@@ -2,10 +2,9 @@
 	import { createEventDispatcher } from 'svelte';
 	import { features } from '$lib/data/landing-features';
 	import HgFeatureCard from '$lib/components/hubgate/HgFeatureCard.svelte';
-	import HgIconLock from '$lib/components/icons/HgIconLock.svelte';
 
 	const dispatch = createEventDispatcher();
-	let activeFeature = 0;
+	let activeFeature = 2;
 </script>
 
 <div class="w-full max-w-[740px] px-8 pb-8">
@@ -34,20 +33,10 @@
 				<HgFeatureCard
 					title={feature.title}
 					description={feature.description}
+					illustration={feature.illustration}
 					on:open={() => dispatch('open')}
 					on:dismiss={() => dispatch('dismiss')}
-				>
-					<svelte:fragment slot="illustration">
-						{#if i === 0}
-							<div class="w-24 h-24 [&>svg]:w-full! [&>svg]:h-full!">
-								<HgIconLock class="text-hg-success-400" />
-							</div>
-							<div class="bg-white border border-hg-text-secondary rounded-full px-4 py-1.5">
-								<span class="font-hg-body text-xs text-hg-text-secondary">No data used to train AI models</span>
-							</div>
-						{/if}
-					</svelte:fragment>
-				</HgFeatureCard>
+				/>
 			{/if}
 		{/each}
 	{/key}

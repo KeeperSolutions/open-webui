@@ -24,9 +24,10 @@
 		role="dialog"
 		aria-modal="true"
 		aria-label="Sign in"
+		tabindex="-1"
 		class="fixed inset-0 z-50 flex items-center justify-center p-4"
 		on:click={close}
-		on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') close(); }}
+		on:keydown={(e) => { if (e.key === 'Escape') close(); }}
 	>
 		<div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
 

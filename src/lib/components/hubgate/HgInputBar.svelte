@@ -41,7 +41,7 @@
 			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-1">
 					<HgIconShield class="text-hg-text-primary" />
-					<span class="font-hg-body text-sm text-[#1c1917]">PII Masking</span>
+					<span class="hidden sm:inline font-hg-body text-sm text-[#1c1917]">PII Masking</span>
 				</div>
 				<HgIconToggleOn class="text-hg-blue" />
 			</div>

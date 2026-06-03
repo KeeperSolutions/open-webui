@@ -18,15 +18,14 @@
 	];
 </script>
 
-<div class="flex flex-wrap justify-center gap-2 mb-10 w-full max-w-[880px]">
+<div class="flex flex-wrap justify-center gap-2 mb-10 w-[calc(100%-2rem)] max-w-[880px]">
 	{#each promptChips as chip}
 		<button
 			type="button"
 			class="inline-flex items-center gap-2 h-8 px-4 bg-white border border-hg-border rounded-full font-hg-body text-xs text-hg-text-secondary hover:border-hg-blue hover:text-hg-text-primary transition-colors"
 			on:click={() => dispatch('open')}
 		>
-			<svelte:component this={chip.icon} class="text-hg-text-primary" />
-
+			<span class="hidden sm:contents"><svelte:component this={chip.icon} class="text-hg-text-primary" /></span>
 			{chip.label}
 		</button>
 	{/each}
