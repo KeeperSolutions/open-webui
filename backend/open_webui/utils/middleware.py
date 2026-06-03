@@ -2854,11 +2854,6 @@ async def process_chat_response(
                                     usage = data.get("usage", {}) or {}
                                     usage.update(data.get("timings", {}))  # llama.cpp
                                     if usage:
-                                        Chats.upsert_message_to_chat_by_id_and_message_id(
-                                            metadata["chat_id"],
-                                            metadata["message_id"],
-                                            {"usage": usage},
-                                        )
                                         await event_emitter(
                                             {
                                                 "type": "chat:completion",
@@ -2867,6 +2862,14 @@ async def process_chat_response(
                                                 },
                                             }
                                         )
+                                        try:
+                                            Chats.upsert_message_to_chat_by_id_and_message_id(
+                                                metadata["chat_id"],
+                                                metadata["message_id"],
+                                                {"usage": usage},
+                                            )
+                                        except Exception as e:
+                                            log.warning(f"failed to persist usage: {e}")
 
                                     if not choices:
                                         error = data.get("error", {})
