@@ -20,7 +20,7 @@ from open_webui.utils.task import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.constants import TASKS
 
-from open_webui.routers.pipelines import process_pipeline_inlet_filter
+from open_webui.routers.pipelines import process_pipeline_inlet_filter, process_pipeline_outlet_filter
 
 from open_webui.utils.task import get_task_model_id
 
@@ -40,6 +40,45 @@ from open_webui.config import (
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _report_task_usage(
+    request,
+    user,
+    payload: dict,
+    response,
+    models: dict,
+) -> None:
+    """Report task LLM usage to the pipeline outlet so Langfuse records it."""
+    try:
+        if not isinstance(response, dict):
+            return
+        usage = response.get("usage") or {}
+        if not usage:
+            return
+        choices = response.get("choices", [])
+        assistant_content = ""
+        if choices:
+            assistant_content = choices[0].get("message", {}).get("content", "")
+        chat_id = payload.get("metadata", {}).get("chat_id")
+        if not chat_id:
+            return
+        outlet_body = {
+            "chat_id": chat_id,
+            "model": payload["model"],
+            "messages": payload["messages"]
+            + [
+                {
+                    "role": "assistant",
+                    "content": assistant_content,
+                    "usage": usage,
+                }
+            ],
+            "metadata": payload.get("metadata", {}),
+        }
+        await process_pipeline_outlet_filter(request, outlet_body, user, models)
+    except Exception as exc:
+        log.warning(f"_report_task_usage failed: {exc}")
 
 
 ##################################
@@ -236,7 +275,9 @@ async def generate_title(
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        await _report_task_usage(request, user, payload, response, models)
+        return response
     except Exception as e:
         log.error("Exception occurred", exc_info=True)
         return JSONResponse(
@@ -309,7 +350,9 @@ async def generate_follow_ups(
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        await _report_task_usage(request, user, payload, response, models)
+        return response
     except Exception as e:
         log.error("Exception occurred", exc_info=True)
         return JSONResponse(
@@ -382,7 +425,9 @@ async def generate_chat_tags(
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        await _report_task_usage(request, user, payload, response, models)
+        return response
     except Exception as e:
         log.error(f"Error generating chat completion: {e}")
         return JSONResponse(

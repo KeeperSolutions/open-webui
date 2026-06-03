@@ -36,6 +36,7 @@ from open_webui.routers.pipelines import (
     process_pipeline_outlet_filter,
 )
 
+from open_webui.models.chats import Chats as _Chats
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 
@@ -318,6 +319,20 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
 
     model = models[model_id]
 
+    # If last assistant message has no usage, fall back to DB (race condition fix:
+    # frontend may send /api/chat/completed before the streaming usage socket event arrives)
+    _messages = data.get("messages", [])
+    _last_asst = next(
+        (m for m in reversed(_messages) if m.get("role") == "assistant"), None
+    )
+    if _last_asst and not _last_asst.get("usage"):
+        _chat_id = data.get("chat_id")
+        _db_msg_id = _last_asst.get("id")
+        if _chat_id and _db_msg_id:
+                _db_msg = _Chats.get_message_by_id_and_message_id(_chat_id, _db_msg_id)
+                _db_usage = (_db_msg or {}).get("usage")
+                if _db_usage:
+                    _last_asst["usage"] = _db_usage
     try:
         data = await process_pipeline_outlet_filter(request, data, user, models)
     except Exception as e:
