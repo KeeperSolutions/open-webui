@@ -13,6 +13,7 @@
 	let accepting = false;
 	let declining = false;
 
+	let token: string;
 	$: token = $page.params.token;
 
 	onMount(async () => {

@@ -278,7 +278,9 @@ class TeamsTable:
 
     def get_all_active(self) -> list[TeamModel]:
         with get_db() as db:
-            rows = db.query(Team).filter_by(subscription_status="active").all()
+            rows = db.query(Team).filter(
+                Team.subscription_status.in_(("active", "trialing"))
+            ).all()
             return [TeamModel.model_validate(r) for r in rows]
 
     def update(self, team_id: str, **kwargs) -> Optional[TeamModel]:

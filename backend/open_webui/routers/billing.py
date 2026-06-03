@@ -1,5 +1,6 @@
 import datetime
 import logging
+import time as _time
 from typing import Optional
 
 import stripe
@@ -22,6 +23,9 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+_team_cost_cache: dict[str, tuple[float, float]] = {}
+_TEAM_COST_CACHE_TTL = 45  # seconds
 
 
 # ---------- Helpers ----------
@@ -79,13 +83,21 @@ def _get_user_current_month_cost(email: str) -> float:
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
-    """Return aggregate current-month Langfuse cost (EUR) for all members of a team."""
+    """Return aggregate current-month Langfuse cost (EUR) for all members of a team.
+
+    Result is cached for _TEAM_COST_CACHE_TTL seconds to avoid per-request Langfuse calls.
+    """
+    cached = _team_cost_cache.get(team_id)
+    if cached and _time.time() < cached[1]:
+        return cached[0]
+
     try:
         from open_webui.langfuse.metrics import get_current_month
         from open_webui.models.users import Users as UsersModel
 
         members = TeamMembers.get_by_team_id(team_id)
         if not members:
+            _team_cost_cache[team_id] = (0.0, _time.time() + _TEAM_COST_CACHE_TTL)
             return 0.0
 
         rows = get_current_month()
@@ -96,6 +108,7 @@ def _get_team_current_month_cost(team_id: str) -> float:
             u = UsersModel.get_user_by_id(m.user_id)
             if u:
                 total += cost_by_email.get(u.email, 0.0)
+        _team_cost_cache[team_id] = (total, _time.time() + _TEAM_COST_CACHE_TTL)
         return total
     except Exception as e:
         log.warning(f"Could not fetch team monthly cost for team_id={team_id}: {e}")
@@ -1027,7 +1040,7 @@ async def create_team_topup(body: TopupRequest, request: Request, user=Depends(g
 
     # Find the matching top-up option
     option = next(
-        (o for o in STRIPE_TOPUP_AMOUNTS if float(o.get("amount_eur", 0)) == body.amount_eur),
+        (o for o in STRIPE_TOPUP_AMOUNTS if round(float(o.get("amount_eur", 0)) * 100) == round(body.amount_eur * 100)),
         None,
     )
     if not option or not option.get("price_id"):
@@ -1154,8 +1167,13 @@ async def accept_invite(token: str, user=Depends(get_verified_user)):
             detail="Team has no available seats.",
         )
 
-    # Check not already a member
+    # Check not already a member of a different team
     existing = TeamMembers.get_by_user_id(user.id)
+    if existing and existing.team_id != team.id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You are already a member of a different team.",
+        )
     if not existing:
         TeamMembers.add(team.id, user.id, role="member")
 
@@ -1225,7 +1243,7 @@ async def _handle_stripe_event(event_type: str, data):
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
         raw_meta = getattr(data, "metadata", None)
-        metadata = getattr(raw_meta, "_data", {}) or {}
+        metadata = dict(raw_meta) if raw_meta else {}
 
         # Check if this is a team top-up (one-time payment)
         if metadata.get("type") == "team_topup":

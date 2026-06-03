@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
 		getTeamStatus,
@@ -35,12 +35,12 @@
 		}
 	};
 
-	load();
+	onMount(() => { load(); });
 
 	const handleInvite = async () => {
 		if (!inviteEmail.trim()) return;
 		if (!isValidEmail(inviteEmail)) {
-			emailError = 'Please enter a valid email address.';
+			emailError = $i18n.t('Please enter a valid email address.');
 			return;
 		}
 		emailError = '';
@@ -73,6 +73,8 @@
 		navigator.clipboard.writeText(url).then(() => {
 			copiedToken = inv.token;
 			setTimeout(() => (copiedToken = null), 2000);
+		}).catch(() => {
+			toast.error($i18n.t('Failed to copy link'));
 		});
 	};
 

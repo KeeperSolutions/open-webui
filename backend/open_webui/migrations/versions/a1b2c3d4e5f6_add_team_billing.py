@@ -46,7 +46,8 @@ def upgrade():
         sa.Column("created_at", sa.BigInteger(), nullable=False),
     )
     op.create_index("ix_team_members_team_id", "team_members", ["team_id"])
-    op.create_index("ix_team_members_user_id", "team_members", ["user_id"])
+    op.create_index("uq_team_members_user_id", "team_members", ["user_id"], unique=True)
+    op.create_index("uq_team_members_team_user", "team_members", ["team_id", "user_id"], unique=True)
 
     op.create_table(
         "team_invites",
@@ -67,6 +68,8 @@ def upgrade():
 
 def downgrade():
     op.drop_column("stripe_billing", "team_id")
+    op.drop_index("uq_team_members_team_user", "team_members")
+    op.drop_index("uq_team_members_user_id", "team_members")
     op.drop_table("team_invites")
     op.drop_table("team_members")
     op.drop_table("teams")

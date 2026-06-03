@@ -609,7 +609,7 @@
 			<div class="space-y-1.5">
 				<div class="text-sm font-medium">{$i18n.t('Seat plan')}</div>
 				<div class="space-y-2">
-					{#each teamTiers.sort((a, b) => a.seat_count - b.seat_count) as tier}
+					{#each [...teamTiers].sort((a, b) => a.seat_count - b.seat_count) as tier}
 						<button
 							on:click={() => (selectedSeatCount = tier.seat_count)}
 							class="w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition
