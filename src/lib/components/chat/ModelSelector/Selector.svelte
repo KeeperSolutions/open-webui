@@ -192,15 +192,13 @@
 	const resetView = async () => {
 		await tick();
 
-		const selectedInFiltered = filteredItems.findIndex((item) => item.value === value);
+		const isFeatured = selectedConnectionType === 'featured';
+		const activeList = isFeatured ? featuredModels : filteredItems;
+		const selectedInActive = isFeatured
+			? activeList.findIndex((entry) => entry.model_id === value)
+			: activeList.findIndex((item) => item.value === value);
 
-		if (selectedInFiltered >= 0) {
-			// The selected model is visible in the current filter
-			selectedModelIdx = selectedInFiltered;
-		} else {
-			// The selected model is not visible, default to first item in filtered list
-			selectedModelIdx = 0;
-		}
+		selectedModelIdx = selectedInActive >= 0 ? selectedInActive : 0;
 
 		await tick();
 		const item = document.querySelector(`[data-arrow-selected="true"]`);
@@ -460,13 +458,17 @@
 						autocomplete="off"
 						aria-label={$i18n.t('Search In Models')}
 						on:keydown={(e) => {
-							if (e.code === 'Enter' && filteredItems.length > 0) {
-								value = filteredItems[selectedModelIdx].value;
+							const isFeatured = selectedConnectionType === 'featured';
+							const activeList = isFeatured ? featuredModels : filteredItems;
+							if (e.code === 'Enter' && activeList.length > 0) {
+								value = isFeatured
+									? featuredModels[selectedModelIdx].model_id
+									: filteredItems[selectedModelIdx].value;
 								show = false;
 								return; // dont need to scroll on selection
 							} else if (e.code === 'ArrowDown') {
 								e.stopPropagation();
-								selectedModelIdx = Math.min(selectedModelIdx + 1, filteredItems.length - 1);
+								selectedModelIdx = Math.min(selectedModelIdx + 1, activeList.length - 1);
 							} else if (e.code === 'ArrowUp') {
 								e.stopPropagation();
 								selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
@@ -544,7 +546,7 @@
 							{/if}
 
 							<!-- External tab hidden intentionally — all OpenAI-compatible models are "external" by default,
-							     making this tab redundant noise. Re-enable by removing the `false &&` guard if needed.
+							     making this tab redundant noise. Re-enable by removing the `false &&` guard below. -->
 							{#if false && items.find((item) => item.model?.connection_type === 'external')}
 								<button
 									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'external'
@@ -558,7 +560,7 @@
 								>
 									{$i18n.t('External')}
 								</button>
-							{/if} -->
+							{/if}
 
 							{#if items.find((item) => item.model?.direct)}
 								<button
@@ -598,9 +600,10 @@
 
 			<div class="px-2.5 max-h-64 overflow-y-auto group relative">
 				{#if selectedConnectionType === 'featured'}
-					{#each featuredModels as entry (entry.model_id)}
+					{#each featuredModels as entry, index (entry.model_id)}
 						<button
-							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id ? 'bg-gray-100 dark:bg-gray-800' : ''}"
+							data-arrow-selected={selectedModelIdx === index ? 'true' : undefined}
+							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id || selectedModelIdx === index ? 'bg-gray-100 dark:bg-gray-800' : ''}"
 							on:click={() => {
 								value = entry.model_id;
 								show = false;

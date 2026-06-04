@@ -25,7 +25,11 @@ $: featuredIds = featuredModels.map((m) => m.model_id);
 $: availableModels = $models.filter((m) => !featuredIds.includes(m.id));
 
 // Re-init sortable only when items are added or removed, not on field edits
-$: if (listElement && featuredModels.length > 0 && featuredModels.length !== prevLength) {
+$: if (featuredModels.length === 0 && prevLength !== 0) {
+    prevLength = 0;
+    sortable?.destroy();
+    sortable = null;
+} else if (listElement && featuredModels.length > 0 && featuredModels.length !== prevLength) {
     prevLength = featuredModels.length;
     initSortable();
 }
