@@ -43,6 +43,7 @@
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import ManageModelsModal from './Models/ManageModelsModal.svelte';
+	import FeaturedModelsModal from './Models/FeaturedModelsModal.svelte';
 	import ModelMenu from '$lib/components/admin/Settings/Models/ModelMenu.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
@@ -66,6 +67,7 @@
 
 	let showConfigModal = false;
 	let showManageModal = false;
+	let showFeaturedModelsModal = false;
 
 	$: if (models) {
 		filteredModels = models
@@ -277,6 +279,7 @@
 
 <ConfigureModelsModal bind:show={showConfigModal} initHandler={init} />
 <ManageModelsModal bind:show={showManageModal} />
+<FeaturedModelsModal bind:show={showFeaturedModelsModal} />
 
 {#if models !== null}
 	{#if selectedModelId === null}
@@ -299,6 +302,20 @@
 							}}
 						>
 							<Download />
+						</button>
+					</Tooltip>
+
+					<Tooltip content={$i18n.t('Featured Models')}>
+						<button
+							class=" p-1 rounded-full flex gap-1 items-center"
+							type="button"
+							on:click={() => {
+								showFeaturedModelsModal = true;
+							}}
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.601a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" />
+							</svg>
 						</button>
 					</Tooltip>
 

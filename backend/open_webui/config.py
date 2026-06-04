@@ -1214,6 +1214,13 @@ MODEL_ORDER_LIST = PersistentConfig(
     [],
 )
 
+# Featured models config — each entry: {model_id, provider_name, featured_name, tags: [str, str, str], order}
+FEATURED_MODELS = PersistentConfig(
+    "FEATURED_MODELS",
+    "ui.featured_models",
+    [],
+)
+
 DEFAULT_USER_ROLE = PersistentConfig(
     "DEFAULT_USER_ROLE",
     "ui.default_user_role",
