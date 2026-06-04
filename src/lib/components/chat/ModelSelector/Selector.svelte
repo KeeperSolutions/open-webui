@@ -67,7 +67,13 @@
 	let selectedTag = '';
 	let selectedConnectionType = '';
 
-	let rawFeaturedModels: { model_id: string; order: number }[] = [];
+	let rawFeaturedModels: {
+		model_id: string;
+		provider_name: string;
+		featured_name: string;
+		tags: [string, string, string];
+		order: number;
+	}[] = [];
 
 	$: availableIds = new Set(
 		items
@@ -76,11 +82,9 @@
 	);
 
 	$: featuredModels = rawFeaturedModels.length > 0
-		? availableIds.size > 0
-			? [...rawFeaturedModels]
-				.filter((m) => availableIds.has(m.model_id))
-				.sort((a, b) => a.order - b.order)
-			: [...rawFeaturedModels].sort((a, b) => a.order - b.order)
+		? [...rawFeaturedModels]
+			.filter((m) => availableIds.has(m.model_id))
+			.sort((a, b) => a.order - b.order)
 		: [];
 
 	let ollamaVersion = null;
@@ -354,7 +358,9 @@
 		} catch {
 			// non-blocking — featured models are best-effort
 		}
-	});	$: if (show) {
+	});
+
+	$: if (show) {
 		setOllamaVersion();
 	}
 

@@ -1,7 +1,7 @@
 import logging
 import copy
 from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 import aiohttp
 
 from typing import Optional
@@ -467,7 +467,7 @@ class ModelsConfigForm(BaseModel):
     DEFAULT_MODELS: Optional[str]
     DEFAULT_PINNED_MODELS: Optional[str]
     MODEL_ORDER_LIST: Optional[list[str]]
-    FEATURED_MODELS: Optional[list] = []
+    FEATURED_MODELS: Optional[list] = Field(default_factory=list)
 
 
 @router.get("/models/featured")
