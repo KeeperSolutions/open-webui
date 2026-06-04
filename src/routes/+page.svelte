@@ -46,7 +46,9 @@
 			<div class="flex-1"></div>
 			<HgHeroSection />
 			<HgInputBar on:open={() => (showModal = true)} />
-			<HgPromptChips on:open={() => (showModal = true)} />
+			<div class="mb-10 w-full flex justify-center">
+				<HgPromptChips on:open={() => (showModal = true)} />
+			</div>
 			{#if carouselDismissed}
 				<div class="flex-1"></div>
 				<div class="pb-8 w-full flex justify-center">

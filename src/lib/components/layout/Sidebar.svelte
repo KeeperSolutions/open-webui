@@ -41,7 +41,6 @@
 		importChat
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
-	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -211,33 +210,28 @@
 	const initChannels = async () => {
 		try {
 			await channels.set(await getChannels(localStorage.token));
-		} catch (error) {
+		} catch {
 			// Channels feature may not be enabled, continue without them
-			console.log('Channels not available:', error);
 			await channels.set([]);
 		}
 	};
 
 	const initChatList = async () => {
 		// Reset pagination variables
-		console.log('initChatList');
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
 		initFolders();
 		await Promise.all([
 			await (async () => {
-				console.log('Init tags');
 				const _tags = await getAllTags(localStorage.token);
 				tags.set(_tags);
 			})(),
 			await (async () => {
-				console.log('Init pinned chats');
 				const _pinnedChats = await getPinnedChatList(localStorage.token);
 				pinnedChats.set(_pinnedChats);
 			})(),
 			await (async () => {
-				console.log('Init chat list');
 				const _chats = await getChatList(localStorage.token, $currentChatPage);
 				await chats.set(_chats);
 			})()
@@ -485,6 +479,8 @@
 		}
 
 		setTimeout(() => {
+			document.getElementById('new-chat-button')?.click();
+
 			if ($mobile) {
 				showSidebar.set(false);
 			}
@@ -596,9 +592,9 @@
 						<div class=" self-center flex items-center justify-center size-9">
 							<img
 								crossorigin="anonymous"
-								src="/static/favicon.png"
-								class="sidebar-new-chat-icon size-6 rounded-full group-hover:hidden"
-								alt=""
+								src="/hubgate/hubgate-logomark.svg"
+								class="sidebar-new-chat-icon size-6 group-hover:hidden"
+								alt="Hubgate"
 							/>
 
 							<Sidebar className="size-5 hidden group-hover:flex" />
@@ -774,9 +770,9 @@
 				>
 					<img
 						crossorigin="anonymous"
-						src="/static/favicon.png"
-						class="sidebar-new-chat-icon size-6 rounded-full"
-						alt=""
+						src="/hubgate/hubgate-logomark.svg"
+						class="sidebar-new-chat-icon size-6"
+						alt="Hubgate"
 					/>
 				</a>
 
@@ -1274,7 +1270,10 @@
 											tippyOptions={{ allowHTML: true }}
 										>
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
-												{$i18n.t('This month')}: <span class="font-medium text-gray-700 dark:text-gray-300">€{myUsage.total_cost.toFixed(2)}</span>
+												{$i18n.t('This month')}:
+												<span class="font-medium text-gray-700 dark:text-gray-300"
+													>€{myUsage.total_cost.toFixed(2)}</span
+												>
 											</div>
 										</Tooltip>
 									{:else}

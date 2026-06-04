@@ -9,6 +9,8 @@
 
 	const dispatch = createEventDispatcher();
 
+	export let onSelect: ((data: { type: string; data: string }) => void) | null = null;
+
 	const promptChips: { label: string; icon: Component }[] = [
 		{ label: 'Draft a proposal', icon: HgIconDocument },
 		{ label: 'Review a document', icon: HgIconReview },
@@ -18,12 +20,12 @@
 	];
 </script>
 
-<div class="flex flex-wrap justify-center gap-2 mb-10 w-[calc(100%-2rem)] max-w-[880px]">
+<div class="flex flex-wrap justify-center gap-2 w-full max-w-[880px]">
 	{#each promptChips as chip}
 		<button
 			type="button"
 			class="inline-flex items-center gap-2 h-8 px-4 bg-white border border-hg-border rounded-full font-hg-body text-xs text-hg-text-secondary hover:border-hg-blue hover:text-hg-text-primary transition-colors"
-			on:click={() => dispatch('open')}
+			on:click={() => onSelect ? onSelect({ type: 'prompt', data: chip.label }) : dispatch('open')}
 		>
 			<span class="hidden sm:contents"><svelte:component this={chip.icon} class="text-hg-text-primary" /></span>
 			{chip.label}

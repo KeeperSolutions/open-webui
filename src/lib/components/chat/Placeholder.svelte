@@ -25,6 +25,7 @@
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
+	import HgPromptChips from '$lib/components/hubgate/HgPromptChips.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import MessageInput from './MessageInput.svelte';
@@ -226,6 +227,11 @@
 				/>
 			</div>
 		</div>
+
+	</div>
+
+	<div class="flex justify-center mt-4 mb-6 w-full">
+		<HgPromptChips onSelect={(e) => messageInput?.setText(e.data)} />
 	</div>
 
 	{#if $selectedFolder}

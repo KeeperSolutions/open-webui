@@ -118,12 +118,15 @@
 			</div>
 		{:else}
 			<div
+				role="button"
+				tabindex="0"
 				class="{buttonClassName} cursor-pointer"
 				on:pointerup={() => {
 					if (!disabled) {
 						open = !open;
 					}
 				}}
+				on:keydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!disabled) open = !open; } }}
 			>
 				<div
 					class=" w-full font-medium flex items-center justify-between gap-2 {attributes?.done &&

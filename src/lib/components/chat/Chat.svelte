@@ -240,7 +240,6 @@
 			return;
 		}
 		sessionStorage.selectedModels = selectedModelsString;
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	let oldSelectedModelIds = [''];
@@ -349,8 +348,6 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		console.log(event);
-
 		if (event.chat_id === $chatId) {
 			await tick();
 			let message = history.messages[event.message_id];
@@ -459,7 +456,7 @@
 							cb(result);
 						}
 					} catch (error) {
-						console.error('Error executing code:', error);
+						console.error('Error executing code:', error); // allow-console
 					}
 				} else if (type === 'input') {
 					eventCallback = cb;
@@ -472,7 +469,7 @@
 					eventConfirmationInputPlaceholder = data.placeholder;
 					eventConfirmationInputValue = data?.value ?? '';
 				} else {
-					console.log('Unknown message type', data);
+					console.warn('Unknown message type', data); // allow-console
 				}
 
 				history.messages[event.message_id] = message;
@@ -489,7 +486,6 @@
 		}
 
 		if (event.data.type === 'action:submit') {
-			console.debug(event.data.text);
 
 			if (prompt !== '') {
 				await tick();
@@ -499,7 +495,6 @@
 
 		// Replace with your iframe's origin
 		if (event.data.type === 'input:prompt') {
-			console.debug(event.data.text);
 
 			const inputElement = document.getElementById('chat-input');
 
@@ -510,7 +505,6 @@
 		}
 
 		if (event.data.type === 'input:prompt:submit') {
-			console.debug(event.data.text);
 
 			if (event.data.text !== '') {
 				await tick();
@@ -550,7 +544,6 @@
 
 	onMount(async () => {
 		loading = true;
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
 
@@ -559,6 +552,16 @@
 		pageSubscribe = page.subscribe(async (p) => {
 			if (p.url.pathname === '/') {
 				await tick();
+				if ($models.length === 0) {
+					await new Promise<void>((resolve) => {
+						const unsubscribe = models.subscribe((m: Model[]) => {
+							if (m.length > 0) {
+								unsubscribe();
+								resolve();
+							}
+						});
+					});
+				}
 				initNewChat();
 			}
 
@@ -572,6 +575,7 @@
 		if (!chatIdProp) {
 			loading = false;
 			await tick();
+			initNewChat();
 		}
 
 		if (storageChatInput) {
@@ -627,8 +631,6 @@
 				JSON.stringify(selectedModels) !== JSON.stringify(folder.data.model_ids)
 			) {
 				selectedModels = folder.data.model_ids;
-
-				console.log('Set selectedModels from folder data:', selectedModels);
 			}
 		});
 
@@ -646,22 +648,13 @@
 			$socket?.off('events', chatEventHandler);
 			$audioQueue?.destroy();
 		} catch (e) {
-			console.error(e);
+			console.error(e); // allow-console // allow-console
 		}
 	});
 
 	// File upload functions
 
 	const uploadGoogleDriveFile = async (fileData) => {
-		console.log('Starting uploadGoogleDriveFile with:', {
-			id: fileData.id,
-			name: fileData.name,
-			url: fileData.url,
-			headers: {
-				Authorization: `Bearer ${token}`
-			}
-		});
-
 		// Validate input
 		if (!fileData?.id || !fileData?.name || !fileData?.url || !fileData?.headers?.Authorization) {
 			throw new Error('Invalid file data provided');
@@ -683,7 +676,6 @@
 
 		try {
 			files = [...files, fileItem];
-			console.log('Processing web file with URL:', fileData.url);
 
 			// Configure fetch options with proper headers
 			const fetchOptions = {
@@ -695,7 +687,6 @@
 			};
 
 			// Attempt to fetch the file
-			console.log('Fetching file content from Google Drive...');
 			const fileResponse = await fetch(fileData.url, fetchOptions);
 
 			if (!fileResponse.ok) {
@@ -705,30 +696,18 @@
 
 			// Get content type from response
 			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			console.log('Response received with content-type:', contentType);
+			// allow-console
 
 			// Convert response to blob
-			console.log('Converting response to blob...');
 			const fileBlob = await fileResponse.blob();
 
 			if (fileBlob.size === 0) {
 				throw new Error('Retrieved file is empty');
 			}
 
-			console.log('Blob created:', {
-				size: fileBlob.size,
-				type: fileBlob.type || contentType
-			});
-
 			// Create File object with proper MIME type
 			const file = new File([fileBlob], fileData.name, {
 				type: fileBlob.type || contentType
-			});
-
-			console.log('File object created:', {
-				name: file.name,
-				size: file.size,
-				type: file.type
 			});
 
 			if (file.size === 0) {
@@ -747,14 +726,11 @@
 			}
 
 			// Upload file to server
-			console.log('Uploading file to server...');
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
 			}
-
-			console.log('File uploaded successfully:', uploadedFile);
 
 			// Update file item with upload results
 			fileItem.status = 'uploaded';
@@ -767,7 +743,7 @@
 			files = files;
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
-			console.error('Error uploading file:', e);
+			console.error('Error uploading file:', e); // allow-console
 			files = files.filter((f) => f.itemId !== tempItemId);
 			toast.error(
 				$i18n.t('Error uploading file: {{error}}', {
@@ -891,7 +867,6 @@
 	//////////////////////////
 
 	const initNewChat = async () => {
-		console.log('initNewChat');
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -955,24 +930,22 @@
 				// Set from folder model IDs
 				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				if (sessionStorage.selectedModels) {
-					// Set from session storage (temporary selection)
+				if ($settings?.models) {
+					// Set from user settings (saved default — always takes priority)
+					selectedModels = $settings?.models;
+				} else if (sessionStorage.selectedModels) {
+					// Set from session storage (temporary carry-over, only if no saved default)
 					selectedModels = JSON.parse(sessionStorage.selectedModels);
 					sessionStorage.removeItem('selectedModels');
-				} else {
-					if ($settings?.models) {
-						// Set from user settings
-						selectedModels = $settings?.models;
-					} else if (defaultModels && defaultModels.length > 0) {
-						// Set from default models
-						selectedModels = defaultModels;
-					}
+				} else if (defaultModels && defaultModels.length > 0) {
+					// Set from default models
+					selectedModels = defaultModels;
 				}
 			}
-
-			// Unavailable & hidden models filtering
-			selectedModels = selectedModels.filter((modelId) => availableModels.includes(modelId));
 		}
+
+		// Unavailable & hidden models filtering
+		selectedModels = selectedModels.filter((modelId) => availableModels.includes(modelId));
 
 		// Ensure at least one model is selected
 		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
@@ -982,8 +955,10 @@
 					selectedModels = defaultModels.filter((modelId) => availableModels.includes(modelId));
 				}
 
-				// Set to first available model
-				selectedModels = [availableModels?.at(0) ?? ''];
+				// Fall back to first available model only if still empty
+				if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
+					selectedModels = [availableModels?.at(0) ?? ''];
+				}
 			} else {
 				selectedModels = [''];
 			}
@@ -1001,6 +976,8 @@
 		autoScroll = true;
 
 		resetInput();
+		prompt = '';
+		messageInput?.setText('');
 		await chatId.set('');
 		await chatTitle.set('');
 
@@ -1091,8 +1068,6 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1416,7 +1391,7 @@
 				// Stream response
 				let value = choices[0]?.delta?.content ?? '';
 				if (message.content == '' && value == '\n') {
-					console.log('Empty response');
+					console.warn('Empty response'); // allow-console
 				} else {
 					message.content += value;
 
@@ -1542,7 +1517,6 @@
 			);
 		}
 
-		console.log(data);
 		await tick();
 
 		if (autoScroll) {
@@ -1555,8 +1529,6 @@
 	//////////////////////////
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-		console.log('submitPrompt', userPrompt, $chatId);
-
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -1742,7 +1714,6 @@
 
 		await Promise.all(
 			selectedModelIds.map(async (modelId, _modelIdx) => {
-				console.log('modelId', modelId);
 				const model = $models.filter((m) => m.id === modelId).at(0);
 
 				if (model) {
@@ -1874,7 +1845,7 @@
 		let userLocation;
 		if ($settings?.userLocation) {
 			userLocation = await getAndUpdateUserLocation(localStorage.token).catch((err) => {
-				console.error(err);
+				console.error(err); // allow-console
 				return undefined;
 			});
 		}
@@ -2007,8 +1978,6 @@
 			},
 			`${WEBUI_BASE_URL}/api`
 		).catch(async (error) => {
-			console.log(error);
-
 			let errorMessage = error;
 			if (error?.error?.message) {
 				errorMessage = error.error.message;
@@ -2057,7 +2026,7 @@
 			innerError = error;
 		}
 
-		console.error(innerError);
+		console.error(innerError); // allow-console
 		if ('detail' in innerError) {
 			// FastAPI error
 			toast.error(innerError.detail);
@@ -2158,8 +2127,6 @@
 	};
 
 	const regenerateResponse = async (message, suggestionPrompt = null) => {
-		console.log('regenerateResponse');
-
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 
@@ -2196,7 +2163,6 @@
 	};
 
 	const continueResponse = async () => {
-		console.log('continueResponse');
 		const _chatId = JSON.parse(JSON.stringify($chatId));
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
@@ -2221,7 +2187,6 @@
 	};
 
 	const mergeResponses = async (messageId, responses, _chatId) => {
-		console.log('mergeResponses', messageId, responses);
 		const message = history.messages[messageId];
 		const mergedResponse = {
 			status: true,
@@ -2267,10 +2232,10 @@
 
 				await saveChatHandler(_chatId, history);
 			} else {
-				console.error(res);
+				console.error(res); // allow-console
 			}
 		} catch (e) {
-			console.error(e);
+			console.error(e); // allow-console
 		}
 	};
 
@@ -2306,7 +2271,7 @@
 
 			selectedFolder.set(null);
 		} else {
-			_chatId = `local:${$socket?.id}`; // Use socket id for temporary chat
+			_chatId = `local:${$socket?.id}`; // Use socket id for ephemeral chat
 			await chatId.set(_chatId);
 		}
 		await tick();
@@ -2491,7 +2456,7 @@
 									toast.success($i18n.t('Conversation saved successfully'));
 								}
 							} catch (error) {
-								console.error('Error saving conversation:', error);
+								console.error('Error saving conversation:', error); // allow-console
 								toast.error($i18n.t('Failed to save conversation'));
 							}
 						}}
