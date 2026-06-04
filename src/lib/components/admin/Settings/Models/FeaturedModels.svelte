@@ -25,7 +25,7 @@ $: featuredIds = featuredModels.map((m) => m.model_id);
 $: availableModels = $models.filter((m) => !featuredIds.includes(m.id));
 
 // Re-init sortable only when items are added or removed, not on field edits
-$: if (listElement && featuredModels.length !== prevLength) {
+$: if (listElement && featuredModels.length > 0 && featuredModels.length !== prevLength) {
     prevLength = featuredModels.length;
     initSortable();
 }
@@ -50,9 +50,14 @@ const addModel = () => {
 };
 
 const removeModel = (idx: number) => {
-    featuredModels = featuredModels
+    const next = featuredModels
         .filter((_, i) => i !== idx)
         .map((m, i) => ({ ...m, order: i }));
+    if (next.length === 0) {
+        sortable?.destroy();
+        sortable = null;
+    }
+    featuredModels = next;
 };
 
 const reorderModels = (oldIndex: number, newIndex: number) => {
