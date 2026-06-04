@@ -67,13 +67,21 @@
 	let selectedTag = '';
 	let selectedConnectionType = '';
 
-	let featuredModels: {
-		model_id: string;
-		provider_name: string;
-		featured_name: string;
-		tags: [string, string, string];
-		order: number;
-	}[] = [];
+	let rawFeaturedModels: { model_id: string; order: number }[] = [];
+
+	$: availableIds = new Set(
+		items
+			.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
+			.map((item) => item.value)
+	);
+
+	$: featuredModels = rawFeaturedModels.length > 0
+		? availableIds.size > 0
+			? [...rawFeaturedModels]
+				.filter((m) => availableIds.has(m.model_id))
+				.sort((a, b) => a.order - b.order)
+			: [...rawFeaturedModels].sort((a, b) => a.order - b.order)
+		: [];
 
 	let ollamaVersion = null;
 	let selectedModelIdx = 0;
@@ -341,17 +349,7 @@
 			const config = await getFeaturedModels(localStorage.token);
 			const raw = config?.FEATURED_MODELS;
 			if (Array.isArray(raw) && raw.length > 0) {
-				const availableIds = new Set(
-					items
-						.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
-						.map((item) => item.value)
-				);
-			featuredModels = raw
-				.filter((m) => availableIds.has(m.model_id))
-				.sort((a, b) => a.order - b.order);
-				if (featuredModels.length > 0) {
-					selectedConnectionType = 'featured';
-				}
+				rawFeaturedModels = raw;
 			}
 		} catch {
 			// non-blocking — featured models are best-effort

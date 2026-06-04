@@ -492,7 +492,7 @@ async def set_models_config(
     request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
     request.app.state.config.DEFAULT_PINNED_MODELS = form_data.DEFAULT_PINNED_MODELS
     request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
-    request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS
+    request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS or []
     return {
         "DEFAULT_MODELS": request.app.state.config.DEFAULT_MODELS,
         "DEFAULT_PINNED_MODELS": request.app.state.config.DEFAULT_PINNED_MODELS,

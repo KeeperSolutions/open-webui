@@ -32,7 +32,7 @@
             existingConfig = (await getModelsConfig(localStorage.token)) ?? {};
             const raw = existingConfig?.FEATURED_MODELS;
             featuredModels = Array.isArray(raw) ? [...raw] : [];
-        } catch (error) {
+        } catch (error: unknown) {
             toast.error($i18n.t('Failed to load configuration'));
             featuredModels = [];
         }
@@ -53,7 +53,7 @@
             } else {
                 toast.error($i18n.t('Failed to save featured models'));
             }
-        } catch (error) {
+        } catch (error: unknown) {
             toast.error($i18n.t('Failed to save featured models'));
         } finally {
             loading = false;
