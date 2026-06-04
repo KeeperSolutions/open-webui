@@ -24,7 +24,7 @@
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
-	import { getModelsConfig } from '$lib/apis/configs';
+	import { getFeaturedModels } from '$lib/apis/configs';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -338,7 +338,7 @@
 		}
 
 		try {
-			const config = await getModelsConfig(localStorage.token);
+			const config = await getFeaturedModels(localStorage.token);
 			const raw = config?.FEATURED_MODELS;
 			if (Array.isArray(raw) && raw.length > 0) {
 				const availableIds = new Set(
@@ -539,7 +539,9 @@
 								</button>
 							{/if}
 
-							{#if items.find((item) => item.model?.connection_type === 'external')}
+							<!-- External tab hidden intentionally — all OpenAI-compatible models are "external" by default,
+							     making this tab redundant noise. Re-enable by removing the `false &&` guard if needed.
+							{#if false && items.find((item) => item.model?.connection_type === 'external')}
 								<button
 									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'external'
 										? ''
@@ -552,7 +554,7 @@
 								>
 									{$i18n.t('External')}
 								</button>
-							{/if}
+							{/if} -->
 
 							{#if items.find((item) => item.model?.direct)}
 								<button

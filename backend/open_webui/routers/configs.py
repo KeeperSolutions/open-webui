@@ -470,6 +470,11 @@ class ModelsConfigForm(BaseModel):
     FEATURED_MODELS: Optional[list] = []
 
 
+@router.get("/models/featured")
+async def get_featured_models(request: Request, user=Depends(get_verified_user)):
+    return {"FEATURED_MODELS": request.app.state.config.FEATURED_MODELS}
+
+
 @router.get("/models", response_model=ModelsConfigForm)
 async def get_models_config(request: Request, user=Depends(get_admin_user)):
     return {

@@ -305,6 +305,23 @@ export const setCodeExecutionConfig = async (token: string, config: object) => {
 	return res;
 };
 
+export const getFeaturedModels = async (token: string) => {
+    const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models/featured`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        console.error(error);
+        throw error.detail ?? 'Failed to fetch featured models';
+    }
+
+    return res.json();
+};
+
 export const getModelsConfig = async (token: string) => {
 	let error = null;
 
