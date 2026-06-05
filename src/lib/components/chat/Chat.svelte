@@ -546,27 +546,7 @@
 
 		audioQueue.set(new AudioQueue(document.getElementById('audioElement')));
 
-		pageSubscribe = page.subscribe(async (p) => {
-			if (p.url.pathname === '/') {
-				await tick();
-				if ($models.length === 0) {
-					await new Promise<void>((resolve, reject) => {
-						let unsubscribe: () => void;
-						unsubscribe = models.subscribe((m: Model[]) => {
-							if (m.length > 0) {
-								unsubscribe();
-								resolve();
-							}
-						});
-						onDestroy(() => {
-							unsubscribe();
-							reject(new Error('component destroyed'));
-						});
-					}).catch(() => {});
-				}
-				initNewChat();
-			}
-
+		pageSubscribe = page.subscribe(() => {
 			stopAudio();
 		});
 
