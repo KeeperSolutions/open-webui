@@ -120,6 +120,8 @@
 			<div
 				role="button"
 				tabindex="0"
+				aria-expanded={open}
+				aria-disabled={disabled || undefined}
 				class="{buttonClassName} cursor-pointer"
 				on:pointerup={() => {
 					if (!disabled) {

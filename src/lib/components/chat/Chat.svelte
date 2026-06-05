@@ -486,7 +486,6 @@
 		}
 
 		if (event.data.type === 'action:submit') {
-
 			if (prompt !== '') {
 				await tick();
 				submitPrompt(prompt);
@@ -495,7 +494,6 @@
 
 		// Replace with your iframe's origin
 		if (event.data.type === 'input:prompt') {
-
 			const inputElement = document.getElementById('chat-input');
 
 			if (inputElement) {
@@ -505,7 +503,6 @@
 		}
 
 		if (event.data.type === 'input:prompt:submit') {
-
 			if (event.data.text !== '') {
 				await tick();
 				submitPrompt(event.data.text);
@@ -553,14 +550,19 @@
 			if (p.url.pathname === '/') {
 				await tick();
 				if ($models.length === 0) {
-					await new Promise<void>((resolve) => {
-						const unsubscribe = models.subscribe((m: Model[]) => {
+					await new Promise<void>((resolve, reject) => {
+						let unsubscribe: () => void;
+						unsubscribe = models.subscribe((m: Model[]) => {
 							if (m.length > 0) {
 								unsubscribe();
 								resolve();
 							}
 						});
-					});
+						onDestroy(() => {
+							unsubscribe();
+							reject(new Error('component destroyed'));
+						});
+					}).catch(() => {});
 				}
 				initNewChat();
 			}
@@ -648,7 +650,7 @@
 			$socket?.off('events', chatEventHandler);
 			$audioQueue?.destroy();
 		} catch (e) {
-			console.error(e); // allow-console // allow-console
+			console.error(e); // allow-console
 		}
 	});
 
@@ -696,7 +698,6 @@
 
 			// Get content type from response
 			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			// allow-console
 
 			// Convert response to blob
 			const fileBlob = await fileResponse.blob();
@@ -956,7 +957,10 @@
 				}
 
 				// Fall back to first available model only if still empty
-				if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
+				if (
+					selectedModels.length === 0 ||
+					(selectedModels.length === 1 && selectedModels[0] === '')
+				) {
 					selectedModels = [availableModels?.at(0) ?? ''];
 				}
 			} else {

@@ -93,7 +93,6 @@
 	import HgIconMic from '$lib/components/icons/HgIconMic.svelte';
 	import HgIconWave from '$lib/components/icons/HgIconWave.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
-	import PageEdit from '../icons/PageEdit.svelte';
 	import { goto } from '$app/navigation';
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
