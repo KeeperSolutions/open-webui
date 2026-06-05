@@ -978,3 +978,26 @@ INTERNAL_EMAIL_DOMAINS = [
     if d.strip()
 ]
 TRIAL_CREDIT_EUR = float(os.environ.get("TRIAL_CREDIT_EUR", "2.0"))
+
+# JSON mapping seat count → {price_id, price_eur, usage_budget_eur}
+# e.g. '{"5": {"price_id": "price_abc", "price_eur": 150, "usage_budget_eur": 250}}'
+import json as _json
+try:
+    STRIPE_TEAM_TIERS: dict = _json.loads(os.environ.get("STRIPE_TEAM_TIERS", "{}"))
+except (ValueError, TypeError):
+    STRIPE_TEAM_TIERS: dict = {}
+
+# JSON list of one-time top-up options: [{price_id, amount_eur}, ...]
+# e.g. '[{"price_id": "price_topup50", "amount_eur": 50}, {"price_id": "price_topup100", "amount_eur": 100}]'
+try:
+    STRIPE_TOPUP_AMOUNTS: list = _json.loads(os.environ.get("STRIPE_TOPUP_AMOUNTS", "[]"))
+except (ValueError, TypeError):
+    STRIPE_TOPUP_AMOUNTS: list = []
+
+# SMTP email config (optional — if not set, invite emails are silently skipped)
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
+SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "")
+SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Keeper AI Gateway")
