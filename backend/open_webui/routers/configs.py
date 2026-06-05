@@ -1,7 +1,7 @@
 import logging
 import copy
 from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 import aiohttp
 
 from typing import Optional
@@ -467,6 +467,12 @@ class ModelsConfigForm(BaseModel):
     DEFAULT_MODELS: Optional[str]
     DEFAULT_PINNED_MODELS: Optional[str]
     MODEL_ORDER_LIST: Optional[list[str]]
+    FEATURED_MODELS: list = Field(default_factory=list)
+
+
+@router.get("/models/featured")
+async def get_featured_models(request: Request, user=Depends(get_verified_user)):
+    return {"FEATURED_MODELS": request.app.state.config.FEATURED_MODELS}
 
 
 @router.get("/models", response_model=ModelsConfigForm)
@@ -475,6 +481,7 @@ async def get_models_config(request: Request, user=Depends(get_admin_user)):
         "DEFAULT_MODELS": request.app.state.config.DEFAULT_MODELS,
         "DEFAULT_PINNED_MODELS": request.app.state.config.DEFAULT_PINNED_MODELS,
         "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST,
+        "FEATURED_MODELS": request.app.state.config.FEATURED_MODELS,
     }
 
 
@@ -485,10 +492,12 @@ async def set_models_config(
     request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
     request.app.state.config.DEFAULT_PINNED_MODELS = form_data.DEFAULT_PINNED_MODELS
     request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
+    request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS or []
     return {
         "DEFAULT_MODELS": request.app.state.config.DEFAULT_MODELS,
         "DEFAULT_PINNED_MODELS": request.app.state.config.DEFAULT_PINNED_MODELS,
         "MODEL_ORDER_LIST": request.app.state.config.MODEL_ORDER_LIST,
+        "FEATURED_MODELS": request.app.state.config.FEATURED_MODELS,
     }
 
 

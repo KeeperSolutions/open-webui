@@ -24,6 +24,7 @@
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
+	import { getFeaturedModels } from '$lib/apis/configs';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -65,6 +66,26 @@
 
 	let selectedTag = '';
 	let selectedConnectionType = '';
+
+	let rawFeaturedModels: {
+		model_id: string;
+		provider_name: string;
+		featured_name: string;
+		tags: [string, string, string];
+		order: number;
+	}[] = [];
+
+	$: availableIds = new Set(
+		items
+			.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
+			.map((item) => item.value)
+	);
+
+	$: featuredModels = rawFeaturedModels.length > 0
+		? [...rawFeaturedModels]
+			.filter((m) => availableIds.has(m.model_id))
+			.sort((a, b) => a.order - b.order)
+		: [];
 
 	let ollamaVersion = null;
 	let selectedModelIdx = 0;
@@ -130,6 +151,8 @@
 							return item.model?.connection_type === 'external';
 						} else if (selectedConnectionType === 'direct') {
 							return item.model?.direct;
+						} else if (selectedConnectionType === 'featured') {
+							return false;
 						}
 					})
 			: items
@@ -150,9 +173,15 @@
 							return item.model?.connection_type === 'external';
 						} else if (selectedConnectionType === 'direct') {
 							return item.model?.direct;
+						} else if (selectedConnectionType === 'featured') {
+							return false;
 						}
 					})
 	).filter((item) => !(item.model?.info?.meta?.hidden ?? false));
+
+	$: if (searchValue && selectedConnectionType === 'featured') {
+		selectedConnectionType = '';
+	}
 
 	$: if (selectedTag || selectedConnectionType) {
 		resetView();
@@ -163,15 +192,13 @@
 	const resetView = async () => {
 		await tick();
 
-		const selectedInFiltered = filteredItems.findIndex((item) => item.value === value);
+		const isFeatured = selectedConnectionType === 'featured';
+		const activeList = isFeatured ? featuredModels : filteredItems;
+		const selectedInActive = isFeatured
+			? activeList.findIndex((entry) => entry.model_id === value)
+			: activeList.findIndex((item) => item.value === value);
 
-		if (selectedInFiltered >= 0) {
-			// The selected model is visible in the current filter
-			selectedModelIdx = selectedInFiltered;
-		} else {
-			// The selected model is not visible, default to first item in filtered list
-			selectedModelIdx = 0;
-		}
+		selectedModelIdx = selectedInActive >= 0 ? selectedInActive : 0;
 
 		await tick();
 		const item = document.querySelector(`[data-arrow-selected="true"]`);
@@ -319,6 +346,16 @@
 			// Remove duplicates and sort
 			tags = Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
 		}
+
+		try {
+			const config = await getFeaturedModels(localStorage.token);
+			const raw = config?.FEATURED_MODELS;
+			if (Array.isArray(raw) && raw.length > 0) {
+				rawFeaturedModels = raw;
+			}
+		} catch {
+			// non-blocking — featured models are best-effort
+		}
 	});
 
 	$: if (show) {
@@ -362,8 +399,9 @@
 	bind:open={show}
 	onOpenChange={async () => {
 		searchValue = '';
+		const isFeaturedSelected = featuredModels.some((m) => m.model_id === value);
+		selectedConnectionType = (isFeaturedSelected || (!value && featuredModels.length > 0)) ? 'featured' : '';
 		window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
-
 		resetView();
 	}}
 	closeFocus={false}
@@ -421,13 +459,17 @@
 						autocomplete="off"
 						aria-label={$i18n.t('Search In Models')}
 						on:keydown={(e) => {
-							if (e.code === 'Enter' && filteredItems.length > 0) {
-								value = filteredItems[selectedModelIdx].value;
+							const isFeatured = selectedConnectionType === 'featured';
+							const activeList = isFeatured ? featuredModels : filteredItems;
+							if (e.code === 'Enter' && activeList.length > 0) {
+								value = isFeatured
+									? featuredModels[selectedModelIdx].model_id
+									: filteredItems[selectedModelIdx].value;
 								show = false;
 								return; // dont need to scroll on selection
 							} else if (e.code === 'ArrowDown') {
 								e.stopPropagation();
-								selectedModelIdx = Math.min(selectedModelIdx + 1, filteredItems.length - 1);
+								selectedModelIdx = Math.min(selectedModelIdx + 1, activeList.length - 1);
 							} else if (e.code === 'ArrowUp') {
 								e.stopPropagation();
 								selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
@@ -458,6 +500,21 @@
 							class="flex gap-1 w-fit text-center text-sm rounded-full bg-transparent px-1.5 whitespace-nowrap"
 							bind:this={tagsContainerElement}
 						>
+							{#if featuredModels.length > 0 && !searchValue}
+								<button
+									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'featured'
+										? ''
+										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
+									aria-pressed={selectedConnectionType === 'featured'}
+									on:click={() => {
+										selectedTag = '';
+										selectedConnectionType = 'featured';
+									}}
+								>
+									{$i18n.t('Featured')}
+								</button>
+							{/if}
+
 							{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
 								<button
 									class="min-w-fit outline-none px-1.5 py-0.5 {selectedTag === '' &&
@@ -489,7 +546,9 @@
 								</button>
 							{/if}
 
-							{#if items.find((item) => item.model?.connection_type === 'external')}
+							<!-- External tab hidden intentionally — all OpenAI-compatible models are "external" by default,
+							     making this tab redundant noise. Re-enable by removing the `false &&` guard below. -->
+							{#if false && items.find((item) => item.model?.connection_type === 'external')}
 								<button
 									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'external'
 										? ''
@@ -541,28 +600,66 @@
 			</div>
 
 			<div class="px-2.5 max-h-64 overflow-y-auto group relative">
-				{#each filteredItems as item, index}
-					<ModelItem
-						{selectedModelIdx}
-						{item}
-						{index}
-						{value}
-						{pinModelHandler}
-						{unloadModelHandler}
-						onClick={() => {
-							value = item.value;
-							selectedModelIdx = index;
-
-							show = false;
-						}}
-					/>
-				{:else}
-					<div class="">
+				{#if selectedConnectionType === 'featured'}
+					{#each featuredModels as entry, index (entry.model_id)}
+						<button
+							data-arrow-selected={selectedModelIdx === index ? 'true' : undefined}
+							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id ? 'bg-gray-100 dark:bg-gray-800' : ''}"
+							on:click={() => {
+								value = entry.model_id;
+								show = false;
+							}}
+						>
+							<div class="flex-1 min-w-0">
+								<div class="flex items-center justify-between gap-2">
+									<span class="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate">{entry.featured_name}</span>
+									{#if value === entry.model_id}
+										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 text-gray-700 dark:text-gray-300">
+											<path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+										</svg>
+									{/if}
+								</div>
+								{#if entry.provider_name}
+									<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{entry.provider_name}</div>
+								{/if}
+								{#if entry.tags?.some((t) => t)}
+									<div class="flex flex-wrap gap-1 mt-1.5">
+										{#each entry.tags.filter((t) => t) as tag}
+											<span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{tag}</span>
+										{/each}
+									</div>
+								{/if}
+							</div>
+						</button>
+					{:else}
 						<div class="block px-3 py-2 text-sm text-gray-700 dark:text-gray-100">
-							{$i18n.t('No results found')}
+							{$i18n.t('No featured models available')}
 						</div>
-					</div>
-				{/each}
+					{/each}
+				{:else}
+					{#each filteredItems as item, index}
+						<ModelItem
+							{selectedModelIdx}
+							{item}
+							{index}
+							{value}
+							{pinModelHandler}
+							{unloadModelHandler}
+							onClick={() => {
+								value = item.value;
+								selectedModelIdx = index;
+
+								show = false;
+							}}
+						/>
+					{:else}
+						<div class="">
+							<div class="block px-3 py-2 text-sm text-gray-700 dark:text-gray-100">
+								{$i18n.t('No results found')}
+							</div>
+						</div>
+					{/each}
+				{/if}
 
 				{#if !(searchValue.trim() in $MODEL_DOWNLOAD_POOL) && searchValue && ollamaVersion && $user?.role === 'admin'}
 					<Tooltip
