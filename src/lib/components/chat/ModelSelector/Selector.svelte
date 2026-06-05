@@ -399,7 +399,8 @@
 	bind:open={show}
 	onOpenChange={async () => {
 		searchValue = '';
-		selectedConnectionType = featuredModels.length > 0 ? 'featured' : '';
+		const isFeaturedSelected = featuredModels.some((m) => m.model_id === value);
+		selectedConnectionType = isFeaturedSelected ? 'featured' : '';
 		window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
 		resetView();
 	}}
@@ -603,7 +604,7 @@
 					{#each featuredModels as entry, index (entry.model_id)}
 						<button
 							data-arrow-selected={selectedModelIdx === index ? 'true' : undefined}
-							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id || selectedModelIdx === index ? 'bg-gray-100 dark:bg-gray-800' : ''}"
+							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id ? 'bg-gray-100 dark:bg-gray-800' : ''}"
 							on:click={() => {
 								value = entry.model_id;
 								show = false;
