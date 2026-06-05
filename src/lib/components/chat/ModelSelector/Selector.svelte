@@ -400,7 +400,7 @@
 	onOpenChange={async () => {
 		searchValue = '';
 		const isFeaturedSelected = featuredModels.some((m) => m.model_id === value);
-		selectedConnectionType = isFeaturedSelected ? 'featured' : '';
+		selectedConnectionType = (isFeaturedSelected || (!value && featuredModels.length > 0)) ? 'featured' : '';
 		window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
 		resetView();
 	}}
