@@ -79,16 +79,20 @@
 	import Sparkles from '../icons/Sparkles.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
-	import Voice from '../icons/Voice.svelte';
 	import Terminal from '../icons/Terminal.svelte';
-	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import Component from '../icons/Component.svelte';
-	import PlusAlt from '../icons/PlusAlt.svelte';
+	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
+
+	import HgIconPlus from '$lib/components/icons/HgIconPlus.svelte';
+	import HgIconSettings from '$lib/components/icons/HgIconSettings.svelte';
+	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
+	import HgIconToggleOn from '$lib/components/icons/HgIconToggleOn.svelte';
+	import HgIconMic from '$lib/components/icons/HgIconMic.svelte';
+	import HgIconWave from '$lib/components/icons/HgIconWave.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
-	import PageEdit from '../icons/PageEdit.svelte';
 	import { goto } from '$app/navigation';
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
@@ -382,6 +386,7 @@
 	let suggestions = null;
 
 	let showTools = false;
+	let piiMaskingEnabled = true;
 
 	let loaded = false;
 	let recording = false;
@@ -961,7 +966,6 @@
 	});
 
 	onDestroy(() => {
-		console.log('destroy');
 		window.removeEventListener('keydown', onKeyDown);
 		window.removeEventListener('keyup', onKeyUp);
 
@@ -1120,9 +1124,9 @@
 
 						<div
 							id="message-input-container"
-							class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
-								? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
-								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
+							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] text-hg-text-primary transition px-1 {$temporaryChatEnabled
+								? 'border-dashed border-hg-border'
+								: 'border-hg-border'}"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
@@ -1499,17 +1503,26 @@
 									>
 										<div
 											id="input-menu-button"
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 										>
-											<PlusAlt className="size-5.5" />
+											<HgIconPlus class="w-5 h-5" />
 										</div>
 									</InputMenu>
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
-										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50"
-										></div>
+									<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border"></div>
 
+									<Tooltip content={$i18n.t('Settings')} placement="top">
+										<button
+											type="button"
+											id="settings-button"
+											class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											on:click={() => showControls.update((v) => !v)}
+										>
+											<HgIconSettings class="w-5 h-5" />
+										</button>
+									</Tooltip>
+
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 										<IntegrationsMenu
 											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
 											{toggleFilters}
@@ -1538,7 +1551,7 @@
 										>
 											<div
 												id="integration-menu-button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 											>
 												<Component className="size-4.5" strokeWidth="1.5" />
 											</div>
@@ -1551,7 +1564,7 @@
 												<button
 													type="button"
 													id="model-valves-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+													class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 													on:click={() => {
 														selectedValvesType = 'function';
 														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
@@ -1572,7 +1585,7 @@
 												})}
 											>
 												<button
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-hg-text-secondary hover:text-hg-text-primary rounded-lg self-center transition"
 													aria-label="Available Tools"
 													type="button"
 													on:click={() => {
@@ -1600,8 +1613,8 @@
 														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
 															filterId
 														)
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
+															? 'text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
+															: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} capitalize"
 													>
 														{#if filter?.icon}
 															<div class="size-4 items-center flex justify-center">
@@ -1632,8 +1645,8 @@
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
 													($settings?.webSearch ?? false) === 'always'
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
+														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
 												>
 													<GlobeAlt className="size-4" strokeWidth="1.75" />
 													<div class="hidden group-hover:block">
@@ -1650,8 +1663,8 @@
 														(imageGenerationEnabled = !imageGenerationEnabled)}
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
+														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
 												>
 													<Photo className="size-4" strokeWidth="1.75" />
 													<div class="hidden group-hover:block">
@@ -1672,8 +1685,8 @@
 														(codeInterpreterEnabled = !codeInterpreterEnabled)}
 													type="button"
 													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
+														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} {($settings?.highContrastMode ??
 													false)
 														? 'm-1'
 														: 'focus:outline-hidden rounded-full'}"
@@ -1689,56 +1702,56 @@
 									</div>
 								</div>
 
-								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.5px]">
+								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
 									{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating}
-										<div class=" flex items-center">
-											<Tooltip content={$i18n.t('Stop')}>
-												<button
-													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
-													aria-label={$i18n.t('Stop')}
-													on:click={() => {
-														stopResponse();
-													}}
+										<Tooltip content={$i18n.t('Stop')}>
+											<button
+												class="bg-hg-bg-surface hover:bg-hg-bg-muted text-hg-text-primary border border-hg-border transition rounded-full p-1.5"
+												aria-label={$i18n.t('Stop')}
+												on:click={() => {
+													stopResponse();
+												}}
+											>
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													viewBox="0 0 24 24"
+													fill="currentColor"
+													class="size-5"
 												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 24 24"
-														fill="currentColor"
-														class="size-5"
-													>
-														<path
-															fill-rule="evenodd"
-															d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
-															clip-rule="evenodd"
-														/>
-													</svg>
-												</button>
-											</Tooltip>
-										</div>
+													<path
+														fill-rule="evenodd"
+														d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
+														clip-rule="evenodd"
+													/>
+												</svg>
+											</button>
+										</Tooltip>
 									{:else}
-										{#if prompt !== '' && !history?.currentId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
-											<!-- {$i18n.t('Create Note')}  -->
-											<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
-												<button
-													id="send-message-button"
-													class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center"
-													type="button"
-													disabled={prompt === '' && files.length === 0}
-													on:click={() => {
-														createNote();
-													}}
+										<!-- PII Masking toggle (stub) -->
+										<button
+											type="button"
+											class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted transition"
+											on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
+											aria-label="Toggle PII Masking"
+										>
+											<div class="flex items-center gap-1">
+												<HgIconShield class="w-4 h-4 text-hg-text-primary" />
+												<span class="hidden sm:inline font-hg-body text-sm text-hg-text-primary"
+													>PII Masking</span
 												>
-													<PageEdit className="size-4.5 translate-y-[0.5px]" />
-												</button>
-											</Tooltip>
-										{/if}
+											</div>
+											<HgIconToggleOn
+												class="w-5 h-5 {piiMaskingEnabled
+													? 'text-hg-blue'
+													: 'text-hg-text-tertiary'}"
+											/>
+										</button>
 
 										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
-											<!-- {$i18n.t('Record voice')} -->
 											<Tooltip content={$i18n.t('Dictate')}>
 												<button
 													id="voice-input-button"
-													class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center mr-0.5"
+													class="text-hg-text-secondary hover:text-hg-text-primary transition rounded-full p-1.5 self-center"
 													type="button"
 													on:click={async () => {
 														try {
@@ -1768,17 +1781,7 @@
 													}}
 													aria-label="Voice Input"
 												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 20 20"
-														fill="currentColor"
-														class="size-5 translate-y-[0.5px]"
-													>
-														<path d="M7 4a3 3 0 016 0v6a3 3 0 11-6 0V4z" />
-														<path
-															d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5h-1.5a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-1.5v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z"
-														/>
-													</svg>
+													<HgIconMic class="w-5 h-5" />
 												</button>
 											</Tooltip>
 										{/if}
@@ -1788,7 +1791,7 @@
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-1.5 self-center"
+														class="bg-hg-blue text-white hover:bg-blue-700 transition rounded-full p-1.5 self-center"
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {
@@ -1842,7 +1845,7 @@
 														}}
 														aria-label={$i18n.t('Voice mode')}
 													>
-														<Voice className="size-5" strokeWidth="2.5" />
+														<HgIconWave class="w-5 h-5" />
 													</button>
 												</Tooltip>
 											</div>
@@ -1852,8 +1855,8 @@
 													<button
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0)
-															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
+															? 'bg-hg-blue text-white hover:bg-blue-700'
+															: 'bg-hg-bg-muted text-hg-text-tertiary disabled'} transition rounded-full p-1.5 self-center"
 														aria-label={$i18n.t('Send message')}
 														type="submit"
 														disabled={prompt === '' && files.length === 0}

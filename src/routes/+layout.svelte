@@ -116,7 +116,6 @@
 		});
 
 		_socket.on('connect', async () => {
-			console.log('connected', _socket.id);
 			const res = await getVersion(localStorage.token);
 
 			const deploymentId = res?.deployment_id ?? null;
@@ -136,7 +135,6 @@
 			// Send heartbeat every 30 seconds
 			heartbeatInterval = setInterval(() => {
 				if (_socket.connected) {
-					console.log('Sending heartbeat');
 					_socket.emit('heartbeat', {});
 				}
 			}, 30000);
@@ -148,8 +146,6 @@
 			if (version !== null) {
 				WEBUI_VERSION.set(version);
 			}
-
-			console.log('version', version);
 
 			if (localStorage.getItem('token')) {
 				// Emit user-join event with auth token
