@@ -1123,7 +1123,7 @@
 
 						<div
 							id="message-input-container"
-							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface dark:bg-gray-850 shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] dark:shadow-none text-hg-text-primary transition px-1 {$temporaryChatEnabled
+							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface dark:bg-gray-850 shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] dark:shadow-none text-hg-text-primary dark:text-gray-100 transition px-1 {$temporaryChatEnabled
 								? 'border-dashed border-hg-border dark:border-gray-700'
 								: 'border-hg-border dark:border-transparent'}"
 							dir={$settings?.chatDirection ?? 'auto'}
