@@ -24,10 +24,10 @@
 	{#each promptChips as chip}
 		<button
 			type="button"
-			class="inline-flex items-center gap-2 h-8 px-4 bg-white border border-hg-border rounded-full font-hg-body text-xs text-hg-text-secondary hover:border-hg-blue hover:text-hg-text-primary transition-colors"
+			class="inline-flex items-center gap-2 h-8 px-4 bg-white dark:bg-gray-900 border border-hg-border dark:border-gray-700 rounded-full font-hg-body text-xs text-hg-text-secondary dark:text-gray-400 hover:border-hg-blue hover:text-hg-text-primary dark:hover:text-gray-100 transition-colors"
 			on:click={() => onSelect ? onSelect({ type: 'prompt', data: chip.label }) : dispatch('open')}
 		>
-			<span class="hidden sm:contents"><svelte:component this={chip.icon} class="text-hg-text-primary" /></span>
+			<span class="hidden sm:contents"><svelte:component this={chip.icon} class="text-hg-text-primary dark:text-gray-400" /></span>
 			{chip.label}
 		</button>
 	{/each}
