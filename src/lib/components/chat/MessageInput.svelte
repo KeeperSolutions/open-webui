@@ -1123,9 +1123,9 @@
 
 						<div
 							id="message-input-container"
-							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] text-hg-text-primary transition px-1 {$temporaryChatEnabled
-								? 'border-dashed border-hg-border'
-								: 'border-hg-border'}"
+							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface dark:bg-gray-850 shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] dark:shadow-none text-hg-text-primary dark:text-gray-100 transition px-1 {$temporaryChatEnabled
+								? 'border-dashed border-hg-border dark:border-gray-700'
+								: 'border-hg-border dark:border-transparent'}"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
@@ -1502,19 +1502,19 @@
 									>
 										<div
 											id="input-menu-button"
-											class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 										>
 											<HgIconPlus class="w-5 h-5" />
 										</div>
 									</InputMenu>
 
-									<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border"></div>
+									<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"></div>
 
 									<Tooltip content={$i18n.t('Settings')} placement="top">
 										<button
 											type="button"
 											id="settings-button"
-											class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 											on:click={() => showControls.update((v) => !v)}
 										>
 											<HgIconSettings class="w-5 h-5" />
@@ -1550,7 +1550,7 @@
 										>
 											<div
 												id="integration-menu-button"
-												class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 											>
 												<Component className="size-4.5" strokeWidth="1.5" />
 											</div>
@@ -1705,7 +1705,7 @@
 									{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating}
 										<Tooltip content={$i18n.t('Stop')}>
 											<button
-												class="bg-hg-bg-surface hover:bg-hg-bg-muted text-hg-text-primary border border-hg-border transition rounded-full p-1.5"
+												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
 												aria-label={$i18n.t('Stop')}
 												on:click={() => {
 													stopResponse();
@@ -1729,20 +1729,20 @@
 										<!-- PII Masking toggle (stub) -->
 										<button
 											type="button"
-											class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted transition"
+											class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
 											on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
 											aria-label="Toggle PII Masking"
 										>
 											<div class="flex items-center gap-1">
-												<HgIconShield class="w-4 h-4 text-hg-text-primary" />
-												<span class="hidden sm:inline font-hg-body text-sm text-hg-text-primary"
+												<HgIconShield class="w-4 h-4 text-hg-text-primary dark:text-gray-400" />
+												<span class="hidden sm:inline font-hg-body text-sm text-hg-text-primary dark:text-gray-400"
 													>PII Masking</span
 												>
 											</div>
 											<HgIconToggleOn
 												class="w-5 h-5 {piiMaskingEnabled
-													? 'text-hg-blue'
-													: 'text-hg-text-tertiary'}"
+													? 'text-hg-blue dark:text-white'
+													: 'text-hg-text-tertiary dark:text-gray-600'}"
 											/>
 										</button>
 
@@ -1750,7 +1750,7 @@
 											<Tooltip content={$i18n.t('Dictate')}>
 												<button
 													id="voice-input-button"
-													class="text-hg-text-secondary hover:text-hg-text-primary transition rounded-full p-1.5 self-center"
+													class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
 													type="button"
 													on:click={async () => {
 														try {
@@ -1790,7 +1790,7 @@
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-														class="bg-hg-blue text-white hover:bg-blue-700 transition rounded-full p-1.5 self-center"
+														class="bg-hg-blue dark:bg-gray-700 text-white dark:text-gray-100 hover:bg-blue-700 dark:hover:bg-gray-600 transition rounded-full p-1.5 self-center"
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {

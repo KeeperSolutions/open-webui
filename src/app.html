@@ -135,6 +135,13 @@
 						id="logo-hubgate"
 						style="width: auto; height: 3rem"
 						src="/hubgate/hubgate-logo.svg"
+						alt="Hubgate logo"
+					/>
+					<img
+						id="logo-hubgate-dark"
+						style="width: auto; height: 3rem"
+						src="/hubgate/hubgate-logo-dark.svg"
+						alt="Hubgate logo"
 					/>
 				</div>
 
@@ -218,6 +225,18 @@
 				width: 0%;
 				left: 100%;
 			}
+		}
+
+		#logo-hubgate-dark {
+			display: none;
+		}
+
+		html.dark #logo-hubgate {
+			display: none;
+		}
+
+		html.dark #logo-hubgate-dark {
+			display: block;
 		}
 
 		html.dark #progress-background {
