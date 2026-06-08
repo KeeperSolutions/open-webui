@@ -164,7 +164,9 @@
 
 	$: if (chatIdProp) {
 		navigateHandler();
-	} else {
+	}
+
+	$: if (!chatIdProp) {
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
 	}
 

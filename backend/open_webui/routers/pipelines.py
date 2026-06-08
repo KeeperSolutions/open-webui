@@ -128,7 +128,8 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             # Per-request override from features.pii_masking takes precedence over the
             # stored user setting, allowing the per-chat toggle to control masking without
             # writing back to the DB.
-            request_pii = payload.get("features", {}).get("pii_masking")
+            features = payload.get("features")
+            request_pii = features.get("pii_masking") if isinstance(features, dict) else None
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
 

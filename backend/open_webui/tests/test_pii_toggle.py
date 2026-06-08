@@ -237,6 +237,32 @@ class TestPerRequestOverride:
         # "true" string is not bool — stored value must be preserved
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is False
 
+    def test_null_features_does_not_raise(self):
+        captured = []
+        payload = {"model": "gpt-4", "features": None}
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        # features=null must not raise; stored value is preserved
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
+    def test_non_dict_features_does_not_raise(self):
+        captured = []
+        payload = {"model": "gpt-4", "features": ["pii_masking"]}
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        # features as a list must not raise; stored value is preserved
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
 
 # ---------------------------------------------------------------------------
 # Multiple filters — override applies independently to each

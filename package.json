@@ -20,7 +20,7 @@
 		"cy:open": "cypress open",
 		"test:frontend": "vitest run --passWithNoTests --reporter=verbose",
 		"pyodide:fetch": "node scripts/prepare-pyodide.js",
-		"test": "npm run test"
+		"test": "npm run test:frontend"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "3.2.2",
