@@ -53,11 +53,11 @@
 				const metaThemeColorTag = document.querySelector('meta[name="theme-color"]');
 				const prefersDarkTheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-				if (localStorage?.token) {
-					if (!localStorage?.theme) {
-						localStorage.theme = 'system';
-					}
+				if (!localStorage?.theme) {
+					localStorage.theme = 'system';
+				}
 
+				if (localStorage?.token) {
 					if (localStorage.theme === 'system') {
 						document.documentElement.classList.add(prefersDarkTheme ? 'dark' : 'light');
 						metaThemeColorTag.setAttribute('content', prefersDarkTheme ? '#171717' : '#ffffff');
@@ -79,7 +79,8 @@
 						metaThemeColorTag.setAttribute('content', '#171717');
 					}
 
-					window.matchMedia('(prefers-color-scheme: dark)').addListener((e) => {
+					const darkMql = window.matchMedia('(prefers-color-scheme: dark)');
+					const onDarkChange = (e) => {
 						if (localStorage.theme === 'system') {
 							if (e.matches) {
 								document.documentElement.classList.add('dark');
@@ -91,7 +92,12 @@
 								metaThemeColorTag.setAttribute('content', '#ffffff');
 							}
 						}
-					});
+					};
+					if (darkMql.addEventListener) {
+						darkMql.addEventListener('change', onDarkChange);
+					} else {
+						darkMql.addListener(onDarkChange);
+					}
 				} else {
 					document.documentElement.classList.add('light');
 					metaThemeColorTag.setAttribute('content', '#ffffff');

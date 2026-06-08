@@ -12,8 +12,30 @@ const applyThemeFromLocalStorage = () => {
 	const isDark = theme === 'dark' || theme === 'oled-dark' || (theme === 'system' && prefersDark);
 
 	const html = document.documentElement;
+
+	if (theme === 'oled-dark') {
+		html.style.setProperty('--color-gray-800', '#101010');
+		html.style.setProperty('--color-gray-850', '#050505');
+		html.style.setProperty('--color-gray-900', '#000000');
+		html.style.setProperty('--color-gray-950', '#000000');
+	} else {
+		html.style.removeProperty('--color-gray-800');
+		html.style.removeProperty('--color-gray-850');
+		html.style.removeProperty('--color-gray-900');
+		html.style.removeProperty('--color-gray-950');
+	}
+
 	html.classList.remove('light', 'dark', 'her');
 	html.classList.add(isDark ? 'dark' : theme === 'her' ? 'her' : 'light');
+
+	const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+	if (metaThemeColor) {
+		const color =
+			theme === 'oled-dark' ? '#000000' :
+			theme === 'her' ? '#983724' :
+			isDark ? '#171717' : '#ffffff';
+		metaThemeColor.setAttribute('content', color);
+	}
 };
 
 export const handleAuthSuccess = async (sessionUser: SessionUser & { token?: string }) => {
