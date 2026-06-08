@@ -1243,7 +1243,7 @@ async def _handle_stripe_event(event_type: str, data):
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
         raw_meta = getattr(data, "metadata", None)
-        metadata = dict(raw_meta) if raw_meta else {}
+        metadata = dict(getattr(raw_meta, "_data", {})) if raw_meta else {}
 
         # Check if this is a team top-up (one-time payment)
         if metadata.get("type") == "team_topup":
