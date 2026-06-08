@@ -734,6 +734,19 @@
 				} else {
 					settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
 				}
+
+				const savedTheme = $settings?.theme ?? localStorage.theme ?? 'system';
+				localStorage.theme = savedTheme;
+				theme.set(savedTheme);
+				const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+				const isDark =
+					savedTheme === 'dark' ||
+					savedTheme === 'oled-dark' ||
+					(savedTheme === 'system' && prefersDark);
+				document.documentElement.classList.remove('light', 'dark', 'her');
+				document.documentElement.classList.add(
+					isDark ? 'dark' : savedTheme === 'her' ? 'her' : 'light'
+				);
 				setTextScale($settings?.textScale ?? 1);
 
 				// Set up the token expiry check
