@@ -97,6 +97,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
+	import { getPiiMaskingDefault } from '$lib/utils/pii';
 
 	export let chatIdProp = '';
 
@@ -138,6 +139,7 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	let piiMaskingEnabled = getPiiMaskingDefault($settings);
 
 	let showCommands = false;
 
@@ -162,6 +164,8 @@
 
 	$: if (chatIdProp) {
 		navigateHandler();
+	} else {
+		piiMaskingEnabled = getPiiMaskingDefault($settings);
 	}
 
 	const navigateHandler = async () => {
@@ -175,6 +179,7 @@
 		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
+		piiMaskingEnabled = getPiiMaskingDefault($settings);
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -199,6 +204,7 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						piiMaskingEnabled = input.piiMaskingEnabled ?? getPiiMaskingDefault($settings);
 					}
 				} catch (e) {}
 			} else {
@@ -258,6 +264,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
+		piiMaskingEnabled = getPiiMaskingDefault($settings);
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			setDefaults();
@@ -570,6 +577,7 @@
 			webSearchEnabled = false;
 			imageGenerationEnabled = false;
 			codeInterpreterEnabled = false;
+			piiMaskingEnabled = getPiiMaskingDefault($settings);
 
 			try {
 				const input = JSON.parse(storageChatInput);
@@ -582,6 +590,9 @@
 					webSearchEnabled = input.webSearchEnabled;
 					imageGenerationEnabled = input.imageGenerationEnabled;
 					codeInterpreterEnabled = input.codeInterpreterEnabled;
+					// piiMaskingEnabled is intentionally not restored from the new-chat draft —
+					// it always seeds from the user's global setting so toggling PII in one
+					// session doesn't bleed into the next new chat.
 				}
 			} catch (e) {}
 		}
@@ -1767,7 +1778,8 @@
 					$config?.features?.enable_web_search &&
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 						? webSearchEnabled
-						: false
+						: false,
+				pii_masking: piiMaskingEnabled
 			};
 
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
@@ -2498,6 +2510,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									bind:piiMaskingEnabled
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}
@@ -2540,6 +2553,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									bind:piiMaskingEnabled
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}

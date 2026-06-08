@@ -53,11 +53,11 @@
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
-	import { deleteFileById } from '$lib/apis/files';
+
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 
-	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+	import { WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 
 	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
@@ -158,7 +158,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		piiMaskingEnabled
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -295,8 +296,6 @@
 	};
 
 	const replaceVariables = (variables: Record<string, any>) => {
-		console.log('Replacing variables:', variables);
-
 		const chatInput = document.getElementById('chat-input');
 
 		if (chatInput) {
@@ -386,7 +385,7 @@
 	let suggestions = null;
 
 	let showTools = false;
-	let piiMaskingEnabled = true;
+	export let piiMaskingEnabled = true;
 
 	let loaded = false;
 	let recording = false;
@@ -417,8 +416,8 @@
 		return false;
 	}
 
-	let chatInputContainerElement;
-	let chatInputElement;
+	let chatInputContainerElement: HTMLDivElement;
+	let chatInputElement: InstanceType<typeof RichTextInput>;
 
 	let filesInputElement;
 	let commandsElement;

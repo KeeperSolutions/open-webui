@@ -215,6 +215,10 @@ type Settings = {
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 
+	pipelines?: {
+		valves?: Record<string, Record<string, unknown>>;
+	};
+
 	system?: string;
 	seed?: number;
 	temperature?: string;

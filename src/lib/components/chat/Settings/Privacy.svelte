@@ -3,6 +3,7 @@
 	import { settings } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import Switch from '$lib/components/common/Switch.svelte';
+	import { getPiiMaskingDefault } from '$lib/utils/pii';
 
 	// Known PII filter pipeline IDs across deployed instances:
 	//   "pii_filter"           — pii-filter repo (pii_filter.py)
@@ -46,14 +47,7 @@
 	let piiMaskingEnabled = true;
 
 	onMount(() => {
-		const valves = ($settings as any)?.pipelines?.valves ?? {};
-		for (const id of PII_FILTER_IDS) {
-			const v = valves?.[id]?.pii_masking_enabled;
-			if (typeof v === 'boolean') {
-				piiMaskingEnabled = v;
-				return;
-			}
-		}
+		piiMaskingEnabled = getPiiMaskingDefault($settings);
 	});
 </script>
 
