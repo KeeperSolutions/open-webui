@@ -734,6 +734,41 @@
 				} else {
 					settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
 				}
+
+				const savedTheme = $settings?.theme ?? localStorage.theme ?? 'system';
+				localStorage.theme = savedTheme;
+				theme.set(savedTheme);
+				if (window.applyTheme) {
+					window.applyTheme();
+				} else {
+					const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+					const isDark =
+						savedTheme === 'dark' ||
+						savedTheme === 'oled-dark' ||
+						(savedTheme === 'system' && prefersDark);
+					const html = document.documentElement;
+					if (savedTheme === 'oled-dark') {
+						html.style.setProperty('--color-gray-800', '#101010');
+						html.style.setProperty('--color-gray-850', '#050505');
+						html.style.setProperty('--color-gray-900', '#000000');
+						html.style.setProperty('--color-gray-950', '#000000');
+					} else {
+						html.style.removeProperty('--color-gray-800');
+						html.style.removeProperty('--color-gray-850');
+						html.style.removeProperty('--color-gray-900');
+						html.style.removeProperty('--color-gray-950');
+					}
+					html.classList.remove('light', 'dark', 'her');
+					html.classList.add(isDark ? 'dark' : savedTheme === 'her' ? 'her' : 'light');
+					const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+					if (metaThemeColor) {
+						const color =
+							savedTheme === 'oled-dark' ? '#000000' :
+							savedTheme === 'her' ? '#983724' :
+							isDark ? '#171717' : '#ffffff';
+						metaThemeColor.setAttribute('content', color);
+					}
+				}
 				setTextScale($settings?.textScale ?? 1);
 
 				// Set up the token expiry check
