@@ -22,8 +22,8 @@ describe('label and id', () => {
 	});
 
 	it('renders no label element when label prop is empty', () => {
-		renderInput({ name: 'email', type: 'email' });
-		expect(screen.queryByRole('label')).not.toBeInTheDocument();
+		const { container } = renderInput({ name: 'email', type: 'email' });
+		expect(container.querySelector('label')).not.toBeInTheDocument();
 	});
 
 	it('renders caption text when provided', () => {

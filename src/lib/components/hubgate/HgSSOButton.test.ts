@@ -10,7 +10,6 @@ beforeEach(() => vi.clearAllMocks());
 
 describe('click navigation', () => {
 	it('navigates to href when provided', async () => {
-		const assign = vi.fn();
 		Object.defineProperty(window, 'location', {
 			value: { href: '' },
 			writable: true

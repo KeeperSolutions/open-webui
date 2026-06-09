@@ -16,9 +16,6 @@ vi.mock('$lib/data/landing-features', () => ({
 
 const renderCarousel = () => render(HgFeatureCarousel);
 
-const activeTab = () =>
-	screen.getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')!;
-
 const tabAt = (i: number) => screen.getAllByRole('tab')[i];
 
 beforeEach(() => {

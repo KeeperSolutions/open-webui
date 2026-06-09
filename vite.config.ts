@@ -1,5 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
@@ -33,11 +33,5 @@ export default defineConfig({
 		watch: {
 			ignored: ['**/md-docs/**', '**/CLAUDE.md', '**/README.md']
 		}
-	},
-	test: {
-		environment: 'jsdom',
-		setupFiles: ['src/setupTests.ts'],
-		include: ['src/**/*.test.ts'],
-		globals: true
 	}
 });
