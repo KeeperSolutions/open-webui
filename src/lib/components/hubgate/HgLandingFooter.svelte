@@ -1,11 +1,29 @@
+<script lang="ts">
+	import { page } from '$app/stores';
+
+	const links = [
+		{ href: '/pricing', label: 'Pricing' },
+		{ href: '/privacy', label: 'Privacy Policy' },
+		{ href: '/terms', label: 'Terms of use' }
+	];
+</script>
+
 <footer class="bg-hg-bg-surface border-t border-hg-border">
 	<div class="max-w-7xl mx-auto px-8 py-3 sm:relative">
 		<!-- Mobile layout -->
 		<div class="flex flex-col items-center gap-4 sm:hidden">
 			<div class="flex items-center gap-4">
-				<a href="/pricing" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Pricing</a>
-				<a href="/privacy" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Privacy Policy</a>
-				<a href="/terms" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Terms of use</a>
+				{#each links as link}
+					<a
+						href={link.href}
+						class="font-hg-body text-xs transition-colors
+							{$page.url.pathname === link.href
+								? 'text-hg-text-primary font-semibold'
+								: 'text-hg-text-tertiary hover:text-hg-text-secondary'}"
+					>
+						{link.label}
+					</a>
+				{/each}
 			</div>
 			<div class="flex flex-col items-center gap-2">
 				<a href="/landing" aria-label="Hubgate home">
@@ -25,9 +43,17 @@
 			</div>
 
 			<div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-4">
-				<a href="/pricing" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Pricing</a>
-				<a href="/privacy" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Privacy Policy</a>
-				<a href="/terms" class="font-hg-body text-xs text-hg-text-tertiary hover:text-hg-text-secondary transition-colors">Terms of use</a>
+				{#each links as link}
+					<a
+						href={link.href}
+						class="font-hg-body text-xs transition-colors
+							{$page.url.pathname === link.href
+								? 'text-hg-text-primary font-semibold'
+								: 'text-hg-text-tertiary hover:text-hg-text-secondary'}"
+					>
+						{link.label}
+					</a>
+				{/each}
 			</div>
 
 			<span class="font-hg-body text-xs text-hg-text-tertiary">Hosted in EU</span>

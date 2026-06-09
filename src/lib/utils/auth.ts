@@ -51,5 +51,7 @@ export const handleAuthSuccess = async (sessionUser: SessionUser & { token?: str
 	if (sessionUser.token && timezone) {
 		updateUserTimezone(sessionUser.token, timezone);
 	}
-	goto('/chat');
+	const redirect = localStorage.getItem('postLoginRedirect') ?? '/chat';
+	localStorage.removeItem('postLoginRedirect');
+	goto(redirect);
 };
