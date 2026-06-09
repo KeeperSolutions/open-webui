@@ -10,7 +10,7 @@
 </script>
 
 <div
-	class="w-[calc(100%-2rem)] max-w-[740px] bg-white border border-[#e7e5e4] rounded-[24px] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden mb-4 cursor-pointer"
+	class="w-full rounded-t-[24px] mb-0 sm:w-[calc(100%-2rem)] sm:max-w-[740px] sm:rounded-[24px] sm:mb-4 mx-auto bg-white border border-[#e7e5e4] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden cursor-pointer"
 	role="button"
 	tabindex="0"
 	on:click={() => dispatch('open')}

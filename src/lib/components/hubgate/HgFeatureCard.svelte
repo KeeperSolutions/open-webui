@@ -28,11 +28,18 @@
 		</div>
 
 		<div class="relative flex flex-col items-center justify-center h-full gap-4 p-5 py-2 sm:py-5">
-			<svelte:component this={illustration} />
+			<!-- Fixed-height box so every illustration occupies the same vertical space -->
+			<div class="flex items-center justify-center w-full h-[170px]">
+				<div class="w-full flex flex-col items-center gap-[6px]">
+					<svelte:component this={illustration} />
+				</div>
+			</div>
 		</div>
 	</div>
 
-	<div class="flex-1 flex flex-col justify-between p-6 sm:p-8 text-left relative">
+	<div
+		class="flex-1 self-stretch flex flex-col items-start justify-center p-3 sm:p-8 sm:justify-between text-left relative"
+	>
 		<button
 			type="button"
 			class="absolute top-4 right-4 hover:opacity-70 transition-opacity"
@@ -43,7 +50,9 @@
 		</button>
 
 		<div class="flex flex-col gap-2">
-			<h3 class="font-hg-heading font-bold text-[18px] sm:text-[22px] text-hg-text-primary leading-[1.3]">
+			<h3
+				class="font-hg-heading font-bold text-[18px] sm:text-[22px] text-hg-text-primary leading-[1.3] w-9/10"
+			>
 				{title}
 			</h3>
 			<p class="hidden sm:block font-hg-body text-sm text-hg-text-secondary leading-[1.4]">

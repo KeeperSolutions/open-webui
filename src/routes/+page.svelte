@@ -42,7 +42,32 @@
 	<div class="relative flex flex-col flex-1" style="z-index:1">
 		<HgLandingHeader />
 
-		<div class="flex-1 flex flex-col items-center">
+		<!-- Mobile layout (below sm): single screen, input pinned to bottom -->
+		<div class="flex flex-col h-[calc(100dvh-57px)] sm:hidden overflow-hidden">
+			<!-- Top region: hero + carousel, centered; scrolls internally if it overflows -->
+			<div class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center justify-center">
+				<HgHeroSection />
+				<div class="w-full px-3 pb-4 flex justify-center">
+					{#if carouselDismissed}
+						<HgHiddenFeatures on:open={() => (carouselDismissed = false)} />
+					{:else}
+						<HgFeatureCarousel
+							on:open={() => (showModal = true)}
+							on:dismiss={() => (carouselDismissed = true)}
+						/>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Bottom region: chips directly above input, pinned to viewport bottom -->
+			<div class="shrink-0 flex flex-col gap-2">
+				<HgPromptChips on:open={() => (showModal = true)} />
+				<HgInputBar on:open={() => (showModal = true)} />
+			</div>
+		</div>
+
+		<!-- Desktop layout (sm+) — existing order unchanged -->
+		<div class="hidden sm:flex flex-col flex-1 items-center">
 			<div class="flex-1"></div>
 			<HgHeroSection />
 			<HgInputBar on:open={() => (showModal = true)} />
@@ -63,7 +88,9 @@
 			{/if}
 		</div>
 
-		<HgLandingFooter />
+		<div class="hidden sm:block">
+			<HgLandingFooter />
+		</div>
 	</div>
 </div>
 
