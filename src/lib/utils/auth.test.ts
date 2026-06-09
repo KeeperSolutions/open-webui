@@ -54,6 +54,18 @@ describe('handleAuthSuccess — post-login redirect', () => {
 		expect(localStorage.getItem('postLoginRedirect')).toBeNull();
 	});
 
+	it('falls back to /chat for a value not starting with /', async () => {
+		localStorage.setItem('postLoginRedirect', 'https://evil.com');
+		await handleAuthSuccess(sessionUser);
+		expect(navigation.goto).toHaveBeenCalledWith('/chat');
+	});
+
+	it('falls back to /chat for an empty string value', async () => {
+		localStorage.setItem('postLoginRedirect', '');
+		await handleAuthSuccess(sessionUser);
+		expect(navigation.goto).toHaveBeenCalledWith('/chat');
+	});
+
 	it('second call uses its own redirect — key is cleared after first call', async () => {
 		localStorage.setItem('postLoginRedirect', '/billing');
 		await handleAuthSuccess(sessionUser);

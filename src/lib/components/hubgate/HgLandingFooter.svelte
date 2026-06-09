@@ -16,6 +16,7 @@
 				{#each links as link}
 					<a
 						href={link.href}
+						aria-current={$page.url.pathname === link.href ? 'page' : undefined}
 						class="font-hg-body text-xs transition-colors
 							{$page.url.pathname === link.href
 								? 'text-hg-text-primary font-semibold'
@@ -46,6 +47,7 @@
 				{#each links as link}
 					<a
 						href={link.href}
+						aria-current={$page.url.pathname === link.href ? 'page' : undefined}
 						class="font-hg-body text-xs transition-colors
 							{$page.url.pathname === link.href
 								? 'text-hg-text-primary font-semibold'

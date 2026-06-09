@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
 	import { user } from '$lib/stores';
 	import { handleAuthSuccess } from '$lib/utils/auth';
 	import { plans, type PricingPlan } from '$lib/data/pricing-plans';
@@ -22,9 +21,7 @@
 		showModal = true;
 	};
 
-	onMount(() => {
-		if ($user) goto('/chat');
-	});
+	$: if ($user) goto('/chat');
 
 	const onSuccess = async (e: CustomEvent) => {
 		showModal = false;
