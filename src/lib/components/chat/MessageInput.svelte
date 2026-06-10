@@ -90,6 +90,7 @@
 	import HgIconSettings from '$lib/components/icons/HgIconSettings.svelte';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import HgIconToggleOn from '$lib/components/icons/HgIconToggleOn.svelte';
+	import HgIconToggleOff from '$lib/components/icons/HgIconToggleOff.svelte';
 	import HgIconMic from '$lib/components/icons/HgIconMic.svelte';
 	import HgIconWave from '$lib/components/icons/HgIconWave.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
@@ -1729,6 +1730,8 @@
 										<!-- PII Masking toggle (stub) -->
 										<button
 											type="button"
+											role="switch"
+											aria-checked={piiMaskingEnabled}
 											class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
 											on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
 											aria-label="Toggle PII Masking"
@@ -1739,11 +1742,11 @@
 													>PII Masking</span
 												>
 											</div>
-											<HgIconToggleOn
-												class="w-5 h-5 {piiMaskingEnabled
-													? 'text-hg-blue dark:text-white'
-													: 'text-hg-text-tertiary dark:text-gray-600'}"
-											/>
+											{#if piiMaskingEnabled}
+												<HgIconToggleOn class="w-5 h-5 text-hg-blue dark:text-white" />
+											{:else}
+												<HgIconToggleOff class="w-5 h-5 text-hg-text-tertiary dark:text-gray-600" />
+											{/if}
 										</button>
 
 										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}

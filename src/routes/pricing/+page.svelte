@@ -34,59 +34,79 @@
 </svelte:head>
 
 {#if !$user}
-<div class="relative min-h-screen flex flex-col font-hg-body">
-	<img
-		src="/hubgate/hubgate-pixel-pattern.svg"
-		alt=""
-		aria-hidden="true"
-		class="pointer-events-none"
-		style="position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:0"
-	/>
+	<div class="relative min-h-screen flex flex-col font-hg-body">
+		<img
+			src="/hubgate/hubgate-pixel-pattern.svg"
+			alt=""
+			aria-hidden="true"
+			class="pointer-events-none"
+			style="position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:0"
+		/>
 
-	<div class="relative flex flex-col flex-1" style="z-index:1">
-		<HgLandingHeader />
+		<div class="relative flex flex-col flex-1" style="z-index:1">
+			<HgLandingHeader />
 
-		<main class="flex-1 flex flex-col items-center justify-center">
-			<!-- Hero -->
-			<div class="flex flex-col items-center text-center px-8 pt-8 pb-0">
-				<div class="mb-6">
-					<img src="/hubgate/hubgate-logo.svg" alt="Hubgate" width="120" height="24" />
-				</div>
+			<main class="flex-1 flex flex-col items-center justify-center">
+				<!-- Hero -->
+				<div class="flex flex-col items-center text-center px-8 pt-8 pb-0">
+					<div class="mb-6">
+						<img src="/hubgate/hubgate-logo.svg" alt="Hubgate" width="120" height="24" />
+					</div>
 
-				<div class="mb-6 inline-flex items-center gap-1.5 bg-hg-bg-surface border border-hg-text-secondary rounded-[87px] px-4 py-1.5">
-					<HgIconLock class="text-hg-success-600" />
-					<span class="font-hg-body text-xs text-hg-text-secondary">No data used to train AI models</span>
-				</div>
-
-				<h1 class="font-hg-heading font-bold text-[clamp(28px,4vw,44px)] leading-[1.2] text-hg-text-primary mb-4">
-					Start free. <span class="text-hg-orange">Scale securely.</span>
-				</h1>
-
-				<p class="font-hg-body text-base text-hg-text-secondary leading-[1.6] mb-10 max-w-[440px]">
-					Start for free. Scale your AI usage securely with built-in governance and automatic PII masking.
-				</p>
-			</div>
-
-			<!-- Pricing cards: 1-col mobile, 2-col tablet, all-in-one-row desktop -->
-			<div class="px-6 pb-16 w-full flex justify-center">
-				<div id="pricing-cards" class="grid gap-4 grid-cols-1 sm:grid-cols-2" style="--cols: {plans.length}">
-					{#each plans as plan, i}
-						<div
-							class="flex justify-center"
-							class:lone-last-card={plans.length % 2 !== 0 && i === plans.length - 1}
+					<div
+						class="mb-6 inline-flex items-center gap-1.5 bg-hg-bg-surface border border-hg-text-secondary rounded-[87px] px-4 py-1.5"
+					>
+						<HgIconLock class="text-hg-success-600" />
+						<span class="font-hg-body text-xs text-hg-text-secondary"
+							>No data used to train AI models</span
 						>
-							<HgPricingCard {plan} on:cta={() => openModal(plan)} />
-						</div>
-					{/each}
+					</div>
+
+					<h1
+						class="font-hg-heading font-bold text-[clamp(28px,4vw,44px)] leading-[1.2] text-hg-text-primary mb-4"
+					>
+						Start free. <span class="text-hg-orange">Scale securely.</span>
+					</h1>
+
+					<p
+						class="font-hg-body text-base text-hg-text-secondary leading-[1.6] mb-10 max-w-[440px]"
+					>
+						Start for free. Scale your AI usage securely with built-in governance and automatic PII
+						masking.
+					</p>
 				</div>
-			</div>
-		</main>
 
-		<HgLandingFooter />
+				<!-- Pricing cards: 1-col mobile, 2-col tablet, all-in-one-row desktop -->
+				<div class="px-6 pb-4 w-full flex justify-center">
+					<div
+						id="pricing-cards"
+						class="grid gap-4 grid-cols-1 sm:grid-cols-2"
+						style="--cols: {plans.length}"
+					>
+						{#each plans as plan, i}
+							<div
+								class="flex justify-center"
+								class:lone-last-card={plans.length % 2 !== 0 && i === plans.length - 1}
+							>
+								<HgPricingCard {plan} on:cta={() => openModal(plan)} />
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<p
+					class="px-6 pb-16 text-center font-hg-body text-xs font-normal leading-[1.4] text-hg-text-secondary max-w-[440px]"
+				>
+					Credits reset monthly and do not roll over. Queries beyond your allowance require a
+					top-up.
+				</p>
+			</main>
+
+			<HgLandingFooter />
+		</div>
 	</div>
-</div>
 
-<HgAuthModal bind:open={showModal} on:success={onSuccess} />
+	<HgAuthModal bind:open={showModal} on:success={onSuccess} />
 {/if}
 
 <style>

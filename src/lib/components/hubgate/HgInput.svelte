@@ -15,6 +15,22 @@
 	import HgIconMail from '$lib/components/icons/HgIconMail.svelte';
 	import HgIconKey from '$lib/components/icons/HgIconKey.svelte';
 	import HgIconUser from '$lib/components/icons/HgIconUser.svelte';
+	import HgIconEyeOpen from '$lib/components/icons/HgIconEyeOpen.svelte';
+	import HgIconEyeClosed from '$lib/components/icons/HgIconEyeClosed.svelte';
+
+	// Allow hiding the reveal toggle for password fields if ever needed.
+	export let showRevealToggle = true;
+
+	let revealed = false;
+	let inputEl: HTMLInputElement;
+
+	$: isPassword = type === 'password';
+
+	// Svelte forbids a dynamic `type` attribute alongside `bind:value`, so set it
+	// imperatively: password fields become 'text' when revealed.
+	$: if (inputEl) {
+		inputEl.type = isPassword && revealed ? 'text' : type;
+	}
 
 	$: inputId = id || name;
 
@@ -66,6 +82,7 @@
 		{/if}
 
 		<input
+			bind:this={inputEl}
 			{type}
 			{name}
 			id={inputId}
@@ -82,6 +99,23 @@
 				text-hg-text-primary placeholder:text-hg-text-tertiary
 				outline-none disabled:cursor-not-allowed"
 		/>
+
+		{#if isPassword && showRevealToggle}
+			<button
+				type="button"
+				class="shrink-0 text-hg-text-tertiary hover:text-hg-text-primary transition-colors disabled:cursor-not-allowed"
+				aria-label={revealed ? 'Hide password' : 'Show password'}
+				aria-pressed={revealed}
+				{disabled}
+				on:click={() => (revealed = !revealed)}
+			>
+				{#if revealed}
+					<HgIconEyeOpen />
+				{:else}
+					<HgIconEyeClosed />
+				{/if}
+			</button>
+		{/if}
 	</div>
 
 	{#if caption}

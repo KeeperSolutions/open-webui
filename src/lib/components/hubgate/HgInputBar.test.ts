@@ -71,3 +71,27 @@ describe('a11y', () => {
 		expect(screen.getByRole('button')).toHaveAttribute('tabindex', '0');
 	});
 });
+
+// ─── decorative chrome (no nested interactive controls) ───────────────────────
+
+// HgInputBar is a fake teaser input: the whole bar is the only interactive
+// element (opens the auth modal). The PII toggle and action icons are purely
+// decorative — there must be no nested button/switch inside the role=button
+// wrapper (avoids the nested-interactive a11y anti-pattern).
+
+describe('decorative chrome', () => {
+	it('exposes exactly one interactive element (the bar itself)', () => {
+		renderBar();
+		expect(screen.getAllByRole('button')).toHaveLength(1);
+	});
+
+	it('has no nested switch control', () => {
+		renderBar();
+		expect(screen.queryByRole('switch')).toBeNull();
+	});
+
+	it('renders the PII Masking label and shield (decorative)', () => {
+		renderBar();
+		expect(screen.getByText('PII Masking')).toBeInTheDocument();
+	});
+});

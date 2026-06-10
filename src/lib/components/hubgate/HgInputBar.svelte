@@ -43,6 +43,7 @@
 					<HgIconShield class="text-hg-text-primary" />
 					<span class="hidden sm:inline font-hg-body text-sm text-[#1c1917]">PII Masking</span>
 				</div>
+				<!-- Decorative: this is a fake teaser input; the whole bar opens the auth modal. -->
 				<HgIconToggleOn class="text-hg-blue" />
 			</div>
 
