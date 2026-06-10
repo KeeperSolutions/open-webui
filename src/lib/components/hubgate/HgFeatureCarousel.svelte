@@ -46,7 +46,7 @@
 <div
 	role="region"
 	aria-label="Feature slides"
-	class="w-full max-w-[740px] px-8 pb-8"
+	class="w-full max-w-[740px] px-0 sm:px-8 pb-8"
 	on:mouseenter={() => (paused = true)}
 	on:mouseleave={() => (paused = false)}
 	on:touchstart={onTouchStart}

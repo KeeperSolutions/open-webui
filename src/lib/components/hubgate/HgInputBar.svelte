@@ -10,7 +10,7 @@
 </script>
 
 <div
-	class="w-[calc(100%-2rem)] max-w-[740px] bg-white border border-[#e7e5e4] rounded-[24px] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden mb-4 cursor-pointer"
+	class="w-full rounded-t-[24px] mb-0 sm:w-[calc(100%-2rem)] sm:max-w-[740px] sm:rounded-[24px] sm:mb-4 mx-auto bg-white border border-[#e7e5e4] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden cursor-pointer"
 	role="button"
 	tabindex="0"
 	on:click={() => dispatch('open')}
@@ -27,7 +27,7 @@
 		</p>
 	</div>
 
-	<div class="bg-white border-t border-[#f5f5f4] flex items-center justify-between px-2 py-2">
+	<div class="bg-white border-t border-[#f5f5f4] flex items-center justify-between px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:pb-2">
 		<div class="flex items-center">
 			<div class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#f5f5f4] transition-colors">
 				<HgIconPlus class="text-hg-text-primary" />

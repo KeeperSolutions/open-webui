@@ -3,8 +3,8 @@
 	import HgIconLock from '$lib/components/icons/HgIconLock.svelte';
 </script>
 
-<div class="flex flex-col items-center text-center px-8 pt-16 pb-0">
-	<div class="mb-8">
+<div class="flex flex-col items-center text-center px-8 pt-6 sm:pt-16 pb-0">
+	<div class="mb-8 hidden sm:block">
 		<img src="/hubgate/hubgate-logo.svg" alt={$WEBUI_NAME} width="120" height="24" />
 	</div>
 
