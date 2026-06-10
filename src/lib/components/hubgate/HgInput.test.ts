@@ -119,3 +119,60 @@ describe('value and events', () => {
 		expect(onInput).toHaveBeenCalled();
 	});
 });
+
+// ─── password reveal toggle ───────────────────────────────────────────────────
+
+describe('password reveal toggle', () => {
+	const getInput = (container: HTMLElement) => container.querySelector('input')!;
+
+	it('renders a reveal toggle for password fields, hidden by default', () => {
+		renderInput({ name: 'password', type: 'password' });
+		// Default state: password hidden → "Show password" affordance
+		expect(screen.getByRole('button', { name: 'Show password' })).toBeInTheDocument();
+	});
+
+	it('does not render a reveal toggle for non-password fields', () => {
+		renderInput({ name: 'email', type: 'email' });
+		expect(screen.queryByRole('button', { name: /password/i })).toBeNull();
+	});
+
+	it('starts with the input type as password (masked)', () => {
+		const { container } = renderInput({ name: 'password', type: 'password' });
+		expect(getInput(container).type).toBe('password');
+	});
+
+	it('reveals the password (type=text) when the toggle is clicked', async () => {
+		const { container } = renderInput({ name: 'password', type: 'password' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+		expect(getInput(container).type).toBe('text');
+	});
+
+	it('flips the toggle label and aria-pressed when revealed', async () => {
+		renderInput({ name: 'password', type: 'password' });
+		const toggle = screen.getByRole('button', { name: 'Show password' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+		await fireEvent.click(toggle);
+
+		const hideToggle = screen.getByRole('button', { name: 'Hide password' });
+		expect(hideToggle).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('hides the password again on a second click', async () => {
+		const { container } = renderInput({ name: 'password', type: 'password' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+		expect(getInput(container).type).toBe('password');
+	});
+
+	it('preserves the entered value across reveal toggling', async () => {
+		const { container } = renderInput({ name: 'password', type: 'password', value: 's3cret' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+		expect(getInput(container)).toHaveValue('s3cret');
+	});
+
+	it('omits the toggle when showRevealToggle=false', () => {
+		renderInput({ name: 'password', type: 'password', showRevealToggle: false });
+		expect(screen.queryByRole('button', { name: /password/i })).toBeNull();
+	});
+});
