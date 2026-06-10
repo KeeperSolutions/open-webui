@@ -12,18 +12,10 @@
 
 	import { deleteModel, getOllamaVersion, pullModel, unloadModel } from '$lib/apis/ollama';
 
-	import {
-		user,
-		MODEL_DOWNLOAD_POOL,
-		models,
-		mobile,
-		temporaryChatEnabled,
-		settings,
-		config,
-		theme
-	} from '$lib/stores';
+	import { user, MODEL_DOWNLOAD_POOL, models, mobile, settings, config, theme } from '$lib/stores';
+	import type { Model } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
-	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+	import { splitStream } from '$lib/utils';
 	import { resolveTheme } from '$lib/utils/theme';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { getModels } from '$lib/apis';
@@ -62,8 +54,8 @@
 	let show = false;
 	let tags = [];
 
-	let selectedModel = '';
-	$: selectedModel = items.find((item) => item.value === value) ?? '';
+	let selectedModel: (typeof items)[number] | null = null;
+	$: selectedModel = items.find((item) => item.value === value) ?? null;
 
 	$: resolvedTheme = resolveTheme($theme);
 
@@ -81,9 +73,10 @@
 		return spaceIdx === -1 ? '' : label.slice(spaceIdx + 1).trim();
 	})();
 
-	$: isCurrentModelDefault = ($settings?.models?.[0] ?? '') === value;
+	$: isCurrentModelDefault = !!value && ($settings?.models?.[0] ?? '') === value;
 
 	const toggleDefaultModel = async () => {
+		if (!value) return;
 		const newDefault = isCurrentModelDefault ? '' : value;
 		await settings.set({ ...$settings, models: newDefault ? [newDefault] : [] });
 		await updateUserSettings(localStorage.token, { ui: $settings });
@@ -482,10 +475,15 @@
 						loading="lazy"
 					/>
 					<span class="font-hg-body font-semibold text-base truncate">
-						<span class="text-hg-text-primary dark:text-gray-100">{selectedNameHead}</span>{#if selectedNameTail}<span class="text-hg-text-tertiary dark:text-gray-500">{' '}– {selectedNameTail}</span>{/if}
+						<span class="text-hg-text-primary dark:text-gray-100">{selectedNameHead}</span
+						>{#if selectedNameTail}<span class="text-hg-text-tertiary dark:text-gray-500"
+								>{' '}– {selectedNameTail}</span
+							>{/if}
 					</span>
 				{:else}
-					<span class="font-hg-body text-hg-text-tertiary dark:text-gray-400 truncate">{placeholder}</span>
+					<span class="font-hg-body text-hg-text-tertiary dark:text-gray-400 truncate"
+						>{placeholder}</span
+					>
 				{/if}
 			</div>
 			<HgIconChevronRight class="shrink-0 size-5 text-hg-orange dark:text-gray-400 rotate-90" />
@@ -493,7 +491,9 @@
 	</DropdownMenu.Trigger>
 
 	<DropdownMenu.Content
-		class="z-40 {$mobile ? 'w-full' : 'w-[400px]'} max-w-[calc(100vw-1rem)] rounded-2xl bg-white dark:bg-gray-850 dark:text-white border border-hg-border-subtle dark:border-gray-800 shadow-lg outline-hidden overflow-hidden"
+		class="z-40 {$mobile
+			? 'w-full'
+			: 'w-[400px]'} max-w-[calc(100vw-1rem)] rounded-2xl bg-white dark:bg-gray-850 dark:text-white border border-hg-border-subtle dark:border-gray-800 shadow-lg outline-hidden overflow-hidden"
 		transition={flyAndScale}
 		side={$mobile ? 'bottom' : 'bottom-start'}
 		sideOffset={2}
@@ -502,8 +502,13 @@
 		<slot>
 			{#if searchEnabled}
 				<div class="p-3 border-b border-hg-border-subtle dark:border-gray-800">
-					<div class="flex items-center gap-2 h-[44px] px-2 rounded-hg-md border border-hg-border dark:border-gray-700 bg-hg-bg-surface dark:bg-gray-900">
-						<Search className="size-5 shrink-0 text-hg-text-tertiary dark:text-gray-500" strokeWidth="2" />
+					<div
+						class="flex items-center gap-2 h-[44px] px-2 rounded-hg-md border border-hg-border dark:border-gray-700 bg-hg-bg-surface dark:bg-gray-900"
+					>
+						<Search
+							className="size-5 shrink-0 text-hg-text-tertiary dark:text-gray-500"
+							strokeWidth="2"
+						/>
 						<input
 							id="model-search-input"
 							bind:value={searchValue}
@@ -551,7 +556,10 @@
 					<div class="flex gap-1 w-fit whitespace-nowrap" bind:this={tagsContainerElement}>
 						{#if featuredModels.length > 0 && !searchValue}
 							<button
-								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'featured' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+								'featured'
+									? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+									: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 								aria-pressed={selectedConnectionType === 'featured'}
 								on:click={() => {
 									selectedTag = '';
@@ -564,7 +572,10 @@
 
 						{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
 							<button
-								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag === '' && selectedConnectionType === '' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag ===
+									'' && selectedConnectionType === ''
+									? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+									: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 								aria-pressed={selectedTag === '' && selectedConnectionType === ''}
 								on:click={() => {
 									selectedConnectionType = '';
@@ -577,7 +588,10 @@
 
 						{#if items.find((item) => item.model?.connection_type === 'local')}
 							<button
-								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'local' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+								'local'
+									? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+									: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 								aria-pressed={selectedConnectionType === 'local'}
 								on:click={() => {
 									selectedTag = '';
@@ -592,7 +606,10 @@
 						     making this tab redundant noise. Re-enable by removing the `false &&` guard below. -->
 						{#if false && items.find((item) => item.model?.connection_type === 'external')}
 							<button
-								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'external' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+								'external'
+									? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+									: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 								aria-pressed={selectedConnectionType === 'external'}
 								on:click={() => {
 									selectedTag = '';
@@ -605,7 +622,10 @@
 
 						{#if items.find((item) => item.model?.direct)}
 							<button
-								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'direct' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+								'direct'
+									? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+									: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 								aria-pressed={selectedConnectionType === 'direct'}
 								on:click={() => {
 									selectedTag = '';
@@ -619,7 +639,10 @@
 						{#each tags as tag}
 							<Tooltip content={tag}>
 								<button
-									class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag === tag ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+									class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag ===
+									tag
+										? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+										: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
 									aria-pressed={selectedTag === tag}
 									on:click={() => {
 										selectedConnectionType = '';
@@ -773,10 +796,22 @@
 					on:click={toggleDefaultModel}
 					aria-pressed={isCurrentModelDefault}
 				>
-					<div class="mt-0.5 size-4 rounded-[4px] border border-hg-text-tertiary dark:border-gray-500 flex items-center justify-center shrink-0">
+					<div
+						class="mt-0.5 size-4 rounded-[4px] border border-hg-text-tertiary dark:border-gray-500 flex items-center justify-center shrink-0"
+					>
 						{#if isCurrentModelDefault}
-							<svg viewBox="0 0 12 12" class="size-3 text-hg-text-primary dark:text-gray-100" fill="none">
-								<path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+							<svg
+								viewBox="0 0 12 12"
+								class="size-3 text-hg-text-primary dark:text-gray-100"
+								fill="none"
+							>
+								<path
+									d="M2 6l3 3 5-5"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								/>
 							</svg>
 						{/if}
 					</div>
