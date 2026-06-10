@@ -4,9 +4,17 @@
 	import HgIconSettings from '$lib/components/icons/HgIconSettings.svelte';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import HgIconToggleOn from '$lib/components/icons/HgIconToggleOn.svelte';
+	import HgIconToggleOff from '$lib/components/icons/HgIconToggleOff.svelte';
 	import HgIconMic from '$lib/components/icons/HgIconMic.svelte';
 	import HgIconWave from '$lib/components/icons/HgIconWave.svelte';
 	const dispatch = createEventDispatcher();
+
+	let piiMasking = true;
+
+	const togglePii = (e: Event) => {
+		e.stopPropagation();
+		piiMasking = !piiMasking;
+	};
 </script>
 
 <div
@@ -43,7 +51,21 @@
 					<HgIconShield class="text-hg-text-primary" />
 					<span class="hidden sm:inline font-hg-body text-sm text-[#1c1917]">PII Masking</span>
 				</div>
-				<HgIconToggleOn class="text-hg-blue" />
+				<button
+					type="button"
+					role="switch"
+					aria-checked={piiMasking}
+					aria-label="Toggle PII masking"
+					class="flex items-center"
+					on:click={togglePii}
+					on:keydown={(e) => e.stopPropagation()}
+				>
+					{#if piiMasking}
+						<HgIconToggleOn class="text-hg-blue" />
+					{:else}
+						<HgIconToggleOff class="text-hg-text-tertiary" />
+					{/if}
+				</button>
 			</div>
 
 			<div class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#f5f5f4] transition-colors">

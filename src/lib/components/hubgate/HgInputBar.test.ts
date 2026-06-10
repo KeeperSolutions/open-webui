@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 
 import HgInputBar from './HgInputBar.svelte';
 
@@ -69,5 +69,39 @@ describe('a11y', () => {
 	it('root element is keyboard focusable (tabindex=0)', () => {
 		renderBar();
 		expect(screen.getByRole('button')).toHaveAttribute('tabindex', '0');
+	});
+});
+
+// ─── PII masking toggle ───────────────────────────────────────────────────────
+
+describe('PII masking toggle', () => {
+	const getToggle = () => screen.getByRole('switch', { name: /toggle pii masking/i });
+
+	it('defaults to on (aria-checked=true)', () => {
+		renderBar();
+		expect(getToggle()).toHaveAttribute('aria-checked', 'true');
+	});
+
+	it('flips aria-checked to false when clicked', async () => {
+		renderBar();
+		await fireEvent.click(getToggle());
+		expect(getToggle()).toHaveAttribute('aria-checked', 'false');
+	});
+
+	it('toggles back to on after two clicks', async () => {
+		renderBar();
+		await fireEvent.click(getToggle());
+		await fireEvent.click(getToggle());
+		expect(getToggle()).toHaveAttribute('aria-checked', 'true');
+	});
+
+	it('clicking the toggle does not dispatch open (propagation stopped)', async () => {
+		const { container } = renderBar();
+		const onOpen = vi.fn();
+		container.addEventListener('open', onOpen);
+
+		await fireEvent.click(getToggle());
+
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 });
