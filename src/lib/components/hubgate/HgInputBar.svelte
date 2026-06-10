@@ -27,7 +27,7 @@
 		</p>
 	</div>
 
-	<div class="bg-white border-t border-[#f5f5f4] flex items-center justify-between px-2 py-2">
+	<div class="bg-white border-t border-[#f5f5f4] flex items-center justify-between px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:pb-2">
 		<div class="flex items-center">
 			<div class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#f5f5f4] transition-colors">
 				<HgIconPlus class="text-hg-text-primary" />

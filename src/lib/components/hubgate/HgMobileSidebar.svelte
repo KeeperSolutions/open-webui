@@ -30,13 +30,14 @@
 	></button>
 {/if}
 
+<!-- 140px is roughly the width of the Get Started button (the gap left on the right) -->
 <div
-	// 140px is roughly the width of Get started button, not a magic number in calc(100vw-140px)
 	class="fixed top-[57px] left-0 h-[calc(100vh-57px)] w-[calc(100vw-140px)] z-50
 		bg-hg-bg-surface border-r border-hg-border
 		flex flex-col justify-between overflow-hidden
 		transform transition-transform duration-200 ease-in-out sm:hidden
 		{open ? 'translate-x-0' : '-translate-x-full'}"
+	inert={!open}
 	aria-hidden={!open}
 >
 	<div class="flex flex-col items-start gap-6 self-stretch p-3">

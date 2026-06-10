@@ -3,17 +3,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import HgMobileSidebar from './HgMobileSidebar.svelte';
 
+// Mutable pathname the mocked `page` store reads, so each test can control the
+// "current route" before rendering and assert the active-link logic for real.
+let mockPathname = '/';
+
 vi.mock('$app/stores', () => ({
 	page: {
 		subscribe: (fn: (value: { url: { pathname: string } }) => void) => {
-			fn({ url: { pathname: '/' } });
+			fn({ url: { pathname: mockPathname } });
 			return () => {};
 		}
 	}
 }));
 
 describe('HgMobileSidebar', () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockPathname = '/';
+	});
 
 	// ── Visibility ──────────────────────────────────────────────────────────────
 
@@ -96,21 +103,20 @@ describe('HgMobileSidebar', () => {
 		});
 	});
 
-	it('the matching link has aria-current="page" when pathname matches', async () => {
-		// Re-mock page store with /pricing pathname
-		vi.doMock('$app/stores', () => ({
-			page: {
-				subscribe: (fn: (value: { url: { pathname: string } }) => void) => {
-					fn({ url: { pathname: '/pricing' } });
-					return () => {};
-				}
-			}
-		}));
-		const mod = await import('./HgMobileSidebar.svelte?t=' + Date.now());
-		const { container } = render(mod.default, { props: { open: true } });
-		const pricingLink = container.querySelector('a[href="/pricing"]');
-		// Component may or may not hot-reload the mock in the same test run,
-		// so we just verify the link exists and is accessible.
-		expect(pricingLink).not.toBeNull();
+	it('the matching link has aria-current="page" and others do not', () => {
+		mockPathname = '/pricing';
+		render(HgMobileSidebar, { props: { open: true } });
+
+		expect(screen.getByRole('link', { name: 'Pricing' })).toHaveAttribute('aria-current', 'page');
+		expect(screen.getByRole('link', { name: 'Privacy Policy' })).not.toHaveAttribute('aria-current', 'page');
+		expect(screen.getByRole('link', { name: 'Terms of Use' })).not.toHaveAttribute('aria-current', 'page');
+	});
+
+	it('the active link is bold (font-semibold) when pathname matches', () => {
+		mockPathname = '/terms';
+		render(HgMobileSidebar, { props: { open: true } });
+
+		expect(screen.getByRole('link', { name: 'Terms of Use' }).className).toContain('font-semibold');
+		expect(screen.getByRole('link', { name: 'Pricing' }).className).not.toContain('font-semibold');
 	});
 });

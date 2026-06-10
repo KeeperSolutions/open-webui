@@ -51,7 +51,7 @@
 
 		<div class="flex flex-col gap-2">
 			<h3
-				class="font-hg-heading font-bold text-[18px] sm:text-[22px] text-hg-text-primary leading-[1.3] w-9/10"
+				class="font-hg-heading font-bold text-[18px] sm:text-[22px] text-hg-text-primary leading-[1.3] w-[90%]"
 			>
 				{title}
 			</h3>
