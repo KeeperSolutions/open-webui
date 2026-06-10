@@ -19,14 +19,18 @@
 		mobile,
 		temporaryChatEnabled,
 		settings,
-		config
+		config,
+		theme
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+	import { resolveTheme } from '$lib/utils/theme';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { getModels } from '$lib/apis';
 	import { getFeaturedModels } from '$lib/apis/configs';
+	import { updateUserSettings } from '$lib/apis/users';
 
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import HgIconChevronRight from '$lib/components/icons/HgIconChevronRight.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -49,7 +53,6 @@
 		[key: string]: any;
 	}[] = [];
 
-	export let className = 'w-[32rem]';
 	export let triggerClassName = 'text-lg';
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -61,6 +64,30 @@
 
 	let selectedModel = '';
 	$: selectedModel = items.find((item) => item.value === value) ?? '';
+
+	$: resolvedTheme = resolveTheme($theme);
+
+	$: selectedNameHead = (() => {
+		if (!selectedModel) return '';
+		const label = (selectedModel.label ?? '').trim();
+		const spaceIdx = label.indexOf(' ');
+		return spaceIdx === -1 ? label : label.slice(0, spaceIdx);
+	})();
+
+	$: selectedNameTail = (() => {
+		if (!selectedModel) return '';
+		const label = (selectedModel.label ?? '').trim();
+		const spaceIdx = label.indexOf(' ');
+		return spaceIdx === -1 ? '' : label.slice(spaceIdx + 1).trim();
+	})();
+
+	$: isCurrentModelDefault = ($settings?.models?.[0] ?? '') === value;
+
+	const toggleDefaultModel = async () => {
+		const newDefault = isCurrentModelDefault ? '' : value;
+		await settings.set({ ...$settings, models: newDefault ? [newDefault] : [] });
+		await updateUserSettings(localStorage.token, { ui: $settings });
+	};
 
 	let searchValue = '';
 
@@ -76,16 +103,36 @@
 	}[] = [];
 
 	$: availableIds = new Set(
-		items
-			.filter((item) => !(item.model?.info?.meta?.hidden ?? false))
-			.map((item) => item.value)
+		items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).map((item) => item.value)
 	);
 
-	$: featuredModels = rawFeaturedModels.length > 0
-		? [...rawFeaturedModels]
-			.filter((m) => availableIds.has(m.model_id))
-			.sort((a, b) => a.order - b.order)
-		: [];
+	$: featuredModels =
+		rawFeaturedModels.length > 0
+			? [...rawFeaturedModels]
+					.filter((m) => availableIds.has(m.model_id))
+					.sort((a, b) => a.order - b.order)
+			: [];
+
+	// Map a featured entry onto the `item` shape ModelItem consumes, reusing the
+	// real backing model (logo, menu) while overriding the display name/tags with
+	// the curated featured values. Only entries with a backing item are rendered
+	// (featuredModels is already filtered to availableIds), so the lookup is safe.
+	const featuredToItem = (entry: (typeof rawFeaturedModels)[number]) => {
+		const backing = items.find((item) => item.value === entry.model_id);
+		const featuredTags = (entry.tags ?? []).filter(Boolean).map((name) => ({ name }));
+
+		return {
+			...backing,
+			value: entry.model_id,
+			label: entry.featured_name || backing?.label,
+			providerName: entry.provider_name || undefined,
+			model: {
+				...backing?.model,
+				id: entry.model_id,
+				tags: featuredTags.length > 0 ? featuredTags : (backing?.model?.tags ?? [])
+			}
+		};
+	};
 
 	let ollamaVersion = null;
 	let selectedModelIdx = 0;
@@ -400,7 +447,8 @@
 	onOpenChange={async () => {
 		searchValue = '';
 		const isFeaturedSelected = featuredModels.some((m) => m.model_id === value);
-		selectedConnectionType = (isFeaturedSelected || (!value && featuredModels.length > 0)) ? 'featured' : '';
+		selectedConnectionType =
+			isFeaturedSelected || (!value && featuredModels.length > 0) ? 'featured' : '';
 		window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
 		resetView();
 	}}
@@ -414,10 +462,7 @@
 		id="model-selector-{id}-button"
 	>
 		<div
-			class="flex w-full text-left px-0.5 bg-transparent truncate {triggerClassName} justify-between {($settings?.highContrastMode ??
-			false)
-				? 'dark:placeholder-gray-100 placeholder-gray-800'
-				: 'placeholder-gray-400'}"
+			class="flex w-full items-center justify-between gap-2 px-3 py-2 rounded-hg-md border border-hg-border-subtle dark:border-gray-800 bg-transparent text-left truncate {triggerClassName}"
 			role="presentation"
 			on:mouseenter={async () => {
 				models.set(
@@ -428,19 +473,27 @@
 				);
 			}}
 		>
-			{#if selectedModel}
-				{selectedModel.label}
-			{:else}
-				{placeholder}
-			{/if}
-			<ChevronDown className=" self-center ml-2 size-3" strokeWidth="2.5" />
+			<div class="flex items-center gap-2 min-w-0">
+				{#if selectedModel}
+					<img
+						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${selectedModel.value}&theme=${resolvedTheme}&lang=${$i18n.language}`}
+						alt=""
+						class="size-5 rounded-full shrink-0"
+						loading="lazy"
+					/>
+					<span class="font-hg-body font-semibold text-base truncate">
+						<span class="text-hg-text-primary dark:text-gray-100">{selectedNameHead}</span>{#if selectedNameTail}<span class="text-hg-text-tertiary dark:text-gray-500">{' '}– {selectedNameTail}</span>{/if}
+					</span>
+				{:else}
+					<span class="font-hg-body text-hg-text-tertiary dark:text-gray-400 truncate">{placeholder}</span>
+				{/if}
+			</div>
+			<HgIconChevronRight class="shrink-0 size-5 text-hg-orange dark:text-gray-400 rotate-90" />
 		</div>
 	</DropdownMenu.Trigger>
 
 	<DropdownMenu.Content
-		class=" z-40 {$mobile
-			? `w-full`
-			: `${className}`} max-w-[calc(100vw-1rem)] justify-start rounded-2xl  bg-white dark:bg-gray-850 dark:text-white shadow-lg  outline-hidden"
+		class="z-40 {$mobile ? 'w-full' : 'w-[400px]'} max-w-[calc(100vw-1rem)] rounded-2xl bg-white dark:bg-gray-850 dark:text-white border border-hg-border-subtle dark:border-gray-800 shadow-lg outline-hidden overflow-hidden"
 		transition={flyAndScale}
 		side={$mobile ? 'bottom' : 'bottom-start'}
 		sideOffset={2}
@@ -448,189 +501,159 @@
 	>
 		<slot>
 			{#if searchEnabled}
-				<div class="flex items-center gap-2.5 px-4.5 mt-3.5 mb-1.5">
-					<Search className="size-4" strokeWidth="2.5" />
+				<div class="p-3 border-b border-hg-border-subtle dark:border-gray-800">
+					<div class="flex items-center gap-2 h-[44px] px-2 rounded-hg-md border border-hg-border dark:border-gray-700 bg-hg-bg-surface dark:bg-gray-900">
+						<Search className="size-5 shrink-0 text-hg-text-tertiary dark:text-gray-500" strokeWidth="2" />
+						<input
+							id="model-search-input"
+							bind:value={searchValue}
+							class="flex-1 text-sm bg-transparent outline-hidden text-hg-text-primary dark:text-gray-100 placeholder:text-hg-text-tertiary dark:placeholder:text-gray-500"
+							placeholder={searchPlaceholder}
+							autocomplete="off"
+							aria-label={$i18n.t('Search In Models')}
+							on:keydown={(e) => {
+								const isFeatured = selectedConnectionType === 'featured';
+								const activeList = isFeatured ? featuredModels : filteredItems;
+								if (e.code === 'Enter' && activeList.length > 0) {
+									value = isFeatured
+										? featuredModels[selectedModelIdx].model_id
+										: filteredItems[selectedModelIdx].value;
+									show = false;
+									return;
+								} else if (e.code === 'ArrowDown') {
+									e.stopPropagation();
+									selectedModelIdx = Math.min(selectedModelIdx + 1, activeList.length - 1);
+								} else if (e.code === 'ArrowUp') {
+									e.stopPropagation();
+									selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
+								} else {
+									selectedModelIdx = 0;
+								}
 
-					<input
-						id="model-search-input"
-						bind:value={searchValue}
-						class="w-full text-sm bg-transparent outline-hidden"
-						placeholder={searchPlaceholder}
-						autocomplete="off"
-						aria-label={$i18n.t('Search In Models')}
-						on:keydown={(e) => {
-							const isFeatured = selectedConnectionType === 'featured';
-							const activeList = isFeatured ? featuredModels : filteredItems;
-							if (e.code === 'Enter' && activeList.length > 0) {
-								value = isFeatured
-									? featuredModels[selectedModelIdx].model_id
-									: filteredItems[selectedModelIdx].value;
-								show = false;
-								return; // dont need to scroll on selection
-							} else if (e.code === 'ArrowDown') {
-								e.stopPropagation();
-								selectedModelIdx = Math.min(selectedModelIdx + 1, activeList.length - 1);
-							} else if (e.code === 'ArrowUp') {
-								e.stopPropagation();
-								selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
-							} else {
-								// if the user types something, reset to the top selection.
-								selectedModelIdx = 0;
-							}
-
-							const item = document.querySelector(`[data-arrow-selected="true"]`);
-							item?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-						}}
-					/>
+								const item = document.querySelector(`[data-arrow-selected="true"]`);
+								item?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+							}}
+						/>
+					</div>
 				</div>
 			{/if}
 
-			<div class="px-2">
-				{#if tags && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
-					<div
-						class=" flex w-full bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none font-[450] mb-0.5"
-						on:wheel={(e) => {
-							if (e.deltaY !== 0) {
-								e.preventDefault();
-								e.currentTarget.scrollLeft += e.deltaY;
-							}
-						}}
-					>
-						<div
-							class="flex gap-1 w-fit text-center text-sm rounded-full bg-transparent px-1.5 whitespace-nowrap"
-							bind:this={tagsContainerElement}
-						>
-							{#if featuredModels.length > 0 && !searchValue}
-								<button
-									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'featured'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									aria-pressed={selectedConnectionType === 'featured'}
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'featured';
-									}}
-								>
-									{$i18n.t('Featured')}
-								</button>
-							{/if}
+			{#if tags && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
+				<div
+					class="flex gap-1 p-3 border-b border-hg-border-subtle dark:border-gray-800 overflow-x-auto scrollbar-none"
+					on:wheel={(e) => {
+						if (e.deltaY !== 0) {
+							e.preventDefault();
+							e.currentTarget.scrollLeft += e.deltaY;
+						}
+					}}
+				>
+					<div class="flex gap-1 w-fit whitespace-nowrap" bind:this={tagsContainerElement}>
+						{#if featuredModels.length > 0 && !searchValue}
+							<button
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'featured' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								aria-pressed={selectedConnectionType === 'featured'}
+								on:click={() => {
+									selectedTag = '';
+									selectedConnectionType = 'featured';
+								}}
+							>
+								{$i18n.t('Featured')}
+							</button>
+						{/if}
 
-							{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
+						{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
+							<button
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag === '' && selectedConnectionType === '' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								aria-pressed={selectedTag === '' && selectedConnectionType === ''}
+								on:click={() => {
+									selectedConnectionType = '';
+									selectedTag = '';
+								}}
+							>
+								{$i18n.t('All')}
+							</button>
+						{/if}
+
+						{#if items.find((item) => item.model?.connection_type === 'local')}
+							<button
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'local' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								aria-pressed={selectedConnectionType === 'local'}
+								on:click={() => {
+									selectedTag = '';
+									selectedConnectionType = 'local';
+								}}
+							>
+								{$i18n.t('Local')}
+							</button>
+						{/if}
+
+						<!-- External tab hidden intentionally — all OpenAI-compatible models are "external" by default,
+						     making this tab redundant noise. Re-enable by removing the `false &&` guard below. -->
+						{#if false && items.find((item) => item.model?.connection_type === 'external')}
+							<button
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'external' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								aria-pressed={selectedConnectionType === 'external'}
+								on:click={() => {
+									selectedTag = '';
+									selectedConnectionType = 'external';
+								}}
+							>
+								{$i18n.t('External')}
+							</button>
+						{/if}
+
+						{#if items.find((item) => item.model?.direct)}
+							<button
+								class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'direct' ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+								aria-pressed={selectedConnectionType === 'direct'}
+								on:click={() => {
+									selectedTag = '';
+									selectedConnectionType = 'direct';
+								}}
+							>
+								{$i18n.t('Direct')}
+							</button>
+						{/if}
+
+						{#each tags as tag}
+							<Tooltip content={tag}>
 								<button
-									class="min-w-fit outline-none px-1.5 py-0.5 {selectedTag === '' &&
-									selectedConnectionType === ''
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									aria-pressed={selectedTag === '' && selectedConnectionType === ''}
+									class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag === tag ? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+									aria-pressed={selectedTag === tag}
 									on:click={() => {
 										selectedConnectionType = '';
-										selectedTag = '';
+										selectedTag = tag;
 									}}
 								>
-									{$i18n.t('All')}
+									{tag.length > 16 ? `${tag.slice(0, 16)}...` : tag}
 								</button>
-							{/if}
-
-							{#if items.find((item) => item.model?.connection_type === 'local')}
-								<button
-									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'local'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									aria-pressed={selectedConnectionType === 'local'}
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'local';
-									}}
-								>
-									{$i18n.t('Local')}
-								</button>
-							{/if}
-
-							<!-- External tab hidden intentionally — all OpenAI-compatible models are "external" by default,
-							     making this tab redundant noise. Re-enable by removing the `false &&` guard below. -->
-							{#if false && items.find((item) => item.model?.connection_type === 'external')}
-								<button
-									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'external'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									aria-pressed={selectedConnectionType === 'external'}
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'external';
-									}}
-								>
-									{$i18n.t('External')}
-								</button>
-							{/if}
-
-							{#if items.find((item) => item.model?.direct)}
-								<button
-									class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType === 'direct'
-										? ''
-										: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-									aria-pressed={selectedConnectionType === 'direct'}
-									on:click={() => {
-										selectedTag = '';
-										selectedConnectionType = 'direct';
-									}}
-								>
-									{$i18n.t('Direct')}
-								</button>
-							{/if}
-
-							{#each tags as tag}
-								<Tooltip content={tag}>
-									<button
-										class="min-w-fit outline-none px-1.5 py-0.5 {selectedTag === tag
-											? ''
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-										aria-pressed={selectedTag === tag}
-										on:click={() => {
-											selectedConnectionType = '';
-											selectedTag = tag;
-										}}
-									>
-										{tag.length > 16 ? `${tag.slice(0, 16)}...` : tag}
-									</button>
-								</Tooltip>
-							{/each}
-						</div>
+							</Tooltip>
+						{/each}
 					</div>
-				{/if}
+				</div>
+			{/if}
+
+			<div class="px-3 pt-3 pb-2">
+				<p class="text-sm text-hg-text-tertiary dark:text-gray-500">{$i18n.t('AI Models')}</p>
 			</div>
 
-			<div class="px-2.5 max-h-64 overflow-y-auto group relative">
+			<div class="max-h-64 overflow-y-auto group relative">
 				{#if selectedConnectionType === 'featured'}
 					{#each featuredModels as entry, index (entry.model_id)}
-						<button
-							data-arrow-selected={selectedModelIdx === index ? 'true' : undefined}
-							class="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-gray-100 dark:hover:bg-gray-800 {value === entry.model_id ? 'bg-gray-100 dark:bg-gray-800' : ''}"
-							on:click={() => {
+						<ModelItem
+							{selectedModelIdx}
+							item={featuredToItem(entry)}
+							{index}
+							{value}
+							{pinModelHandler}
+							{unloadModelHandler}
+							onClick={() => {
 								value = entry.model_id;
+								selectedModelIdx = index;
 								show = false;
 							}}
-						>
-							<div class="flex-1 min-w-0">
-								<div class="flex items-center justify-between gap-2">
-									<span class="font-semibold text-sm text-gray-800 dark:text-gray-100 truncate">{entry.featured_name}</span>
-									{#if value === entry.model_id}
-										<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-4 shrink-0 text-gray-700 dark:text-gray-300">
-											<path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
-										</svg>
-									{/if}
-								</div>
-								{#if entry.provider_name}
-									<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{entry.provider_name}</div>
-								{/if}
-								{#if entry.tags?.some((t) => t)}
-									<div class="flex flex-wrap gap-1 mt-1.5">
-										{#each entry.tags.filter((t) => t) as tag}
-											<span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{tag}</span>
-										{/each}
-									</div>
-								{/if}
-							</div>
-						</button>
+						/>
 					{:else}
 						<div class="block px-3 py-2 text-sm text-gray-700 dark:text-gray-100">
 							{$i18n.t('No featured models available')}
@@ -744,10 +767,24 @@
 				{/each}
 			</div>
 
-			<div class="mb-2.5"></div>
-
-			<div class="hidden w-[42rem]"></div>
-			<div class="hidden w-[32rem]"></div>
+			<div class="border-t border-hg-border-subtle dark:border-gray-800 p-3">
+				<button
+					class="flex items-start gap-2 w-full text-left"
+					on:click={toggleDefaultModel}
+					aria-pressed={isCurrentModelDefault}
+				>
+					<div class="mt-0.5 size-4 rounded-[4px] border border-hg-text-tertiary dark:border-gray-500 flex items-center justify-center shrink-0">
+						{#if isCurrentModelDefault}
+							<svg viewBox="0 0 12 12" class="size-3 text-hg-text-primary dark:text-gray-100" fill="none">
+								<path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						{/if}
+					</div>
+					<span class="text-sm font-semibold font-hg-body text-hg-text-primary dark:text-gray-100">
+						{$i18n.t('Set as default model')}
+					</span>
+				</button>
+			</div>
 		</slot>
 	</DropdownMenu.Content>
 </DropdownMenu.Root>
