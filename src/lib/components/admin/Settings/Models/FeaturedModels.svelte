@@ -1,6 +1,6 @@
 <script lang="ts">
 import Sortable from 'sortablejs';
-import { getContext, onMount, onDestroy } from 'svelte';
+import { getContext, onMount, onDestroy, tick } from 'svelte';
 import { models } from '$lib/stores';
 import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 import XMark from '$lib/components/icons/XMark.svelte';
@@ -20,18 +20,30 @@ let listElement: HTMLElement;
 let sortable: Sortable | null = null;
 let prevLength = -1;
 
+// Centralized destroy helper: always null after destroy to prevent calling methods on destroyed instances
+const destroySortable = () => {
+	if (sortable) {
+		sortable.destroy();
+		sortable = null;
+	}
+};
+
 // IDs already featured — used to exclude from picker
 $: featuredIds = featuredModels.map((m) => m.model_id);
 $: availableModels = $models.filter((m) => !featuredIds.includes(m.id));
 
-// Re-init sortable only when items are added or removed, not on field edits
+// Re-init sortable only when items are added or removed, not on field edits.
+// Use destroySortable for all nulling. Schedule creation via tick() for safety after DOM updates.
 $: if (featuredModels.length === 0 && prevLength !== 0) {
     prevLength = 0;
-    sortable?.destroy();
-    sortable = null;
+    destroySortable();
 } else if (listElement && featuredModels.length > 0 && featuredModels.length !== prevLength) {
     prevLength = featuredModels.length;
-    initSortable();
+    if (featuredModels.length > 1) {
+        tick().then(initSortable);
+    } else {
+        destroySortable();
+    }
 }
 
 const addModel = () => {
@@ -53,15 +65,14 @@ const addModel = () => {
     selectedModelId = '';
 };
 
-const removeModel = (idx: number) => {
-    const next = featuredModels
-        .filter((_, i) => i !== idx)
-        .map((m, i) => ({ ...m, order: i }));
-    if (next.length === 0) {
-        sortable?.destroy();
-        sortable = null;
-    }
-    featuredModels = next;
+const removeModel = (modelId: string) => {
+	const next = featuredModels
+		.filter((m) => m.model_id !== modelId)
+		.map((m, i) => ({ ...m, order: i }));
+	if (next.length === 0) {
+		destroySortable(); // early, while listElement still in DOM
+	}
+	featuredModels = next;
 };
 
 const reorderModels = (oldIndex: number, newIndex: number) => {
@@ -72,18 +83,18 @@ const reorderModels = (oldIndex: number, newIndex: number) => {
 };
 
 const initSortable = () => {
-    sortable?.destroy();
-    if (listElement && featuredModels.length > 1) {
-        sortable = new Sortable(listElement, {
-            animation: 150,
-            handle: '.featured-drag-handle',
-            onEnd: (evt) => {
-                if (evt.oldIndex !== undefined && evt.newIndex !== undefined) {
-                    reorderModels(evt.oldIndex, evt.newIndex);
-                }
-            }
-        });
-    }
+	destroySortable();
+	if (listElement && featuredModels.length > 1) {
+		sortable = new Sortable(listElement, {
+			animation: 150,
+			handle: '.featured-drag-handle',
+			onEnd: (evt) => {
+				if (evt.oldIndex !== undefined && evt.newIndex !== undefined) {
+					reorderModels(evt.oldIndex, evt.newIndex);
+				}
+			}
+		});
+	}
 };
 
 onMount(() => {
@@ -91,7 +102,7 @@ onMount(() => {
 });
 
 onDestroy(() => {
-    sortable?.destroy();
+	destroySortable();
 });
 </script>
 
@@ -137,7 +148,7 @@ onDestroy(() => {
                             type="button"
                             class="shrink-0 text-gray-400 hover:text-red-500 transition"
                             aria-label={$i18n.t('Remove')}
-                            on:click={() => removeModel(idx)}
+                            on:click={() => removeModel(entry.model_id)}
                         >
                             <XMark className="size-4" />
                         </button>
