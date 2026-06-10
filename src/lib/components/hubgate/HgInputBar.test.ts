@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen } from '@testing-library/svelte';
 
 import HgInputBar from './HgInputBar.svelte';
 
@@ -72,36 +72,26 @@ describe('a11y', () => {
 	});
 });
 
-// ─── PII masking toggle ───────────────────────────────────────────────────────
+// ─── decorative chrome (no nested interactive controls) ───────────────────────
 
-describe('PII masking toggle', () => {
-	const getToggle = () => screen.getByRole('switch', { name: /toggle pii masking/i });
+// HgInputBar is a fake teaser input: the whole bar is the only interactive
+// element (opens the auth modal). The PII toggle and action icons are purely
+// decorative — there must be no nested button/switch inside the role=button
+// wrapper (avoids the nested-interactive a11y anti-pattern).
 
-	it('defaults to on (aria-checked=true)', () => {
+describe('decorative chrome', () => {
+	it('exposes exactly one interactive element (the bar itself)', () => {
 		renderBar();
-		expect(getToggle()).toHaveAttribute('aria-checked', 'true');
+		expect(screen.getAllByRole('button')).toHaveLength(1);
 	});
 
-	it('flips aria-checked to false when clicked', async () => {
+	it('has no nested switch control', () => {
 		renderBar();
-		await fireEvent.click(getToggle());
-		expect(getToggle()).toHaveAttribute('aria-checked', 'false');
+		expect(screen.queryByRole('switch')).toBeNull();
 	});
 
-	it('toggles back to on after two clicks', async () => {
+	it('renders the PII Masking label and shield (decorative)', () => {
 		renderBar();
-		await fireEvent.click(getToggle());
-		await fireEvent.click(getToggle());
-		expect(getToggle()).toHaveAttribute('aria-checked', 'true');
-	});
-
-	it('clicking the toggle does not dispatch open (propagation stopped)', async () => {
-		const { container } = renderBar();
-		const onOpen = vi.fn();
-		container.addEventListener('open', onOpen);
-
-		await fireEvent.click(getToggle());
-
-		expect(onOpen).not.toHaveBeenCalled();
+		expect(screen.getByText('PII Masking')).toBeInTheDocument();
 	});
 });
