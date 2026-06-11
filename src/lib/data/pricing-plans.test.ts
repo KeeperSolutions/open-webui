@@ -24,7 +24,7 @@ describe('pricing plans data integrity', () => {
 	});
 
 	it('Team redirects to /billing after login', () => {
-		const plan = plans.find((p) => p.name === 'Team');
+		const plan = plans.find((p) => p.name === 'Business');
 		expect(plan?.postLoginRedirect).toBe('/billing');
 	});
 });

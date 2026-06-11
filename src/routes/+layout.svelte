@@ -763,9 +763,13 @@
 					const metaThemeColor = document.querySelector('meta[name="theme-color"]');
 					if (metaThemeColor) {
 						const color =
-							savedTheme === 'oled-dark' ? '#000000' :
-							savedTheme === 'her' ? '#983724' :
-							isDark ? '#171717' : '#ffffff';
+							savedTheme === 'oled-dark'
+								? '#000000'
+								: savedTheme === 'her'
+									? '#983724'
+									: isDark
+										? '#171717'
+										: '#ffffff';
 						metaThemeColor.setAttribute('content', color);
 					}
 				}
@@ -897,17 +901,12 @@
 	<link
 		crossorigin="anonymous"
 		rel="icon"
-<<<<<<< HEAD
 		type="image/svg+xml"
 		href={isStaging()
 			? '/favicon-staging.svg'
 			: isDev()
 				? '/favicon-dev.svg'
 				: '/hubgate/hubgate-logomark.svg'}
-=======
-		type={isStaging() || isDev() ? 'image/svg+xml' : 'image/png'}
-		href={isStaging() ? '/favicon-staging.svg' : isDev() ? '/favicon-dev.svg' : WEBUI_BASE_URL + '/static/favicon.png'}
->>>>>>> origin/test-deploy
 	/>
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
