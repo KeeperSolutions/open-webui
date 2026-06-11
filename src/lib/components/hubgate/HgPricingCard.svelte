@@ -42,8 +42,8 @@
 			{/if}
 		</div>
 		{#if plan.seatPrice}
-			<span class="font-hg-body text-sm text-hg-text-tertiary leading-[0.1]">
-				{plan.seatPrice}
+			<span class="font-hg-body text-sm text-hg-text-tertiary leading-[1.4]">
+				+ {plan.currency}{plan.seatPrice} / seat / month
 			</span>
 		{/if}
 	</div>
