@@ -8,12 +8,14 @@
 		'i18n'
 	);
 
-	type PiiItem = { type: string; value: string };
+	type PiiItem = { key: string; type: string; value: string };
 
 	export let detections: { type: string; start: number; end: number }[] = [];
 	export let originalText = '';
 
 	let show = false;
+	let items: PiiItem[] = [];
+	let count = 0;
 
 	// Reconstruct masked values locally from the user's own message text and
 	// dedupe identical (type, value) pairs. Nothing here leaves the browser:
@@ -23,7 +25,10 @@
 			(detections ?? [])
 				.map((d): [string, PiiItem] => {
 					const value = (originalText ?? '').slice(d.start, d.end);
-					return [`${d.type}::${value}`, { type: d.type, value }];
+					// JSON.stringify gives an unambiguous (type, value) key — a plain
+					// `${type}::${value}` join could collide if a value contained "::".
+					const key = JSON.stringify([d.type, value]);
+					return [key, { key, type: d.type, value }];
 				})
 				.filter(([, it]) => it.value !== '')
 		).values()
@@ -55,7 +60,7 @@
 				class="mt-2 p-3 rounded-lg border border-gray-50 dark:border-gray-850 text-sm"
 			>
 				<div class="flex flex-col gap-1.5">
-					{#each items as it (it.type + '::' + it.value)}
+					{#each items as it (it.key)}
 						<div class="flex items-center gap-2 flex-wrap">
 							<span
 								class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"

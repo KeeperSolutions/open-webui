@@ -1637,7 +1637,21 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # carried forward — never `pii_detections`/`pii_reverse_map`/
     # `pii_placeholder_map`, which contain plaintext originals + placeholders.
     pipeline_md = form_data.get("metadata") or {}
-    pii_public = pipeline_md.get("pii_detections_public")
+    # Defense-in-depth: re-whitelist to exactly {type:str, start:int, end:int}
+    # right at the trust boundary (data entering OWUI from the separately
+    # deployed pipeline). Even if the pipeline ever emits extra keys (e.g. a
+    # plaintext `original`) or malformed offsets, nothing beyond {type,start,end}
+    # can reach the socket event or the persisted chat record.
+    pii_public = [
+        {"type": d["type"], "start": d["start"], "end": d["end"]}
+        for d in (pipeline_md.get("pii_detections_public") or [])
+        if isinstance(d, dict)
+        and isinstance(d.get("type"), str)
+        and isinstance(d.get("start"), int)
+        and not isinstance(d.get("start"), bool)
+        and isinstance(d.get("end"), int)
+        and not isinstance(d.get("end"), bool)
+    ]
 
     metadata = {
         **metadata,
@@ -1928,9 +1942,9 @@ async def process_chat_response(
 ):
     async def background_tasks_handler():
         # Keeper PII card bridge: emit the pipeline-provided detection summary
-        # to the frontend and persist a whitelisted [{type,start,end}] list.
-        # Mirrors the follow-ups mechanism. No plaintext PII passes through here:
-        # only `pii_detections_public` (slim, non-reversible) is forwarded.
+        # to the frontend and persist it. The list was already re-whitelisted to
+        # exactly [{type,start,end}] at the trust boundary in process_chat_payload,
+        # so no plaintext PII can pass through here. Mirrors the follow-ups path.
         pii_detections = (metadata or {}).get("pii_detections_public") or []
         if pii_detections:
             await event_emitter(
