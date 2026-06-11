@@ -702,6 +702,7 @@ class TeamMemberResponse(BaseModel):
     email: str
     role: str
     current_month_cost_eur: float = 0.0
+    models_used: list[str] = []
 
 
 class TeamInviteResponse(BaseModel):
@@ -832,6 +833,7 @@ async def get_team_status(user=Depends(get_verified_user)):
     pending_invites = TeamInvites.get_by_team_id(team.id)
 
     cost_by_email: dict[str, float] = {}
+    models_by_email: dict[str, list[str]] = {}
     try:
         from open_webui.langfuse.metrics import get_current_month
 
@@ -840,6 +842,11 @@ async def get_team_status(user=Depends(get_verified_user)):
             email = r.get("user", "")
             if email:
                 cost_by_email[email] = cost_by_email.get(email, 0.0) + r.get("cost", 0.0)
+                model = r.get("model", "")
+                if model:
+                    models = models_by_email.setdefault(email, [])
+                    if model not in models:
+                        models.append(model)
     except Exception:
         pass
 
@@ -858,6 +865,7 @@ async def get_team_status(user=Depends(get_verified_user)):
                 email=u.email,
                 role=m.role,
                 current_month_cost_eur=round(cost, 4),
+                models_used=models_by_email.get(u.email, [])[:3],
             )
         )
 
@@ -1416,3 +1424,37 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
 
     result.sort(key=lambda x: x["current_month_cost_eur"], reverse=True)
     return result
+
+
+@router.get("/model-breakdown")
+async def get_model_breakdown(user=Depends(get_verified_user)):
+    """Per-model cost breakdown for the current user this calendar month."""
+    require_billing_enabled()
+    import datetime
+
+    try:
+        from open_webui.langfuse.metrics import get_current_month
+        rows = get_current_month()
+    except Exception as e:
+        log.warning(f"[billing] model-breakdown fetch error: {e}")
+        return {"models": [], "total": 0.0, "month": ""}
+
+    user_rows = [r for r in rows if r.get("user") == user.email]
+    model_costs: dict[str, float] = {}
+    for r in user_rows:
+        model = r.get("model") or "Unknown"
+        model_costs[model] = model_costs.get(model, 0.0) + r.get("cost", 0.0)
+
+    total = sum(model_costs.values())
+    now = datetime.datetime.utcnow()
+
+    models = sorted(
+        [
+            {"model": m, "cost": round(c, 4), "pct": round(c / total * 100) if total > 0 else 0}
+            for m, c in model_costs.items()
+        ],
+        key=lambda x: x["cost"],
+        reverse=True,
+    )
+
+    return {"models": models, "total": round(total, 4), "month": now.strftime("%B %Y")}
