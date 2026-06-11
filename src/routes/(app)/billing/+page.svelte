@@ -7,51 +7,52 @@
 		createCheckoutSession,
 		getBillingPortalUrl,
 		getTeamPortalUrl,
-		getInvoices,
 		getTopupOptions,
 		createTeamTopup,
 		createTeam,
 		getTeamTiers,
+		getTeamStatus,
+		inviteTeamMember,
+		removeTeamMember,
+		getModelBreakdown,
 		type BillingStatus,
-		type Invoice,
 		type TopupOption,
-		type TeamTier
+		type TeamTier,
+		type TeamStatus,
+		type ModelBreakdown
 	} from '$lib/apis/billing';
-	import TeamManagement from './TeamManagement.svelte';
 
 	const i18n = getContext('i18n');
 
 	let status: BillingStatus | null = null;
-	let invoices: Invoice[] = [];
+	let teamStatus: TeamStatus | null = null;
+	let modelBreakdown: ModelBreakdown | null = null;
 	let loading = true;
+
 	let checkingOut = false;
 	let openingPortal = false;
-	let showTeamManagement = false;
-	let showTopupModal = false;
-	let topupOptions: TopupOption[] = [];
-	let toppingUp = false;
 
+	// Create team modal
 	let showCreateTeam = false;
 	let teamName = '';
 	let selectedSeatCount: number | null = null;
 	let creatingTeam = false;
 	let teamTiers: TeamTier[] = [];
 
-	const STATUS_LABELS: Record<string, string> = {
-		active: 'Active',
-		past_due: 'Past Due',
-		canceled: 'Canceled',
-		incomplete: 'Incomplete',
-		trialing: 'Trial'
-	};
+	// Top-up modal
+	let showTopupModal = false;
+	let topupOptions: TopupOption[] = [];
+	let toppingUp = false;
 
-	const STATUS_COLORS: Record<string, string> = {
-		active: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-		past_due: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-		canceled: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-		incomplete: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
-		trialing: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-	};
+	// Invite modal
+	let showInviteModal = false;
+	let inviteEmail = '';
+	let inviting = false;
+
+	// Member actions
+	let openMenuUserId: string | null = null;
+
+	const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 
 	onMount(async () => {
 		const params = $page.url.searchParams;
@@ -66,16 +67,23 @@
 		}
 
 		try {
-			[status, invoices] = await Promise.all([
-				getBillingStatus(localStorage.token),
-				getInvoices(localStorage.token)
-			]);
+			status = await getBillingStatus(localStorage.token);
+
+			const extras: Promise<any>[] = [];
+
+			if (status?.enabled) {
+				extras.push(getModelBreakdown(localStorage.token).then((d) => (modelBreakdown = d)).catch(() => {}));
+			}
+
 			if (status?.plan_tier === 'team') {
-				topupOptions = await getTopupOptions(localStorage.token).catch(() => []);
+				extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
+				extras.push(getTopupOptions(localStorage.token).then((d) => (topupOptions = d)).catch(() => {}));
 			}
 			if (status?.plan_tier === 'trial' || status?.plan_tier === 'paid') {
-				teamTiers = await getTeamTiers(localStorage.token).catch(() => []);
+				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
 			}
+
+			await Promise.all(extras);
 		} catch (e: any) {
 			toast.error(e?.message ?? 'Failed to load billing info');
 		} finally {
@@ -139,372 +147,476 @@
 		}
 	};
 
-	const formatDate = (ts: number) =>
-		new Date(ts * 1000).toLocaleDateString('default', {
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric'
-		});
+	const handleInvite = async () => {
+		if (!inviteEmail.trim()) return;
+		inviting = true;
+		try {
+			await inviteTeamMember(localStorage.token, inviteEmail.trim());
+			toast.success($i18n.t('Invite sent to {{email}}', { email: inviteEmail.trim() }));
+			inviteEmail = '';
+			showInviteModal = false;
+			teamStatus = await getTeamStatus(localStorage.token);
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to send invite'));
+		} finally {
+			inviting = false;
+		}
+	};
 
-	$: creditPct =
-		status?.plan_tier === 'trial' && status.credit_limit_eur > 0
-			? Math.min(100, (status.credit_used_eur / status.credit_limit_eur) * 100)
+	const handleRemoveMember = async (userId: string, name: string) => {
+		openMenuUserId = null;
+		if (!confirm($i18n.t('Remove {{name}} from the team?', { name }))) return;
+		try {
+			await removeTeamMember(localStorage.token, userId);
+			toast.success($i18n.t('{{name}} removed from team', { name }));
+			teamStatus = await getTeamStatus(localStorage.token);
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to remove member'));
+		}
+	};
+
+	function initials(name: string) {
+		return name
+			.split(' ')
+			.map((w) => w[0])
+			.join('')
+			.slice(0, 2)
+			.toUpperCase();
+	}
+
+	const AVATAR_COLORS = [
+		'bg-blue-500',
+		'bg-purple-500',
+		'bg-green-500',
+		'bg-orange-500',
+		'bg-pink-500',
+		'bg-teal-500'
+	];
+
+	function avatarColor(str: string) {
+		let h = 0;
+		for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xffffffff;
+		return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+	}
+
+	$: trialPct =
+		status?.plan_tier === 'trial' && (status.credit_limit_eur ?? 0) > 0
+			? Math.min(100, ((status.credit_used_eur ?? 0) / status.credit_limit_eur) * 100)
 			: 0;
+
+	$: trialLowBalance = trialPct >= 75;
+
+	$: teamBudgetTotal =
+		(status?.usage_budget_eur ?? 0) + (status?.extra_credit_eur ?? 0);
+	$: teamBudgetPct =
+		teamBudgetTotal > 0
+			? Math.min(100, ((status?.team_month_cost_eur ?? 0) / teamBudgetTotal) * 100)
+			: 0;
+	$: teamLowBalance = teamBudgetPct >= 75;
+
+	$: activeMembers = teamStatus?.members?.length ?? 0;
+	$: avgPerMember =
+		activeMembers > 0 ? (teamStatus?.team_month_cost_eur ?? 0) / activeMembers : 0;
 </script>
 
-<div class="w-full max-w-3xl mx-auto px-4 py-8 space-y-6">
-	<h1 class="text-2xl font-semibold">{$i18n.t('Billing')}</h1>
+<div
+	class="w-full max-w-3xl mx-auto px-4 py-8 space-y-1"
+	on:click={() => (openMenuUserId = null)}
+	role="presentation"
+>
+	<!-- Page header -->
+	<div class="mb-6">
+		<h1 class="text-3xl font-bold tracking-tight">{$i18n.t('Billing & Usage')}</h1>
+		<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+			{$i18n.t('Manage your plan, credits and usage statistics.')}
+		</p>
+	</div>
 
 	{#if loading}
-		<div class="text-sm text-gray-500 dark:text-gray-400 animate-pulse">{$i18n.t('Loading...')}</div>
+		<div class="text-sm text-gray-400 animate-pulse">{$i18n.t('Loading...')}</div>
 
 	{:else if !status?.enabled}
 		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-500 dark:text-gray-400">
 			{$i18n.t('Billing is not enabled on this instance.')}
 		</div>
 
-	{:else if status.plan_tier === 'internal'}
-		<!-- Internal user -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="flex items-center gap-3">
-				<div class="font-medium">{$i18n.t('Internal Plan')}</div>
-				<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
-					{$i18n.t('Internal')}
-				</span>
-			</div>
-			<p class="text-sm text-gray-500 dark:text-gray-400">
-				{$i18n.t('You are on the internal plan. Usage is tracked but not billed.')}
-			</p>
-			<div class="space-y-1">
-				<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('This month usage')}</div>
-				<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(4)}</div>
-			</div>
-		</div>
+	{:else}
+		<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide pb-2">
+			{$i18n.t('Plan & subscription')}
+		</p>
 
-	{:else if status.plan_tier === 'trial'}
-		<!-- Trial user -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="flex items-center justify-between flex-wrap gap-3">
-				<div class="font-medium">{$i18n.t('Trial Plan')}</div>
-				<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-					{$i18n.t('Trial')}
-				</span>
-			</div>
-
-			<p class="text-sm text-gray-500 dark:text-gray-400">
-				{$i18n.t('You have a €{{limit}} trial credit. Upgrade to continue after it runs out.', { limit: status.credit_limit_eur.toFixed(2) })}
-			</p>
-
-			<!-- Credit progress bar -->
-			<div class="space-y-1.5">
-				<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-					<span>{$i18n.t('Credit used')}</span>
-					<span>€{status.credit_used_eur.toFixed(4)} / €{status.credit_limit_eur.toFixed(2)}</span>
-				</div>
-				<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-					<div
-						class="h-2 rounded-full transition-all {creditPct >= 90 ? 'bg-red-500' : creditPct >= 60 ? 'bg-yellow-500' : 'bg-blue-500'}"
-						style="width: {creditPct}%"
-					></div>
-				</div>
-				<div class="text-xs font-medium {status.credit_remaining_eur <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">
-					{#if status.credit_remaining_eur <= 0}
-						{$i18n.t('Credit exhausted — upgrade to continue.')}
-					{:else}
-						€{status.credit_remaining_eur.toFixed(4)} {$i18n.t('remaining')}
-					{/if}
-				</div>
-			</div>
-
-			{#if status.credit_remaining_eur <= 0}
-				<div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-					{$i18n.t('Your trial credit is used up. Upgrade to keep using the service.')}
-				</div>
-			{/if}
-
-			<div class="flex gap-2 flex-wrap">
-				<button
-					on:click={handleCheckout}
-					disabled={checkingOut}
-					class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
-				>
-					{checkingOut ? $i18n.t('Redirecting...') : $i18n.t('Upgrade to €45/month')}
-				</button>
-				{#if teamTiers.length > 0}
-					<button
-						on:click={() => (showCreateTeam = true)}
-						class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-					>
-						{$i18n.t('Start a Team')}
-					</button>
-				{/if}
-			</div>
-		</div>
-
-	{:else if status.plan_tier === 'paid'}
-		<!-- Paid subscriber -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="flex items-center justify-between flex-wrap gap-3">
-				<div class="font-medium">{$i18n.t('Subscription')}</div>
-				{#if status.subscription_status}
-					<span class="text-xs px-2.5 py-1 rounded-full font-medium {STATUS_COLORS[status.subscription_status] ?? STATUS_COLORS.incomplete}">
-						{$i18n.t(STATUS_LABELS[status.subscription_status] ?? status.subscription_status)}
+		<!-- ===== INTERNAL ===== -->
+		{#if status.plan_tier === 'internal'}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+				<div class="flex items-start justify-between gap-4">
+					<div>
+						<h2 class="text-lg font-bold">{$i18n.t('Internal Plan')}</h2>
+						<div class="text-2xl font-bold mt-2">€{status.current_month_cost_eur.toFixed(2)}</div>
+						<div class="text-xs text-gray-400 dark:text-gray-500">{$i18n.t('Used this month')}</div>
+					</div>
+					<span class="mt-1 shrink-0 text-xs px-3 py-1 rounded-full border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 font-medium">
+						{$i18n.t('Internal')}
 					</span>
-				{/if}
+				</div>
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-4">
+					{$i18n.t('Your usage is tracked for internal purposes only. No billing applied to your account. To request a plan change or usage increase, contact your administrator.')}
+				</p>
 			</div>
 
-			<div class="grid grid-cols-2 gap-4 text-sm">
-				<div class="space-y-1">
-					<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('This month usage')}</div>
-					<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(4)}</div>
+		<!-- ===== FREE TRIAL ===== -->
+		{:else if status.plan_tier === 'trial'}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+				<div class="flex items-start justify-between gap-4 flex-wrap">
+					<div>
+						<h2 class="text-lg font-bold">{$i18n.t('Free Trial')}</h2>
+						<div class="flex items-center gap-2 mt-1">
+							<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+								€{status.credit_used_eur.toFixed(2)} {$i18n.t('of')} €{status.credit_limit_eur.toFixed(2)} {$i18n.t('used')}
+							</span>
+							{#if trialLowBalance}
+								<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
+									{$i18n.t('Low balance')}
+								</span>
+							{/if}
+						</div>
+					</div>
+					<div class="flex items-center gap-2 shrink-0">
+						{#if teamTiers.length > 0}
+							<button
+								on:click={() => (showCreateTeam = true)}
+								class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
+							>
+								{$i18n.t('View Plans')}
+							</button>
+						{/if}
+						<button
+							on:click={handleCheckout}
+							disabled={checkingOut}
+							class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium disabled:opacity-50"
+						>
+							{checkingOut ? $i18n.t('Redirecting...') : $i18n.t('Upgrade to Pro')}
+						</button>
+					</div>
 				</div>
-				{#if status.upcoming_invoice_eur !== null}
-					<div class="space-y-1">
-						<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Upcoming invoice')}</div>
-						<div class="font-semibold text-lg">€{status.upcoming_invoice_eur?.toFixed(2)}</div>
+
+				<div class="mt-4 space-y-1.5">
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+						<div
+							class="h-2 rounded-full transition-all {trialLowBalance ? 'bg-red-500' : 'bg-green-500'}"
+							style="width: {trialPct}%"
+						></div>
+					</div>
+				</div>
+
+				<p class="text-sm text-gray-500 dark:text-gray-400 mt-3">
+					{#if status.credit_remaining_eur <= 0}
+						{$i18n.t('Your free exploratory credits are exhausted. Upgrade to continue using Hubgate.')}
+					{:else}
+						{$i18n.t('You have')} <strong>€{status.credit_remaining_eur.toFixed(2)}</strong> {$i18n.t('remaining of your free exploratory credits. Upgrade to continue using Hubgate after your trial ends.')}
+					{/if}
+				</p>
+			</div>
+
+		<!-- ===== PAID ===== -->
+		{:else if status.plan_tier === 'paid'}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+				<div class="flex items-start justify-between gap-4 flex-wrap">
+					<div>
+						<h2 class="text-lg font-bold">{$i18n.t('Pro Plan')}</h2>
+						<div class="flex items-center gap-2 mt-1">
+							<span class="text-sm text-gray-500 dark:text-gray-400">
+								€{status.current_month_cost_eur.toFixed(2)} {$i18n.t('used this month')}
+							</span>
+						</div>
+					</div>
+					<div class="flex items-center gap-2 shrink-0">
+						<button
+							on:click={handlePortal}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
+						>
+							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
+						</button>
+						{#if teamTiers.length > 0}
+							<button
+								on:click={() => (showCreateTeam = true)}
+								class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
+							>
+								{$i18n.t('Start a Team')}
+							</button>
+						{/if}
+					</div>
+				</div>
+
+				{#if status.subscription_status === 'past_due'}
+					<div class="mt-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+						{$i18n.t('Your last payment failed. Please update your payment method to avoid service interruption.')}
 					</div>
 				{/if}
 			</div>
 
-			{#if status.subscription_status === 'past_due'}
-				<div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-					{$i18n.t('Your last payment failed. Please update your payment method to avoid service interruption.')}
-				</div>
-			{/if}
-
-			{#if status.subscription_status === 'canceled'}
-				<div class="rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-					{$i18n.t('Your subscription has been canceled.')}
-				</div>
-				<button
-					on:click={handleCheckout}
-					disabled={checkingOut}
-					class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
-				>
-					{checkingOut ? $i18n.t('Redirecting...') : $i18n.t('Resubscribe')}
-				</button>
-			{:else}
-				<div class="flex gap-2 flex-wrap">
-					<button
-						on:click={handlePortal}
-						disabled={openingPortal}
-						class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition disabled:opacity-50"
-					>
-						{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage payment method')}
-					</button>
-					{#if teamTiers.length > 0}
+		<!-- ===== TEAM OWNER ===== -->
+		{:else if status.plan_tier === 'team'}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+				<div class="flex items-start justify-between gap-4 flex-wrap">
+					<div>
+						<h2 class="text-lg font-bold">{$i18n.t('Team Subscription')}</h2>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+							{$i18n.t("Your team is on a shared usage plan. Each member's activity is tracked individually.")}
+						</p>
+					</div>
+					<div class="flex items-center gap-2 shrink-0">
 						<button
-							on:click={() => (showCreateTeam = true)}
-							class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+							on:click={handleTeamPortal}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
 						>
-							{$i18n.t('Start a Team')}
+							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
+						</button>
+						{#if topupOptions.length > 0}
+							<button
+								on:click={() => (showTopupModal = true)}
+								class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
+							>
+								{$i18n.t('Buy Credits')}
+							</button>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Usage bar -->
+				<div class="mt-4 space-y-1.5">
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+						{#if status.usage_budget_eur}
+							<div
+								class="h-2 rounded-full transition-all {teamLowBalance ? 'bg-red-500' : 'bg-green-500'}"
+								style="width: {teamBudgetPct}%"
+							></div>
+						{:else}
+							<div class="h-2 rounded-full bg-blue-500" style="width: 100%"></div>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Stats row -->
+				<div class="mt-4 grid grid-cols-3 gap-4">
+					<div>
+						<div class="text-xl font-bold">€{(status.team_month_cost_eur ?? 0).toFixed(2)}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Usage this month')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{activeMembers}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Active members')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">€{avgPerMember.toFixed(2)}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Avg per member')}</div>
+					</div>
+				</div>
+
+				{#if status.subscription_status === 'past_due'}
+					<div class="mt-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+						{$i18n.t('Your last payment failed. Please update your payment method to avoid service interruption for your team.')}
+					</div>
+				{/if}
+			</div>
+
+		<!-- ===== TEAM MEMBER ===== -->
+		{:else if status.plan_tier === 'team_member'}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
+				<div class="flex items-start justify-between gap-4 flex-wrap">
+					<div>
+						<h2 class="text-lg font-bold">{status.team_name ?? $i18n.t('Team Plan')}</h2>
+						{#if status.team_owner_name}
+							<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+								{$i18n.t('Managed by {{owner}}', { owner: status.team_owner_name })}
+							</p>
+						{/if}
+					</div>
+				</div>
+
+				{#if status.usage_budget_eur}
+					{@const total = (status.usage_budget_eur ?? 0) + (status.extra_credit_eur ?? 0)}
+					{@const pct = total > 0 ? Math.min(100, (1 - (status.usage_budget_remaining_eur ?? 0) / total) * 100) : 0}
+					<div class="mt-4 space-y-1.5">
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team budget used')}</div>
+						<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+							<div
+								class="h-2 rounded-full transition-all {pct >= 75 ? 'bg-red-500' : 'bg-green-500'}"
+								style="width: {pct}%"
+							></div>
+						</div>
+					</div>
+				{/if}
+
+				<div class="mt-4">
+					<div class="text-xl font-bold">€{status.current_month_cost_eur.toFixed(2)}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
+				</div>
+
+				{#if status.subscription_status === 'past_due' || status.subscription_status === 'canceled'}
+					<div class="mt-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
+						{$i18n.t('Your team subscription has an issue. Please contact your team owner.')}
+					</div>
+				{/if}
+			</div>
+
+		{:else}
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-400">
+				{$i18n.t('Your billing account is being set up. Please refresh in a moment.')}
+			</div>
+		{/if}
+
+		<!-- ===== PER-MODEL BREAKDOWN ===== -->
+		{#if modelBreakdown && modelBreakdown.models.length > 0}
+			<div class="pt-6">
+				<p class="text-xs text-gray-400 dark:text-gray-500 font-medium pb-3">
+					{$i18n.t('Per-Model Cost Breakdown')} &bull; {modelBreakdown.month}
+				</p>
+				<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
+					{#each modelBreakdown.models as m}
+						<div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 last:border-b-0">
+							<span class="text-sm font-medium">{m.model}</span>
+							<div class="flex items-center gap-4">
+								<span class="text-sm font-semibold">€{m.cost.toFixed(2)}</span>
+								<span class="text-xs text-gray-400 dark:text-gray-500 w-8 text-right">{m.pct}%</span>
+							</div>
+						</div>
+					{/each}
+					<div class="flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/50">
+						<span class="text-sm font-medium">{$i18n.t('Total spent')} – {modelBreakdown.month}</span>
+						<span class="text-sm font-bold">€{modelBreakdown.total.toFixed(2)}</span>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- ===== TEAM LEADERBOARD (team owner only) ===== -->
+		{#if status.plan_tier === 'team' && teamStatus}
+			<div class="pt-6">
+				<div class="flex items-center justify-between pb-3">
+					<p class="text-xs text-gray-400 dark:text-gray-500 font-medium">
+						{$i18n.t('Team Usage Leaderboard')} &bull; {currentMonth}
+					</p>
+					{#if (teamStatus.seat_used < teamStatus.seat_limit)}
+						<button
+							on:click|stopPropagation={() => (showInviteModal = true)}
+							class="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+						>
+							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+							</svg>
+							{$i18n.t('Invite Member')}
 						</button>
 					{/if}
 				</div>
-			{/if}
-		</div>
 
-		<!-- Invoice history -->
-		{#if invoices.length > 0}
-			<div class="space-y-2">
-				<div class="font-medium text-sm">{$i18n.t('Invoice history')}</div>
-				<div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+				<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
 					<table class="w-full text-sm">
-						<thead class="bg-gray-50 dark:bg-gray-850 text-gray-500 dark:text-gray-400">
-							<tr>
-								<th class="text-left px-4 py-2 font-medium">{$i18n.t('Date')}</th>
-								<th class="text-right px-4 py-2 font-medium">{$i18n.t('Amount')}</th>
-								<th class="text-left px-4 py-2 font-medium">{$i18n.t('Status')}</th>
-								<th class="px-4 py-2"></th>
+						<thead>
+							<tr class="border-b border-gray-100 dark:border-gray-800">
+								<th class="text-left px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Member')}</th>
+								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Role')}</th>
+								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Status')}</th>
+								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">{$i18n.t('Models Used')}</th>
+								<th class="text-right px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Total spend')}</th>
+								<th class="px-3 py-3"></th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-							{#each invoices as inv}
-								<tr class="hover:bg-gray-50 dark:hover:bg-gray-850 transition">
-									<td class="px-4 py-2">{formatDate(inv.date)}</td>
-									<td class="px-4 py-2 text-right font-medium">€{inv.amount_eur.toFixed(2)}</td>
-									<td class="px-4 py-2">
-										<span class="text-xs px-2 py-0.5 rounded-full {STATUS_COLORS[inv.status] ?? STATUS_COLORS.incomplete}">
-											{$i18n.t(STATUS_LABELS[inv.status] ?? inv.status)}
+						<tbody>
+							{#each teamStatus.members as member}
+								<tr class="border-b border-gray-100 dark:border-gray-800 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
+									<td class="px-5 py-3">
+										<div class="flex items-center gap-2.5">
+											<div class="w-7 h-7 rounded-full {avatarColor(member.name)} flex items-center justify-center text-white text-xs font-semibold shrink-0">
+												{initials(member.name)}
+											</div>
+											<div>
+												<div class="font-medium text-sm leading-tight">{member.name}</div>
+												<div class="text-xs text-gray-400 dark:text-gray-500">{member.email}</div>
+											</div>
+										</div>
+									</td>
+									<td class="px-3 py-3">
+										{#if member.role === 'owner'}
+											<span class="text-xs px-2 py-0.5 rounded-full bg-gray-900 text-white dark:bg-white dark:text-gray-900 font-medium">
+												{$i18n.t('Admin')}
+											</span>
+										{:else}
+											<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 font-medium">
+												{$i18n.t('Member')}
+											</span>
+										{/if}
+									</td>
+									<td class="px-3 py-3">
+										<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-medium">
+											{$i18n.t('Active')}
 										</span>
 									</td>
-									<td class="px-4 py-2 text-right">
-										{#if inv.pdf_url}
-											<a
-												href={inv.pdf_url}
-												target="_blank"
-												rel="noreferrer"
-												class="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+									<td class="px-3 py-3 hidden md:table-cell">
+										<span class="text-xs text-gray-500 dark:text-gray-400">
+											{member.models_used.length > 0 ? member.models_used.join(', ') : '–'}
+										</span>
+									</td>
+									<td class="px-5 py-3 text-right font-semibold">
+										€{member.current_month_cost_eur.toFixed(2)}
+									</td>
+									<td class="px-3 py-3 relative">
+										{#if member.role !== 'owner'}
+											<button
+												on:click|stopPropagation={() => (openMenuUserId = openMenuUserId === member.user_id ? null : member.user_id)}
+												aria-label={$i18n.t('Member actions')}
+												class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400"
 											>
-												{$i18n.t('PDF')}
-											</a>
+												<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+													<circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+												</svg>
+											</button>
+											{#if openMenuUserId === member.user_id}
+												<div class="absolute right-8 top-2 z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg py-1 min-w-[140px]">
+													<button
+														on:click|stopPropagation={() => handleRemoveMember(member.user_id, member.name)}
+														class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+													>
+														{$i18n.t('Delete member')}
+													</button>
+												</div>
+											{/if}
 										{/if}
 									</td>
 								</tr>
 							{/each}
-						</tbody>
-					</table>
-				</div>
-			</div>
-		{/if}
 
-	{:else if status.plan_tier === 'team'}
-		<!-- Team owner -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="flex items-center justify-between flex-wrap gap-3">
-				<div>
-					<div class="font-medium">{status.team_name ?? $i18n.t('Team Plan')}</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-						{status.seat_limit} {$i18n.t('seats')}
-					</div>
-				</div>
-				<div class="flex items-center gap-2">
-					{#if status.subscription_status}
-						<span class="text-xs px-2.5 py-1 rounded-full font-medium {STATUS_COLORS[status.subscription_status] ?? STATUS_COLORS.incomplete}">
-							{$i18n.t(STATUS_LABELS[status.subscription_status] ?? status.subscription_status)}
-						</span>
-					{/if}
-					<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-						{$i18n.t('Team')}
-					</span>
-				</div>
-			</div>
-
-			<!-- Seat usage bar -->
-			{#if status.seat_limit && status.seat_used !== null}
-				<div class="space-y-1">
-					<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-						<span>{$i18n.t('Seats used')}</span>
-						<span>{status.seat_used} / {status.seat_limit}</span>
-					</div>
-					<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-						<div
-							class="h-2 rounded-full bg-orange-500 transition-all"
-							style="width: {Math.min(100, ((status.seat_used ?? 0) / (status.seat_limit ?? 1)) * 100)}%"
-						></div>
-					</div>
-				</div>
-			{/if}
-
-			<!-- Usage budget bar -->
-			{#if status.usage_budget_eur}
-				{@const used = status.team_month_cost_eur ?? 0}
-				{@const total = (status.usage_budget_eur ?? 0) + (status.extra_credit_eur ?? 0)}
-				{@const usedPct = total > 0 ? Math.min(100, (used / total) * 100) : 0}
-				<div class="space-y-1.5">
-					<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-						<span>{$i18n.t('Usage this month')}</span>
-						<span>€{used.toFixed(4)} / €{total.toFixed(2)}</span>
-					</div>
-					<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-						<div
-							class="h-2 rounded-full transition-all {usedPct >= 90 ? 'bg-red-500' : usedPct >= 70 ? 'bg-yellow-500' : 'bg-orange-500'}"
-							style="width: {usedPct}%"
-						></div>
-					</div>
-					<div class="text-xs font-medium {(status.usage_budget_remaining_eur ?? 1) <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">
-						{#if (status.usage_budget_remaining_eur ?? 1) <= 0}
-							{$i18n.t('Budget exhausted — buy more usage to continue.')}
-						{:else}
-							€{(status.usage_budget_remaining_eur ?? 0).toFixed(4)} {$i18n.t('remaining')}
-						{/if}
-					</div>
-					{#if status.extra_credit_eur}
-						<div class="text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('Includes €{{extra}} in purchased credits', { extra: status.extra_credit_eur.toFixed(2) })}
-						</div>
-					{/if}
-				</div>
-
-				{#if (status.usage_budget_remaining_eur ?? 1) <= 0}
-					<div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-						{$i18n.t("Your team's usage budget is exhausted. Buy more credits to restore access.")}
-					</div>
-				{/if}
-			{:else}
-				<div class="grid grid-cols-2 gap-4 text-sm">
-					<div class="space-y-1">
-						<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Team usage this month')}</div>
-						<div class="font-semibold text-lg">€{(status.team_month_cost_eur ?? 0).toFixed(4)}</div>
-					</div>
-					{#if status.upcoming_invoice_eur !== null}
-						<div class="space-y-1">
-							<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Upcoming invoice')}</div>
-							<div class="font-semibold text-lg">€{status.upcoming_invoice_eur?.toFixed(2)}</div>
-						</div>
-					{/if}
-				</div>
-			{/if}
-
-			{#if status.upcoming_invoice_eur !== null && status.usage_budget_eur}
-				<div class="text-sm">
-					<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Upcoming invoice')}</div>
-					<div class="font-semibold">€{status.upcoming_invoice_eur?.toFixed(2)}</div>
-				</div>
-			{/if}
-
-			{#if status.subscription_status === 'past_due'}
-				<div class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-					{$i18n.t('Your last payment failed. Please update your payment method to avoid service interruption for your team.')}
-				</div>
-			{/if}
-
-			<div class="flex gap-2 flex-wrap">
-				<button
-					on:click={() => (showTeamManagement = true)}
-					class="px-4 py-2 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition"
-				>
-					{$i18n.t('Manage Team')}
-				</button>
-				{#if topupOptions.length > 0}
-					<button
-						on:click={() => (showTopupModal = true)}
-						class="px-4 py-2 rounded-lg text-sm bg-orange-600 text-white hover:opacity-80 transition"
-					>
-						{$i18n.t('Buy more usage')}
-					</button>
-				{/if}
-				<button
-					on:click={handleTeamPortal}
-					disabled={openingPortal}
-					class="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition disabled:opacity-50"
-				>
-					{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage billing')}
-				</button>
-			</div>
-		</div>
-
-		<!-- Invoice history for team owner -->
-		{#if invoices.length > 0}
-			<div class="space-y-2">
-				<div class="font-medium text-sm">{$i18n.t('Invoice history')}</div>
-				<div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-					<table class="w-full text-sm">
-						<thead class="bg-gray-50 dark:bg-gray-850 text-gray-500 dark:text-gray-400">
-							<tr>
-								<th class="text-left px-4 py-2 font-medium">{$i18n.t('Date')}</th>
-								<th class="text-right px-4 py-2 font-medium">{$i18n.t('Amount')}</th>
-								<th class="text-left px-4 py-2 font-medium">{$i18n.t('Status')}</th>
-								<th class="px-4 py-2"></th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-							{#each invoices as inv}
-								<tr class="hover:bg-gray-50 dark:hover:bg-gray-850 transition">
-									<td class="px-4 py-2">{formatDate(inv.date)}</td>
-									<td class="px-4 py-2 text-right font-medium">€{inv.amount_eur.toFixed(2)}</td>
-									<td class="px-4 py-2">
-										<span class="text-xs px-2 py-0.5 rounded-full {STATUS_COLORS[inv.status] ?? STATUS_COLORS.incomplete}">
-											{$i18n.t(STATUS_LABELS[inv.status] ?? inv.status)}
+							<!-- Pending invites -->
+							{#each teamStatus.pending_invites as inv}
+								<tr class="border-b border-gray-100 dark:border-gray-800 last:border-b-0 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
+									<td class="px-5 py-3">
+										<div class="flex items-center gap-2.5">
+											<div class="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-400 text-xs font-semibold shrink-0">
+												?
+											</div>
+											<div>
+												<div class="text-sm text-gray-500 dark:text-gray-400">{inv.invited_email}</div>
+											</div>
+										</div>
+									</td>
+									<td class="px-3 py-3">
+										<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 font-medium">
+											{$i18n.t('Member')}
 										</span>
 									</td>
-									<td class="px-4 py-2 text-right">
-										{#if inv.pdf_url}
-											<a href={inv.pdf_url} target="_blank" rel="noreferrer" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-												{$i18n.t('PDF')}
-											</a>
-										{/if}
+									<td class="px-3 py-3">
+										<span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 font-medium">
+											{$i18n.t('Pending')}
+										</span>
 									</td>
+									<td class="px-3 py-3 hidden md:table-cell">
+										<span class="text-xs text-gray-400">–</span>
+									</td>
+									<td class="px-5 py-3 text-right font-semibold text-gray-400">€0.00</td>
+									<td class="px-3 py-3"></td>
 								</tr>
 							{/each}
 						</tbody>
@@ -512,80 +624,24 @@
 				</div>
 			</div>
 		{/if}
-
-	{:else if status.plan_tier === 'team_member'}
-		<!-- Team member -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-			<div class="flex items-center justify-between flex-wrap gap-3">
-				<div>
-					<div class="font-medium">{status.team_name ?? $i18n.t('Team Plan')}</div>
-					{#if status.team_owner_name}
-						<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-							{$i18n.t('Managed by {{owner}}', { owner: status.team_owner_name })}
-						</div>
-					{/if}
-				</div>
-				<span class="text-xs px-2.5 py-1 rounded-full font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-					{$i18n.t('Team')}
-				</span>
-			</div>
-
-			{#if status.subscription_status === 'past_due' || status.subscription_status === 'canceled'}
-				<div class="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
-					{$i18n.t('Your team subscription has an issue. Please contact your team owner.')}
-				</div>
-			{/if}
-
-			<!-- Team budget bar (member view) -->
-			{#if status.usage_budget_eur}
-				{@const total = (status.usage_budget_eur ?? 0) + (status.extra_credit_eur ?? 0)}
-				{@const usedPct = total > 0 ? Math.min(100, (1 - (status.usage_budget_remaining_eur ?? 0) / total) * 100) : 0}
-				<div class="space-y-1.5">
-					<div class="flex justify-between text-xs text-gray-500 dark:text-gray-400">
-						<span>{$i18n.t('Team budget remaining')}</span>
-						<span>€{(status.usage_budget_remaining_eur ?? 0).toFixed(2)} / €{total.toFixed(2)}</span>
-					</div>
-					<div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-						<div
-							class="h-2 rounded-full transition-all {usedPct >= 90 ? 'bg-red-500' : usedPct >= 70 ? 'bg-yellow-500' : 'bg-orange-500'}"
-							style="width: {usedPct}%"
-						></div>
-					</div>
-				</div>
-			{/if}
-
-			<div class="space-y-1">
-				<div class="text-gray-500 dark:text-gray-400 text-xs">{$i18n.t('Your usage this month')}</div>
-				<div class="font-semibold text-lg">€{status.current_month_cost_eur.toFixed(4)}</div>
-			</div>
-		</div>
-
-	{:else}
-		<!-- No billing record yet (unconfigured) -->
-		<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-500 dark:text-gray-400">
-			{$i18n.t('Your billing account is being set up. Please refresh the page in a moment.')}
-		</div>
 	{/if}
 </div>
 
-{#if showTeamManagement}
-	<TeamManagement onClose={() => (showTeamManagement = false)} />
-{/if}
-
-{#if showCreateTeam}
+<!-- ===== INVITE MODAL ===== -->
+{#if showInviteModal}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-		on:click|self={() => (showCreateTeam = false)}
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+		on:click|self={() => (showInviteModal = false)}
 		role="dialog"
 		aria-modal="true"
 	>
-		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-5">
+		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
 			<div class="flex items-center justify-between">
-				<h2 class="font-semibold text-lg">{$i18n.t('Start a Team')}</h2>
+				<h2 class="font-semibold text-base">{$i18n.t('Invite to team')}</h2>
 				<button
-					on:click={() => (showCreateTeam = false)}
-					class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-					aria-label="Close"
+					on:click={() => (showInviteModal = false)}
+					aria-label={$i18n.t('Close')}
+					class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
 				>
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -593,7 +649,58 @@
 				</button>
 			</div>
 
-			<!-- Team name -->
+			<div class="space-y-1.5">
+				<label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="invite-email">{$i18n.t('Email')}</label>
+				<div class="relative">
+					<svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+					</svg>
+					<input
+						id="invite-email"
+						type="email"
+						bind:value={inviteEmail}
+						placeholder="jane@company.com"
+						on:keydown={(e) => e.key === 'Enter' && handleInvite()}
+						class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+					/>
+				</div>
+			</div>
+
+			<button
+				on:click={handleInvite}
+				disabled={inviting || !inviteEmail.trim()}
+				class="w-full py-2.5 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium disabled:opacity-50"
+			>
+				{inviting ? $i18n.t('Sending...') : $i18n.t('Send Invite')}
+			</button>
+			<button
+				on:click={() => (showInviteModal = false)}
+				class="w-full text-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
+			>
+				{$i18n.t('Cancel')}
+			</button>
+		</div>
+	</div>
+{/if}
+
+<!-- ===== CREATE TEAM MODAL ===== -->
+{#if showCreateTeam}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+		on:click|self={() => (showCreateTeam = false)}
+		role="dialog"
+		aria-modal="true"
+	>
+		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-5">
+			<div class="flex items-center justify-between">
+				<h2 class="font-semibold text-base">{$i18n.t('Start a Team')}</h2>
+				<button on:click={() => (showCreateTeam = false)} aria-label={$i18n.t('Close')} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			</div>
+
 			<div class="space-y-1.5">
 				<label class="text-sm font-medium" for="team-name">{$i18n.t('Team name')}</label>
 				<input
@@ -601,11 +708,10 @@
 					type="text"
 					bind:value={teamName}
 					placeholder={$i18n.t('e.g. Acme Corp')}
-					class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+					class="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
 				/>
 			</div>
 
-			<!-- Seat tier selection -->
 			<div class="space-y-1.5">
 				<div class="text-sm font-medium">{$i18n.t('Seat plan')}</div>
 				<div class="space-y-2">
@@ -614,12 +720,10 @@
 							on:click={() => (selectedSeatCount = tier.seat_count)}
 							class="w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition
 								{selectedSeatCount === tier.seat_count
-									? 'border-black dark:border-white bg-gray-50 dark:bg-gray-800'
+									? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
 									: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'}"
 						>
-							<div class="text-left">
-								<div class="font-medium text-sm">{tier.seat_count} {$i18n.t('seats')}</div>
-							</div>
+							<div class="text-sm font-medium">{tier.seat_count} {$i18n.t('seats')}</div>
 							<div class="text-sm font-semibold">€{tier.price_eur.toFixed(0)}/mo</div>
 						</button>
 					{/each}
@@ -629,7 +733,7 @@
 			<button
 				on:click={handleCreateTeam}
 				disabled={creatingTeam || !teamName.trim() || !selectedSeatCount}
-				class="w-full px-4 py-2.5 rounded-lg text-sm bg-black text-white dark:bg-white dark:text-black hover:opacity-80 transition disabled:opacity-50"
+				class="w-full py-2.5 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium disabled:opacity-50"
 			>
 				{creatingTeam ? $i18n.t('Redirecting to checkout...') : $i18n.t('Continue to checkout')}
 			</button>
@@ -637,21 +741,18 @@
 	</div>
 {/if}
 
+<!-- ===== TOP-UP MODAL ===== -->
 {#if showTopupModal}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => (showTopupModal = false)}
 		role="dialog"
 		aria-modal="true"
 	>
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
 			<div class="flex items-center justify-between">
-				<h2 class="font-semibold text-lg">{$i18n.t('Buy more usage')}</h2>
-				<button
-					on:click={() => (showTopupModal = false)}
-					class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-					aria-label="Close"
-				>
+				<h2 class="font-semibold text-base">{$i18n.t('Buy more usage')}</h2>
+				<button on:click={() => (showTopupModal = false)} aria-label={$i18n.t('Close')} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
 					</svg>
@@ -667,13 +768,13 @@
 						disabled={toppingUp}
 						class="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition disabled:opacity-50"
 					>
-						<span class="font-medium">€{opt.amount_eur.toFixed(0)} {$i18n.t('credits')}</span>
+						<span class="font-medium text-sm">€{opt.amount_eur.toFixed(0)} {$i18n.t('credits')}</span>
 						<span class="text-sm text-gray-500 dark:text-gray-400">€{opt.amount_eur.toFixed(2)}</span>
 					</button>
 				{/each}
 			</div>
 			{#if toppingUp}
-				<div class="text-center text-sm text-gray-500 dark:text-gray-400 animate-pulse">{$i18n.t('Redirecting to checkout...')}</div>
+				<div class="text-center text-sm text-gray-400 animate-pulse">{$i18n.t('Redirecting to checkout...')}</div>
 			{/if}
 		</div>
 	</div>

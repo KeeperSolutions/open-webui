@@ -86,6 +86,23 @@ export type AdminBillingRow = {
 export const getAdminBillingSummary = (token: string) =>
 	request<AdminBillingRow[]>(`${base}/admin/summary`, token);
 
+// --- Model breakdown ---
+
+export type ModelBreakdownItem = {
+	model: string;
+	cost: number;
+	pct: number;
+};
+
+export type ModelBreakdown = {
+	models: ModelBreakdownItem[];
+	total: number;
+	month: string;
+};
+
+export const getModelBreakdown = (token: string) =>
+	request<ModelBreakdown>(`${base}/model-breakdown`, token);
+
 // --- Team types ---
 
 export type TeamMember = {
@@ -94,6 +111,7 @@ export type TeamMember = {
 	email: string;
 	role: string;
 	current_month_cost_eur: number;
+	models_used: string[];
 };
 
 export type TeamInvite = {
