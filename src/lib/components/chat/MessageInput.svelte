@@ -1505,7 +1505,7 @@
 											id="input-menu-button"
 											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 										>
-											<HgIconPlus class="w-5 h-5" />
+											<HgIconPlus class="w-5 h-5 text-hg-text-tertiary dark:text-gray-400" />
 										</div>
 									</InputMenu>
 

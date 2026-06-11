@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { models, showSettings, settings, user, mobile, config } from '$lib/stores';
-	import { onMount, tick, getContext } from 'svelte';
+	import { models, settings, user } from '$lib/stores';
+	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Selector from './ModelSelector/Selector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -25,7 +25,7 @@
 		toast.success($i18n.t('Default model updated'));
 	};
 
-	const pinModelHandler = async (modelId) => {
+	const pinModelHandler = async (modelId: string) => {
 		let pinnedModels = $settings?.pinnedModels ?? [];
 
 		if (pinnedModels.includes(modelId)) {
@@ -129,7 +129,7 @@
 
 {#if showSetDefault}
 	<div
-		class="relative text-left mt-[1px] ml-1 text-[0.7rem] text-gray-600 dark:text-gray-400 font-primary"
+		class="relative text-left mt-px ml-1 text-[0.7rem] text-gray-600 dark:text-gray-400 font-primary"
 	>
 		{#if JSON.stringify(selectedModels) === JSON.stringify($settings?.models ?? [])}
 			<span>{$i18n.t('Default model')}</span>
