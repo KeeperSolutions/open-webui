@@ -4,6 +4,7 @@ export type PricingPlan = {
 	currency: '€' | '$' | '£';
 	price: number;
 	priceSuffix?: string;
+	seatPrice?: number;
 	features: string[];
 	ctaLabel: string;
 	isMostPopular?: boolean;
@@ -44,11 +45,12 @@ export const plans: PricingPlan[] = [
 		postLoginRedirect: '/billing'
 	},
 	{
-		name: 'Team',
+		name: 'Business',
 		tagline: 'Govern and scale AI across your organisation',
 		currency: '€',
-		price: 45,
-		priceSuffix: '/ seat/month',
+		price: 79,
+		priceSuffix: '/ workspace',
+		seatPrice: 15,
 		features: [
 			'Centralised team billing',
 			'Team leaderboard & usage analytics',
@@ -57,7 +59,7 @@ export const plans: PricingPlan[] = [
 			'Dedicated admin control centre',
 			'Everything in Premium Plan'
 		],
-		ctaLabel: 'Create a Team',
+		ctaLabel: 'Create a Workspace',
 		note: 'Volume discounts available — contact us',
 		postLoginRedirect: '/billing'
 	}
