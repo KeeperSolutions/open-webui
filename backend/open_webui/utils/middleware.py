@@ -1631,11 +1631,39 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # Remove duplicate files based on their content
         files = list({json.dumps(f, sort_keys=True): f for f in files}.values())
 
+    # Keeper PII card: capture the pipeline-provided detection summary BEFORE
+    # OWUI rebuilds `form_data["metadata"]` (which would otherwise drop it).
+    # Only the slim, non-PII `pii_detections_public` ([{type,start,end}]) is
+    # carried forward — never `pii_detections`/`pii_reverse_map`/
+    # `pii_placeholder_map`, which contain plaintext originals + placeholders.
+    pipeline_md = form_data.get("metadata") or {}
+    # Defense-in-depth: re-whitelist to exactly {type:str, start:int, end:int}
+    # right at the trust boundary (data entering OWUI from the separately
+    # deployed pipeline). Even if the pipeline ever emits extra keys (e.g. a
+    # plaintext `original`) or malformed offsets, nothing beyond {type,start,end}
+    # can reach the socket event or the persisted chat record.
+    pii_public = [
+        {"type": d["type"], "start": d["start"], "end": d["end"]}
+        for d in (pipeline_md.get("pii_detections_public") or [])
+        if isinstance(d, dict)
+        and isinstance(d.get("type"), str)
+        and isinstance(d.get("start"), int)
+        and not isinstance(d.get("start"), bool)
+        and isinstance(d.get("end"), int)
+        and not isinstance(d.get("end"), bool)
+    ]
+
     metadata = {
         **metadata,
         "tool_ids": tool_ids,
         "files": files,
     }
+    if pii_public:
+        metadata["pii_detections_public"] = pii_public
+        log.info(
+            "pii_card bridge: captured %d detection(s) from pipeline metadata",
+            len(pii_public),
+        )
     form_data["metadata"] = metadata
 
     # Server side tools
@@ -1913,6 +1941,29 @@ async def process_chat_response(
     request, response, form_data, user, metadata, model, events, tasks
 ):
     async def background_tasks_handler():
+        # Keeper PII card bridge: emit the pipeline-provided detection summary
+        # to the frontend and persist it. The list was already re-whitelisted to
+        # exactly [{type,start,end}] at the trust boundary in process_chat_payload,
+        # so no plaintext PII can pass through here. Mirrors the follow-ups path.
+        pii_detections = (metadata or {}).get("pii_detections_public") or []
+        if pii_detections:
+            await event_emitter(
+                {
+                    "type": "chat:message:pii",
+                    "data": {"pii_detections": pii_detections},
+                }
+            )
+            if not metadata.get("chat_id", "").startswith("local:"):
+                Chats.upsert_message_to_chat_by_id_and_message_id(
+                    metadata["chat_id"],
+                    metadata["message_id"],
+                    {"piiDetections": pii_detections},
+                )
+            log.info(
+                "pii_card bridge: emitted chat:message:pii with %d detection(s)",
+                len(pii_detections),
+            )
+
         message = None
         messages = []
 

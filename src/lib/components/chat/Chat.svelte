@@ -396,6 +396,10 @@
 					if (autoScroll) {
 						scrollToBottom('smooth');
 					}
+				} else if (type === 'chat:message:pii') {
+					// Keeper PII card: slim [{type,start,end}] only — values are
+					// reconstructed client-side from the user's own message text.
+					message.piiDetections = data.pii_detections;
 				} else if (type === 'chat:message:favorite') {
 					// Update message favorite status
 					message.favorite = data.favorite;
