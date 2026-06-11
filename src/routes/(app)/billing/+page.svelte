@@ -7,7 +7,6 @@
 		createCheckoutSession,
 		getBillingPortalUrl,
 		getTeamPortalUrl,
-		getInvoices,
 		getTopupOptions,
 		createTeamTopup,
 		createTeam,
@@ -17,7 +16,6 @@
 		removeTeamMember,
 		getModelBreakdown,
 		type BillingStatus,
-		type Invoice,
 		type TopupOption,
 		type TeamTier,
 		type TeamStatus,
@@ -27,7 +25,6 @@
 	const i18n = getContext('i18n');
 
 	let status: BillingStatus | null = null;
-	let invoices: Invoice[] = [];
 	let teamStatus: TeamStatus | null = null;
 	let modelBreakdown: ModelBreakdown | null = null;
 	let loading = true;
@@ -70,14 +67,13 @@
 		}
 
 		try {
-			[status, invoices] = await Promise.all([
-				getBillingStatus(localStorage.token),
-				getInvoices(localStorage.token)
-			]);
+			status = await getBillingStatus(localStorage.token);
 
-			const extras: Promise<any>[] = [
-				getModelBreakdown(localStorage.token).then((d) => (modelBreakdown = d)).catch(() => {})
-			];
+			const extras: Promise<any>[] = [];
+
+			if (status?.enabled) {
+				extras.push(getModelBreakdown(localStorage.token).then((d) => (modelBreakdown = d)).catch(() => {}));
+			}
 
 			if (status?.plan_tier === 'team') {
 				extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
@@ -347,7 +343,7 @@
 								on:click={() => (showCreateTeam = true)}
 								class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
 							>
-								{$i18n.t('Upgrade to Pro')}
+								{$i18n.t('Start a Team')}
 							</button>
 						{/if}
 					</div>
@@ -477,7 +473,7 @@
 		{#if modelBreakdown && modelBreakdown.models.length > 0}
 			<div class="pt-6">
 				<p class="text-xs text-gray-400 dark:text-gray-500 font-medium pb-3">
-					{$i18n.t('Per-Model Token Breakdown')} &bull; {modelBreakdown.month}
+					{$i18n.t('Per-Model Cost Breakdown')} &bull; {modelBreakdown.month}
 				</p>
 				<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
 					{#each modelBreakdown.models as m}
@@ -571,6 +567,7 @@
 										{#if member.role !== 'owner'}
 											<button
 												on:click|stopPropagation={() => (openMenuUserId = openMenuUserId === member.user_id ? null : member.user_id)}
+												aria-label={$i18n.t('Member actions')}
 												class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400"
 											>
 												<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -643,6 +640,7 @@
 				<h2 class="font-semibold text-base">{$i18n.t('Invite to team')}</h2>
 				<button
 					on:click={() => (showInviteModal = false)}
+					aria-label={$i18n.t('Close')}
 					class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
 				>
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -666,16 +664,6 @@
 						class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
 					/>
 				</div>
-			</div>
-
-			<div class="space-y-1.5">
-				<label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="invite-role">{$i18n.t('Role')}</label>
-				<select
-					id="invite-role"
-					class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-900"
-				>
-					<option value="member">{$i18n.t('Member')}</option>
-				</select>
 			</div>
 
 			<button
@@ -706,7 +694,7 @@
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-5">
 			<div class="flex items-center justify-between">
 				<h2 class="font-semibold text-base">{$i18n.t('Start a Team')}</h2>
-				<button on:click={() => (showCreateTeam = false)} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+				<button on:click={() => (showCreateTeam = false)} aria-label={$i18n.t('Close')} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
 					</svg>
@@ -764,7 +752,7 @@
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
 			<div class="flex items-center justify-between">
 				<h2 class="font-semibold text-base">{$i18n.t('Buy more usage')}</h2>
-				<button on:click={() => (showTopupModal = false)} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+				<button on:click={() => (showTopupModal = false)} aria-label={$i18n.t('Close')} class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
 					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
 					</svg>

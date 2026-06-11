@@ -845,7 +845,7 @@ async def get_team_status(user=Depends(get_verified_user)):
                 model = r.get("model", "")
                 if model:
                     models = models_by_email.setdefault(email, [])
-                    if model not in models:
+                    if model not in models and len(models) < 3:
                         models.append(model)
     except Exception:
         pass
@@ -865,7 +865,7 @@ async def get_team_status(user=Depends(get_verified_user)):
                 email=u.email,
                 role=m.role,
                 current_month_cost_eur=round(cost, 4),
-                models_used=models_by_email.get(u.email, [])[:3],
+                models_used=models_by_email.get(u.email, []),
             )
         )
 
