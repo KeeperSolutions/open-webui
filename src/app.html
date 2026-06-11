@@ -106,16 +106,22 @@
 
 		%sveltekit.head%
 
-		<!-- Google tag (gtag.js) -->
-		<script async src="https://www.googletagmanager.com/gtag/js?id=G-4MRPG904MH"></script>
+		<!-- Google tag (gtag.js) — production only -->
 		<script>
-			window.dataLayer = window.dataLayer || [];
-			function gtag() {
-				dataLayer.push(arguments);
-			}
-			gtag('js', new Date());
-
-			gtag('config', 'G-4MRPG904MH');
+			(function () {
+				var host = window.location.hostname;
+				var isLocal = host === 'localhost' || host.startsWith('127.');
+				var isStaging = host.indexOf('-staging-') !== -1;
+				if (isLocal || isStaging) return;
+				var s = document.createElement('script');
+				s.async = true;
+				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-4MRPG904MH';
+				document.head.appendChild(s);
+				window.dataLayer = window.dataLayer || [];
+				function gtag() { dataLayer.push(arguments); }
+				gtag('js', new Date());
+				gtag('config', 'G-4MRPG904MH');
+			})();
 		</script>
 	</head>
 
