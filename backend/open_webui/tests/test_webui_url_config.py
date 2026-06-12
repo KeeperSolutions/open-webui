@@ -6,57 +6,43 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from open_webui.config import validate_webui_url
+
 
 # ---------------------------------------------------------------------------
-# Startup validation — test the guard logic directly
+# Startup validation — tests against the real guard in config.py
 # ---------------------------------------------------------------------------
-
-
-def _validate_webui_url(value):
-    """Mirrors the guard in config.py."""
-    if not value or not value.startswith(("http://", "https://")):
-        raise RuntimeError(
-            f"WEBUI_URL must be a valid URL starting with http:// or https:// "
-            f"(e.g. https://example.com). Got: {value!r}"
-        )
-    return value
 
 
 class TestWebuiUrlStartupValidation:
     def test_raises_when_webui_url_missing(self):
         with pytest.raises(RuntimeError) as exc_info:
-            _validate_webui_url(os.environ.get("_MISSING_VAR_"))
+            validate_webui_url(os.environ.get("_MISSING_VAR_"))
         assert "WEBUI_URL" in str(exc_info.value)
 
     def test_raises_when_webui_url_empty_string(self):
         with pytest.raises(RuntimeError) as exc_info:
-            _validate_webui_url("")
+            validate_webui_url("")
         assert "WEBUI_URL" in str(exc_info.value)
 
     def test_raises_when_webui_url_invalid(self):
         for bad in ("lolo", "ftp://example.com", "example.com", "//example.com"):
             with pytest.raises(RuntimeError) as exc_info:
-                _validate_webui_url(bad)
+                validate_webui_url(bad)
             assert bad in str(exc_info.value)
 
     def test_error_message_is_actionable(self):
         with pytest.raises(RuntimeError) as exc_info:
-            _validate_webui_url("lolo")
+            validate_webui_url("lolo")
         msg = str(exc_info.value)
         assert "WEBUI_URL" in msg
         assert "http://" in msg or "https://" in msg
 
     def test_does_not_raise_for_http(self):
-        assert _validate_webui_url("http://localhost:5173") == "http://localhost:5173"
+        assert validate_webui_url("http://localhost:5173") == "http://localhost:5173"
 
     def test_does_not_raise_for_https(self):
-        assert _validate_webui_url("https://example.com") == "https://example.com"
-
-    def test_invalid_url_raises_runtime_error(self):
-        """Guard must reject any value that is not http(s)://."""
-        for bad in (None, "", "lolo", "ftp://x.com", "//x.com"):
-            with pytest.raises(RuntimeError):
-                _validate_webui_url(bad)
+        assert validate_webui_url("https://example.com") == "https://example.com"
 
 
 # ---------------------------------------------------------------------------

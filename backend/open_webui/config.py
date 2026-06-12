@@ -1127,13 +1127,16 @@ TOOL_SERVER_CONNECTIONS = PersistentConfig(
 ####################################
 
 
-_webui_url_env = os.environ.get("WEBUI_URL")
-if not _webui_url_env or not _webui_url_env.startswith(("http://", "https://")):
-    raise RuntimeError(
-        f"WEBUI_URL must be a valid URL starting with http:// or https:// "
-        f"(e.g. https://example.com). Got: {_webui_url_env!r}"
-    )
-WEBUI_URL = _webui_url_env
+def validate_webui_url(value: str) -> str:
+    if not value or not value.startswith(("http://", "https://")):
+        raise RuntimeError(
+            f"WEBUI_URL must be a valid URL starting with http:// or https:// "
+            f"(e.g. https://example.com). Got: {value!r}"
+        )
+    return value
+
+
+WEBUI_URL = validate_webui_url(os.environ.get("WEBUI_URL"))
 
 
 ENABLE_SIGNUP = PersistentConfig(
