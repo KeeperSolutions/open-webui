@@ -149,7 +149,7 @@
 				{#if $config?.oauth?.providers?.google}
 					<HgSSOButton provider="google" href={`${WEBUI_BASE_URL}/oauth/google/login`} />
 				{/if}
-				<!-- Temporary disable Microsoft SSO -->
+				<!-- Temporarily disable Microsoft SSO -->
 				<!-- {#if $config?.oauth?.providers?.microsoft}
 					<HgSSOButton provider="microsoft" href={`${WEBUI_BASE_URL}/oauth/microsoft/login`} />
 				{/if} -->
