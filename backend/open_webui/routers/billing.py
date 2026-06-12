@@ -549,7 +549,7 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
     # Reuse existing Stripe customer if available
     customer_id = record.stripe_customer_id if record else None
 
-    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
 
     def _create_customer() -> str:
         customer = client.v1.customers.create(
@@ -627,7 +627,7 @@ async def billing_portal(request: Request, user=Depends(get_verified_user)):
             detail="No billing account found.",
         )
 
-    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
     try:
         session = client.v1.billing_portal.sessions.create(
             params={
@@ -767,7 +767,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         )
 
     client = get_stripe_client()
-    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
 
     # Create Stripe customer for the team
     try:
@@ -996,7 +996,7 @@ async def team_billing_portal(request: Request, user=Depends(get_verified_user))
         raise HTTPException(status_code=404, detail="No team billing account found.")
 
     client = get_stripe_client()
-    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
     try:
         session = client.v1.billing_portal.sessions.create(
             params={
@@ -1062,7 +1062,7 @@ async def create_team_topup(body: TopupRequest, request: Request, user=Depends(g
         raise HTTPException(status_code=400, detail="Team has no billing account.")
 
     client = get_stripe_client()
-    webui_url = (request.app.state.config.WEBUI_URL or str(request.base_url)).rstrip("/")
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
 
     try:
         session = client.v1.checkout.sessions.create(

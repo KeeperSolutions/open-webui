@@ -2294,12 +2294,12 @@ async def process_chat_response(
                                     await post_webhook(
                                         request.app.state.WEBUI_NAME,
                                         webhook_url,
-                                        f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
+                                        f"{title} - {request.app.state.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
                                         {
                                             "action": "chat",
                                             "message": content,
                                             "title": title,
-                                            "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
+                                            "url": f"{request.app.state.WEBUI_URL}/c/{metadata['chat_id']}",
                                         },
                                     )
 
@@ -3732,12 +3732,12 @@ async def process_chat_response(
                         await post_webhook(
                             request.app.state.WEBUI_NAME,
                             webhook_url,
-                            f"{title} - {request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
+                            f"{title} - {request.app.state.WEBUI_URL}/c/{metadata['chat_id']}\n\n{content}",
                             {
                                 "action": "chat",
                                 "message": content,
                                 "title": title,
-                                "url": f"{request.app.state.config.WEBUI_URL}/c/{metadata['chat_id']}",
+                                "url": f"{request.app.state.WEBUI_URL}/c/{metadata['chat_id']}",
                             },
                         )
 
