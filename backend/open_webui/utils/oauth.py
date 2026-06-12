@@ -348,7 +348,7 @@ async def get_oauth_client_info_with_dynamic_client_registration(
         oauth_server_metadata_url = None
 
         redirect_base_url = (
-            str(request.app.state.config.WEBUI_URL or request.base_url)
+            str(request.app.state.WEBUI_URL or request.base_url)
         ).rstrip("/")
 
         oauth_client_metadata = OAuthClientMetadata(
@@ -908,7 +908,7 @@ class OAuthClientManager:
             )
 
         redirect_url = (
-            str(request.app.state.config.WEBUI_URL or request.base_url)
+            str(request.app.state.WEBUI_URL or request.base_url)
         ).rstrip("/")
 
         if error_message:
@@ -1663,7 +1663,7 @@ class OAuthManager:
             )
 
         redirect_base_url = (
-            str(request.app.state.config.WEBUI_URL or request.base_url)
+            str(request.app.state.WEBUI_URL or request.base_url)
         ).rstrip("/")
         redirect_url = f"{redirect_base_url}/auth"
 

@@ -1133,7 +1133,7 @@ if not _webui_url_env or not _webui_url_env.startswith(("http://", "https://")):
         f"WEBUI_URL must be a valid URL starting with http:// or https:// "
         f"(e.g. https://example.com). Got: {_webui_url_env!r}"
     )
-WEBUI_URL = PersistentConfig("WEBUI_URL", "webui.url", _webui_url_env)
+WEBUI_URL = _webui_url_env
 
 
 ENABLE_SIGNUP = PersistentConfig(

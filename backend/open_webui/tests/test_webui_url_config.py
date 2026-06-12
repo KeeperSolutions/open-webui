@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,6 +10,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Startup validation — test the guard logic directly
 # ---------------------------------------------------------------------------
+
 
 def _validate_webui_url(value):
     """Mirrors the guard in config.py."""
@@ -51,24 +52,21 @@ class TestWebuiUrlStartupValidation:
     def test_does_not_raise_for_https(self):
         assert _validate_webui_url("https://example.com") == "https://example.com"
 
-    def test_config_py_guard_matches_test_logic(self):
-        """The actual guard in config.py must use the same condition."""
-        import inspect
-        import open_webui.config as cfg_module
-
-        source = inspect.getsource(cfg_module)
-        assert "_webui_url_env = os.environ.get(\"WEBUI_URL\")" in source
-        assert "startswith" in source
-        assert "raise RuntimeError" in source
+    def test_invalid_url_raises_runtime_error(self):
+        """Guard must reject any value that is not http(s)://."""
+        for bad in (None, "", "lolo", "ftp://x.com", "//x.com"):
+            with pytest.raises(RuntimeError):
+                _validate_webui_url(bad)
 
 
 # ---------------------------------------------------------------------------
 # Admin config endpoint
 # ---------------------------------------------------------------------------
 
+
 def _make_request(webui_url="https://example.com"):
     request = MagicMock()
-    request.app.state.config.WEBUI_URL = webui_url
+    request.app.state.WEBUI_URL = webui_url
     request.app.state.config.SHOW_ADMIN_DETAILS = True
     request.app.state.config.ADMIN_EMAIL = "admin@example.com"
     request.app.state.config.ENABLE_SIGNUP = True
@@ -95,6 +93,7 @@ def _make_request(webui_url="https://example.com"):
 
 def _make_form_data(webui_url="https://ignored.example.com", **overrides):
     from open_webui.routers.auths import AdminConfig
+
     defaults = dict(
         SHOW_ADMIN_DETAILS=True,
         ADMIN_EMAIL="admin@example.com",
@@ -124,9 +123,7 @@ class TestAdminConfigEndpoint:
         from open_webui.routers.auths import get_admin_config
 
         request = _make_request()
-        result = asyncio.run(
-            get_admin_config(request=request, user=MagicMock())
-        )
+        result = asyncio.run(get_admin_config(request=request, user=MagicMock()))
 
         assert result["WEBUI_URL_ENV_CONTROLLED"] is True
 
@@ -135,9 +132,7 @@ class TestAdminConfigEndpoint:
         from open_webui.routers.auths import get_admin_config
 
         request = _make_request(webui_url="https://my-instance.example.com")
-        result = asyncio.run(
-            get_admin_config(request=request, user=MagicMock())
-        )
+        result = asyncio.run(get_admin_config(request=request, user=MagicMock()))
 
         assert result["WEBUI_URL"] == "https://my-instance.example.com"
 
@@ -153,7 +148,7 @@ class TestAdminConfigEndpoint:
             update_admin_config(request=request, form_data=form_data, user=MagicMock())
         )
 
-        assert request.app.state.config.WEBUI_URL == original_url
+        assert request.app.state.WEBUI_URL == original_url
 
     def test_post_admin_config_still_updates_other_fields(self):
         """POST /admin/config must still update unrelated fields normally."""

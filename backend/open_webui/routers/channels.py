@@ -1263,7 +1263,7 @@ async def post_new_message(
             await model_response_handler(request, channel, message, user)
             await send_notification(
                 request.app.state.WEBUI_NAME,
-                request.app.state.config.WEBUI_URL,
+                request.app.state.WEBUI_URL,
                 channel,
                 message,
                 active_user_ids,
