@@ -1,6 +1,6 @@
 <svg width="1920" height="810" viewBox="0 0 1920 810" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g clip-path="url(#clip0_2157_19509)">
-<rect width="1920" height="810" fill="#111110"/>
+<rect width="1920" height="810" fill="transparent"/>
 <rect x="1475" y="61" width="54" height="54" fill="#151412"/>
 <rect x="1475" y="216" width="54" height="54" fill="#151412"/>
 <rect x="1475" y="270" width="54" height="54" fill="#151412"/>
@@ -225,7 +225,7 @@
 </g>
 <defs>
 <clipPath id="clip0_2157_19509">
-<rect width="1920" height="810" fill="#111110"/>
+<rect width="1920" height="810" fill="transparent"/>
 </clipPath>
 </defs>
 </svg>
