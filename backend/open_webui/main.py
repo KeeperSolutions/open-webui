@@ -431,6 +431,7 @@ from open_webui.config import (
     ENABLE_ADMIN_CHAT_ACCESS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    ENABLE_TRUSTMIDER_FEEDBACK,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -1989,6 +1990,7 @@ async def get_app_config(request: Request):
                     "enable_user_status": app.state.config.ENABLE_USER_STATUS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
+                    "enable_trustmider_feedback": ENABLE_TRUSTMIDER_FEEDBACK,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     "enable_memories": app.state.config.ENABLE_MEMORIES,

@@ -43,6 +43,7 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
+	import TrustmiderFeedback from '$lib/components/TrustmiderFeedback.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
@@ -335,6 +336,10 @@
 			}}
 		/>
 	</div>
+{/if}
+
+{#if $config?.features?.enable_trustmider_feedback && $user}
+	<TrustmiderFeedback />
 {/if}
 
 {#if $user}

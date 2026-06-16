@@ -1639,6 +1639,10 @@ ENABLE_ADMIN_CHAT_ACCESS = (
     os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
 )
 
+ENABLE_TRUSTMIDER_FEEDBACK = (
+    os.environ.get("ENABLE_TRUSTMIDER_FEEDBACK", "").lower() == "true"
+)
+
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     "ENABLE_COMMUNITY_SHARING",
     "ui.enable_community_sharing",
