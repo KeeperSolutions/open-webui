@@ -18,6 +18,7 @@
 		popup.style.opacity = '0';
 		transitionTimeout = setTimeout(() => {
 			popup.style.display = 'none';
+			iframe.src = 'about:blank';
 		}, 300);
 	}
 
@@ -73,7 +74,7 @@
 
 <div
 	bind:this={popup}
-	style="position:fixed; bottom:90px; right:20px; width:400px; height:600px; background:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:9998; display:none; overflow:hidden; transition:all 0.3s ease; transform:scale(0.95); opacity:0;"
+	style="position:fixed; bottom:90px; right:20px; width:400px; max-width:calc(100vw - 40px); height:600px; max-height:calc(100vh - 110px); background:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:9998; display:none; overflow:hidden; transition:all 0.3s ease; transform:scale(0.95); opacity:0;"
 >
 	<button
 		on:click={(e) => {
