@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const baseUrl = 'https://my-feedback.is';
 	const path = '/genny/6a30065898cc45120a0e032c';
 	const iconPath =
 		'M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2M20 16H5.2L4 17.2V4H20V16Z';
-	const buttonColor = '#2563eb';
 
 	let button: HTMLButtonElement;
 	let popup: HTMLDivElement;
 	let iframe: HTMLIFrameElement;
 	let transitionTimeout: ReturnType<typeof setTimeout> | undefined;
+	let surveyLoading = false;
 
 	function closePopup() {
 		clearTimeout(transitionTimeout);
@@ -32,12 +33,20 @@
 		}
 	}
 
+	function handleKeyDown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && popup.style.display === 'block') {
+			closePopup();
+		}
+	}
+
 	function handleButtonClick() {
 		if (popup.style.display === 'block') {
 			closePopup();
 		} else {
 			clearTimeout(transitionTimeout);
 			popup.style.display = 'block';
+			popup.focus();
+			surveyLoading = true;
 			transitionTimeout = setTimeout(() => {
 				popup.style.transform = 'scale(1)';
 				popup.style.opacity = '1';
@@ -49,10 +58,12 @@
 
 	onMount(() => {
 		window.addEventListener('mousedown', handleClickOutside, true);
+		window.addEventListener('keydown', handleKeyDown);
 	});
 
 	onDestroy(() => {
 		window.removeEventListener('mousedown', handleClickOutside, true);
+		window.removeEventListener('keydown', handleKeyDown);
 		clearTimeout(transitionTimeout);
 	});
 </script>
@@ -65,7 +76,8 @@
 	on:focus={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
 	on:blur={(e) => (e.currentTarget.style.transform = 'scale(1)')}
 	aria-label="Open feedback form"
-	style="position:fixed; bottom:20px; right:20px; width:60px; height:60px; border-radius:50%; background-color:{buttonColor}; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:9999; transition:transform 0.2s;"
+	class="bg-hg-blue"
+	style="position:fixed; bottom:20px; right:20px; width:60px; height:60px; border-radius:50%; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:9999; transition:transform 0.2s;"
 >
 	<svg
 		xmlns="http://www.w3.org/2000/svg"
@@ -81,6 +93,10 @@
 
 <div
 	bind:this={popup}
+	role="dialog"
+	aria-modal="true"
+	aria-label="Feedback"
+	tabindex="-1"
 	style="position:fixed; bottom:90px; right:20px; width:400px; max-width:calc(100vw - 40px); height:600px; max-height:calc(100vh - 110px); background:white; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:9998; display:none; overflow:hidden; transition:all 0.3s ease; transform:scale(0.95); opacity:0;"
 >
 	<button
@@ -109,11 +125,20 @@
 		</svg>
 	</button>
 
+	{#if surveyLoading}
+		<div
+			style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:white;"
+		>
+			<Spinner className="size-8 text-gray-400" />
+		</div>
+	{/if}
+
 	<iframe
 		bind:this={iframe}
 		title="Feedback survey"
 		sandbox="allow-scripts allow-forms allow-same-origin"
 		referrerpolicy="strict-origin-when-cross-origin"
+		on:load={() => (surveyLoading = false)}
 		style="width:100%; height:100%; border:none;"
 	></iframe>
 </div>
