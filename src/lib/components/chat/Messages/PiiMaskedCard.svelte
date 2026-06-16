@@ -2,11 +2,11 @@
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { slide } from 'svelte/transition';
-	import LockClosed from '$lib/components/icons/LockClosed.svelte';
+	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 
-	const i18n = getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>(
-		'i18n'
-	);
+	const i18n =
+		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
 
 	type PiiItem = { key: string; type: string; value: string };
 
@@ -37,27 +37,26 @@
 </script>
 
 {#if count > 0}
-	<div class="mt-2.5">
+	<div class="relative self-center">
 		<button
 			type="button"
-			class="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg border border-gray-50 dark:border-gray-850 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+			class="flex items-center gap-1.5 text-sm px-2 py-1 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5 transition"
 			on:click={() => (show = !show)}
 			aria-expanded={show}
 		>
-			<LockClosed className="size-3.5" />
-			<span class="font-medium">{$i18n.t('PII masked')}</span>
-			<span
-				class="text-xs px-2 rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+			<HgIconShield class="size-4 text-green-600 dark:text-green-400" />
+			<span class="font-medium whitespace-nowrap"
+				>{$i18n.t('{{count}} values masked', { count })}</span
 			>
-				{count}
-			</span>
-			<span class="text-gray-400 dark:text-gray-500 text-xs">{show ? '▾' : '▸'}</span>
+			<ChevronDown
+				className="size-3 transition-transform duration-150 {show ? 'rotate-180' : ''}"
+			/>
 		</button>
 
 		{#if show}
 			<div
 				transition:slide={{ duration: 150 }}
-				class="mt-2 p-3 rounded-lg border border-gray-50 dark:border-gray-850 text-sm"
+				class="absolute right-0 z-20 mt-1 w-72 max-w-[80vw] p-3 rounded-lg border border-gray-50 dark:border-gray-850 bg-white dark:bg-gray-900 shadow-lg text-sm text-left"
 			>
 				<div class="flex flex-col gap-1.5">
 					{#each items as it (it.key)}

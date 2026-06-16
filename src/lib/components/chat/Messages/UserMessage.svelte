@@ -15,6 +15,7 @@
 	import Markdown from './Markdown.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import PiiMaskedCard from './PiiMaskedCard.svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -57,6 +58,20 @@
 			message = JSON.parse(JSON.stringify(history.messages[messageId]));
 		}
 	}
+
+	// Keeper PII card: detections live on the child (assistant) message; read them
+	// from live history so the card sits on the user message it describes.
+	$: piiDetections = (() => {
+		for (const cid of history?.messages?.[messageId]?.childrenIds ?? []) {
+			const d = history?.messages?.[cid]?.piiDetections;
+			if ((d ?? []).length > 0) return d;
+		}
+		return [];
+	})();
+	$: piiOriginalText =
+		history?.messages?.[messageId]?.originalContent ??
+		history?.messages?.[messageId]?.content ??
+		'';
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -558,6 +573,8 @@
 							</Tooltip>
 						{/if}
 					{/if}
+
+					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
 
 					{#if $settings?.chatBubble ?? true}
 						{#if siblings.length > 1}

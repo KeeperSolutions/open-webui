@@ -59,7 +59,6 @@
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
-	import PiiMaskedCard from './PiiMaskedCard.svelte';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
@@ -1446,15 +1445,6 @@
 								}}
 							/>
 						</div>
-					{/if}
-
-					{#if message.done && !readOnly && (message?.piiDetections ?? []).length > 0}
-						<PiiMaskedCard
-							detections={message?.piiDetections ?? []}
-							originalText={history?.messages?.[message?.parentId]?.originalContent ??
-								history?.messages?.[message?.parentId]?.content ??
-								''}
-						/>
 					{/if}
 				{/if}
 			</div>
