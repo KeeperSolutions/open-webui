@@ -45,6 +45,7 @@
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import TrustmiderFeedback from '$lib/components/TrustmiderFeedback.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import { shouldShowTrustmiderFeedback } from '$lib/utils/featureGates';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
 	const i18n = getContext('i18n');
@@ -338,7 +339,7 @@
 	</div>
 {/if}
 
-{#if $config?.features?.enable_trustmider_feedback && $user}
+{#if shouldShowTrustmiderFeedback($config, $user)}
 	<TrustmiderFeedback />
 {/if}
 
