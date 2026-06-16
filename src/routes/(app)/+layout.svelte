@@ -43,9 +43,9 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
-	import TrustmiderFeedback from '$lib/components/TrustmiderFeedback.svelte';
+	import TrustminderFeedback from '$lib/components/TrustminderFeedback.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { shouldShowTrustmiderFeedback } from '$lib/utils/featureGates';
+	import { shouldShowTrustminderFeedback } from '$lib/utils/featureGates';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
 	const i18n = getContext('i18n');
@@ -339,8 +339,8 @@
 	</div>
 {/if}
 
-{#if shouldShowTrustmiderFeedback($config, $user)}
-	<TrustmiderFeedback />
+{#if shouldShowTrustminderFeedback($config, $user)}
+	<TrustminderFeedback />
 {/if}
 
 {#if $user}

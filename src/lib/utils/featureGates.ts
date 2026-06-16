@@ -1,6 +1,6 @@
-export function shouldShowTrustmiderFeedback(
-	config: { features?: { enable_trustmider_feedback?: boolean } } | undefined | null,
+export function shouldShowTrustminderFeedback(
+	config: { features?: { enable_trustminder_feedback?: boolean } } | undefined | null,
 	user: unknown
 ): boolean {
-	return Boolean(config?.features?.enable_trustmider_feedback) && Boolean(user);
+	return Boolean(config?.features?.enable_trustminder_feedback) && Boolean(user);
 }

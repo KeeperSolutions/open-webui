@@ -10,11 +10,13 @@
 	let button: HTMLButtonElement;
 	let popup: HTMLDivElement;
 	let iframe: HTMLIFrameElement;
+	let transitionTimeout: ReturnType<typeof setTimeout> | undefined;
 
 	function closePopup() {
+		clearTimeout(transitionTimeout);
 		popup.style.transform = 'scale(0.95)';
 		popup.style.opacity = '0';
-		setTimeout(() => {
+		transitionTimeout = setTimeout(() => {
 			popup.style.display = 'none';
 		}, 300);
 	}
@@ -33,8 +35,9 @@
 		if (popup.style.display === 'block') {
 			closePopup();
 		} else {
+			clearTimeout(transitionTimeout);
 			popup.style.display = 'block';
-			setTimeout(() => {
+			transitionTimeout = setTimeout(() => {
 				popup.style.transform = 'scale(1)';
 				popup.style.opacity = '1';
 			}, 10);
@@ -49,6 +52,7 @@
 
 	onDestroy(() => {
 		window.removeEventListener('mousedown', handleClickOutside, true);
+		clearTimeout(transitionTimeout);
 	});
 </script>
 
@@ -57,8 +61,8 @@
 	on:click={handleButtonClick}
 	on:mouseover={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
 	on:mouseout={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-	on:focus={() => {}}
-	on:blur={() => {}}
+	on:focus={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
+	on:blur={(e) => (e.currentTarget.style.transform = 'scale(1)')}
 	aria-label="Open feedback form"
 	style="position:fixed; bottom:20px; right:20px; width:60px; height:60px; border-radius:50%; background-color:{buttonColor}; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:9999; transition:transform 0.2s;"
 >
@@ -78,6 +82,8 @@
 		}}
 		on:mouseover={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)')}
 		on:mouseout={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+		on:focus={(e) => (e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.1)')}
+		on:blur={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
 		aria-label="Close feedback form"
 		style="position:absolute; top:8px; right:8px; width:32px; height:32px; border:none; background:transparent; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; z-index:1; transition:background-color 0.2s;"
 	>
@@ -88,6 +94,11 @@
 		</svg>
 	</button>
 
-	<iframe bind:this={iframe} title="Feedback survey" style="width:100%; height:100%; border:none;"
+	<iframe
+		bind:this={iframe}
+		title="Feedback survey"
+		sandbox="allow-scripts allow-forms allow-same-origin"
+		referrerpolicy="strict-origin-when-cross-origin"
+		style="width:100%; height:100%; border:none;"
 	></iframe>
 </div>
