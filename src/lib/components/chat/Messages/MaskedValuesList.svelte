@@ -2,7 +2,7 @@
 	// Presentational, container-agnostic view of locally-reconstructed PII values.
 	// Renders inside the masked-values popover today; the same component can later
 	// be dropped into a side panel / drawer without changes.
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { copyToClipboard } from '$lib/utils';
 
@@ -45,11 +45,17 @@
 	$: sections = dense ? groups : [{ type: '__all__', label: '', items: filtered }];
 
 	const copy = async (it: MaskedItem) => {
-		await copyToClipboard(it.value);
+		const ok = await copyToClipboard(it.value);
+		if (!ok) return;
 		copiedKey = it.key;
 		if (copyTimer) clearTimeout(copyTimer);
 		copyTimer = setTimeout(() => (copiedKey = null), 1200);
 	};
+
+	// Don't let a pending copy-feedback timer outlive the component.
+	onDestroy(() => {
+		if (copyTimer) clearTimeout(copyTimer);
+	});
 </script>
 
 <div

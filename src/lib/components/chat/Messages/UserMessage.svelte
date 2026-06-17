@@ -62,8 +62,11 @@
 	// Keeper PII card: detections live on the child (assistant) message; read them
 	// from live history so the card sits on the user message it describes.
 	$: piiDetections = (() => {
-		for (const cid of history?.messages?.[messageId]?.childrenIds ?? []) {
-			const d = history?.messages?.[cid]?.piiDetections;
+		// Iterate newest-first: childrenIds grow with regenerations / multi-model
+		// responses, so the latest child holds the freshest detections.
+		const children = history?.messages?.[messageId]?.childrenIds ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			const d = history?.messages?.[children[i]]?.piiDetections;
 			if ((d ?? []).length > 0) return d;
 		}
 		return [];
