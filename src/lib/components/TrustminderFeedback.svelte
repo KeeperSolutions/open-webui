@@ -23,16 +23,6 @@
 		}, 300);
 	}
 
-	function handleClickOutside(e: MouseEvent) {
-		if (
-			popup.style.display === 'block' &&
-			!popup.contains(e.target as Node) &&
-			!button.contains(e.target as Node)
-		) {
-			closePopup();
-		}
-	}
-
 	function handleKeyDown(e: KeyboardEvent) {
 		if (e.key === 'Escape' && popup.style.display === 'block') {
 			closePopup();
@@ -57,12 +47,10 @@
 	}
 
 	onMount(() => {
-		window.addEventListener('mousedown', handleClickOutside, true);
 		window.addEventListener('keydown', handleKeyDown);
 	});
 
 	onDestroy(() => {
-		window.removeEventListener('mousedown', handleClickOutside, true);
 		window.removeEventListener('keydown', handleKeyDown);
 		clearTimeout(transitionTimeout);
 	});
