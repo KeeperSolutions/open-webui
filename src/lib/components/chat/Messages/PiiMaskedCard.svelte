@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
-	import { slide } from 'svelte/transition';
+	import { Popover } from 'bits-ui';
+	import { flyAndScale } from '$lib/utils/transitions';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import MaskedValuesList from './MaskedValuesList.svelte';
 
 	const i18n =
 		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
@@ -37,45 +39,34 @@
 </script>
 
 {#if count > 0}
-	<div class="relative self-center">
-		<button
-			type="button"
-			class="flex items-center gap-1.5 text-sm px-2 py-1 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/5 transition"
-			on:click={() => (show = !show)}
-			aria-expanded={show}
+	<Popover.Root bind:open={show}>
+		<!-- Badge — Figma "PiiMaskingResult" pill; chevron flips while open -->
+		<Popover.Trigger
+			class="flex items-center justify-center gap-1 h-9 px-3 py-1 self-center rounded-full bg-stone-50 dark:bg-gray-800 hover:bg-stone-100 dark:hover:bg-gray-700 transition"
 		>
-			<HgIconShield class="size-4 text-green-600 dark:text-green-400" />
-			<span class="font-medium whitespace-nowrap"
+			<HgIconShield class="size-3.5 text-hg-success-600 dark:text-green-400" />
+			<span
+				class="font-hg-body text-xs font-normal text-hg-text-primary dark:text-gray-100 whitespace-nowrap"
 				>{$i18n.t('{{count}} values masked', { count })}</span
 			>
 			<ChevronDown
-				className="size-3 transition-transform duration-150 {show ? 'rotate-180' : ''}"
+				className="size-4 text-hg-text-secondary dark:text-gray-400 transition-transform duration-150 {show
+					? 'rotate-180'
+					: ''}"
 			/>
-		</button>
+		</Popover.Trigger>
 
-		{#if show}
-			<div
-				transition:slide={{ duration: 150 }}
-				class="absolute right-0 z-20 mt-1 w-72 max-w-[80vw] p-3 rounded-lg border border-gray-50 dark:border-gray-850 bg-white dark:bg-gray-900 shadow-lg text-sm text-left"
-			>
-				<div class="flex flex-col gap-1.5">
-					{#each items as it (it.key)}
-						<div class="flex items-center gap-2 flex-wrap">
-							<span
-								class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-							>
-								{it.type}
-							</span>
-							<span class="font-mono text-gray-600 dark:text-gray-300 break-all">{it.value}</span>
-						</div>
-					{/each}
-				</div>
-				<div
-					class="mt-2 pt-2 border-t border-gray-50 dark:border-gray-850 text-xs text-gray-400 dark:text-gray-500"
-				>
-					{$i18n.t('Values are reconstructed locally — they never leave your browser.')}
-				</div>
-			</div>
-		{/if}
-	</div>
+		<Popover.Content
+			side="bottom"
+			align="end"
+			sideOffset={6}
+			collisionPadding={12}
+			strategy="fixed"
+			fitViewport={true}
+			transition={flyAndScale}
+			class="z-[9999] rounded-2xl border border-hg-border dark:border-gray-800 bg-hg-bg-surface dark:bg-gray-900 shadow-xl overflow-hidden"
+		>
+			<MaskedValuesList {items} />
+		</Popover.Content>
+	</Popover.Root>
 {/if}
