@@ -1728,26 +1728,36 @@
 										</Tooltip>
 									{:else}
 										<!-- PII Masking toggle (stub) -->
-										<button
-											type="button"
-											role="switch"
-											aria-checked={piiMaskingEnabled}
-											class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
-											on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
-											aria-label="Toggle PII Masking"
+										<Tooltip
+											content={$i18n.t(
+												'Dynamic PII Masking: A dual-stage filter built on proven open-source NER (Microsoft Presidio and spaCy), enhanced with proprietary tuning and 15+ custom regional recognizers. It automatically detects and replaces Personally Identifiable Information (PII) with secure placeholders before queries leave your secure environment, ensuring zero raw PII reaches public LLMs.'
+											)}
+											placement="top"
 										>
-											<div class="flex items-center gap-1">
-												<HgIconShield class="w-4 h-4 text-hg-text-primary dark:text-gray-400" />
-												<span class="hidden sm:inline font-hg-body text-sm text-hg-text-primary dark:text-gray-400"
-													>PII Masking</span
-												>
-											</div>
-											{#if piiMaskingEnabled}
-												<HgIconToggleOn class="w-5 h-5 text-hg-blue dark:text-white" />
-											{:else}
-												<HgIconToggleOff class="w-5 h-5 text-hg-text-tertiary dark:text-gray-600" />
-											{/if}
-										</button>
+											<button
+												type="button"
+												role="switch"
+												aria-checked={piiMaskingEnabled}
+												class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
+												on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
+												aria-label="Toggle PII Masking"
+											>
+												<div class="flex items-center gap-1">
+													<HgIconShield class="w-4 h-4 text-hg-text-primary dark:text-gray-400" />
+													<span
+														class="hidden sm:inline font-hg-body text-sm text-hg-text-primary dark:text-gray-400"
+														>PII Masking</span
+													>
+												</div>
+												{#if piiMaskingEnabled}
+													<HgIconToggleOn class="w-5 h-5 text-hg-blue dark:text-white" />
+												{:else}
+													<HgIconToggleOff
+														class="w-5 h-5 text-hg-text-tertiary dark:text-gray-600"
+													/>
+												{/if}
+											</button>
+										</Tooltip>
 
 										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
 											<Tooltip content={$i18n.t('Dictate')}>

@@ -97,7 +97,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
-	import { getPiiMaskingDefault } from '$lib/utils/pii';
+	import { getPiiMaskingDefault, isPiiPipelineConfigured } from '$lib/utils/pii';
 
 	export let chatIdProp = '';
 
@@ -562,6 +562,21 @@
 		pageSubscribe = page.subscribe(() => {
 			stopAudio();
 		});
+
+		// Admin-only: warn when masking is requested but no PII filter pipeline is
+		// wired up on any connected pipeline server (local or cloud), so messages
+		// would silently pass through unmasked. Fire-and-forget so it never blocks load.
+		if ($user?.role === 'admin' && getPiiMaskingDefault($settings)) {
+			isPiiPipelineConfigured(localStorage.token).then((configured) => {
+				if (!configured) {
+					toast.warning(
+						$i18n.t(
+							'PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.'
+						)
+					);
+				}
+			});
+		}
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
