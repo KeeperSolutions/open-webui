@@ -1,16 +1,9 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext, onMount } from 'svelte';
-	import { settings } from '$lib/stores';
+	import { settings, user } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import { getPiiMaskingDefault } from '$lib/utils/pii';
-
-	// Known PII filter pipeline IDs across deployed instances:
-	//   "pii_filter"           — pii-filter repo (pii_filter.py)
-	//   "pii_filter_pipeline"  — pipelines-v4 repo + GCP deployment (pii_filter_pipeline.py)
-	// The OpenWebUI bridge keys per-filter valves by the runtime filter id, so we
-	// mirror the toggle under every known id to cover whichever pipeline is wired up.
-	const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
+	import { getPiiMaskingDefault, isPiiPipelineConfigured, PII_FILTER_IDS } from '$lib/utils/pii';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -46,8 +39,22 @@
 
 	let piiMaskingEnabled = true;
 
-	onMount(() => {
+	// Admin-only sanity check: is a PII filter pipeline actually wired up anywhere
+	// (local or cloud)? If masking is on but none is connected, nothing gets masked.
+	const isAdmin = $user?.role === 'admin';
+	let piiPipelineConfigured = true;
+	let piiCheckDone = false;
+
+	$: showPiiPipelineWarning =
+		isAdmin && piiCheckDone && piiMaskingEnabled && !piiPipelineConfigured;
+
+	onMount(async () => {
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
+
+		if (isAdmin) {
+			piiPipelineConfigured = await isPiiPipelineConfigured(localStorage.token);
+			piiCheckDone = true;
+		}
 	});
 </script>
 
@@ -93,6 +100,31 @@
 					'When ON, personal data (names, IBANs, emails, etc.) is automatically replaced with placeholders before being sent to the AI model.'
 				)}
 			</div>
+
+			{#if showPiiPipelineWarning}
+				<div
+					class="mt-2 flex items-start gap-2 rounded-lg bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200"
+					role="alert"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="size-4 shrink-0 mt-0.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+					<span>
+						{$i18n.t(
+							'PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.'
+						)}
+					</span>
+				</div>
+			{/if}
 		</div>
 
 		<div class="mt-6">

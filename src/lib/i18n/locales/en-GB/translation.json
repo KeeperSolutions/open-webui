@@ -1304,6 +1304,7 @@
 	"Perplexity Search API URL": "",
 	"Perplexity Search Context Usage": "",
 	"Personalization": "Personalisation",
+	"PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.": "",
 	"Pin": "",
 	"Pinned": "",
 	"Pinned Messages": "",

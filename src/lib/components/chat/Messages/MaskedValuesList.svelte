@@ -44,7 +44,7 @@
 	})();
 	$: sections = dense ? groups : [{ type: '__all__', label: '', items: filtered }];
 
-	const copy = async (it: MaskedItem) => {
+	const copyValueToClipboard = async (it: MaskedItem) => {
 		const ok = await copyToClipboard(it.value);
 		if (!ok) return;
 		copiedKey = it.key;
@@ -107,7 +107,7 @@
 									type="button"
 									class="shrink-0 p-1 rounded-md text-hg-text-tertiary dark:text-gray-500 hover:text-hg-text-primary dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition"
 									aria-label={$i18n.t('Copy value')}
-									on:click={() => copy(it)}
+									on:click={() => copyValueToClipboard(it)}
 								>
 									{#if copiedKey === it.key}
 										<svg

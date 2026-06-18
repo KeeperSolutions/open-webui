@@ -1305,6 +1305,7 @@
 	"Perplexity Search Context Usage": "",
 	"Personalization": "Prilagodba",
 	"PII masked": "PII maskiran",
+	"PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.": "PII maskiranje je uključeno, ali nijedan PII filter pipeline nije spojen (lokalno ni u oblaku). Poruke neće biti maskirane.",
 	"Pin": "",
 	"Pinned": "",
 	"Pinned Messages": "",
