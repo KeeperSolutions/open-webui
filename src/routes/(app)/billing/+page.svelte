@@ -2,6 +2,7 @@
 	import { onMount, getContext } from 'svelte';
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
+	import { showSidebar } from '$lib/stores';
 	import {
 		getBillingStatus,
 		createCheckoutSession,
@@ -219,6 +220,11 @@
 		activeMembers > 0 ? (teamStatus?.team_month_cost_eur ?? 0) / activeMembers : 0;
 </script>
 
+<div
+	class="w-full flex-1 transition-width duration-200 ease-in-out {$showSidebar
+		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
+		: ''} overflow-y-auto h-screen"
+>
 <div
 	class="w-full max-w-3xl mx-auto px-4 py-8 space-y-1"
 	on:click={() => (openMenuUserId = null)}
@@ -625,6 +631,7 @@
 			</div>
 		{/if}
 	{/if}
+</div>
 </div>
 
 <!-- ===== INVITE MODAL ===== -->

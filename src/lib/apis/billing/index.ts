@@ -86,6 +86,26 @@ export type AdminBillingRow = {
 export const getAdminBillingSummary = (token: string) =>
 	request<AdminBillingRow[]>(`${base}/admin/summary`, token);
 
+// --- My usage (sidebar) ---
+
+export type ExchangeRateEntry = {
+	usd_per_eur: number;
+	from: number; // unix epoch
+	to: number;   // unix epoch
+};
+
+export type MyUsage = {
+	month: number;
+	year: number;
+	total_tokens: number;
+	total_cost_usd: number;
+	total_cost_eur: number;
+	exchange_rates: ExchangeRateEntry[];
+	ledger_ready: boolean;
+};
+
+export const getMyUsage = (token: string) => request<MyUsage>(`${base}/my-usage`, token);
+
 // --- Model breakdown ---
 
 export type ModelBreakdownItem = {

@@ -11,7 +11,8 @@ export type MyUsage = {
 	month: number;
 	year: number;
 	total_tokens: number;
-	total_cost: number;
+	total_cost_eur: number;
+	total_cost?: number; // legacy field — kept for backwards compatibility
 };
 
 export const getLangfuseMetrics = async (
