@@ -121,6 +121,13 @@ async def reorder_model_classes(
     with get_db() as db:
         now = int(time.time())
         try:
+            # First pass: move all rows to temporary negative orders to avoid unique conflicts
+            for idx, item in enumerate(items):
+                db.query(ModelClass).filter_by(id=item.id).update(
+                    {"order": -(idx + 1), "updated_at": now}
+                )
+            db.flush()
+            # Second pass: set final positive orders
             for item in items:
                 db.query(ModelClass).filter_by(id=item.id).update(
                     {"order": item.order, "updated_at": now}
