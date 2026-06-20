@@ -30,12 +30,12 @@ async def create_model_class(
         result = ModelClasses.create(form_data)
     except IntegrityError:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
     if result is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
     return result
@@ -56,13 +56,13 @@ async def update_model_class(
         result = ModelClasses.update(id, form_data)
     except IntegrityError:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
 
     if result is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
     return result
@@ -129,7 +129,7 @@ async def reorder_model_classes(
         except IntegrityError:
             db.rollback()
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Duplicate order value",
             )
 
