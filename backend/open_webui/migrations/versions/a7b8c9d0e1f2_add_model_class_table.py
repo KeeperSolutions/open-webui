@@ -4,6 +4,7 @@ Revision ID: a7b8c9d0e1f2
 Revises: d8d905b57f4e
 Create Date: 2026-06-18 00:00:00.000000
 
+Add order column for explicit sorting.
 """
 
 from typing import Sequence, Union
@@ -29,8 +30,10 @@ def upgrade():
         sa.Column("msgs_business", sa.Text(), nullable=True),
         sa.Column("created_at", sa.BigInteger(), nullable=False),
         sa.Column("updated_at", sa.BigInteger(), nullable=False),
+        sa.Column("order", sa.Integer(), nullable=False, unique=True),
     )
 
 
 def downgrade():
+    op.drop_column("model_class", "order")
     op.drop_table("model_class")
