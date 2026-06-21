@@ -132,6 +132,9 @@ def _sync_observations(since: datetime.datetime) -> int:
     unpriced_models: Set[str] = set()
     priced_models: Set[str] = set()
 
+    # Fetch rate once per sync batch — stable for up to 4h, consistent across all rows.
+    batch_rate = get_eur_usd_rate()
+
     for obs in fetch_observations_since(since):
         obs_id = obs.get("id")
         if not obs_id:
@@ -166,10 +169,9 @@ def _sync_observations(since: datetime.datetime) -> int:
         eur_usd_rate = None
         cost_eur = None
         if cost_usd is not None:
-            rate = get_eur_usd_rate()
-            if rate is not None:
-                eur_usd_rate = rate
-                cost_eur = cost_usd / rate
+            if batch_rate is not None:
+                eur_usd_rate = batch_rate
+                cost_eur = cost_usd / batch_rate
                 priced_models.add(model)
             # else: rate unavailable — cost_eur stays None; don't mark as priced
         else:

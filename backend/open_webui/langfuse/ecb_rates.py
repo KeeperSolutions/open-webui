@@ -40,7 +40,7 @@ def _fetch_rate() -> Optional[float]:
         # Strip embedded credentials from proxy URLs (e.g. http://user:pass@host)
         sanitized = re.sub(r"://[^@]+@", "://<redacted>@", str(exc))
         _last_error = sanitized[:500]  # cap length to avoid leaking large traces
-        log.warning("ECB rate fetch failed: %s", exc)
+        log.warning("ECB rate fetch failed: %s", sanitized)
         return None
 
 

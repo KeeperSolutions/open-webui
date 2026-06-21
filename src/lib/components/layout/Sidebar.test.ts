@@ -9,8 +9,7 @@
  * - chat updates do NOT trigger an immediate usage refresh
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mount, unmount } from 'svelte';
-import { writable, readable } from 'svelte/store';
+import { readable } from 'svelte/store';
 
 // ---- Store mocks (hoisted before imports) ----
 vi.mock('$lib/stores', async () => {

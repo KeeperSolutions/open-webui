@@ -85,7 +85,8 @@
 			// ledger_ready is false when the poller hasn't completed its first sync yet.
 			// Retry after 30s so the sidebar populates without waiting the full 5-minute poll interval.
 			if (retryIfEmpty && myUsage && !myUsage.ledger_ready) {
-				usageRetryTimer = setTimeout(loadMyUsage, 30 * 1000);
+				if (usageRetryTimer) clearTimeout(usageRetryTimer);
+				usageRetryTimer = setTimeout(() => loadMyUsage({ retryIfEmpty: true }), 30 * 1000);
 			}
 		} catch {
 			myUsage = null;
@@ -102,7 +103,7 @@
 				const monthName = new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', {
 					month: 'long'
 				});
-				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div><div>Estimated cost: €${(myUsage.total_cost_eur ?? myUsage.total_cost ?? 0).toFixed(2)}</div></div>`;
+				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div><div>Estimated cost: €${(myUsage.total_cost_eur ?? 0).toFixed(2)}</div></div>`;
 			})()
 		: '';
 
@@ -1270,7 +1271,7 @@
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
 												{$i18n.t('This month')}:
 												<span class="font-medium text-gray-700 dark:text-gray-300"
-													>€{(myUsage.total_cost_eur ?? myUsage.total_cost ?? 0).toFixed(2)}</span
+													>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
 												>
 											</div>
 										</Tooltip>
