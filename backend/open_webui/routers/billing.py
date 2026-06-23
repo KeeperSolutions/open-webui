@@ -5,7 +5,7 @@ from typing import Optional
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.env import (
     BILLING_ENABLED,
@@ -24,8 +24,40 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-_team_cost_cache: dict[str, tuple[float, float]] = {}
 _TEAM_COST_CACHE_TTL = 45  # seconds
+
+
+class _TTLCache:
+    """Minimal bounded TTL cache — avoids an external dependency for a simple use case."""
+
+    def __init__(self, maxsize: int, ttl: float) -> None:
+        self._maxsize = maxsize
+        self._ttl = ttl
+        self._store: dict = {}   # key → (value, expires_at)
+
+    def get(self, key, default=None):
+        entry = self._store.get(key)
+        if entry is None:
+            return default
+        value, expires_at = entry
+        if _time.monotonic() >= expires_at:
+            del self._store[key]
+            return default
+        return value
+
+    def __setitem__(self, key, value) -> None:
+        if len(self._store) >= self._maxsize and key not in self._store:
+            # Evict one expired entry; if none expired, drop oldest
+            now = _time.monotonic()
+            expired = [k for k, (_, exp) in self._store.items() if exp <= now]
+            if expired:
+                del self._store[expired[0]]
+            elif self._store:
+                del self._store[next(iter(self._store))]
+        self._store[key] = (value, _time.monotonic() + self._ttl)
+
+
+_team_cost_cache: _TTLCache = _TTLCache(maxsize=256, ttl=_TEAM_COST_CACHE_TTL)
 
 
 # ---------- Helpers ----------
@@ -54,61 +86,53 @@ def get_stripe_client() -> stripe.StripeClient:
 
 
 def _get_user_alltime_cost(email: str, created_at: int) -> float:
-    """Return total Langfuse cost (EUR) for `email` since account creation."""
+    """Return total ledger cost (EUR) for `email` since account creation."""
     try:
-        from open_webui.langfuse.metrics import get_alltime_since
+        from open_webui.models.usage_ledger import UsageLedgerDB
 
-        # Use the later of: billing record created_at or start of current year.
-        # This caps the lookback to the current year while never querying before account creation.
-        year_start = datetime.datetime(datetime.datetime.utcnow().year, 1, 1)
-        record_start = datetime.datetime.utcfromtimestamp(created_at)
-        since = max(year_start, record_start)
-
-        rows = get_alltime_since(since)
-        return sum(r["cost"] for r in rows if r.get("user") == email)
+        return UsageLedgerDB.get_cost_eur_for_user_since(email, created_at)
     except Exception as e:
-        log.warning(f"Could not fetch alltime Langfuse cost for {email}: {e}")
+        log.warning(f"Could not fetch alltime ledger cost for {email}: {e}")
         return 0.0
 
 
 def _get_user_current_month_cost(email: str) -> float:
     try:
-        from open_webui.langfuse.metrics import get_current_month
+        from open_webui.models.usage_ledger import UsageLedgerDB
 
-        rows = get_current_month()
-        return sum(r["cost"] for r in rows if r.get("user") == email)
+        return UsageLedgerDB.get_cost_eur_for_user_current_month(email)
     except Exception as e:
-        log.warning(f"Could not fetch monthly Langfuse cost for {email}: {e}")
+        log.warning(f"Could not fetch monthly ledger cost for {email}: {e}")
         return 0.0
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
-    """Return aggregate current-month Langfuse cost (EUR) for all members of a team.
+    """Return aggregate current-month EUR cost for all members of a team (from ledger).
 
-    Result is cached for _TEAM_COST_CACHE_TTL seconds to avoid per-request Langfuse calls.
+    Result is cached for _TEAM_COST_CACHE_TTL seconds.
     """
     cached = _team_cost_cache.get(team_id)
-    if cached and _time.time() < cached[1]:
-        return cached[0]
+    if cached is not None:
+        return cached
 
     try:
-        from open_webui.langfuse.metrics import get_current_month
+        from open_webui.models.usage_ledger import UsageLedgerDB
         from open_webui.models.users import Users as UsersModel
 
         members = TeamMembers.get_by_team_id(team_id)
         if not members:
-            _team_cost_cache[team_id] = (0.0, _time.time() + _TEAM_COST_CACHE_TTL)
+            _team_cost_cache[team_id] = 0.0
             return 0.0
 
-        rows = get_current_month()
-        cost_by_email = {r.get("user", ""): r.get("cost", 0.0) for r in rows if r.get("user")}
-
-        total = 0.0
+        emails = []
         for m in members:
             u = UsersModel.get_user_by_id(m.user_id)
             if u:
-                total += cost_by_email.get(u.email, 0.0)
-        _team_cost_cache[team_id] = (total, _time.time() + _TEAM_COST_CACHE_TTL)
+                emails.append(u.email)
+
+        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(emails)
+        total = sum(cost_by_email.values())
+        _team_cost_cache[team_id] = total
         return total
     except Exception as e:
         log.warning(f"Could not fetch team monthly cost for team_id={team_id}: {e}")
@@ -421,22 +445,21 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
         seat_used = TeamMembers.count_members(team.id)
 
-        # Aggregate team usage: sum costs for all team member billing records
-        team_billing_rows = StripeBillings.get_team_members(team.id)
         from open_webui.models.users import Users as UsersModel
+        from open_webui.models.usage_ledger import UsageLedgerDB
 
-        team_month_cost = 0.0
+        members_db = TeamMembers.get_by_team_id(team.id)
+        member_emails = []
+        for m in members_db:
+            u = UsersModel.get_user_by_id(m.user_id)
+            if u:
+                member_emails.append(u.email)
+        if user.email not in member_emails:
+            member_emails.append(user.email)
+
         try:
-            from open_webui.langfuse.metrics import get_current_month
-
-            month_rows = get_current_month()
-            cost_by_email = {r.get("user", ""): r.get("cost", 0.0) for r in month_rows if r.get("user")}
-            for br in team_billing_rows:
-                u = UsersModel.get_user_by_id(br.user_id)
-                if u:
-                    team_month_cost += cost_by_email.get(u.email, 0.0)
-            # Also include owner's own usage
-            team_month_cost += cost_by_email.get(user.email, 0.0)
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            team_month_cost = sum(cost_by_email.values())
         except Exception:
             team_month_cost = current_month_cost
 
@@ -832,28 +855,25 @@ async def get_team_status(user=Depends(get_verified_user)):
     members_db = TeamMembers.get_by_team_id(team.id)
     pending_invites = TeamInvites.get_by_team_id(team.id)
 
-    cost_by_email: dict[str, float] = {}
-    models_by_email: dict[str, list[str]] = {}
-    try:
-        from open_webui.langfuse.metrics import get_current_month
+    from open_webui.models.usage_ledger import UsageLedgerDB
 
-        rows = get_current_month()
-        for r in rows:
-            email = r.get("user", "")
-            if email:
-                cost_by_email[email] = cost_by_email.get(email, 0.0) + r.get("cost", 0.0)
-                model = r.get("model", "")
-                if model:
-                    models = models_by_email.setdefault(email, [])
-                    if model not in models and len(models) < 3:
-                        models.append(model)
+    user_by_id = {
+        m.user_id: u
+        for m in members_db
+        if (u := UsersModel.get_user_by_id(m.user_id))
+    }
+    member_emails = [u.email for u in user_by_id.values()]
+    try:
+        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+        models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
     except Exception:
-        pass
+        cost_by_email = {}
+        models_by_email = {}
 
     members_out: list[TeamMemberResponse] = []
     team_month_cost = 0.0
     for m in members_db:
-        u = UsersModel.get_user_by_id(m.user_id)
+        u = user_by_id.get(m.user_id)
         if not u:
             continue
         cost = cost_by_email.get(u.email, 0.0)
@@ -1376,17 +1396,9 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
     all_records = StripeBillings.get_all()
     billing_by_user_id = {r.user_id: r for r in all_records}
 
-    cost_by_email: dict[str, float] = {}
-    try:
-        from open_webui.langfuse.metrics import get_current_month
+    from open_webui.models.usage_ledger import UsageLedgerDB
 
-        rows = get_current_month()
-        for r in rows:
-            email = r.get("user", "")
-            if email:
-                cost_by_email[email] = cost_by_email.get(email, 0.0) + r.get("cost", 0.0)
-    except Exception as e:
-        log.warning(f"Admin summary: could not fetch Langfuse metrics: {e}")
+    cost_by_email = UsageLedgerDB.get_all_users_cost_current_month()
 
     result = []
     for record in all_records:
@@ -1428,33 +1440,65 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
 
 @router.get("/model-breakdown")
 async def get_model_breakdown(user=Depends(get_verified_user)):
-    """Per-model cost breakdown for the current user this calendar month."""
+    """Per-model EUR cost breakdown for the current user this calendar month."""
     require_billing_enabled()
-    import datetime
 
-    try:
-        from open_webui.langfuse.metrics import get_current_month
-        rows = get_current_month()
-    except Exception as e:
-        log.warning(f"[billing] model-breakdown fetch error: {e}")
-        return {"models": [], "total": 0.0, "month": ""}
+    from open_webui.models.usage_ledger import UsageLedgerDB
 
-    user_rows = [r for r in rows if r.get("user") == user.email]
-    model_costs: dict[str, float] = {}
-    for r in user_rows:
-        model = r.get("model") or "Unknown"
-        model_costs[model] = model_costs.get(model, 0.0) + r.get("cost", 0.0)
-
-    total = sum(model_costs.values())
+    rows = UsageLedgerDB.get_model_breakdown_current_month(user.email)
+    total = sum(r["cost_eur"] for r in rows)
     now = datetime.datetime.utcnow()
 
-    models = sorted(
-        [
-            {"model": m, "cost": round(c, 4), "pct": round(c / total * 100) if total > 0 else 0}
-            for m, c in model_costs.items()
-        ],
-        key=lambda x: x["cost"],
-        reverse=True,
-    )
+    models = [
+        {
+            "model": r["model"],
+            "cost": round(r["cost_eur"], 4),
+            "tokens": r["tokens"],
+            "pct": round(r["cost_eur"] / total * 100) if total > 0 else 0,
+        }
+        for r in rows
+    ]
 
     return {"models": models, "total": round(total, 4), "month": now.strftime("%B %Y")}
+
+
+class ExchangeRateEntry(BaseModel):
+    usd_per_eur: float  # USD per 1 EUR (ECB D.USD.EUR.SP00.A series)
+    from_: int = Field(alias="from")  # unix epoch
+    to: int             # unix epoch
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MyUsageResponse(BaseModel):
+    month: int
+    year: int
+    total_tokens: int
+    total_cost_usd: float
+    total_cost_eur: float
+    exchange_rates: list[ExchangeRateEntry] = []
+    ledger_ready: bool = True
+
+
+@router.get("/my-usage", response_model=MyUsageResponse)
+async def get_my_usage(user=Depends(get_verified_user)):
+    """Current user's token and cost for the current calendar month, from the ledger."""
+    require_billing_enabled()
+
+    from open_webui.models.usage_ledger import UsageLedgerDB
+
+    cost_eur = UsageLedgerDB.get_cost_eur_for_user_current_month(user.email)
+    cost_usd = UsageLedgerDB.get_cost_usd_for_user_current_month(user.email)
+    total_tokens = UsageLedgerDB.get_tokens_for_user_current_month(user.email)
+    rates = UsageLedgerDB.get_exchange_rates_current_month(user.email)
+    now = datetime.datetime.utcnow()
+
+    return MyUsageResponse(
+        month=now.month,
+        year=now.year,
+        total_tokens=total_tokens,
+        total_cost_usd=round(cost_usd, 6),
+        total_cost_eur=round(cost_eur, 4),
+        exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
+        ledger_ready=UsageLedgerDB.is_ledger_ready(),
+    )

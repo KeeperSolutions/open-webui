@@ -88,8 +88,6 @@ if "cuda_error" in locals():
 SRC_LOG_LEVELS = {}  # Legacy variable, do not remove
 
 WEBUI_NAME = os.environ.get("WEBUI_NAME", "Open WebUI")
-if WEBUI_NAME != "Open WebUI":
-    WEBUI_NAME += " (Open WebUI)"
 
 WEBUI_FAVICON_URL = "https://openwebui.com/favicon.png"
 
@@ -979,6 +977,13 @@ INTERNAL_EMAIL_DOMAINS = [
 ]
 TRIAL_CREDIT_EUR = float(os.environ.get("TRIAL_CREDIT_EUR", "2.0"))
 
+# Days of Langfuse observation history to import on first deploy (when usage_ledger is empty).
+# After first sync the DB watermark takes over and this var is no longer consulted.
+try:
+    LEDGER_BOOTSTRAP_DAYS = int(os.environ.get("LEDGER_BOOTSTRAP_DAYS", "30"))
+except ValueError:
+    LEDGER_BOOTSTRAP_DAYS = 30
+
 # JSON mapping seat count → {price_id, price_eur, usage_budget_eur}
 # e.g. '{"5": {"price_id": "price_abc", "price_eur": 150, "usage_budget_eur": 250}}'
 import json as _json
@@ -1001,3 +1006,4 @@ SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "")
 SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Keeper AI Gateway")
+SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() not in ("false", "0", "no")
