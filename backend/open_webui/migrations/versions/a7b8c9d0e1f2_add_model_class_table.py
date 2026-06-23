@@ -1,8 +1,8 @@
 """Add model_class table
 
 Revision ID: a7b8c9d0e1f2
-Revises: d8d905b57f4e
-Create Date: 2026-06-18 00:00:00.000000
+Revises: b2c3d4e5f6a7
+Create Date: 2026-06-22 00:00:00.000000
 
 Add order column for explicit sorting.
 """
@@ -35,5 +35,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("model_class", "order")
     op.drop_table("model_class")

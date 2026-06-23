@@ -234,11 +234,11 @@
 					<thead class="text-xs text-gray-800 uppercase bg-transparent dark:text-gray-200">
 						<tr class="border-b-[1.5px] border-gray-50 dark:border-gray-850/30">
 							<th class="px-1 py-2 w-5"></th>
-							<th class="px-3 py-2">Model class</th>
-							<th class="px-3 py-2">Credit burn / message</th>
-							<th class="px-3 py-2 text-right">Pro</th>
-							<th class="px-3 py-2 text-right">Premium</th>
-							<th class="px-3 py-2 text-right">Business</th>
+							<th class="px-3 py-2">{$i18n.t('Model class')}</th>
+							<th class="px-3 py-2">{$i18n.t('Credit burn / message')}</th>
+							<th class="px-3 py-2 text-right">{$i18n.t('Pro')}</th>
+							<th class="px-3 py-2 text-right">{$i18n.t('Premium')}</th>
+							<th class="px-3 py-2 text-right">{$i18n.t('Business')}</th>
 							<th class="px-2 py-2 w-10"></th>
 						</tr>
 					</thead>
