@@ -16,6 +16,7 @@
 	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
+	import CheckCircle from '$lib/components/icons/CheckCircle.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -253,23 +254,27 @@
 										placeholder="Name"
 										class="w-32 text-sm bg-transparent border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none"
 										on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+										on:focus={(e) => e.currentTarget.select()}
 									/>
 									<input
 										type="text"
 										bind:value={editForm.models}
 										placeholder="model-1, model-2"
 										class="block w-48 text-xs mt-1 bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-0.5 focus:outline-none"
+										on:focus={(e) => e.currentTarget.select()}
 									/>
 								</td>
 								<td class="px-3 py-2">
-									<input
-										type="number"
-										step="0.1"
-										bind:value={editForm.credit_burn}
-										placeholder="0"
-										class="w-20 text-sm font-mono bg-transparent border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none"
-										on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
-									/>
+										<input
+											type="number"
+											step="0.1"
+											bind:value={editForm.credit_burn}
+											placeholder="0"
+											class="w-20 text-sm font-mono bg-transparent border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none"
+											on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+											on:focus={(e) => e.currentTarget.select()}
+										/>
+
 								</td>
 								<td class="px-3 py-2 text-right">
 									<input
@@ -310,16 +315,18 @@
 								<td class="px-2 py-2 text-right">
 									<div class="flex gap-1 justify-end">
 										<button
-											class="px-2 py-0.5 text-xs bg-black text-white dark:bg-white dark:text-black rounded"
+											class="p-2 text-emerald-600 hover:text-emerald-700 dark:text-emerald-500 dark:hover:text-emerald-400 rounded-lg transition"
 											on:click={saveEdit}
+											title={$i18n.t('Save')}
 										>
-											Save
+											<CheckCircle className="size-5" />
 										</button>
 										<button
-											class="px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 rounded"
+											class="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition"
 											on:click={cancelEdit}
+											title={$i18n.t('Cancel')}
 										>
-											Cancel
+											<XMark className="size-5" />
 										</button>
 									</div>
 								</td>
@@ -397,6 +404,7 @@
 											placeholder="~{proMsgs}"
 											class="w-20 text-sm font-mono bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none text-right"
 											on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+											on:focus={(e) => e.currentTarget.select()}
 										/>
 										<small class="block text-gray-400">msgs / month</small>
 									{:else}
@@ -417,6 +425,7 @@
 											placeholder="~{premMsgs}"
 											class="w-20 text-sm font-mono bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none text-right"
 											on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+											on:focus={(e) => e.currentTarget.select()}
 										/>
 										<small class="block text-gray-400">≈ {Math.round(premMsgs / 22)} / day</small>
 									{:else}
@@ -437,6 +446,7 @@
 											placeholder="~{busMsgs}"
 											class="w-20 text-sm font-mono bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none text-right"
 											on:keydown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+											on:focus={(e) => e.currentTarget.select()}
 										/>
 										<small class="block text-gray-400">msgs / seat</small>
 									{:else}
@@ -451,16 +461,18 @@
 									{#if isEditing}
 										<div class="flex gap-1 justify-end">
 											<button
-												class="px-2 py-0.5 text-xs bg-black text-white dark:bg-white dark:text-black rounded"
+												class="p-2 text-emerald-600 hover:text-emerald-700 dark:text-emerald-500 dark:hover:text-emerald-400 rounded-lg transition"
 												on:click={saveEdit}
+												title={$i18n.t('Save')}
 											>
-												Save
+												<CheckCircle className="size-5" />
 											</button>
 											<button
-												class="px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 rounded"
+												class="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition"
 												on:click={cancelEdit}
+												title={$i18n.t('Cancel')}
 											>
-												Cancel
+												<XMark className="size-5" />
 											</button>
 										</div>
 									{:else}
