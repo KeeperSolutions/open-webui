@@ -104,6 +104,10 @@ async def periodic_billing_usage_reporter():
     Async task that wakes up daily at UTC midnight and pushes usage to Stripe.
     Designed to be launched with asyncio.create_task() at app startup.
     """
+    from open_webui.env import BILLING_ENABLED
+    if not BILLING_ENABLED:
+        return
+
     log.info("[billing-reporter] Task started.")
 
     while True:
@@ -111,15 +115,8 @@ async def periodic_billing_usage_reporter():
         log.debug(f"[billing-reporter] Next run in {wait:.0f}s ({wait/3600:.1f}h).")
         await asyncio.sleep(wait)
 
-        log.info("[billing-reporter] Running daily usage report.")
-        try:
-            await _run_usage_report()
-        except Exception as e:
-            log.error(f"[billing-reporter] Unexpected error: {e}")
-
-        # Deep rescan: re-fetch last 7 days from Langfuse to catch backfilled pricing.
-        # Uses bulk_upsert_costs to update previously-NULL cost_eur rows without touching
-        # already-priced rows.
+        # Deep rescan runs first so backfilled Langfuse pricing is in the ledger
+        # before _run_usage_report() reads it for Stripe billing.
         try:
             loop = asyncio.get_running_loop()
             rescan_since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
@@ -127,6 +124,12 @@ async def periodic_billing_usage_reporter():
             await loop.run_in_executor(None, lambda: _sync_observations(rescan_since, deep_rescan=True))
         except Exception as e:
             log.error(f"[billing-reporter] Deep rescan failed: {e}")
+
+        log.info("[billing-reporter] Running daily usage report.")
+        try:
+            await _run_usage_report()
+        except Exception as e:
+            log.error(f"[billing-reporter] Unexpected error: {e}")
 
         # Small buffer to avoid drift from midnight into the same second
         await asyncio.sleep(5)

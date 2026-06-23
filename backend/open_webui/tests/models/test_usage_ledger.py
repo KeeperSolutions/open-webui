@@ -141,6 +141,44 @@ class TestBulkUpsertCosts:
         }])
         assert updated == 0
 
+    def test_skips_rows_where_ecb_unavailable(self, ledger):
+        # cost_usd present but cost_eur=None (ECB was down during rescan) — must not
+        # write NULL back onto NULL or claim a backfill occurred.
+        ledger.bulk_insert_ignore([_make_row("obs_upsert_d", "u4@x.com", cost_eur=None)])
+        updated = ledger.bulk_upsert_costs([{
+            "langfuse_observation_id": "obs_upsert_d",
+            "cost_usd": 0.05,
+            "eur_usd_rate": None,
+            "cost_eur": None,
+        }])
+        assert updated == 0
+        # cost_eur should still be NULL, not changed
+        assert ledger.get_cost_eur_for_user_current_month("u4@x.com") == 0.0
+
+    def test_sets_has_data_after_update(self, ledger):
+        ledger.bulk_insert_ignore([_make_row("obs_upsert_e", "u5@x.com", cost_eur=None)])
+        ledger._has_data = False  # reset to simulate a fresh process that hasn't inserted yet
+        ledger.bulk_upsert_costs([{
+            "langfuse_observation_id": "obs_upsert_e",
+            "cost_usd": 0.05,
+            "eur_usd_rate": 1.15,
+            "cost_eur": 0.05 / 1.15,
+        }])
+        assert ledger._has_data
+
+    def test_bulk_update_multiple_rows(self, ledger):
+        ledger.bulk_insert_ignore([
+            _make_row("obs_upsert_f1", "u6@x.com", cost_eur=None),
+            _make_row("obs_upsert_f2", "u6@x.com", cost_eur=None),
+        ])
+        updated = ledger.bulk_upsert_costs([
+            {"langfuse_observation_id": "obs_upsert_f1", "cost_usd": 0.10, "eur_usd_rate": 1.15, "cost_eur": 0.10 / 1.15},
+            {"langfuse_observation_id": "obs_upsert_f2", "cost_usd": 0.20, "eur_usd_rate": 1.15, "cost_eur": 0.20 / 1.15},
+        ])
+        assert updated == 2
+        result = ledger.get_cost_eur_for_user_current_month("u6@x.com")
+        assert result == pytest.approx((0.10 + 0.20) / 1.15)
+
 
 class TestGetCostEurForUserCurrentMonth:
     def test_sums_current_month_cost_for_user(self, ledger):

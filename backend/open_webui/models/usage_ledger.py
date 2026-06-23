@@ -5,7 +5,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, Float, Index, Integer, Text, func, insert
+from sqlalchemy import BigInteger, Column, Float, Index, Integer, Text, case, func, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from open_webui.internal.db import Base, get_db
@@ -146,35 +146,50 @@ class UsageLedgerTable:
 
         Used by the nightly deep rescan to backfill pricing that Langfuse added after
         the original insert. Only overwrites a row when the stored cost_eur IS NULL and
-        the incoming cost_usd IS NOT NULL — priced rows are never touched.
+        the incoming cost_usd AND cost_eur are both NOT NULL — priced rows are never
+        touched, and rows where ECB was also unavailable (cost_eur=None) are skipped.
+        Uses a single bulk CASE UPDATE to avoid N+1 round-trips.
         Returns the number of rows updated.
         """
         if not rows:
             return 0
-        # Only process rows that actually have a cost to write
-        costed = [r for r in rows if r.get("cost_usd") is not None]
+        # Require both cost_usd and cost_eur to be non-None — skips rows where ECB
+        # was also unavailable during the rescan, which would write NULL back onto NULL.
+        costed = [r for r in rows if r.get("cost_usd") is not None and r.get("cost_eur") is not None]
         if not costed:
             return 0
 
         now_ts = int(time.time())
-        updated = 0
+        obs_ids = [r["langfuse_observation_id"] for r in costed]
+
         with get_db() as db:
-            for r in costed:
-                result = db.execute(
-                    UsageLedger.__table__.update()
-                    .where(
-                        UsageLedger.langfuse_observation_id == r["langfuse_observation_id"],
-                        UsageLedger.cost_eur.is_(None),
-                    )
-                    .values(
-                        cost_usd=r["cost_usd"],
-                        eur_usd_rate=r.get("eur_usd_rate"),
-                        cost_eur=r.get("cost_eur"),
-                        synced_at=now_ts,
-                    )
+            result = db.execute(
+                UsageLedger.__table__.update()
+                .where(
+                    UsageLedger.langfuse_observation_id.in_(obs_ids),
+                    UsageLedger.cost_eur.is_(None),
                 )
-                updated += result.rowcount
+                .values(
+                    cost_usd=case(
+                        {r["langfuse_observation_id"]: r["cost_usd"] for r in costed},
+                        value=UsageLedger.langfuse_observation_id,
+                    ),
+                    eur_usd_rate=case(
+                        {r["langfuse_observation_id"]: r.get("eur_usd_rate") for r in costed},
+                        value=UsageLedger.langfuse_observation_id,
+                    ),
+                    cost_eur=case(
+                        {r["langfuse_observation_id"]: r["cost_eur"] for r in costed},
+                        value=UsageLedger.langfuse_observation_id,
+                    ),
+                    synced_at=now_ts,
+                )
+            )
             db.commit()
+            updated = result.rowcount if result.rowcount >= 0 else 0
+
+        if updated > 0:
+            self._has_data = True
         return updated
 
     def get_cost_eur_for_user_current_month(self, user_id: str) -> float:
