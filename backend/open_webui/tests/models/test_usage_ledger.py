@@ -103,6 +103,45 @@ class TestGetMaxObservedAt:
         assert ledger.get_max_observed_at() == ts2
 
 
+class TestBulkUpsertCosts:
+    def test_updates_null_cost_row(self, ledger):
+        ledger.bulk_insert_ignore([_make_row("obs_upsert_a", "u@x.com", cost_eur=None)])
+        updated = ledger.bulk_upsert_costs([{
+            "langfuse_observation_id": "obs_upsert_a",
+            "cost_usd": 0.05,
+            "eur_usd_rate": 1.15,
+            "cost_eur": 0.05 / 1.15,
+        }])
+        assert updated == 1
+        result = ledger.get_cost_eur_for_user_current_month("u@x.com")
+        assert result == pytest.approx(0.05 / 1.15)
+
+    def test_skips_already_priced_row(self, ledger):
+        ledger.bulk_insert_ignore([_make_row("obs_upsert_b", "u2@x.com", cost_eur=0.05)])
+        updated = ledger.bulk_upsert_costs([{
+            "langfuse_observation_id": "obs_upsert_b",
+            "cost_usd": 0.99,
+            "eur_usd_rate": 1.15,
+            "cost_eur": 0.99 / 1.15,
+        }])
+        assert updated == 0
+        result = ledger.get_cost_eur_for_user_current_month("u2@x.com")
+        assert result == pytest.approx(0.05)
+
+    def test_returns_zero_for_empty_input(self, ledger):
+        assert ledger.bulk_upsert_costs([]) == 0
+
+    def test_skips_rows_without_cost_usd(self, ledger):
+        ledger.bulk_insert_ignore([_make_row("obs_upsert_c", "u3@x.com", cost_eur=None)])
+        updated = ledger.bulk_upsert_costs([{
+            "langfuse_observation_id": "obs_upsert_c",
+            "cost_usd": None,
+            "eur_usd_rate": None,
+            "cost_eur": None,
+        }])
+        assert updated == 0
+
+
 class TestGetCostEurForUserCurrentMonth:
     def test_sums_current_month_cost_for_user(self, ledger):
         ledger.bulk_insert_ignore([

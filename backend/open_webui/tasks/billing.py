@@ -116,12 +116,29 @@ async def periodic_billing_usage_reporter():
             await _run_usage_report()
         except Exception as e:
             log.error(f"[billing-reporter] Unexpected error: {e}")
+
+        # Deep rescan: re-fetch last 7 days from Langfuse to catch backfilled pricing.
+        # Uses bulk_upsert_costs to update previously-NULL cost_eur rows without touching
+        # already-priced rows.
+        try:
+            loop = asyncio.get_running_loop()
+            rescan_since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+            log.info("[billing-reporter] Starting nightly deep rescan from %s.", rescan_since.isoformat())
+            await loop.run_in_executor(None, lambda: _sync_observations(rescan_since, deep_rescan=True))
+        except Exception as e:
+            log.error(f"[billing-reporter] Deep rescan failed: {e}")
+
         # Small buffer to avoid drift from midnight into the same second
         await asyncio.sleep(5)
 
 
-def _sync_observations(since: datetime.datetime) -> int:
-    """Blocking: fetch Langfuse observations since `since`, convert to EUR, insert into ledger."""
+def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -> int:
+    """Blocking: fetch Langfuse observations since `since`, convert to EUR, insert into ledger.
+
+    When deep_rescan=True (nightly path), rows that already exist with cost_eur=NULL are
+    updated if Langfuse now has pricing for them (bulk_upsert_costs). The hot-path (every
+    5 min) uses insert-ignore only — fast and cheap.
+    """
     from open_webui.langfuse.observations import fetch_observations_since
     from open_webui.langfuse.ecb_rates import get_eur_usd_rate
     from open_webui.models.usage_ledger import UsageLedgerDB
@@ -191,7 +208,14 @@ def _sync_observations(since: datetime.datetime) -> int:
         })
 
     inserted = UsageLedgerDB.bulk_insert_ignore(rows) if rows else 0
-    log.info("[ledger-poller] Synced %d observations (%d inserted).", len(rows), inserted)
+
+    updated = 0
+    if deep_rescan and rows:
+        updated = UsageLedgerDB.bulk_upsert_costs(rows)
+        if updated:
+            log.info("[ledger-poller] Deep rescan backfilled costs for %d previously-unpriced rows.", updated)
+
+    log.info("[ledger-poller] Synced %d observations (%d inserted, %d cost-backfilled).", len(rows), inserted, updated)
 
     # Re-arm alert state for models that were "recovered" but have lost pricing again
     relapsed = unpriced_models & _priced_models_recovered

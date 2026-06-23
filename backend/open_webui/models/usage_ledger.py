@@ -141,6 +141,42 @@ class UsageLedgerTable:
             self._has_data = True
         return inserted
 
+    def bulk_upsert_costs(self, rows: List[Dict]) -> int:
+        """Update cost columns for existing rows where cost_eur is currently NULL.
+
+        Used by the nightly deep rescan to backfill pricing that Langfuse added after
+        the original insert. Only overwrites a row when the stored cost_eur IS NULL and
+        the incoming cost_usd IS NOT NULL — priced rows are never touched.
+        Returns the number of rows updated.
+        """
+        if not rows:
+            return 0
+        # Only process rows that actually have a cost to write
+        costed = [r for r in rows if r.get("cost_usd") is not None]
+        if not costed:
+            return 0
+
+        now_ts = int(time.time())
+        updated = 0
+        with get_db() as db:
+            for r in costed:
+                result = db.execute(
+                    UsageLedger.__table__.update()
+                    .where(
+                        UsageLedger.langfuse_observation_id == r["langfuse_observation_id"],
+                        UsageLedger.cost_eur.is_(None),
+                    )
+                    .values(
+                        cost_usd=r["cost_usd"],
+                        eur_usd_rate=r.get("eur_usd_rate"),
+                        cost_eur=r.get("cost_eur"),
+                        synced_at=now_ts,
+                    )
+                )
+                updated += result.rowcount
+            db.commit()
+        return updated
+
     def get_cost_eur_for_user_current_month(self, user_id: str) -> float:
         with get_db() as db:
             result = (
