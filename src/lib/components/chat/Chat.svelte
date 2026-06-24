@@ -1593,7 +1593,11 @@
 
 			if (lastMessage.error && !lastMessage.content) {
 				// Error in response
-				toast.error($i18n.t(`Oops! There was an error in the previous response.`));
+				if (lastMessage.error.content?.includes('credits_exhausted')) {
+					window.dispatchEvent(new CustomEvent('billing:credits_exhausted'));
+				} else {
+					toast.error($i18n.t(`Oops! There was an error in the previous response.`));
+				}
 				return;
 			}
 		}
@@ -2046,7 +2050,11 @@
 		console.error(innerError); // allow-console
 		if ('detail' in innerError) {
 			// FastAPI error
-			toast.error(innerError.detail);
+			if (innerError.detail === 'credits_exhausted') {
+				window.dispatchEvent(new CustomEvent('billing:credits_exhausted'));
+			} else {
+				toast.error(innerError.detail);
+			}
 			errorMessage = innerError.detail;
 		} else if ('error' in innerError) {
 			// OpenAI error

@@ -2,6 +2,7 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getAdminBillingSummary, type AdminBillingRow } from '$lib/apis/billing';
+	import { PLAN_TIER } from '$lib/billing/planTiers';
 
 	const i18n = getContext('i18n');
 
@@ -37,8 +38,8 @@
 	});
 
 	$: totalCost = rows.reduce((s, r) => s + r.current_month_cost_eur, 0);
-	$: paidCount = rows.filter((r) => r.plan_tier === 'paid' && r.subscription_status === 'active').length;
-	$: trialCount = rows.filter((r) => r.plan_tier === 'trial').length;
+	$: paidCount = rows.filter((r) => (r.plan_tier === PLAN_TIER.PRO || r.plan_tier === PLAN_TIER.PREMIUM) && r.subscription_status === 'active').length;
+	$: trialCount = rows.filter((r) => r.plan_tier === PLAN_TIER.TRIAL).length;
 	$: pastDueCount = rows.filter((r) => r.subscription_status === 'past_due').length;
 </script>
 

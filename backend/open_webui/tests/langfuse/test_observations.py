@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import open_webui.langfuse.observations as obs_module
 from open_webui.langfuse.observations import fetch_observations_since, _resolve_user_ids
 
 
@@ -52,6 +53,13 @@ SINCE = datetime.datetime(2026, 6, 19, 0, 0, 0, tzinfo=datetime.timezone.utc)
 def patch_load_env():
     with patch("open_webui.langfuse.observations.load_env", return_value=("pk", "sk", "https://cloud.langfuse.com")):
         yield
+
+
+@pytest.fixture(autouse=True)
+def clear_trace_cache():
+    obs_module._trace_user_cache.clear()
+    yield
+    obs_module._trace_user_cache.clear()
 
 
 class TestResolveUserIds:
@@ -103,6 +111,39 @@ class TestResolveUserIds:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
         assert result["trace_aaa"] == ""
+
+    def test_cache_miss_fetches_and_stores(self):
+        mock_resp = _make_trace_response("user@example.com")
+        with patch("open_webui.langfuse.observations.requests.get", return_value=mock_resp) as mock_get:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
+        assert result == {"trace_aaa": "user@example.com"}
+        assert mock_get.call_count == 1
+        assert obs_module._trace_user_cache["trace_aaa"] == "user@example.com"
+
+    def test_cache_hit_skips_fetch(self):
+        obs_module._trace_user_cache["trace_aaa"] = "cached@example.com"
+        with patch("open_webui.langfuse.observations.requests.get") as mock_get:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
+        assert result == {"trace_aaa": "cached@example.com"}
+        mock_get.assert_not_called()
+
+    def test_cache_partial_hit_only_fetches_misses(self):
+        obs_module._trace_user_cache["trace_aaa"] = "alice@example.com"
+
+        def side_effect(url, **kwargs):
+            if "trace_bbb" in url:
+                return _make_trace_response("bob@example.com")
+            raise ValueError(f"unexpected url: {url}")
+
+        with patch("open_webui.langfuse.observations.requests.get", side_effect=side_effect) as mock_get:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                result = _resolve_user_ids("https://host", {}, ["trace_aaa", "trace_bbb"], pool)
+
+        assert result["trace_aaa"] == "alice@example.com"
+        assert result["trace_bbb"] == "bob@example.com"
+        assert mock_get.call_count == 1  # only trace_bbb fetched
 
 
 class TestFetchObservationsSince:

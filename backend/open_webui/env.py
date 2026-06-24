@@ -965,7 +965,9 @@ EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
 BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")  # €45/month flat subscription price
+STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")  # legacy alias — maps to pro
+STRIPE_PRICE_ID_PRO = os.environ.get("STRIPE_PRICE_ID_PRO", "") or os.environ.get("STRIPE_PRICE_ID", "")
+STRIPE_PRICE_ID_PREMIUM = os.environ.get("STRIPE_PRICE_ID_PREMIUM", "")
 STRIPE_FREE_TIER_CENTS = int(os.environ.get("STRIPE_FREE_TIER_CENTS", "200"))  # €2.00 trial credit
 BILLING_GRACE_PERIOD_DAYS = int(os.environ.get("BILLING_GRACE_PERIOD_DAYS", "3"))
 

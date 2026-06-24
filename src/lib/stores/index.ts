@@ -4,6 +4,7 @@ import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import { isDev, isStaging } from '$lib/utils';
+import type { BillingStatus, MyUsage } from '$lib/apis/billing';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -81,6 +82,9 @@ export const functions = writable(null);
 export const toolServers = writable([]);
 
 export const banners: Writable<Banner[]> = writable([]);
+
+export const billingStatus: Writable<BillingStatus | null> = writable(null);
+export const myUsage: Writable<MyUsage | null> = writable(null);
 
 export const settings: Writable<Settings> = writable({});
 
