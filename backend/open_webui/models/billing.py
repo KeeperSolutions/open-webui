@@ -172,6 +172,24 @@ class StripeBillingTable:
                 row.updated_at = int(time.time())
                 db.commit()
 
+    def add_top_up_credits(self, user_id: str, credits: int) -> Optional[StripeBillingModel]:
+        with get_db() as db:
+            row = db.query(StripeBilling).filter_by(user_id=user_id).first()
+            if not row:
+                return None
+            row.top_up_credits = (row.top_up_credits or 0) + credits
+            row.updated_at = int(time.time())
+            db.commit()
+            db.refresh(row)
+            return StripeBillingModel.model_validate(row)
+
+    def reset_top_up_credits(self, user_id: str) -> None:
+        with get_db() as db:
+            db.query(StripeBilling).filter_by(user_id=user_id).update(
+                {"top_up_credits": 0, "updated_at": int(time.time())}
+            )
+            db.commit()
+
 
 StripeBillings = StripeBillingTable()
 
@@ -201,7 +219,7 @@ class Team(Base):
     # Usage budget included with the flat subscription
     monthly_usage_budget_eur = Column(Float, nullable=False, default=0.0)
     # Extra credits purchased via top-up; owner can buy more when budget is exhausted
-    extra_usage_credit_eur = Column(Float, nullable=False, default=0.0)
+    top_up_credits = Column(Integer, nullable=False, default=0)
 
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -225,7 +243,7 @@ class TeamModel(BaseModel):
     topup_checkout_session_id: Optional[str] = None
 
     monthly_usage_budget_eur: float = 0.0
-    extra_usage_credit_eur: float = 0.0
+    top_up_credits: int = 0
 
     created_at: int
     updated_at: int
@@ -247,7 +265,7 @@ class TeamsTable:
                 owner_user_id=owner_user_id,
                 seat_limit=seat_limit,
                 monthly_usage_budget_eur=monthly_usage_budget_eur,
-                extra_usage_credit_eur=0.0,
+                top_up_credits=0,
                 created_at=now,
                 updated_at=now,
             )
@@ -306,21 +324,21 @@ class TeamsTable:
             db.commit()
             return updated > 0
 
-    def add_usage_credit(self, team_id: str, amount_eur: float) -> Optional[TeamModel]:
+    def add_top_up_credits(self, team_id: str, credits: int) -> Optional[TeamModel]:
         with get_db() as db:
             row = db.query(Team).filter_by(id=team_id).first()
             if not row:
                 return None
-            row.extra_usage_credit_eur = (row.extra_usage_credit_eur or 0.0) + amount_eur
+            row.top_up_credits = (row.top_up_credits or 0) + credits
             row.updated_at = int(time.time())
             db.commit()
             db.refresh(row)
             return TeamModel.model_validate(row)
 
-    def reset_extra_credit(self, team_id: str) -> None:
+    def reset_top_up_credits(self, team_id: str) -> None:
         with get_db() as db:
             db.query(Team).filter_by(id=team_id).update(
-                {"extra_usage_credit_eur": 0.0, "updated_at": int(time.time())}
+                {"top_up_credits": 0, "updated_at": int(time.time())}
             )
             db.commit()
 
