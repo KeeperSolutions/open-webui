@@ -4,7 +4,6 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Float, Integer, JSON, Text
-from sqlalchemy.exc import IntegrityError
 
 from open_webui.internal.db import Base, get_db
 
@@ -81,7 +80,7 @@ class ModelClassesTable:
             row = db.query(ModelClass).filter_by(id=id).first()
             return ModelClassModel.model_validate(row) if row else None
 
-    def create(self, form_data: ModelClassForm) -> Optional[ModelClassModel]:
+    def create(self, form_data: ModelClassForm) -> ModelClassModel:
         with get_db() as db:
             now = int(time.time())
             if form_data.order is None:
@@ -89,8 +88,6 @@ class ModelClassesTable:
                 order_value = max_order + 1
             else:
                 order_value = form_data.order
-                if db.query(ModelClass.id).filter_by(order=order_value).first():
-                    return None
 
             row = ModelClass(
                 name=form_data.name,
@@ -104,27 +101,17 @@ class ModelClassesTable:
                 order=order_value,
             )
             db.add(row)
-            try:
-                db.commit()
-                db.refresh(row)
-                return ModelClassModel.model_validate(row)
-            except IntegrityError:
-                db.rollback()
-                return None
+            db.commit()
+            db.refresh(row)
+            return ModelClassModel.model_validate(row)
 
-    def update(self, id: int, form_data: ModelClassUpdateForm) -> Optional[ModelClassModel]:
+    def update(self, id: int, form_data: ModelClassUpdateForm) -> ModelClassModel:
         with get_db() as db:
             row = db.query(ModelClass).filter_by(id=id).first()
             if not row:
-                return None
+                # Should not happen because router already checks existence
+                raise RuntimeError(f"ModelClass with id={id} disappeared during update")
             if form_data.order is not None:
-                conflict = (
-                    db.query(ModelClass.id)
-                    .filter(ModelClass.order == form_data.order, ModelClass.id != id)
-                    .first()
-                )
-                if conflict:
-                    return None
                 row.order = form_data.order
             row.name = form_data.name
             row.models = form_data.models
@@ -133,13 +120,9 @@ class ModelClassesTable:
             row.msgs_premium = form_data.msgs_premium
             row.msgs_business = form_data.msgs_business
             row.updated_at = int(time.time())
-            try:
-                db.commit()
-                db.refresh(row)
-                return ModelClassModel.model_validate(row)
-            except IntegrityError:
-                db.rollback()
-                return None
+            db.commit()
+            db.refresh(row)
+            return ModelClassModel.model_validate(row)
 
     def delete(self, id: int) -> bool:
         with get_db() as db:

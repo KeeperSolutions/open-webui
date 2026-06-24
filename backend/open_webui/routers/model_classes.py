@@ -27,18 +27,12 @@ async def create_model_class(
     form_data: ModelClassForm, user=Depends(get_admin_user)
 ):
     try:
-        result = ModelClasses.create(form_data)
+        return ModelClasses.create(form_data)
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order value already exists",
-        )
-    return result
 
 
 @router.put("/{id}", response_model=ModelClassModel)
@@ -53,19 +47,12 @@ async def update_model_class(
         )
 
     try:
-        result = ModelClasses.update(id, form_data)
+        return ModelClasses.update(id, form_data)
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Order value already exists",
         )
-
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Order value already exists",
-        )
-    return result
 
 
 @router.delete("/{id}")
