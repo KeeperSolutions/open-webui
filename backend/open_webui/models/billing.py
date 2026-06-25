@@ -30,7 +30,7 @@ class StripeBilling(Base):
 
     subscription_status = Column(Text, nullable=True)  # active | past_due | canceled | incomplete
     free_tier_credit_applied = Column(Boolean, default=False, nullable=False)
-    plan_tier = Column(Text, nullable=True)  # internal | trial | paid | team | team_member
+    plan_tier = Column(Text, nullable=True)  # internal | trial | pro | premium | team | team_member
     checkout_session_id = Column(Text, nullable=True)
     team_id = Column(Text, nullable=True)  # set for plan_tier "team" and "team_member"
 
@@ -51,7 +51,7 @@ class StripeBillingModel(BaseModel):
 
     subscription_status: Optional[str] = None
     free_tier_credit_applied: bool = False
-    plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member
+    plan_tier: Optional[str] = None  # internal | trial | pro | premium | team | team_member
     checkout_session_id: Optional[str] = None
     team_id: Optional[str] = None
 

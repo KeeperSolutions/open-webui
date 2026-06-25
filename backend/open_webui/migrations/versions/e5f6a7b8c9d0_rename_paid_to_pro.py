@@ -18,8 +18,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("UPDATE stripe_billings SET plan_tier = 'pro' WHERE plan_tier = 'paid'")
+    op.execute("UPDATE stripe_billing SET plan_tier = 'pro' WHERE plan_tier = 'paid'")
 
 
 def downgrade() -> None:
-    op.execute("UPDATE stripe_billings SET plan_tier = 'paid' WHERE plan_tier = 'pro'")
+    op.execute("UPDATE stripe_billing SET plan_tier = 'paid' WHERE plan_tier = 'pro'")
