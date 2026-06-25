@@ -32,7 +32,10 @@ class StripeBilling(Base):
     free_tier_credit_applied = Column(Boolean, default=False, nullable=False)
     plan_tier = Column(Text, nullable=True)  # internal | trial | paid | team | team_member
     checkout_session_id = Column(Text, nullable=True)
+    topup_checkout_session_id = Column(Text, nullable=True)
     team_id = Column(Text, nullable=True)  # set for plan_tier "team" and "team_member"
+
+    top_up_credits = Column(Integer, nullable=False, default=0)
 
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -53,7 +56,9 @@ class StripeBillingModel(BaseModel):
     free_tier_credit_applied: bool = False
     plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member
     checkout_session_id: Optional[str] = None
+    topup_checkout_session_id: Optional[str] = None
     team_id: Optional[str] = None
+    top_up_credits: int = 0
 
     created_at: int
     updated_at: int
@@ -75,6 +80,21 @@ class StripeBillingTable:
             row = db.query(StripeBilling).filter_by(checkout_session_id=session_id).first()
             return StripeBillingModel.model_validate(row) if row else None
 
+    def get_by_topup_checkout_session_id(self, session_id: str) -> Optional[StripeBillingModel]:
+        with get_db() as db:
+            row = db.query(StripeBilling).filter_by(topup_checkout_session_id=session_id).first()
+            return StripeBillingModel.model_validate(row) if row else None
+
+    def update_topup_checkout_session_id(self, user_id: str, session_id: str) -> bool:
+        with get_db() as db:
+            updated = (
+                db.query(StripeBilling)
+                .filter_by(user_id=user_id)
+                .update({"topup_checkout_session_id": session_id, "updated_at": int(time.time())})
+            )
+            db.commit()
+            return updated > 0
+
     def get_by_customer_id(self, customer_id: str) -> Optional[StripeBillingModel]:
         with get_db() as db:
             row = db.query(StripeBilling).filter_by(stripe_customer_id=customer_id).first()
@@ -91,6 +111,7 @@ class StripeBillingTable:
         free_tier_credit_applied: Optional[bool] = None,
         plan_tier: Optional[str] = None,
         checkout_session_id: Optional[str] = None,
+        topup_checkout_session_id: Optional[str] = None,
         team_id: Optional[str] = None,
     ) -> StripeBillingModel:
         with get_db() as db:
@@ -108,6 +129,7 @@ class StripeBillingTable:
                     free_tier_credit_applied=free_tier_credit_applied or False,
                     plan_tier=plan_tier,
                     checkout_session_id=checkout_session_id,
+                    topup_checkout_session_id=topup_checkout_session_id,
                     team_id=team_id,
                     created_at=now,
                     updated_at=now,
@@ -128,6 +150,8 @@ class StripeBillingTable:
                     row.plan_tier = plan_tier
                 if checkout_session_id is not None:
                     row.checkout_session_id = checkout_session_id
+                if topup_checkout_session_id is not None:
+                    row.topup_checkout_session_id = topup_checkout_session_id
                 if free_tier_credit_applied is not None:
                     row.free_tier_credit_applied = free_tier_credit_applied
                 if team_id is not None:

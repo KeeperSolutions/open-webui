@@ -1,7 +1,7 @@
 """Add topup_packs table
 
 Revision ID: 1782300783
-Revises: d8d905b57f4e
+Revises: a7b8c9d0e1f2
 Create Date: 2026-06-24 11:33:03.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "1782300783"
-down_revision: Union[str, None] = "d8d905b57f4e"
+down_revision: Union[str, None] = "a7b8c9d0e1f2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

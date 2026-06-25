@@ -418,7 +418,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         upcoming_eur: Optional[float] = None
         try:
             invoice = client.v1.invoices.create_preview(
-                params={"customer": record.stripe_customer_id}
+                params={"customer": record.stripe_customer_id, "subscription": record.stripe_subscription_id}
             )
             upcoming_eur = invoice.amount_due / 100
         except stripe.StripeError:
@@ -475,7 +475,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
             try:
                 client = get_stripe_client()
                 invoice = client.v1.invoices.create_preview(
-                    params={"customer": team.stripe_customer_id}
+                    params={"customer": team.stripe_customer_id, "subscription": team.stripe_subscription_id}
                 )
                 upcoming_eur = invoice.amount_due / 100
             except stripe.StripeError:
@@ -1108,8 +1108,8 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
 
     if is_team:
         Teams.update(target_id, topup_checkout_session_id=session.id)
-    else:
-        StripeBillings.upsert(user_id=target_id, checkout_session_id=session.id)
+    # For individual users we intentionally do NOT store the session ID here.
+    # It is written only after successful payment inside the webhook handler.
 
     return CheckoutResponse(url=session.url)
 
@@ -1278,7 +1278,13 @@ async def _handle_stripe_event(event_type: str, data):
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
         raw_meta = getattr(data, "metadata", None)
-        metadata = dict(getattr(raw_meta, "_data", {})) if raw_meta else {}
+        if raw_meta is None:
+            metadata = {}
+        else:
+            try:
+                metadata = dict(raw_meta)
+            except Exception:
+                metadata = getattr(raw_meta, "_data", {}) or {}
 
         # Handle top-up (team or individual)
         if metadata.get("type") == "topup":
@@ -1296,7 +1302,7 @@ async def _handle_stripe_event(event_type: str, data):
                     if existing:
                         return {"received": True}
                 elif user_id:
-                    existing = StripeBillings.get_by_checkout_session_id(session_id)
+                    existing = StripeBillings.get_by_topup_checkout_session_id(session_id)
                     if existing:
                         return {"received": True}
 
@@ -1306,16 +1312,14 @@ async def _handle_stripe_event(event_type: str, data):
                     credits = pack.credits
                     if team_id:
                         Teams.add_top_up_credits(team_id, credits)
-                        log.info(f"[billing] Top-up: team_id={team_id} +{credits} credits")
                     elif user_id:
                         StripeBillings.add_top_up_credits(user_id, credits)
-                        log.info(f"[billing] Top-up: user_id={user_id} +{credits} credits")
 
                     # Mark session as processed
                     if team_id:
                         Teams.update(team_id, topup_checkout_session_id=session_id)
                     elif user_id:
-                        StripeBillings.upsert(user_id=user_id, checkout_session_id=session_id)
+                        StripeBillings.update_topup_checkout_session_id(user_id, session_id)
             return {"received": True}
 
         # Check if this is a team subscription checkout
