@@ -21,9 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column('stripe_billing', sa.Column('topup_checkout_session_id', sa.Text(), nullable=True))
-    op.add_column('stripe_billing', sa.Column('top_up_credits', sa.Integer(), nullable=False, server_default='0'))
 
 
 def downgrade() -> None:
     op.drop_column('stripe_billing', 'topup_checkout_session_id')
-    op.drop_column('stripe_billing', 'top_up_credits')
