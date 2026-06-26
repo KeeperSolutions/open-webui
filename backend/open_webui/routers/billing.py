@@ -296,7 +296,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
         return user
 
     if record.plan_tier == PLAN_TIER_TRIAL:
-        _check_credits_exhausted(user.email)
+        _check_credits_exhausted(user.email, user.id)
         return user
 
     # plan_tier is None or "internal" — allow (covers legacy rows and internal users)

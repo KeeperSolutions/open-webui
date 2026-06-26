@@ -1,10 +1,14 @@
+import sys
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from open_webui.main import app
-from open_webui.utils.auth import get_verified_user
+sys.modules.setdefault("stripe", MagicMock())
+
+from open_webui.main import app  # noqa: E402
+from open_webui.utils.auth import get_verified_user  # noqa: E402
 
 
 client = TestClient(app)
@@ -56,6 +60,14 @@ def override_user(user_obj):
 
 def clear_overrides():
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def billing_enabled():
+    """Patch module-level constants so billing endpoints don't 503/400 unconditionally."""
+    with patch("open_webui.routers.billing.BILLING_ENABLED", True), \
+         patch("open_webui.routers.billing.STRIPE_WEBHOOK_SECRET", "whsec_test"):
+        yield
 
 
 class TestCreateTopup:
