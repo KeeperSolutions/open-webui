@@ -1080,6 +1080,8 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Team subscription is not active.",
             )
+        if not team.stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No billing account.")
         target_customer_id = team.stripe_customer_id
         target_id = team.id
         is_team = True
