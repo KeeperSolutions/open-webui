@@ -1,8 +1,9 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import type { PlanTier } from '$lib/billing/planTiers';
 
 export type BillingStatus = {
 	enabled: boolean;
-	plan_tier: 'internal' | 'trial' | 'paid' | 'team' | 'team_member' | null;
+	plan_tier: PlanTier | null;
 	is_configured: boolean;
 
 	// Trial
@@ -102,6 +103,10 @@ export type MyUsage = {
 	total_cost_eur: number;
 	exchange_rates: ExchangeRateEntry[];
 	ledger_ready: boolean;
+	credits_balance: number;
+	credits_used: number;
+	credits_remaining: number;
+	credits_per_eur_cent: number; // 0 = internal (credits not applicable)
 };
 
 export const getMyUsage = (token: string) => request<MyUsage>(`${base}/my-usage`, token);

@@ -1,16 +1,19 @@
 import datetime as dt
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Generator, Dict, Any, List
 
 import requests
+from cachetools import TTLCache
 
 from open_webui.langfuse.metrics import auth_header, load_env
 
 log = logging.getLogger(__name__)
 
 _PAGE_SIZE = 100
-_TRACE_RESOLVE_WORKERS = 20
+_TRACE_RESOLVE_WORKERS = 10
+_trace_user_cache: TTLCache[str, str] = TTLCache(maxsize=10_000, ttl=7200)
 
 
 def _fetch_one_trace(host: str, headers: dict, tid: str) -> tuple[str, str]:
@@ -31,14 +34,29 @@ def _fetch_one_trace(host: str, headers: dict, tid: str) -> tuple[str, str]:
 def _resolve_user_ids(
     host: str, headers: dict, trace_ids: List[str], pool: ThreadPoolExecutor
 ) -> Dict[str, str]:
-    """Return {traceId: userId} for a batch of trace IDs, fetched concurrently via shared pool."""
+    """Return {traceId: userId} for a batch of trace IDs.
+
+    Cache hits are returned immediately; only uncached IDs are fetched from Langfuse.
+    Resolved IDs are stored in _trace_user_cache (2h TTL, 10k cap) to reduce API calls
+    across successive poller ticks.
+    """
     if not trace_ids:
         return {}
     result: Dict[str, str] = {}
-    futures = {pool.submit(_fetch_one_trace, host, headers, tid): tid for tid in trace_ids}
-    for future in as_completed(futures):
-        tid, user_id = future.result()
-        result[tid] = user_id
+    to_fetch: List[str] = []
+    for tid in trace_ids:
+        if tid in _trace_user_cache:
+            result[tid] = _trace_user_cache[tid]
+        else:
+            to_fetch.append(tid)
+
+    if to_fetch:
+        futures = {pool.submit(_fetch_one_trace, host, headers, tid): tid for tid in to_fetch}
+        for future in as_completed(futures):
+            tid, user_id = future.result()
+            _trace_user_cache[tid] = user_id
+            result[tid] = user_id
+
     return result
 
 
@@ -69,6 +87,14 @@ def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], No
                     },
                     timeout=30,
                 )
+                if resp.status_code == 429:
+                    try:
+                        wait = int(resp.headers.get("Retry-After", "60"))
+                    except (ValueError, TypeError):
+                        wait = 60
+                    log.warning("Langfuse rate limit hit (page %d), retrying in %ds", page, wait)
+                    time.sleep(wait)
+                    continue
                 resp.raise_for_status()
                 body = resp.json()
             except Exception as exc:

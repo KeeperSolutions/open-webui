@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import os
 import time
 from typing import Set
 
@@ -220,6 +221,28 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
 
     log.info("[ledger-poller] Synced %d observations (%d inserted, %d cost-backfilled).", len(rows), inserted, updated)
 
+    # Log overage for credits users — signals potential abuse if repeated across syncs
+    try:
+        from open_webui.models.user_credits import UserCreditsDB, eur_to_credits
+        distinct_users = {r["user_id"] for r in rows if r.get("user_id")}
+        for uid in distinct_users:
+            row_creds = UserCreditsDB.get(uid)
+            if row_creds and row_creds.balance > 0:
+                try:
+                    from open_webui.models.usage_ledger import UsageLedgerDB as _UL
+                    cost = _UL.get_cost_eur_for_user_current_month(uid)
+                except Exception:
+                    continue
+                used = eur_to_credits(cost, row_creds.credits_per_eur_cent)
+                remaining = row_creds.balance - used
+                if remaining < 0:
+                    log.warning(
+                        "[ledger-poller] credits overage: user=%s overshot=%d credits (balance=%d used=%d)",
+                        uid, abs(remaining), row_creds.balance, used,
+                    )
+    except Exception as _e:
+        log.debug("[ledger-poller] overage check skipped: %s", _e)
+
     # Re-arm alert state for models that were "recovered" but have lost pricing again
     relapsed = unpriced_models & _priced_models_recovered
     if relapsed:
@@ -343,4 +366,8 @@ async def periodic_ledger_poller():
         except Exception as exc:
             log.error("[ledger-poller] Unexpected error: %s", exc)
 
-        await asyncio.sleep(300)
+        try:
+            poll_interval = int(os.environ.get("LEDGER_POLL_INTERVAL", "300"))
+        except (ValueError, TypeError):
+            poll_interval = 300
+        await asyncio.sleep(poll_interval)

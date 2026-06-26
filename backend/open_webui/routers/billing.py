@@ -12,6 +12,8 @@ from open_webui.env import (
     INTERNAL_EMAIL_DOMAINS,
     STRIPE_FREE_TIER_CENTS,
     STRIPE_PRICE_ID,
+    STRIPE_PRICE_ID_PRO,
+    STRIPE_PRICE_ID_PREMIUM,
     STRIPE_SECRET_KEY,
     STRIPE_TEAM_TIERS,
     STRIPE_WEBHOOK_SECRET,
@@ -19,6 +21,16 @@ from open_webui.env import (
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
+from open_webui.models.billing_plans import (
+    CREDITS_TIERS,
+    PLAN_CREDITS,
+    PLAN_TIER_INTERNAL,
+    PLAN_TIER_PREMIUM,
+    PLAN_TIER_PRO,
+    PLAN_TIER_TEAM,
+    PLAN_TIER_TEAM_MEMBER,
+    PLAN_TIER_TRIAL,
+)
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
 log = logging.getLogger(__name__)
@@ -63,6 +75,30 @@ _team_cost_cache: _TTLCache = _TTLCache(maxsize=256, ttl=_TEAM_COST_CACHE_TTL)
 # ---------- Helpers ----------
 
 
+def _tier_from_price_id(price_id: str) -> str:
+    """Map a Stripe price ID to a plan tier string. Defaults to pro for unknown IDs."""
+    if STRIPE_PRICE_ID_PREMIUM and price_id == STRIPE_PRICE_ID_PREMIUM:
+        return PLAN_TIER_PREMIUM
+    return PLAN_TIER_PRO
+
+
+def _price_id_from_session(session) -> str:
+    """Extract the first price ID from a Stripe checkout session object."""
+    try:
+        line_items = getattr(session, "line_items", None)
+        if line_items:
+            data = getattr(line_items, "data", None) or line_items.get("data", [])
+            if data:
+                price = getattr(data[0], "price", None) or data[0].get("price", {})
+                return getattr(price, "id", None) or price.get("id", "")
+    except Exception:
+        pass
+    meta = getattr(session, "metadata", None) or {}
+    if hasattr(meta, "get"):
+        return meta.get("price_id", "")
+    return ""
+
+
 def is_internal_user(email: str) -> bool:
     domain = email.split("@")[-1].lower()
     return domain in INTERNAL_EMAIL_DOMAINS
@@ -104,6 +140,41 @@ def _get_user_current_month_cost(email: str) -> float:
     except Exception as e:
         log.warning(f"Could not fetch monthly ledger cost for {email}: {e}")
         return 0.0
+
+
+def _check_credits_exhausted(email: str, user_id: str) -> None:
+    """Raise 402 with detail='credits_exhausted' if the user has no remaining credits.
+
+    Trial credits are lifetime (alltime cost). Pro/premium reset monthly.
+    When no user_credits row exists, falls back to the plan's default balance so
+    users who raced past onboarding are still enforced (not silently allowed through).
+    """
+    try:
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB, eur_to_credits
+
+        record = StripeBillings.get_by_user_id(user_id)
+        if not record or record.plan_tier not in CREDITS_TIERS:
+            return
+
+        row = UserCreditsDB.get(email)
+        balance = row.balance if row else PLAN_CREDITS.get(record.plan_tier, 0)
+        rate = row.credits_per_eur_cent if row else CREDITS_PER_EUR_CENT
+
+        if record.plan_tier == PLAN_TIER_TRIAL:
+            cost_eur = _get_user_alltime_cost(email, record.created_at or 0)
+        else:
+            cost_eur = _get_user_current_month_cost(email)
+
+        used = eur_to_credits(cost_eur, rate)
+        if used >= balance:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="credits_exhausted",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.warning("[billing] credits exhaustion check failed for %s: %s", email, e)
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
@@ -165,8 +236,9 @@ async def check_billing_access(user=Depends(get_verified_user)):
         if record is None:
             return user  # Stripe unreachable, allow through
 
-    if record.plan_tier == "paid":
+    if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
         if record.subscription_status in ("active", "trialing"):
+            _check_credits_exhausted(user.email, user.id)
             return user
         if record.subscription_status == "canceled":
             raise HTTPException(
@@ -178,7 +250,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
             detail="Your payment is past due. Please update your billing details at /billing.",
         )
 
-    if record.plan_tier == "team":
+    if record.plan_tier == PLAN_TIER_TEAM:
         team = Teams.get_by_owner_user_id(user.id)
         if not team or team.subscription_status not in ("active", "trialing"):
             raise HTTPException(
@@ -198,7 +270,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
                 )
         return user
 
-    if record.plan_tier == "team_member":
+    if record.plan_tier == PLAN_TIER_TEAM_MEMBER:
         if not record.team_id:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -223,16 +295,8 @@ async def check_billing_access(user=Depends(get_verified_user)):
                 )
         return user
 
-    if record.plan_tier == "trial":
-        cost_used = _get_user_alltime_cost(user.email, record.created_at)
-        if cost_used >= TRIAL_CREDIT_EUR:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=(
-                    f"Your €{TRIAL_CREDIT_EUR:.2f} trial credit has been used up. "
-                    "Please upgrade your plan at /billing."
-                ),
-            )
+    if record.plan_tier == PLAN_TIER_TRIAL:
+        _check_credits_exhausted(user.email)
         return user
 
     # plan_tier is None or "internal" — allow (covers legacy rows and internal users)
@@ -301,7 +365,10 @@ async def auto_onboard_user(user, request=None):
             plan_tier="trial",
             free_tier_credit_applied=free_tier_applied,
         )
-        log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id})")
+        # Assign trial credits at current global rate
+        from open_webui.models.user_credits import UserCreditsDB, CREDITS_PER_EUR_CENT, PLAN_CREDITS
+        UserCreditsDB.set_plan(user.email, PLAN_CREDITS["trial"], CREDITS_PER_EUR_CENT)
+        log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={PLAN_CREDITS['trial']})")
 
     except stripe.StripeError as e:
         log.error(f"[billing] Failed to onboard external user {user.email}: {e}")
@@ -1364,15 +1431,24 @@ async def _handle_stripe_event(event_type: str, data):
                 record = StripeBillings.get_by_customer_id(customer_id)
 
             if record:
+                price_id = _price_id_from_session(data)
+                plan_tier = _tier_from_price_id(price_id)
                 StripeBillings.upsert(
                     user_id=record.user_id,
                     stripe_customer_id=customer_id,
                     stripe_subscription_id=subscription_id,
-                    plan_tier="paid",
+                    plan_tier=plan_tier,
                     subscription_status="active",
                     free_tier_credit_applied=record.free_tier_credit_applied,
                 )
-                log.info(f"[billing] Checkout completed: user_id={record.user_id} → paid plan")
+                log.info(f"[billing] Checkout completed: user_id={record.user_id} → {plan_tier}")
+                from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB
+                from open_webui.models.users import Users as _Users
+                u = _Users.get_user_by_id(record.user_id)
+                if u:
+                    credits = PLAN_CREDITS.get(plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+                    UserCreditsDB.set_plan(u.email, credits, CREDITS_PER_EUR_CENT)
+                    log.info("[billing] Credits assigned: user=%s plan=%s balance=%d rate=%s", u.email, plan_tier, credits, CREDITS_PER_EUR_CENT)
 
     elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
         customer_id = getattr(data, "customer", None)
@@ -1402,9 +1478,19 @@ async def _handle_stripe_event(event_type: str, data):
                 log.info(f"[billing] Team payment recovered: customer={customer_id}")
             else:
                 record = StripeBillings.get_by_customer_id(customer_id)
-                if record and record.subscription_status == "past_due":
-                    StripeBillings.update_subscription_status(customer_id, "active")
-                    log.info(f"[billing] Payment recovered: customer={customer_id}")
+                if record:
+                    if record.subscription_status == "past_due":
+                        StripeBillings.update_subscription_status(customer_id, "active")
+                        log.info(f"[billing] Payment recovered: customer={customer_id}")
+                    # Monthly renewal — reset credits at current global rate
+                    if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
+                        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB
+                        from open_webui.models.users import Users as _Users
+                        u = _Users.get_user_by_id(record.user_id)
+                        if u:
+                            credits = PLAN_CREDITS.get(record.plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+                            UserCreditsDB.set_plan(u.email, credits, CREDITS_PER_EUR_CENT)
+                            log.info("[billing] Monthly renewal credits reset: user=%s plan=%s balance=%d rate=%s", u.email, record.plan_tier, credits, CREDITS_PER_EUR_CENT)
 
     elif event_type == "payment_method.attached":
         customer_id = getattr(data, "customer", None)
@@ -1529,6 +1615,10 @@ class MyUsageResponse(BaseModel):
     total_cost_eur: float
     exchange_rates: list[ExchangeRateEntry] = []
     ledger_ready: bool = True
+    credits_balance: int = 0
+    credits_used: int = 0
+    credits_remaining: int = 0
+    credits_per_eur_cent: float = 0.0  # 0 = credits not applicable (internal)
 
 
 @router.get("/my-usage", response_model=MyUsageResponse)
@@ -1537,12 +1627,27 @@ async def get_my_usage(user=Depends(get_verified_user)):
     require_billing_enabled()
 
     from open_webui.models.usage_ledger import UsageLedgerDB
+    from open_webui.models.user_credits import UserCreditsDB, eur_to_credits
 
     cost_eur = UsageLedgerDB.get_cost_eur_for_user_current_month(user.email)
     cost_usd = UsageLedgerDB.get_cost_usd_for_user_current_month(user.email)
     total_tokens = UsageLedgerDB.get_tokens_for_user_current_month(user.email)
     rates = UsageLedgerDB.get_exchange_rates_current_month(user.email)
     now = datetime.datetime.utcnow()
+
+    record = StripeBillings.get_by_user_id(user.id)
+    credits_balance = credits_used = credits_remaining = 0
+    credits_per_eur_cent = 0.0
+
+    if record and record.plan_tier in CREDITS_TIERS:
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+        row = UserCreditsDB.get(user.email)
+        rate = row.credits_per_eur_cent if row else CREDITS_PER_EUR_CENT
+        balance = row.balance if row else PLAN_CREDITS.get(record.plan_tier, 0)
+        credits_per_eur_cent = rate
+        credits_balance = balance
+        credits_used = eur_to_credits(cost_eur, rate)
+        credits_remaining = max(0, balance - credits_used)
 
     return MyUsageResponse(
         month=now.month,
@@ -1552,4 +1657,8 @@ async def get_my_usage(user=Depends(get_verified_user)):
         total_cost_eur=round(cost_eur, 4),
         exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
         ledger_ready=UsageLedgerDB.is_ledger_ready(),
+        credits_balance=credits_balance,
+        credits_used=credits_used,
+        credits_remaining=credits_remaining,
+        credits_per_eur_cent=credits_per_eur_cent,
     )

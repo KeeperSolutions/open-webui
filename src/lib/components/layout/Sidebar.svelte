@@ -7,7 +7,6 @@
 		user,
 		chats,
 		settings,
-		showSettings,
 		chatId,
 		tags,
 		folders as _folders,
@@ -25,7 +24,8 @@
 		isApp,
 		models,
 		selectedFolder,
-		WEBUI_NAME
+		WEBUI_NAME,
+		billingStatus
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
@@ -41,6 +41,7 @@
 		importChat
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
+	import { isInternalUser } from '$lib/billing/planTiers';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -103,7 +104,7 @@
 				const monthName = new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', {
 					month: 'long'
 				});
-				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div><div>Estimated cost: €${(myUsage.total_cost_eur ?? 0).toFixed(2)}</div></div>`;
+				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div></div>`;
 			})()
 		: '';
 
@@ -1270,9 +1271,16 @@
 										>
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
 												{$i18n.t('This month')}:
-												<span class="font-medium text-gray-700 dark:text-gray-300"
-													>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
-												>
+												{#if isInternalUser($billingStatus?.plan_tier)}
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
+													>
+												{:else}
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>{myUsage.credits_used ?? 0} / {myUsage.credits_balance}
+														{$i18n.t('credits')}</span
+													>
+												{/if}
 											</div>
 										</Tooltip>
 									{:else}

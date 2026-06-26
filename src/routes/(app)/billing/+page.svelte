@@ -16,18 +16,23 @@
 		inviteTeamMember,
 		removeTeamMember,
 		getModelBreakdown,
+		getMyUsage,
 		type BillingStatus,
 		type TopupOption,
 		type TeamTier,
 		type TeamStatus,
-		type ModelBreakdown
+		type ModelBreakdown,
+		type MyUsage
 	} from '$lib/apis/billing';
+	import { PLAN_TIER, isCreditsUser as _isCreditsUser, isInternalUser } from '$lib/billing/planTiers';
 
 	const i18n = getContext('i18n');
 
 	let status: BillingStatus | null = null;
 	let teamStatus: TeamStatus | null = null;
 	let modelBreakdown: ModelBreakdown | null = null;
+	let myUsage: MyUsage | null = null;
+	let showCredits = false;
 	let loading = true;
 
 	let checkingOut = false;
@@ -52,6 +57,8 @@
 
 	// Member actions
 	let openMenuUserId: string | null = null;
+	let pendingRemoveUserId: string | null = null;
+	let pendingRemoveName: string | null = null;
 
 	const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 
@@ -74,13 +81,18 @@
 
 			if (status?.enabled) {
 				extras.push(getModelBreakdown(localStorage.token).then((d) => (modelBreakdown = d)).catch(() => {}));
+				extras.push(
+					getMyUsage(localStorage.token)
+						.then((d) => { myUsage = d; })
+						.catch(() => {})
+				);
 			}
 
-			if (status?.plan_tier === 'team') {
+			if (status?.plan_tier === PLAN_TIER.TEAM) {
 				extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
 				extras.push(getTopupOptions(localStorage.token).then((d) => (topupOptions = d)).catch(() => {}));
 			}
-			if (status?.plan_tier === 'trial' || status?.plan_tier === 'paid') {
+			if (status?.plan_tier === PLAN_TIER.TRIAL || status?.plan_tier === PLAN_TIER.PRO || status?.plan_tier === PLAN_TIER.PREMIUM) {
 				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
 			}
 
@@ -164,9 +176,18 @@
 		}
 	};
 
-	const handleRemoveMember = async (userId: string, name: string) => {
+	const handleRemoveMember = (userId: string, name: string) => {
 		openMenuUserId = null;
-		if (!confirm($i18n.t('Remove {{name}} from the team?', { name }))) return;
+		pendingRemoveUserId = userId;
+		pendingRemoveName = name;
+	};
+
+	const confirmRemoveMember = async () => {
+		if (!pendingRemoveUserId) return;
+		const userId = pendingRemoveUserId;
+		const name = pendingRemoveName ?? '';
+		pendingRemoveUserId = null;
+		pendingRemoveName = null;
 		try {
 			await removeTeamMember(localStorage.token, userId);
 			toast.success($i18n.t('{{name}} removed from team', { name }));
@@ -200,12 +221,25 @@
 		return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 	}
 
-	$: trialPct =
-		status?.plan_tier === 'trial' && (status.credit_limit_eur ?? 0) > 0
-			? Math.min(100, ((status.credit_used_eur ?? 0) / status.credit_limit_eur) * 100)
+	$: isCreditsUser = _isCreditsUser(status?.plan_tier) && (myUsage?.credits_per_eur_cent ?? 0) > 0;
+	$: showCredits = !!status && !isInternalUser(status.plan_tier) && status.plan_tier !== null;
+
+	// What percentage of the credits balance has been consumed (0–100)
+	$: creditsUsedPercentage =
+		isCreditsUser && (myUsage?.credits_balance ?? 0) > 0
+			? Math.min(100, ((myUsage?.credits_used ?? 0) / (myUsage?.credits_balance ?? 1)) * 100)
 			: 0;
 
+	$: trialPct = creditsUsedPercentage;
 	$: trialLowBalance = trialPct >= 75;
+
+	// Format a EUR cost as either "€0.0042" or "7 cr" depending on the active display tab
+	$: formatCost = (eur: number) => {
+		if (showCredits && myUsage && myUsage.credits_per_eur_cent > 0) {
+			return `${Math.round(eur * 100 * myUsage.credits_per_eur_cent).toLocaleString()} cr`;
+		}
+		return `€${eur.toFixed(2)}`;
+	};
 
 	$: teamBudgetTotal =
 		(status?.usage_budget_eur ?? 0) + (status?.extra_credit_eur ?? 0);
@@ -247,12 +281,14 @@
 		</div>
 
 	{:else}
-		<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide pb-2">
-			{$i18n.t('Plan & subscription')}
-		</p>
+		<div class="pb-2">
+			<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
+				{$i18n.t('Plan & subscription')}
+			</p>
+		</div>
 
 		<!-- ===== INTERNAL ===== -->
-		{#if status.plan_tier === 'internal'}
+		{#if status.plan_tier === PLAN_TIER.INTERNAL}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4">
 					<div>
@@ -270,15 +306,21 @@
 			</div>
 
 		<!-- ===== FREE TRIAL ===== -->
-		{:else if status.plan_tier === 'trial'}
+		{:else if status.plan_tier === PLAN_TIER.TRIAL}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
 						<h2 class="text-lg font-bold">{$i18n.t('Free Trial')}</h2>
 						<div class="flex items-center gap-2 mt-1">
-							<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
-								€{status.credit_used_eur.toFixed(2)} {$i18n.t('of')} €{status.credit_limit_eur.toFixed(2)} {$i18n.t('used')}
-							</span>
+							{#if showCredits && myUsage}
+								<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									{myUsage.credits_used.toLocaleString()} {$i18n.t('of')} {myUsage.credits_balance.toLocaleString()} {$i18n.t('credits used')}
+								</span>
+							{:else}
+								<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									€{status.credit_used_eur.toFixed(2)} {$i18n.t('of')} €{status.credit_limit_eur.toFixed(2)} {$i18n.t('used')}
+								</span>
+							{/if}
 							{#if trialLowBalance}
 								<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
 									{$i18n.t('Low balance')}
@@ -306,7 +348,7 @@
 				</div>
 
 				<div class="mt-4 space-y-1.5">
-					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</div>
 					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
 						<div
 							class="h-2 rounded-full transition-all {trialLowBalance ? 'bg-red-500' : 'bg-green-500'}"
@@ -316,8 +358,10 @@
 				</div>
 
 				<p class="text-sm text-gray-500 dark:text-gray-400 mt-3">
-					{#if status.credit_remaining_eur <= 0}
+					{#if isCreditsUser && myUsage && myUsage.credits_remaining <= 0}
 						{$i18n.t('Your free exploratory credits are exhausted. Upgrade to continue using Hubgate.')}
+					{:else if isCreditsUser && myUsage}
+						{$i18n.t('You have')} <strong>{showCredits ? `${myUsage.credits_remaining.toLocaleString()} cr` : `€${status.credit_remaining_eur.toFixed(2)}`}</strong> {$i18n.t('remaining of your free exploratory credits. Upgrade to continue using Hubgate after your trial ends.')}
 					{:else}
 						{$i18n.t('You have')} <strong>€{status.credit_remaining_eur.toFixed(2)}</strong> {$i18n.t('remaining of your free exploratory credits. Upgrade to continue using Hubgate after your trial ends.')}
 					{/if}
@@ -325,16 +369,44 @@
 			</div>
 
 		<!-- ===== PAID ===== -->
-		{:else if status.plan_tier === 'paid'}
+		{:else if status.plan_tier === PLAN_TIER.PRO || status.plan_tier === PLAN_TIER.PREMIUM}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
 						<h2 class="text-lg font-bold">{$i18n.t('Pro Plan')}</h2>
 						<div class="flex items-center gap-2 mt-1">
-							<span class="text-sm text-gray-500 dark:text-gray-400">
-								€{status.current_month_cost_eur.toFixed(2)} {$i18n.t('used this month')}
-							</span>
+							{#if showCredits && myUsage}
+								<span class="text-sm {creditsUsedPercentage >= 75 ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									{myUsage.credits_used.toLocaleString()} {$i18n.t('of')} {myUsage.credits_balance.toLocaleString()} {$i18n.t('credits used')}
+								</span>
+								{#if myUsage.credits_remaining <= 0}
+									<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
+										{$i18n.t('Exhausted')}
+									</span>
+								{:else if creditsUsedPercentage >= 75}
+									<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
+										{$i18n.t('Low balance')}
+									</span>
+								{/if}
+							{:else}
+								<span class="text-sm text-gray-500 dark:text-gray-400">
+									€{status.current_month_cost_eur.toFixed(2)} {$i18n.t('used this month')}
+								</span>
+							{/if}
 						</div>
+						{#if showCredits && myUsage}
+							<div class="mt-3 space-y-1.5">
+								<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+									<div
+										class="h-2 rounded-full transition-all {creditsUsedPercentage >= 75 ? 'bg-red-500' : 'bg-green-500'}"
+										style="width: {creditsUsedPercentage}%"
+									></div>
+								</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{myUsage.credits_remaining.toLocaleString()} {$i18n.t('credits remaining')}
+								</div>
+							</div>
+						{/if}
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
 						<button
@@ -363,7 +435,7 @@
 			</div>
 
 		<!-- ===== TEAM OWNER ===== -->
-		{:else if status.plan_tier === 'team'}
+		{:else if status.plan_tier === PLAN_TIER.TEAM}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
@@ -430,7 +502,7 @@
 			</div>
 
 		<!-- ===== TEAM MEMBER ===== -->
-		{:else if status.plan_tier === 'team_member'}
+		{:else if status.plan_tier === PLAN_TIER.TEAM_MEMBER}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
@@ -486,21 +558,21 @@
 						<div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 last:border-b-0">
 							<span class="text-sm font-medium">{m.model}</span>
 							<div class="flex items-center gap-4">
-								<span class="text-sm font-semibold">€{m.cost.toFixed(2)}</span>
+								<span class="text-sm font-semibold">{formatCost(m.cost)}</span>
 								<span class="text-xs text-gray-400 dark:text-gray-500 w-8 text-right">{m.pct}%</span>
 							</div>
 						</div>
 					{/each}
 					<div class="flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/50">
 						<span class="text-sm font-medium">{$i18n.t('Total spent')} – {modelBreakdown.month}</span>
-						<span class="text-sm font-bold">€{modelBreakdown.total.toFixed(2)}</span>
+						<span class="text-sm font-bold">{formatCost(modelBreakdown.total)}</span>
 					</div>
 				</div>
 			</div>
 		{/if}
 
 		<!-- ===== TEAM LEADERBOARD (team owner only) ===== -->
-		{#if status.plan_tier === 'team' && teamStatus}
+		{#if status.plan_tier === PLAN_TIER.TEAM && teamStatus}
 			<div class="pt-6">
 				<div class="flex items-center justify-between pb-3">
 					<p class="text-xs text-gray-400 dark:text-gray-500 font-medium">
@@ -783,6 +855,39 @@
 			{#if toppingUp}
 				<div class="text-center text-sm text-gray-400 animate-pulse">{$i18n.t('Redirecting to checkout...')}</div>
 			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- ===== REMOVE MEMBER CONFIRM ===== -->
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && pendingRemoveUserId) { pendingRemoveUserId = null; pendingRemoveName = null; } }} />
+{#if pendingRemoveUserId}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+		on:click|self={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}
+		role="dialog"
+		aria-modal="true"
+		tabindex="-1"
+	>
+		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+			<h2 class="font-semibold text-base">{$i18n.t('Remove team member?')}</h2>
+			<p class="text-sm text-gray-500 dark:text-gray-400">
+				{$i18n.t('{{name}} will lose access to the team immediately.', { name: pendingRemoveName ?? '' })}
+			</p>
+			<div class="flex gap-2">
+				<button
+					on:click={confirmRemoveMember}
+					class="flex-1 py-2.5 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 transition font-medium"
+				>
+					{$i18n.t('Remove')}
+				</button>
+				<button
+					on:click={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}
+					class="flex-1 py-2.5 rounded-lg text-sm border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
+				>
+					{$i18n.t('Cancel')}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}
