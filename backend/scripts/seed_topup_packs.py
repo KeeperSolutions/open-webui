@@ -57,8 +57,7 @@ def seed_topup_packs(packs=None):
                 # Update stripe_price_id if different (allows switching test/live)
                 if existing.stripe_price_id != p["stripe_price_id"]:
                     db.query(TopupPack).filter_by(id=p["id"]).update({
-                        "stripe_price_id": p["stripe_price_id"],
-                        "updated_at": now
+                        "stripe_price_id": p["stripe_price_id"]
                     })
                     updated += 1
             else:
@@ -68,7 +67,6 @@ def seed_topup_packs(packs=None):
                     price_eur=p["price_eur"],
                     stripe_price_id=p["stripe_price_id"],
                     created_at=now,
-                    updated_at=now,
                 )
                 db.add(pack)
                 created += 1
