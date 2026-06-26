@@ -505,7 +505,10 @@ async def get_file_data_content_by_id(id: str, user=Depends(get_verified_user), 
         )
 
     if file.user_id == user.id or user.role == 'admin' or has_access_to_file(id, 'read', user, db=db):
-        return {'content': file.data.get('content', '')}
+        return {
+            'content': file.data.get('content', ''),
+            'pii_detections': file.data.get('pii_detections', []),
+        }
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
