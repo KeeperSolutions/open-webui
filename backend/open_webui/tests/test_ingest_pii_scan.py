@@ -96,3 +96,32 @@ def test_scan_skips_when_no_pii_filter():
             _request(), "OIB 11111111111", file_id="f1", user=_user(),
             models=_models(with_filter=False)))
     assert dets == [] and captured == []
+
+
+def test_process_file_persists_detections(monkeypatch):
+    """process_file's helper stores scan output under file.data['pii_detections']
+    without clobbering 'content', and never propagates scan errors."""
+    import open_webui.routers.retrieval as R
+
+    saved = {}
+    def fake_update(file_id, data, db=None):
+        saved.setdefault(file_id, {}).update(data); return SimpleNamespace(id=file_id)
+    monkeypatch.setattr(R.Files, "update_file_data_by_id", staticmethod(fake_update))
+    async def fake_scan(request, content, *, file_id, user, models=None, features=None):
+        return [{"type": "HR_OIB", "start": 4, "end": 15}]
+    monkeypatch.setattr(R, "scan_file_content_for_pii", fake_scan)
+
+    R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user())
+    assert saved["f1"]["pii_detections"] == [{"type": "HR_OIB", "start": 4, "end": 15}]
+    assert "content" not in saved["f1"]  # only the detections key is written here
+
+
+def test_store_ingest_pii_detections_swallows_scan_error(monkeypatch):
+    """Best-effort: a scan that raises must NOT propagate out of the helper."""
+    import open_webui.routers.retrieval as R
+    async def raising_scan(request, content, *, file_id, user, models=None, features=None):
+        raise RuntimeError("presidio down")
+    monkeypatch.setattr(R, "scan_file_content_for_pii", raising_scan)
+    monkeypatch.setattr(R.Files, "update_file_data_by_id", staticmethod(lambda *a, **k: None))
+    # must not raise
+    R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user())

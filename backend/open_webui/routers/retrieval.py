@@ -98,6 +98,11 @@ from open_webui.utils.misc import (
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
 
+
+# Lazy-loaded to break the middleware -> retrieval circular import; populated on first call.
+scan_file_content_for_pii = None
+
+
 from open_webui.config import (
     ENV,
     RAG_EMBEDDING_MODEL_AUTO_UPDATE,
@@ -1525,6 +1530,33 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
+def _store_ingest_pii_detections(request, file_id, text_content, user):
+    """Best-effort: scan the full extracted content for PII and persist span-only
+    detections under file.data['pii_detections']. Swallows everything -- ingest
+    must never fail because of the card. process_file is a sync route (threadpool),
+    so asyncio.run is safe here; if it ever runs inside an event loop the
+    RuntimeError is caught and the scan is simply skipped."""
+    try:
+        # Lazy import to avoid circular import at module init time
+        # (middleware -> retrieval chain). The global name is also set here so
+        # that test monkeypatching via setattr(R, "scan_file_content_for_pii", ...)
+        # takes effect: the global lookup below will find the patched value.
+        global scan_file_content_for_pii
+        if scan_file_content_for_pii is None:
+            from open_webui.utils.middleware import scan_file_content_for_pii
+        detections = asyncio.run(
+            scan_file_content_for_pii(
+                request, text_content, file_id=file_id, user=user
+            )
+        )
+        if detections:
+            Files.update_file_data_by_id(file_id, {"pii_detections": detections})
+    except Exception as e:
+        log.warning(
+            "failed to store ingest PII detections for %s: %s", file_id, e, exc_info=True
+        )
+
+
 @router.post('/process/file')
 def process_file(
     request: Request,
@@ -1679,6 +1711,7 @@ def process_file(
                 {'content': text_content},
                 db=db,
             )
+            _store_ingest_pii_detections(request, file.id, text_content, user)
             hash = calculate_sha256_string(text_content)
 
             if request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
