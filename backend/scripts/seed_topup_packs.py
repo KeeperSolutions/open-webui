@@ -44,6 +44,11 @@ def seed_topup_packs(packs=None):
     updated = 0
 
     with get_db() as db:
+        # Only seed if no packs exist yet (lightweight dev check)
+        existing_count = db.query(TopupPack).count()
+        if existing_count > 0:
+            return 0, 0
+
         for p in packs:
             existing = TopupPacks.get_by_id(p["id"])
             now = int(time.time())
