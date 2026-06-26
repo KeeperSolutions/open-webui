@@ -19,6 +19,9 @@ __pycache__/
 CLAUDE.md
 src/CLAUDE.md
 backend/CLAUDE.md
+
+# Kilo AI agent files
+.kilo/
 # C extensions
 *.so
 

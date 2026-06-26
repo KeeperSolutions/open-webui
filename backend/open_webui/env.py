@@ -992,12 +992,7 @@ try:
 except (ValueError, TypeError):
     STRIPE_TEAM_TIERS: dict = {}
 
-# JSON list of one-time top-up options: [{price_id, amount_eur}, ...]
-# e.g. '[{"price_id": "price_topup50", "amount_eur": 50}, {"price_id": "price_topup100", "amount_eur": 100}]'
-try:
-    STRIPE_TOPUP_AMOUNTS: list = _json.loads(os.environ.get("STRIPE_TOPUP_AMOUNTS", "[]"))
-except (ValueError, TypeError):
-    STRIPE_TOPUP_AMOUNTS: list = []
+
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
 SMTP_HOST: str = os.environ.get("SMTP_HOST", "")

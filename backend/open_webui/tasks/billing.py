@@ -74,7 +74,7 @@ async def _run_usage_report():
             log.error(f"[billing-reporter] Failed to report usage for {email}: {e}")
 
     # --- Teams use flat billing; no Stripe usage reporting needed.
-    # Reset extra_usage_credit_eur monthly so purchased credits don't roll over.
+    # Reset top_up_credits monthly so purchased credits don't roll over.
     # Use month_start_epoch() rather than day==1 so a missed reset (e.g. service
     # down on the 1st) is caught on the next daily run.
     from open_webui.models.billing import Teams
@@ -83,11 +83,11 @@ async def _run_usage_report():
     active_teams = Teams.get_all_active()
     month_start = _month_start_epoch()
     for team in active_teams:
-        # updated_at is set by reset_extra_credit; if it's before month_start
+        # updated_at is set by reset_top_up_credits; if it's before month_start
         # the reset hasn't happened yet this month.
-        if (team.updated_at or 0) < month_start and team.extra_usage_credit_eur:
-            Teams.reset_extra_credit(team.id)
-            log.info(f"[billing-reporter] Reset extra credit for team_id={team.id}")
+        if (team.updated_at or 0) < month_start and team.top_up_credits:
+            Teams.reset_top_up_credits(team.id)
+            log.info(f"[billing-reporter] Reset top-up credits for team_id={team.id}")
 
 
 def _seconds_until_next_midnight_utc() -> float:

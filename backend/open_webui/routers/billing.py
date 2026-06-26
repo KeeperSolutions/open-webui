@@ -14,10 +14,10 @@ from open_webui.env import (
     STRIPE_PRICE_ID,
     STRIPE_SECRET_KEY,
     STRIPE_TEAM_TIERS,
-    STRIPE_TOPUP_AMOUNTS,
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
 )
+from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
 from open_webui.utils.auth import get_admin_user, get_verified_user
 
@@ -187,7 +187,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
             )
         if team.monthly_usage_budget_eur > 0:
             used = _get_team_current_month_cost(team.id)
-            total_budget = team.monthly_usage_budget_eur + (team.extra_usage_credit_eur or 0.0)
+            total_budget = team.monthly_usage_budget_eur + (team.top_up_credits or 0)
             if used >= total_budget:
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -212,7 +212,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
             )
         if team.monthly_usage_budget_eur > 0:
             used = _get_team_current_month_cost(team.id)
-            total_budget = team.monthly_usage_budget_eur + (team.extra_usage_credit_eur or 0.0)
+            total_budget = team.monthly_usage_budget_eur + (team.top_up_credits or 0)
             if used >= total_budget:
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -418,7 +418,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         upcoming_eur: Optional[float] = None
         try:
             invoice = client.v1.invoices.create_preview(
-                params={"customer": record.stripe_customer_id}
+                params={"customer": record.stripe_customer_id, "subscription": record.stripe_subscription_id}
             )
             upcoming_eur = invoice.amount_due / 100
         except stripe.StripeError:
@@ -475,14 +475,14 @@ async def get_billing_status(user=Depends(get_verified_user)):
             try:
                 client = get_stripe_client()
                 invoice = client.v1.invoices.create_preview(
-                    params={"customer": team.stripe_customer_id}
+                    params={"customer": team.stripe_customer_id, "subscription": team.stripe_subscription_id}
                 )
                 upcoming_eur = invoice.amount_due / 100
             except stripe.StripeError:
                 pass
 
         budget = team.monthly_usage_budget_eur or 0.0
-        extra = team.extra_usage_credit_eur or 0.0
+        extra = team.top_up_credits or 0
         remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
 
         return BillingStatusResponse(
@@ -522,7 +522,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
         owner = UsersModel.get_user_by_id(team.owner_user_id)
         budget = team.monthly_usage_budget_eur or 0.0
-        extra = team.extra_usage_credit_eur or 0.0
+        extra = team.top_up_credits or 0
         team_month_cost = _get_team_current_month_cost(team.id)
         remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
         return BillingStatusResponse(
@@ -1031,55 +1031,66 @@ async def team_billing_portal(request: Request, user=Depends(get_verified_user))
     return PortalResponse(url=session.url)
 
 
-# ---------- Team top-up ----------
+# ---------- Top-up (paid users + teams) ----------
 
 
 class TopupRequest(BaseModel):
-    amount_eur: float
+    top_up_id: str
 
 
-@router.get("/team/topup/options")
+@router.get("/topup/options")
 async def get_topup_options(user=Depends(get_verified_user)):
-    """Return available top-up amounts configured in STRIPE_TOPUP_AMOUNTS."""
+    """Return available top-up packs from DB."""
     require_billing_enabled()
-    return STRIPE_TOPUP_AMOUNTS
+    from open_webui.models.topup import TopupPacks
+
+    packs = TopupPacks.get_all()
+    return [{"id": p.id, "credits": p.credits, "price_eur": p.price_eur} for p in packs]
 
 
-@router.post("/team/topup", response_model=CheckoutResponse)
-async def create_team_topup(body: TopupRequest, request: Request, user=Depends(get_verified_user)):
-    """Create a one-time Stripe checkout for purchasing extra team usage credits."""
+@router.post("/topup", response_model=CheckoutResponse)
+async def create_topup(body: TopupRequest, request: Request, user=Depends(get_verified_user)):
+    """Create a one-time Stripe checkout for a top-up pack (paid user or team)."""
     require_billing_enabled()
 
-    team = Teams.get_by_owner_user_id(user.id)
-    if not team:
-        raise HTTPException(status_code=404, detail="No team found.")
+    from open_webui.models.topup import TopupPacks
 
-    if team.subscription_status not in ("active", "trialing"):
+    billing = StripeBillings.get_by_user_id(user.id)
+    if not billing or billing.plan_tier not in ("paid", "team"):
+        # Explicitly reject team_member and any other tier
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Team subscription is not active.",
+            detail="Top-up requires an active paid or team plan.",
         )
 
-    if not STRIPE_TOPUP_AMOUNTS:
+    if billing.plan_tier == "paid" and billing.subscription_status not in ("active", "trialing"):
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="STRIPE_TOPUP_AMOUNTS is not configured.",
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Paid subscription is not active.",
         )
 
-    # Find the matching top-up option
-    option = next(
-        (o for o in STRIPE_TOPUP_AMOUNTS if round(float(o.get("amount_eur", 0)) * 100) == round(body.amount_eur * 100)),
-        None,
-    )
-    if not option or not option.get("price_id"):
-        available = [o.get("amount_eur") for o in STRIPE_TOPUP_AMOUNTS]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid top-up amount. Available options: {available}",
-        )
+    pack = TopupPacks.get_by_id(body.top_up_id)
+    if not pack:
+        raise HTTPException(status_code=400, detail="Invalid top_up_id.")
 
-    if not team.stripe_customer_id:
-        raise HTTPException(status_code=400, detail="Team has no billing account.")
+    if billing.plan_tier == "team":
+        team = Teams.get_by_owner_user_id(user.id)
+        if not team or team.subscription_status not in ("active", "trialing"):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Team subscription is not active.",
+            )
+        if not team.stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No billing account.")
+        target_customer_id = team.stripe_customer_id
+        target_id = team.id
+        is_team = True
+    else:
+        if not billing.stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No billing account.")
+        target_customer_id = billing.stripe_customer_id
+        target_id = user.id
+        is_team = False
 
     client = get_stripe_client()
     webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
@@ -1087,23 +1098,26 @@ async def create_team_topup(body: TopupRequest, request: Request, user=Depends(g
     try:
         session = client.v1.checkout.sessions.create(
             params={
-                "customer": team.stripe_customer_id,
+                "customer": target_customer_id,
                 "mode": "payment",
-                "line_items": [{"price": option["price_id"], "quantity": 1}],
+                "line_items": [{"price": pack.stripe_price_id, "quantity": 1}],
                 "success_url": f"{webui_url}/billing?topup=success",
                 "cancel_url": f"{webui_url}/billing?topup=canceled",
                 "metadata": {
-                    "team_id": team.id,
-                    "topup_amount_eur": str(body.amount_eur),
-                    "type": "team_topup",
+                    "type": "topup",
+                    "top_up_id": body.top_up_id,
+                    **({"team_id": target_id} if is_team else {"user_id": target_id}),
                 },
             }
         )
     except stripe.StripeError as e:
-        log.error(f"[billing] Team topup checkout error: {e}")
+        log.error(f"[billing] Topup checkout error: {e}")
         raise HTTPException(status_code=502, detail="Failed to create top-up checkout.")
 
-    Teams.update(team.id, topup_checkout_session_id=session.id)
+    # Do not store topup_checkout_session_id here for teams or users.
+    # It is written only after successful payment inside the webhook handler
+    # so the idempotency guard does not short-circuit the first real event.
+
     return CheckoutResponse(url=session.url)
 
 
@@ -1271,15 +1285,52 @@ async def _handle_stripe_event(event_type: str, data):
         customer_id = getattr(data, "customer", None)
         subscription_id = getattr(data, "subscription", None)
         raw_meta = getattr(data, "metadata", None)
-        metadata = dict(getattr(raw_meta, "_data", {})) if raw_meta else {}
+        if raw_meta is None:
+            metadata = {}
+        else:
+            try:
+                metadata = dict(raw_meta)
+            except Exception:
+                metadata = getattr(raw_meta, "_data", {}) or {}
 
-        # Check if this is a team top-up (one-time payment)
-        if metadata.get("type") == "team_topup":
+        # Handle top-up (team or individual)
+        if metadata.get("type") == "topup":
+            from open_webui.models.topup import TopupPacks, TopupPack
+
             team_id = metadata.get("team_id")
-            amount_eur = float(metadata.get("topup_amount_eur", 0))
-            if team_id and amount_eur > 0:
-                Teams.add_usage_credit(team_id, amount_eur)
-                log.info(f"[billing] Team top-up: team_id={team_id} +€{amount_eur:.2f}")
+            user_id = metadata.get("user_id")
+            top_up_id = metadata.get("top_up_id")
+            session_id = getattr(data, "id", None)
+
+            # Require successful payment capture before crediting
+            if getattr(data, "payment_status", None) != "paid":
+                return {"received": True}
+
+            # Idempotency: skip if this checkout session was already processed
+            if session_id:
+                if team_id:
+                    existing = Teams.get_by_topup_checkout_session_id(session_id)
+                    if existing:
+                        return {"received": True}
+                elif user_id:
+                    existing = StripeBillings.get_by_topup_checkout_session_id(session_id)
+                    if existing:
+                        return {"received": True}
+
+            if top_up_id:
+                pack = TopupPacks.get_by_id(top_up_id)
+                if pack:
+                    credits = pack.credits
+                    if team_id:
+                        Teams.add_top_up_credits(team_id, credits)
+                    elif user_id:
+                        StripeBillings.add_top_up_credits(user_id, credits)
+
+                    # Mark session as processed
+                    if team_id:
+                        Teams.update(team_id, topup_checkout_session_id=session_id)
+                    elif user_id:
+                        StripeBillings.update_topup_checkout_session_id(user_id, session_id)
             return {"received": True}
 
         # Check if this is a team subscription checkout
