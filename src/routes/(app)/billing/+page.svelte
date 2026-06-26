@@ -860,11 +860,11 @@
 {/if}
 
 <!-- ===== REMOVE MEMBER CONFIRM ===== -->
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && pendingRemoveUserId) { pendingRemoveUserId = null; pendingRemoveName = null; } }} />
 {#if pendingRemoveUserId}
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}
-		on:keydown|self={(e) => { if (e.key === 'Escape') { pendingRemoveUserId = null; pendingRemoveName = null; } }}
 		role="dialog"
 		aria-modal="true"
 		tabindex="-1"

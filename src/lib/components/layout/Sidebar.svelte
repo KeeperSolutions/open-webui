@@ -41,7 +41,7 @@
 		importChat
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
-	import { PLAN_TIER, isInternalUser } from '$lib/billing/planTiers';
+	import { isInternalUser } from '$lib/billing/planTiers';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -1272,9 +1272,14 @@
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
 												{$i18n.t('This month')}:
 												{#if isInternalUser($billingStatus?.plan_tier)}
-													<span class="font-medium text-gray-700 dark:text-gray-300">€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span>
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
+													>
 												{:else}
-													<span class="font-medium text-gray-700 dark:text-gray-300">{myUsage.credits_used ?? 0} / {myUsage.credits_balance} {$i18n.t('credits')}</span>
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>{myUsage.credits_used ?? 0} / {myUsage.credits_balance}
+														{$i18n.t('credits')}</span
+													>
 												{/if}
 											</div>
 										</Tooltip>

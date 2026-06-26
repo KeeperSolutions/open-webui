@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, onDestroy, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -14,7 +14,7 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
 	import { getBillingStatus, getMyUsage, type BillingStatus } from '$lib/apis/billing';
-	import { PLAN_TIER, isCreditsUser } from '$lib/billing/planTiers';
+	import { PLAN_TIER } from '$lib/billing/planTiers';
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -73,8 +73,14 @@
 			billingStatusStore.set(billingStatus);
 			const isPastDue = billingStatus?.subscription_status === 'past_due';
 			showPastDueBanner = isPastDue;
+			const capturedStatus = billingStatus;
 			getMyUsage(localStorage.token)
-				.then((u) => myUsageStore.set(u))
+				.then((u) => {
+					myUsageStore.set(u);
+					const isTrialExhausted =
+						capturedStatus?.plan_tier === PLAN_TIER.TRIAL && (u?.credits_remaining ?? 1) <= 0;
+					if (isTrialExhausted) showPastDueBanner = true;
+				})
 				.catch(() => {});
 		} catch {
 			// Billing unavailable — don't block the user
@@ -178,9 +184,9 @@
 			return;
 		}
 
-		window.addEventListener('billing:credits_exhausted', () => {
-			showCreditsExhaustedModal = true;
-		});
+		const onCreditsExhausted = () => { showCreditsExhaustedModal = true; };
+		window.addEventListener('billing:credits_exhausted', onCreditsExhausted);
+		onDestroy(() => window.removeEventListener('billing:credits_exhausted', onCreditsExhausted));
 
 		clearChatInputStorage();
 		await Promise.all([

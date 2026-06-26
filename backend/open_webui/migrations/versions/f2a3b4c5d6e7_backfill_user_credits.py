@@ -56,28 +56,29 @@ def upgrade() -> None:
     rows = conn.execute(
         sa.text(
             """
-            SELECT sb.user_id, sb.plan_tier
+            SELECT u.email, sb.plan_tier
             FROM stripe_billing sb
-            LEFT JOIN user_credits uc ON uc.user_id = sb.user_id
+            JOIN "user" u ON u.id = sb.user_id
+            LEFT JOIN user_credits uc ON uc.user_id = u.email
             WHERE sb.plan_tier IN ('trial', 'pro', 'premium')
               AND uc.user_id IS NULL
-
             """
         )
     ).fetchall()
 
-    for user_id, plan_tier in rows:
+    for email, plan_tier in rows:
         balance = _plan_balance(plan_tier, rate)
         conn.execute(
             sa.text(
                 """
                 INSERT INTO user_credits (id, user_id, balance, credits_per_eur_cent, updated_at)
                 VALUES (:id, :user_id, :balance, :rate, :updated_at)
+                ON CONFLICT (user_id) DO NOTHING
                 """
             ),
             {
                 "id": str(uuid.uuid4()),
-                "user_id": user_id,
+                "user_id": email,
                 "balance": balance,
                 "rate": rate,
                 "updated_at": now,

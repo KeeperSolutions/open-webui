@@ -51,15 +51,17 @@ function handleSubmitWithPreviousError(errorContent: string | undefined): void {
 
 describe('credits_exhausted — handleOpenAIError', () => {
 	let fired: boolean;
+	let handler: () => void;
 
 	beforeEach(() => {
 		fired = false;
 		vi.clearAllMocks();
-		window.addEventListener('billing:credits_exhausted', () => { fired = true; });
+		handler = () => { fired = true; };
+		window.addEventListener('billing:credits_exhausted', handler);
 	});
 
 	afterEach(() => {
-		window.removeEventListener('billing:credits_exhausted', () => {});
+		window.removeEventListener('billing:credits_exhausted', handler);
 	});
 
 	it('dispatches billing:credits_exhausted and does not toast', () => {

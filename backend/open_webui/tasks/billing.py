@@ -366,4 +366,8 @@ async def periodic_ledger_poller():
         except Exception as exc:
             log.error("[ledger-poller] Unexpected error: %s", exc)
 
-        await asyncio.sleep(int(os.environ.get("LEDGER_POLL_INTERVAL", "300")))
+        try:
+            poll_interval = int(os.environ.get("LEDGER_POLL_INTERVAL", "300"))
+        except (ValueError, TypeError):
+            poll_interval = 300
+        await asyncio.sleep(poll_interval)

@@ -12,7 +12,7 @@ from open_webui.langfuse.metrics import auth_header, load_env
 log = logging.getLogger(__name__)
 
 _PAGE_SIZE = 100
-_TRACE_RESOLVE_WORKERS = 20
+_TRACE_RESOLVE_WORKERS = 10
 _trace_user_cache: TTLCache[str, str] = TTLCache(maxsize=10_000, ttl=7200)
 
 
@@ -88,7 +88,10 @@ def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], No
                     timeout=30,
                 )
                 if resp.status_code == 429:
-                    wait = int(resp.headers.get("Retry-After", "60"))
+                    try:
+                        wait = int(resp.headers.get("Retry-After", "60"))
+                    except (ValueError, TypeError):
+                        wait = 60
                     log.warning("Langfuse rate limit hit (page %d), retrying in %ds", page, wait)
                     time.sleep(wait)
                     continue

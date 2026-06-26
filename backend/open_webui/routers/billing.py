@@ -142,7 +142,7 @@ def _get_user_current_month_cost(email: str) -> float:
         return 0.0
 
 
-def _check_credits_exhausted(email: str) -> None:
+def _check_credits_exhausted(email: str, user_id: str) -> None:
     """Raise 402 with detail='credits_exhausted' if the user has no remaining credits.
 
     Trial credits are lifetime (alltime cost). Pro/premium reset monthly.
@@ -152,7 +152,7 @@ def _check_credits_exhausted(email: str) -> None:
     try:
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB, eur_to_credits
 
-        record = StripeBillings.get_by_email(email)
+        record = StripeBillings.get_by_user_id(user_id)
         if not record or record.plan_tier not in CREDITS_TIERS:
             return
 
@@ -238,7 +238,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
 
     if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
         if record.subscription_status in ("active", "trialing"):
-            _check_credits_exhausted(user.email)
+            _check_credits_exhausted(user.email, user.id)
             return user
         if record.subscription_status == "canceled":
             raise HTTPException(
