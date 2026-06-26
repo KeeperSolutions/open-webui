@@ -1294,6 +1294,10 @@ async def _handle_stripe_event(event_type: str, data):
             top_up_id = metadata.get("top_up_id")
             session_id = getattr(data, "id", None)
 
+            # Require successful payment capture before crediting
+            if getattr(data, "payment_status", None) != "paid":
+                return {"received": True}
+
             # Idempotency: skip if this checkout session was already processed
             if session_id:
                 if team_id:
