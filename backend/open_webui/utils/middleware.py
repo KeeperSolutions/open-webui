@@ -1170,6 +1170,62 @@ async def _mask_long_text_via_pii_pipeline(request, text, **kwargs):
     return "".join(masked_parts), detections
 
 
+def _resolve_pii_scan_model_id(models):
+    """Pick any model the PII inlet filter applies to (the filter is global,
+    pipelines=['*']). Returns the model id, or None if no filter is usable —
+    in which case the ingest scan is skipped (best-effort)."""
+    if not isinstance(models, dict):
+        return None
+    for model_id, model in models.items():
+        if isinstance(model, dict) and "pipeline" in model:
+            continue  # skip the filter-pipeline pseudo-models themselves
+        if get_sorted_filters(model_id, models):
+            return model_id
+    return None
+
+
+async def scan_file_content_for_pii(
+    request, content, *, file_id, user, models=None, features=None
+):
+    """BEST-EFFORT full-file PII detection for the PII card (NOT the fail-closed
+    security boundary). Scans the entire extracted ``content`` through the
+    external Presidio inlet (sub-chunked, no token-cap truncation) and returns
+    span-only file-relative detections ``[{type,start,end}]``. NEVER raises and
+    NEVER blocks ingest: returns ``[]`` on any problem. The masked text and the
+    synthetic per-file vault entry are discarded; only detections are kept.
+    """
+    if not isinstance(content, str) or content == "":
+        return []
+    if models is None:
+        models = request.app.state.MODELS
+    model_id = _resolve_pii_scan_model_id(models)
+    if model_id is None:
+        return []  # no PII filter configured -> nothing to scan
+    # total=60 (vs chat-time 30): a full-file scan may issue many sub-chunk POSTs.
+    timeout = aiohttp.ClientTimeout(
+        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=60
+    )
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            _masked, detections = await _mask_long_text_via_pii_pipeline(
+                request,
+                content,
+                session=session,
+                chat_id=f"file-{file_id}",  # synthetic vault key; result ignored
+                user=user,
+                model_id=model_id,
+                models=models,
+                features=features if isinstance(features, dict) else {"pii_masking": True},
+                source_marker={"type": "file", "file_id": file_id},
+            )
+        return detections
+    except Exception as e:  # best-effort: log and degrade, never block ingest
+        log.warning(
+            "ingest PII scan failed for file %s: %s", file_id, e, exc_info=True
+        )
+        return []
+
+
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
     Build <source> tag context string from citation sources.
