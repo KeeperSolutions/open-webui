@@ -1106,10 +1106,9 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
         log.error(f"[billing] Topup checkout error: {e}")
         raise HTTPException(status_code=502, detail="Failed to create top-up checkout.")
 
-    if is_team:
-        Teams.update(target_id, topup_checkout_session_id=session.id)
-    # For individual users we intentionally do NOT store the session ID here.
-    # It is written only after successful payment inside the webhook handler.
+    # Do not store topup_checkout_session_id here for teams or users.
+    # It is written only after successful payment inside the webhook handler
+    # so the idempotency guard does not short-circuit the first real event.
 
     return CheckoutResponse(url=session.url)
 
