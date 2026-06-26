@@ -892,6 +892,7 @@
 	"Forward": "",
 	"Forwards system user OAuth access token to authenticate": "",
 	"Forwards system user session credentials to authenticate": "",
+	"from {{source}}": "",
 	"Full Context Mode": "",
 	"Function": "",
 	"Function Calling": "",

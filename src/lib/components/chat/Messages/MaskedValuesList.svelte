@@ -9,7 +9,7 @@
 	const i18n =
 		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
 
-	type MaskedItem = { key: string; type: string; value: string };
+	type MaskedItem = { key: string; type: string; value: string; source?: string };
 
 	export let items: MaskedItem[] = [];
 	// Above this many items the view switches to a grouped + searchable density.
@@ -106,6 +106,13 @@
 									class="min-w-0 flex-1 font-mono text-xs text-hg-text-secondary dark:text-gray-300 break-all"
 									title={it.value}>{it.value}</span
 								>
+								{#if it.source}
+									<span
+										class="shrink-0 max-w-[8rem] truncate text-[10px] text-hg-text-tertiary dark:text-gray-500 whitespace-nowrap"
+										title={$i18n.t('from {{source}}', { source: it.source })}
+										>{$i18n.t('from {{source}}', { source: it.source })}</span
+									>
+								{/if}
 								<button
 									type="button"
 									class="shrink-0 p-1 rounded-md text-hg-text-tertiary dark:text-gray-500 hover:text-hg-text-primary dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition"

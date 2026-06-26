@@ -2174,6 +2174,7 @@
 	"e.g., westus (leave blank for eastus)": "",
 	"edited": "",
 	"for placeholders": "",
+	"from {{source}}": "from {{source}}",
 	"groups": "",
 	"http://localhost:8000": "",
 	"https://mineru.net/api/v4": "",

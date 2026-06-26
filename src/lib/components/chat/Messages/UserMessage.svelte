@@ -82,6 +82,31 @@
 		history?.messages?.[messageId]?.content ??
 		'';
 
+	// Citation sources from the SAME child whose detections we use — needed to
+	// reconstruct file-sourced PII values locally (B2). File-sourced detections
+	// index into these chunks; message-sourced ones ignore this.
+	$: piiSources = (() => {
+		const children = history?.messages?.[messageId]?.childrenIds ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			const child = history?.messages?.[children[i]];
+			if ((child?.piiDetections ?? []).length > 0) return child?.sources ?? [];
+		}
+		return [];
+	})();
+
+	// OWUI keeps uploaded files attached to the whole chat (chatFiles) and resends
+	// them with every turn, so the response's detections cover ALL chat files, not
+	// just this message's. Scope the card to files actually attached to THIS user
+	// message (message-sourced detections — no fileId — always pass through).
+	$: messageFileIds = new Set(
+		(history?.messages?.[messageId]?.files ?? [])
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter(Boolean)
+	);
+	$: piiDetectionsScoped = (piiDetections ?? []).filter(
+		(d: { fileId?: string }) => d?.fileId == null || messageFileIds.has(d.fileId)
+	);
+
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
 		if (res) {
@@ -597,7 +622,11 @@
 						{/if}
 					{/if}
 
-					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
+					<PiiMaskedCard
+						detections={piiDetectionsScoped}
+						originalText={piiOriginalText}
+						sources={piiSources}
+					/>
 
 					{#if $settings?.chatBubble ?? true}
 						{#if siblings.length > 1}

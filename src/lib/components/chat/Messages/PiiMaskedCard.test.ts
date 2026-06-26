@@ -83,4 +83,41 @@ describe('PiiMaskedCard', () => {
 		});
 		expect(container.textContent).toBe('');
 	});
+
+	it('counts a file-sourced detection by reconstructing the value from the citation chunk', () => {
+		// fileId-tagged detection: value is sliced from sources[].document[docIdx],
+		// not the message text (originalText is empty here).
+		renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'f1', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('drops a file-sourced detection when its chunk cannot be located', () => {
+		// no source matches fileId -> empty reconstructed value -> filtered out
+		const { container } = renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'missing', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(container.textContent).toBe('');
+	});
 });
