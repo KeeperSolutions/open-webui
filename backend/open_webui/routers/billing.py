@@ -1063,6 +1063,12 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
             detail="Top-up requires an active paid or team plan.",
         )
 
+    if billing.plan_tier == "paid" and billing.subscription_status not in ("active", "trialing"):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Paid subscription is not active.",
+        )
+
     pack = TopupPacks.get_by_id(body.top_up_id)
     if not pack:
         raise HTTPException(status_code=400, detail="Invalid top_up_id.")
