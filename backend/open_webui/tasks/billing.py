@@ -213,26 +213,27 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
 
     inserted = UsageLedgerDB.bulk_insert_ignore(rows) if rows else 0
 
-    updated = 0
+    updated_costs = 0
+    updated_users = 0
     if deep_rescan and rows:
-        updated = UsageLedgerDB.bulk_upsert_costs(rows)
-        if updated:
-            log.info("[ledger-poller] Deep rescan backfilled costs for %d previously-unpriced rows.", updated)
+        updated_costs = UsageLedgerDB.bulk_upsert_costs(rows)
+        if updated_costs:
+            log.info("[ledger-poller] Deep rescan backfilled costs for %d previously-unpriced rows.", updated_costs)
+        updated_users = UsageLedgerDB.bulk_upsert_user_ids(rows)
+        if updated_users:
+            log.info("[ledger-poller] Deep rescan backfilled user_id for %d previously-unattributed rows.", updated_users)
 
-    log.info("[ledger-poller] Synced %d observations (%d inserted, %d cost-backfilled).", len(rows), inserted, updated)
+    log.info("[ledger-poller] Synced %d observations (%d inserted, %d cost-backfilled, %d user-backfilled).", len(rows), inserted, updated_costs, updated_users)
 
     # Log overage for credits users — signals potential abuse if repeated across syncs
     try:
         from open_webui.models.user_credits import UserCreditsDB, eur_to_credits
-        distinct_users = {r["user_id"] for r in rows if r.get("user_id")}
+        distinct_users = list({r["user_id"] for r in rows if r.get("user_id")})
+        cost_by_user = UsageLedgerDB.get_cost_eur_for_users_current_month(distinct_users)
         for uid in distinct_users:
             row_creds = UserCreditsDB.get(uid)
             if row_creds and row_creds.balance > 0:
-                try:
-                    from open_webui.models.usage_ledger import UsageLedgerDB as _UL
-                    cost = _UL.get_cost_eur_for_user_current_month(uid)
-                except Exception:
-                    continue
+                cost = cost_by_user.get(uid, 0.0)
                 used = eur_to_credits(cost, row_creds.credits_per_eur_cent)
                 remaining = row_creds.balance - used
                 if remaining < 0:

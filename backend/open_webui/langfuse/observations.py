@@ -54,7 +54,8 @@ def _resolve_user_ids(
         futures = {pool.submit(_fetch_one_trace, host, headers, tid): tid for tid in to_fetch}
         for future in as_completed(futures):
             tid, user_id = future.result()
-            _trace_user_cache[tid] = user_id
+            if user_id:
+                _trace_user_cache[tid] = user_id
             result[tid] = user_id
 
     return result
