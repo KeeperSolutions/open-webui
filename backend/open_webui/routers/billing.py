@@ -322,7 +322,7 @@ async def auto_onboard_user(user, request=None):
     if is_internal_user(user.email):
         StripeBillings.upsert(
             user_id=user.id,
-            plan_tier="internal",
+            plan_tier=PLAN_TIER_INTERNAL,
         )
         log.info(f"[billing] Internal user onboarded: {user.email}")
         return
@@ -362,13 +362,15 @@ async def auto_onboard_user(user, request=None):
         StripeBillings.upsert(
             user_id=user.id,
             stripe_customer_id=customer_id,
-            plan_tier="trial",
+            plan_tier=PLAN_TIER_TRIAL,
             free_tier_credit_applied=free_tier_applied,
         )
         # Assign trial credits at current global rate
-        from open_webui.models.user_credits import UserCreditsDB, CREDITS_PER_EUR_CENT, PLAN_CREDITS
-        UserCreditsDB.set_plan(user.email, PLAN_CREDITS["trial"], CREDITS_PER_EUR_CENT)
-        log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={PLAN_CREDITS['trial']})")
+        from open_webui.models.user_credits import UserCreditsDB, CREDITS_PER_EUR_CENT
+        from open_webui.models.billing_plans import get_trial_credits
+        trial_credits = get_trial_credits(CREDITS_PER_EUR_CENT)
+        UserCreditsDB.set_plan(user.email, trial_credits, CREDITS_PER_EUR_CENT)
+        log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={trial_credits})")
 
     except stripe.StripeError as e:
         log.error(f"[billing] Failed to onboard external user {user.email}: {e}")
@@ -442,21 +444,21 @@ async def get_billing_status(user=Depends(get_verified_user)):
             current_month_cost_eur=current_month_cost,
         )
 
-    if record.plan_tier == "internal":
+    if record.plan_tier == PLAN_TIER_INTERNAL:
         return BillingStatusResponse(
             enabled=True,
-            plan_tier="internal",
+            plan_tier=PLAN_TIER_INTERNAL,
             is_configured=True,
             current_month_cost_eur=current_month_cost,
         )
 
-    if record.plan_tier == "trial":
+    if record.plan_tier == PLAN_TIER_TRIAL:
         cost_used = _get_user_alltime_cost(user.email, record.created_at)
         credit_limit = TRIAL_CREDIT_EUR
         remaining = max(0.0, credit_limit - cost_used)
         return BillingStatusResponse(
             enabled=True,
-            plan_tier="trial",
+            plan_tier=PLAN_TIER_TRIAL,
             is_configured=True,
             credit_limit_eur=credit_limit,
             credit_used_eur=round(cost_used, 4),
@@ -464,48 +466,12 @@ async def get_billing_status(user=Depends(get_verified_user)):
             current_month_cost_eur=current_month_cost,
         )
 
-    if record.plan_tier == "paid":
-        if not record.stripe_subscription_id:
-            return BillingStatusResponse(
-                enabled=True,
-                plan_tier="paid",
-                is_configured=False,
-                current_month_cost_eur=current_month_cost,
-            )
-
-        client = get_stripe_client()
-
-        try:
-            sub = client.v1.subscriptions.retrieve(record.stripe_subscription_id)
-            sub_status = sub.status
-        except stripe.StripeError as e:
-            log.error(f"Stripe subscription retrieve error: {e}")
-            sub_status = record.subscription_status
-
-        upcoming_eur: Optional[float] = None
-        try:
-            invoice = client.v1.invoices.create_preview(
-                params={"customer": record.stripe_customer_id, "subscription": record.stripe_subscription_id}
-            )
-            upcoming_eur = invoice.amount_due / 100
-        except stripe.StripeError:
-            pass
-
-        return BillingStatusResponse(
-            enabled=True,
-            plan_tier="paid",
-            is_configured=True,
-            subscription_status=sub_status,
-            upcoming_invoice_eur=upcoming_eur,
-            current_month_cost_eur=current_month_cost,
-        )
-
-    if record.plan_tier == "team":
+    if record.plan_tier == PLAN_TIER_TEAM:
         team = Teams.get_by_owner_user_id(user.id)
         if not team:
             return BillingStatusResponse(
                 enabled=True,
-                plan_tier="team",
+                plan_tier=PLAN_TIER_TEAM,
                 is_configured=False,
                 current_month_cost_eur=current_month_cost,
             )
@@ -554,7 +520,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
         return BillingStatusResponse(
             enabled=True,
-            plan_tier="team",
+            plan_tier=PLAN_TIER_TEAM,
             is_configured=True,
             subscription_status=sub_status,
             upcoming_invoice_eur=upcoming_eur,
@@ -569,11 +535,11 @@ async def get_billing_status(user=Depends(get_verified_user)):
             current_month_cost_eur=current_month_cost,
         )
 
-    if record.plan_tier == "team_member":
+    if record.plan_tier == PLAN_TIER_TEAM_MEMBER:
         if not record.team_id:
             return BillingStatusResponse(
                 enabled=True,
-                plan_tier="team_member",
+                plan_tier=PLAN_TIER_TEAM_MEMBER,
                 is_configured=False,
                 current_month_cost_eur=current_month_cost,
             )
@@ -581,7 +547,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         if not team:
             return BillingStatusResponse(
                 enabled=True,
-                plan_tier="team_member",
+                plan_tier=PLAN_TIER_TEAM_MEMBER,
                 is_configured=False,
                 current_month_cost_eur=current_month_cost,
             )
@@ -594,7 +560,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
         return BillingStatusResponse(
             enabled=True,
-            plan_tier="team_member",
+            plan_tier=PLAN_TIER_TEAM_MEMBER,
             is_configured=True,
             subscription_status=team.subscription_status,
             team_id=team.id,
@@ -609,7 +575,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
     # Fallback for legacy rows without plan_tier — treat as internal
     return BillingStatusResponse(
         enabled=True,
-        plan_tier="internal",
+        plan_tier=PLAN_TIER_INTERNAL,
         is_configured=True,
         current_month_cost_eur=current_month_cost,
     )
@@ -628,7 +594,7 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
 
     record = StripeBillings.get_by_user_id(user.id)
 
-    if record and record.plan_tier == "internal":
+    if record and record.plan_tier == PLAN_TIER_INTERNAL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Internal users do not need a subscription.",
@@ -875,19 +841,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
 
     usage_budget = float(tier_config.get("usage_budget_eur", 0))
 
-    # Create team record
-    team = Teams.create(
-        name=body.name,
-        owner_user_id=user.id,
-        seat_limit=seat_count,
-        monthly_usage_budget_eur=usage_budget,
-    )
-    Teams.update(team.id, stripe_customer_id=customer_id)
-
-    # Add owner as team member
-    TeamMembers.add(team.id, user.id, role="owner")
-
-    # Create checkout session
+    # Create checkout session before persisting the team — avoids orphaned rows on Stripe failure
     try:
         session = client.v1.checkout.sessions.create(
             params={
@@ -896,14 +850,26 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
                 "line_items": [{"price": tier_config["price_id"], "quantity": 1}],
                 "success_url": f"{webui_url}/billing?checkout=success",
                 "cancel_url": f"{webui_url}/billing?checkout=canceled",
-                "metadata": {"user_id": user.id, "team_id": team.id},
+                "metadata": {"user_id": user.id},
             }
         )
     except stripe.StripeError as e:
         log.error(f"[billing] Team checkout session error: {e}")
         raise HTTPException(status_code=502, detail="Failed to create checkout session.")
 
-    Teams.update(team.id, checkout_session_id=session.id)
+    # Stripe session created successfully — now persist team record
+    try:
+        team = Teams.create(
+            name=body.name,
+            owner_user_id=user.id,
+            seat_limit=seat_count,
+            monthly_usage_budget_eur=usage_budget,
+        )
+        Teams.update(team.id, stripe_customer_id=customer_id, checkout_session_id=session.id)
+        TeamMembers.add(team.id, user.id, role="owner")
+    except Exception as e:
+        log.error(f"[billing] Team DB persist failed after Stripe session created (customer={customer_id}, session={session.id}): {e}")
+        raise HTTPException(status_code=500, detail="Failed to save team record. Contact support.")
 
     return CheckoutResponse(url=session.url)
 
@@ -1123,14 +1089,14 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
     from open_webui.models.topup import TopupPacks
 
     billing = StripeBillings.get_by_user_id(user.id)
-    if not billing or billing.plan_tier not in ("paid", "team"):
-        # Explicitly reject team_member and any other tier
+    if not billing or billing.plan_tier not in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM, PLAN_TIER_TEAM):
+        # Explicitly reject team_member, trial, internal, and any other tier
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Top-up requires an active paid or team plan.",
         )
 
-    if billing.plan_tier == "paid" and billing.subscription_status not in ("active", "trialing"):
+    if billing.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) and billing.subscription_status not in ("active", "trialing"):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Paid subscription is not active.",
@@ -1140,7 +1106,7 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
     if not pack:
         raise HTTPException(status_code=400, detail="Invalid top_up_id.")
 
-    if billing.plan_tier == "team":
+    if billing.plan_tier == PLAN_TIER_TEAM:
         team = Teams.get_by_owner_user_id(user.id)
         if not team or team.subscription_status not in ("active", "trialing"):
             raise HTTPException(
@@ -1289,7 +1255,7 @@ async def accept_invite(token: str, user=Depends(get_verified_user)):
     # Update user's billing record
     StripeBillings.upsert(
         user_id=user.id,
-        plan_tier="team_member",
+        plan_tier=PLAN_TIER_TEAM_MEMBER,
         team_id=team.id,
         free_tier_credit_applied=True,  # preserve flag so they don't get another trial credit
     )
@@ -1417,7 +1383,7 @@ async def _handle_stripe_event(event_type: str, data):
             StripeBillings.upsert(
                 user_id=team.owner_user_id,
                 stripe_customer_id=customer_id,
-                plan_tier="team",
+                plan_tier=PLAN_TIER_TEAM,
                 subscription_status="active",
                 team_id=team.id,
             )

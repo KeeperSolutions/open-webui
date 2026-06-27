@@ -192,6 +192,38 @@ class UsageLedgerTable:
             self._has_data = True
         return updated
 
+    def bulk_upsert_user_ids(self, rows: List[Dict]) -> int:
+        """Update user_id for existing rows where user_id is currently NULL or empty.
+
+        Used by the nightly deep rescan to backfill user attribution that failed during
+        the original insert (e.g. Langfuse trace lookup timed out). Only overwrites rows
+        where user_id IS NULL or empty string, and the incoming user_id is non-empty.
+        Returns the number of rows updated.
+        """
+        with_user = [r for r in rows if r.get("user_id") and r.get("langfuse_observation_id")]
+        if not with_user:
+            return 0
+
+        obs_ids = [r["langfuse_observation_id"] for r in with_user]
+
+        with get_db() as db:
+            from sqlalchemy import or_
+            result = db.execute(
+                UsageLedger.__table__.update()
+                .where(
+                    UsageLedger.langfuse_observation_id.in_(obs_ids),
+                    or_(UsageLedger.user_id.is_(None), UsageLedger.user_id == ""),
+                )
+                .values(
+                    user_id=case(
+                        {r["langfuse_observation_id"]: r["user_id"] for r in with_user},
+                        value=UsageLedger.langfuse_observation_id,
+                    ),
+                )
+            )
+            db.commit()
+            return result.rowcount if result.rowcount >= 0 else 0
+
     def get_cost_eur_for_user_current_month(self, user_id: str) -> float:
         with get_db() as db:
             result = (

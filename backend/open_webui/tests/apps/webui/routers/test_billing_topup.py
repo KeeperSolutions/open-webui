@@ -29,7 +29,7 @@ def _billing(**overrides):
     base = {
         "id": "b1",
         "user_id": "u1",
-        "plan_tier": "paid",
+        "plan_tier": "pro",
         "subscription_status": "active",
         "stripe_customer_id": "cus_123",
     }
