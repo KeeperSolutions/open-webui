@@ -243,7 +243,7 @@ async def update_config(
         old_key = existing_key_by_url.get(url, "")
         if old_key and not new_key:
             log.warning(
-                f"[openai] update_config: key for URL[{idx}] '{url}' is being "
+                f"[openai] update_config: key for URL[{idx}] is being "
                 f"cleared (was non-empty). Caller: user={user.id}"
             )
 

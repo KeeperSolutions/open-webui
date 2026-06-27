@@ -3,7 +3,7 @@
   export { className as class };
 </script>
 
-<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" class={className}>
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" class={className}>
   <path d="M16.8458 3.96143H16.0425V17.6489H16.8458V3.96143Z" fill="currentColor"/>
   <path d="M16.0415 3.15283H15.2329V3.9614H16.0415V3.15283Z" fill="currentColor"/>
   <path d="M15.2344 2.34961H14.4312V3.15289H15.2344V2.34961Z" fill="currentColor"/>

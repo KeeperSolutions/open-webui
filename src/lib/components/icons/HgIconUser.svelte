@@ -3,7 +3,7 @@
   export { className as class };
 </script>
 
-<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" class={className}>
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" class={className}>
   <rect x="7.78125" y="2.60352" width="4.4381" height="1.47937" fill="currentColor"/>
   <rect x="7.78125" y="8.521" width="4.4381" height="1.47937" fill="currentColor"/>
   <rect x="12.2188" y="4.08301" width="1.47937" height="4.4381" fill="currentColor"/>

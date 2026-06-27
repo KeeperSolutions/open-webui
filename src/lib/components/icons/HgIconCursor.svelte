@@ -2,7 +2,7 @@
 	let { class: className = '' } = $props();
 </script>
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" class={className}>
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" class={className}>
 	<path d="M17.5215 19.8052V22.8552H19.0515V21.3352H25.1415V18.2852H23.6215V19.8052H17.5215Z" fill="currentColor"/>
 	<path d="M23.6218 16.7559H22.0918V18.2859H23.6218V16.7559Z" fill="currentColor"/>
 	<path d="M22.0923 25.9053H20.5723V28.9453H22.0923V25.9053Z" fill="currentColor"/>
