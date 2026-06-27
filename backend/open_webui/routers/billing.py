@@ -858,16 +858,18 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         raise HTTPException(status_code=502, detail="Failed to create checkout session.")
 
     # Stripe session created successfully — now persist team record
-    team = Teams.create(
-        name=body.name,
-        owner_user_id=user.id,
-        seat_limit=seat_count,
-        monthly_usage_budget_eur=usage_budget,
-    )
-    Teams.update(team.id, stripe_customer_id=customer_id, checkout_session_id=session.id)
-
-    # Add owner as team member
-    TeamMembers.add(team.id, user.id, role="owner")
+    try:
+        team = Teams.create(
+            name=body.name,
+            owner_user_id=user.id,
+            seat_limit=seat_count,
+            monthly_usage_budget_eur=usage_budget,
+        )
+        Teams.update(team.id, stripe_customer_id=customer_id, checkout_session_id=session.id)
+        TeamMembers.add(team.id, user.id, role="owner")
+    except Exception as e:
+        log.error(f"[billing] Team DB persist failed after Stripe session created (customer={customer_id}, session={session.id}): {e}")
+        raise HTTPException(status_code=500, detail="Failed to save team record. Contact support.")
 
     return CheckoutResponse(url=session.url)
 

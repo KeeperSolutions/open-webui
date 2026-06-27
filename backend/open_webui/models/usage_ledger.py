@@ -197,7 +197,7 @@ class UsageLedgerTable:
 
         Used by the nightly deep rescan to backfill user attribution that failed during
         the original insert (e.g. Langfuse trace lookup timed out). Only overwrites rows
-        where user_id IS NULL and the incoming user_id is non-empty.
+        where user_id IS NULL or empty string, and the incoming user_id is non-empty.
         Returns the number of rows updated.
         """
         with_user = [r for r in rows if r.get("user_id") and r.get("langfuse_observation_id")]
