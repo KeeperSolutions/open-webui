@@ -1,16 +1,22 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores';
 	import { handleAuthSuccess } from '$lib/utils/auth';
 	import { plans, type PricingPlan } from '$lib/data/pricing-plans';
+	import { getModelClasses, type ModelClass } from '$lib/apis/model-classes';
 
 	import HgLandingHeader from '$lib/components/hubgate/HgLandingHeader.svelte';
 	import HgLandingFooter from '$lib/components/hubgate/HgLandingFooter.svelte';
 	import HgPricingCard from '$lib/components/hubgate/HgPricingCard.svelte';
+	import HgPricingTable from '$lib/components/hubgate/HgPricingTable.svelte';
 	import HgAuthModal from '$lib/components/hubgate/HgAuthModal.svelte';
 	import HgIconLock from '$lib/components/icons/HgIconLock.svelte';
 
 	let showModal = false;
+	let modelClasses: ModelClass[] = [];
+	let tableLoading = true;
 
 	const openModal = (plan: PricingPlan) => {
 		if (plan.postLoginRedirect) {
@@ -21,12 +27,22 @@
 		showModal = true;
 	};
 
-	$: if ($user) goto('/chat');
-
 	const onSuccess = async (e: CustomEvent) => {
 		showModal = false;
 		await handleAuthSuccess(e.detail);
 	};
+
+	onMount(async () => {
+		if (get(user)) { goto('/chat'); return; }
+
+		try {
+			modelClasses = await getModelClasses();
+		} catch {
+			modelClasses = [];
+		} finally {
+			tableLoading = false;
+		}
+	});
 </script>
 
 <svelte:head>
@@ -76,30 +92,44 @@
 					</p>
 				</div>
 
-				<!-- Pricing cards: 1-col mobile, 2-col tablet, all-in-one-row desktop -->
-				<div class="px-6 pb-4 w-full flex justify-center">
+				<!-- Pricing cards + Enterprise row in one grid -->
+				<div class="px-4 pb-4 w-full max-w-[1280px] mx-auto">
 					<div
 						id="pricing-cards"
-						class="grid gap-4 grid-cols-1 sm:grid-cols-2"
-						style="--cols: {plans.length}"
+						class="grid gap-4 lg:gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
 					>
-						{#each plans as plan, i}
-							<div
-								class="flex justify-center"
-								class:lone-last-card={plans.length % 2 !== 0 && i === plans.length - 1}
-							>
-								<HgPricingCard {plan} on:cta={() => openModal(plan)} />
-							</div>
+						{#each plans as plan}
+							<HgPricingCard {plan} on:cta={() => openModal(plan)} />
 						{/each}
+
+						<!-- Enterprise: always spans all columns -->
+						<div class="col-span-1 md:col-span-2 lg:col-span-4 flex items-center justify-between gap-4 bg-hg-bg-surface border border-hg-border rounded-[24px] px-6 py-4 max-w-[300px] mx-auto md:max-w-none md:mx-0">
+							<div class="flex flex-col gap-0.5">
+								<span class="font-hg-body font-semibold text-sm text-hg-text-secondary leading-[1.4]">Enterprise</span>
+								<span class="font-hg-body text-xs text-hg-text-tertiary leading-[1.4]">EU data residency · DPA · custom agents & RAG · volume discounts</span>
+							</div>
+							<a
+								href="mailto:contact@hubgate.io"
+								class="shrink-0 h-8 px-4 inline-flex items-center rounded-hg-full border border-hg-border bg-hg-bg-surface text-hg-text-secondary hover:bg-hg-blue hover:border-hg-blue hover:text-white font-hg-body text-xs transition-colors duration-200"
+							>
+								Contact Us
+							</a>
+						</div>
 					</div>
 				</div>
 
 				<p
-					class="px-6 pb-16 text-center font-hg-body text-xs font-normal leading-[1.4] text-hg-text-secondary max-w-[440px]"
+					class="px-6 pb-10 text-center font-hg-body text-base font-normal leading-[1.6] text-hg-text-tertiary max-w-[440px]"
 				>
 					Credits reset monthly and do not roll over. Queries beyond your allowance require a
 					top-up.
 				</p>
+
+				{#if tableLoading || modelClasses.length > 0}
+					<div class="px-4 pb-16 w-full max-w-[1280px] mx-auto">
+						<HgPricingTable {modelClasses} loading={tableLoading} />
+					</div>
+				{/if}
 			</main>
 
 			<HgLandingFooter />
@@ -108,20 +138,3 @@
 
 	<HgAuthModal bind:open={showModal} on:success={onSuccess} />
 {/if}
-
-<style>
-	/* Tablet (2-col): the lone last card of an odd-count grid spans both columns and centers. */
-	@media (min-width: 640px) and (max-width: 1023px) {
-		:global(.lone-last-card) {
-			grid-column: span 2;
-		}
-	}
-
-	/* Laptop and wider: every plan in a single centered row, each card 300px. */
-	@media (min-width: 1024px) {
-		:global(#pricing-cards) {
-			grid-template-columns: repeat(var(--cols), 300px);
-			justify-content: center;
-		}
-	}
-</style>
