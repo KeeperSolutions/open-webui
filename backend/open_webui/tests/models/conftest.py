@@ -1,5 +1,5 @@
 import os
 
-# Set before any test module is imported — CREDITS_PER_EUR_CENT is evaluated at
-# import time in user_credits.py and crashes collection if missing.
+# Ensure billing constant is set for any test that imports user_credits before
+# the root conftest runs (shouldn't happen, but defensive).
 os.environ.setdefault("CREDITS_PER_EUR_CENT", "1.82")
