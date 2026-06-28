@@ -39,16 +39,23 @@ log = logging.getLogger(__name__)
 
 
 def _safe_static_path(static_dir, url_path: str) -> Optional[Path]:
-    # Use normpath (lexical, no symlink resolution) so that a symlinked
-    # sub-directory inside static_dir (e.g. providers/ → ../../static/providers)
-    # is still allowed. The .. traversal attack is blocked because normpath
-    # collapses .. before the containment check.
+    from open_webui.env import ENV
     candidate = Path(static_dir) / url_path.lstrip("/")
-    normalised = Path(os.path.normpath(str(candidate)))
-    static_norm = Path(os.path.normpath(str(static_dir)))
-    # Reject traversal out of static_dir and bare root path (url_path="/")
-    if normalised == static_norm or not str(normalised).startswith(str(static_norm) + os.sep):
-        return None
+    if ENV == "dev":
+        # Dev: lexical check only so symlinked subdirs (e.g. providers/) work locally.
+        normalised = Path(os.path.normpath(str(candidate)))
+        static_norm = Path(os.path.normpath(str(static_dir)))
+        if normalised == static_norm or not str(normalised).startswith(str(static_norm) + os.sep):
+            return None
+    else:
+        # Prod: resolve() follows symlinks — rejects any path that escapes STATIC_DIR.
+        try:
+            resolved = candidate.resolve(strict=False)
+            static_resolved = Path(static_dir).resolve(strict=False)
+        except Exception:
+            return None
+        if not resolved.is_relative_to(static_resolved) or resolved == static_resolved:
+            return None
     return candidate
 
 router = APIRouter()
