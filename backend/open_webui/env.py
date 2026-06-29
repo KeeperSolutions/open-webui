@@ -548,9 +548,7 @@ if LICENSE_PUBLIC_KEY:
 -----BEGIN PUBLIC KEY-----
 {LICENSE_PUBLIC_KEY}
 -----END PUBLIC KEY-----
-""".encode(
-            "utf-8"
-        )
+""".encode("utf-8")
     )
 
 
@@ -742,9 +740,15 @@ else:
 
 # SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s.
 # None (keepalives disabled) when sock_read < 4 — interval would be 0 and busy-loop.
-_sse_keepalive_base = AIOHTTP_CLIENT_TIMEOUT_SOCK_READ if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None else 60
+_sse_keepalive_base = (
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
+    if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None
+    else 60
+)
 _sse_keepalive_raw = _sse_keepalive_base // 4
-SSE_KEEPALIVE_INTERVAL = min(_sse_keepalive_raw, 20) if _sse_keepalive_raw >= 1 else None
+SSE_KEEPALIVE_INTERVAL = (
+    min(_sse_keepalive_raw, 20) if _sse_keepalive_raw >= 1 else None
+)
 _sse_keepalive_source = (
     "derived from default 60s"
     if _sock_read_source in ("default", "disabled")
@@ -966,9 +970,13 @@ BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")  # legacy alias — maps to pro
-STRIPE_PRICE_ID_PRO = os.environ.get("STRIPE_PRICE_ID_PRO", "") or os.environ.get("STRIPE_PRICE_ID", "")
+STRIPE_PRICE_ID_PRO = os.environ.get("STRIPE_PRICE_ID_PRO", "") or os.environ.get(
+    "STRIPE_PRICE_ID", ""
+)
 STRIPE_PRICE_ID_PREMIUM = os.environ.get("STRIPE_PRICE_ID_PREMIUM", "")
-STRIPE_FREE_TIER_CENTS = int(os.environ.get("STRIPE_FREE_TIER_CENTS", "200"))  # €2.00 trial credit
+STRIPE_FREE_TIER_CENTS = int(
+    os.environ.get("STRIPE_FREE_TIER_CENTS", "200")
+)  # €2.00 trial credit
 BILLING_GRACE_PERIOD_DAYS = int(os.environ.get("BILLING_GRACE_PERIOD_DAYS", "3"))
 
 # Comma-separated list of email domains considered internal (e.g. "keepersolutions.com")
@@ -989,11 +997,11 @@ except ValueError:
 # JSON mapping seat count → {price_id, price_eur, usage_budget_eur}
 # e.g. '{"5": {"price_id": "price_abc", "price_eur": 150, "usage_budget_eur": 250}}'
 import json as _json
+
 try:
     STRIPE_TEAM_TIERS: dict = _json.loads(os.environ.get("STRIPE_TEAM_TIERS", "{}"))
 except (ValueError, TypeError):
     STRIPE_TEAM_TIERS: dict = {}
-
 
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
@@ -1002,5 +1010,9 @@ SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "")
-SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Keeper AI Gateway")
-SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() not in ("false", "0", "no")
+SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Hubgate")
+SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() not in (
+    "false",
+    "0",
+    "no",
+)

@@ -1,16 +1,15 @@
 {
-<<<<<<< HEAD:static/static/site.webmanifest
-  "name": "Open WebUI",
-  "short_name": "WebUI",
+  "name": "Hubgate",
+  "short_name": "Hubgate",
   "icons": [
     {
-      "src": "/static/web-app-manifest-192x192.png",
+      "src": "/favicon/web-app-manifest-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/static/web-app-manifest-512x512.png",
+      "src": "/favicon/web-app-manifest-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
@@ -20,25 +19,3 @@
   "background_color": "#ffffff",
   "display": "standalone"
 }
-=======
-	"name": "Keeper AI Gateway",
-	"short_name": "Keeper AI Gateway",
-	"icons": [
-		{
-			"src": "/favicon/web-app-manifest-192x192.png",
-			"sizes": "192x192",
-			"type": "image/png",
-			"purpose": "maskable"
-		},
-		{
-			"src": "/favicon/web-app-manifest-512x512.png",
-			"sizes": "512x512",
-			"type": "image/png",
-			"purpose": "maskable"
-		}
-	],
-	"theme_color": "#ffffff",
-	"background_color": "#ffffff",
-	"display": "standalone"
-}
->>>>>>> b4257c629 (Deploy (#5)):static/favicon/site.webmanifest

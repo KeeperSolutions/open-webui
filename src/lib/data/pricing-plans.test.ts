@@ -13,9 +13,18 @@ describe('pricing plans data integrity', () => {
 		}
 	});
 
+	it('has exactly 4 plans in order', () => {
+		expect(plans.map((p) => p.name)).toEqual(['Free Trial', 'Pro', 'Premium', 'Business']);
+	});
+
 	it('Free Trial has no postLoginRedirect', () => {
 		const plan = plans.find((p) => p.name === 'Free Trial');
 		expect(plan?.postLoginRedirect).toBeUndefined();
+	});
+
+	it('Pro redirects to /billing after login', () => {
+		const plan = plans.find((p) => p.name === 'Pro');
+		expect(plan?.postLoginRedirect).toBe('/billing');
 	});
 
 	it('Premium redirects to /billing after login', () => {
@@ -23,8 +32,21 @@ describe('pricing plans data integrity', () => {
 		expect(plan?.postLoginRedirect).toBe('/billing');
 	});
 
-	it('Team redirects to /billing after login', () => {
+	it('Business redirects to /billing after login', () => {
 		const plan = plans.find((p) => p.name === 'Business');
 		expect(plan?.postLoginRedirect).toBe('/billing');
+	});
+
+	it('Premium is the only most-popular plan', () => {
+		const popular = plans.filter((p) => p.isMostPopular);
+		expect(popular).toHaveLength(1);
+		expect(popular[0].name).toBe('Premium');
+	});
+
+	it('every plan has a credits badge', () => {
+		for (const plan of plans) {
+			expect(plan.creditsHighlight).toBeTruthy();
+			expect(plan.creditsLabel).toBeTruthy();
+		}
 	});
 });
