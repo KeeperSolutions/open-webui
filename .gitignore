@@ -305,3 +305,6 @@ backend/.vscode/
 #Custom ignore rules
 scripts/add_test_users.py
 md-docs/*
+
+#symlink for local development and serving custom model logos
+backend/open_webui/static/providers

@@ -2,6 +2,7 @@ from typing import Optional
 import io
 import base64
 import logging
+import os
 from pathlib import Path
 
 from open_webui.models.groups import Groups
@@ -38,11 +39,24 @@ log = logging.getLogger(__name__)
 
 
 def _safe_static_path(static_dir, url_path: str) -> Optional[Path]:
-    """Resolve url_path relative to static_dir and reject path traversal attempts."""
-    resolved = (Path(static_dir) / url_path.lstrip("/")).resolve()
-    if not resolved.is_relative_to(Path(static_dir).resolve()):
-        return None
-    return resolved
+    from open_webui.env import ENV
+    candidate = Path(static_dir) / url_path.lstrip("/")
+    if ENV == "dev":
+        # Dev: lexical check only so symlinked subdirs (e.g. providers/) work locally.
+        normalised = Path(os.path.normpath(str(candidate)))
+        static_norm = Path(os.path.normpath(str(static_dir)))
+        if normalised == static_norm or not str(normalised).startswith(str(static_norm) + os.sep):
+            return None
+    else:
+        # Prod: resolve() follows symlinks — rejects any path that escapes STATIC_DIR.
+        try:
+            resolved = candidate.resolve(strict=False)
+            static_resolved = Path(static_dir).resolve(strict=False)
+        except Exception:
+            return None
+        if not resolved.is_relative_to(static_resolved) or resolved == static_resolved:
+            return None
+    return candidate
 
 router = APIRouter()
 
@@ -483,6 +497,46 @@ def get_model_profile_image(
                     if etag:
                         headers["ETag"] = etag
                     return FileResponse(str(file_path), headers=headers)
+
+    # Priority 2b: model has no DB row — detect provider from runtime MODELS state only.
+    # (Models with a DB row that fell through Priority 2 have no provider logo configured
+    # and won't produce a different result here, so skip the redundant lookup.)
+    if not model and hasattr(request.app.state, "MODELS") and request.app.state.MODELS:
+        runtime_model = request.app.state.MODELS.get(id)
+        if runtime_model:
+            owned_by = runtime_model.get("owned_by", "openai")
+            provider_result = Providers.detect_provider_logo_with_metadata(id, owned_by, theme or "light", db=db)
+            if provider_result:
+                provider_logo = provider_result["logo_url"]
+                provider_updated_at = provider_result["updated_at"]
+                etag = f'"{provider_updated_at}"' if provider_updated_at else None
+                client_etag = request.headers.get("If-None-Match")
+                if etag and client_etag == etag:
+                    return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+                if provider_logo.startswith("http"):
+                    headers = {"Location": provider_logo, "Cache-Control": "public, max-age=3600"}
+                    if etag:
+                        headers["ETag"] = etag
+                    return Response(status_code=status.HTTP_302_FOUND, headers=headers)
+                elif provider_logo.startswith("data:image"):
+                    try:
+                        header, base64_data = provider_logo.split(",", 1)
+                        image_data = base64.b64decode(base64_data)
+                        image_buffer = io.BytesIO(image_data)
+                        media_type = header.split(";")[0].lstrip("data:")
+                        headers = {"Cache-Control": "public, max-age=3600"}
+                        if etag:
+                            headers["ETag"] = etag
+                        return StreamingResponse(image_buffer, media_type=media_type, headers=headers)
+                    except Exception as e:
+                        log.warning(f"Error decoding provider logo: {e}")
+                elif provider_logo.startswith("/"):
+                    file_path = _safe_static_path(STATIC_DIR, provider_logo)
+                    if file_path and file_path.exists():
+                        headers = {"Cache-Control": "public, max-age=3600"}
+                        if etag:
+                            headers["ETag"] = etag
+                        return FileResponse(str(file_path), headers=headers)
 
     # Priority 3: Default fallback
     return FileResponse(f"{STATIC_DIR}/favicon.png")

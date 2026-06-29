@@ -253,7 +253,7 @@
 									<img
 										src={logoUrl}
 										alt={provider.name}
-										class="w-10 h-10 rounded-full object-cover"
+										class="w-10 h-10 object-contain"
 										on:error={(e) => {
 											// Fallback to initials if image fails to load
 											e.target.style.display = 'none';

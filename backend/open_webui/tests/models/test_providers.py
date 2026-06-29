@@ -250,11 +250,31 @@ class TestProviderLogoDetection:
             assert "meta" in logo.lower()
 
     def test_detect_ollama_logo_by_owned_by(self):
-        """Test Ollama logo detection via owned_by field."""
+        """Test Ollama logo detection via owned_by field for a model with no pattern match."""
         with get_db() as db:
-            logo = Providers.detect_provider_logo("mistral", "ollama", "light", db=db)
+            logo = Providers.detect_provider_logo("some-unknown-ollama-model", "ollama", "light", db=db)
             assert logo is not None
             assert "ollama" in logo.lower()
+
+    def test_provider_pattern_takes_priority_over_owned_by(self):
+        """Provider pattern match wins over owned_by=ollama fallback."""
+        with get_db() as db:
+            Providers.delete_provider_by_id("mistral_priority_test", db=db)
+            form = ProviderForm(
+                id="mistral_priority_test",
+                name="Mistral Priority Test",
+                logo_url="/providers/mistral-light.svg",
+                model_id_patterns=["^mistral", "^open-mistral", "^codestral", "^devstral", "^magistral"],
+                priority=100,
+                is_active=True,
+            )
+            Providers.create_provider(form, db=db)
+            try:
+                logo = Providers.detect_provider_logo("mistral", "ollama", "light", db=db)
+                assert logo is not None
+                assert "mistral" in logo.lower()
+            finally:
+                Providers.delete_provider_by_id("mistral_priority_test", db=db)
 
     def test_detect_no_match(self):
         """Test that unmatched models return None."""
