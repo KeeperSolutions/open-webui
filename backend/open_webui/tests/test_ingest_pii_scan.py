@@ -148,3 +148,40 @@ def test_content_endpoint_detections_default_empty(monkeypatch):
     out = asyncio.run(F.get_file_data_content_by_id("f1", user=_user(), db=None))
     assert out["content"] == "hello"
     assert out["pii_detections"] == []
+
+
+def test_scan_partial_chunk_failure_keeps_other_detections():
+    """Best-effort + parallel: if ONE sub-chunk's POST fails, detections from the
+    other chunks must survive (the old sequential path lost everything on the
+    first failure)."""
+    import re
+
+    head = "OIB 11111111111 " + ("x" * 1900)
+    bad = " FAILCHUNK " + ("y" * 1900)
+    tail = " OIB 33333333333 end"
+    content = head + bad + tail
+    OIB = re.compile(r"\b\d{11}\b")
+
+    def _cm(req):
+        body = copy.deepcopy(req["body"])
+        text = body["messages"][0]["content"][:2048]
+        dets = [{"type": "HR_OIB", "start": m.start(), "end": m.end()} for m in OIB.finditer(text)]
+        body["messages"][0]["content"] = "[m]"
+        body.setdefault("metadata", {})["pii_detections_public"] = dets
+        resp = MagicMock(); resp.json = AsyncMock(return_value=body)
+        resp.raise_for_status = MagicMock(); resp.content_type = "application/json"
+        cm = MagicMock(); cm.__aenter__ = AsyncMock(return_value=resp); cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    def _post(url, *, headers, json, ssl):
+        if "FAILCHUNK" in json["body"]["messages"][0]["content"]:
+            raise aiohttp.ClientConnectionError("boom")
+        return _cm(json)
+
+    s = MagicMock(); s.post = _post
+    scm = MagicMock(); scm.__aenter__ = AsyncMock(return_value=s); scm.__aexit__ = AsyncMock(return_value=False)
+    with patch("open_webui.utils.middleware.aiohttp.ClientSession", return_value=scm):
+        dets = asyncio.run(scan_file_content_for_pii(
+            _request(), content, file_id="f1", user=_user(), models=_models()))
+    vals = sorted(content[d["start"]:d["end"]] for d in dets)
+    assert "11111111111" in vals and "33333333333" in vals

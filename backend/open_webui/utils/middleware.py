@@ -910,6 +910,14 @@ MAX_SOURCE_TEXT_CHARS = 50000
 # blank-line/newline boundaries and never cuts a multi-token entity.
 PII_MASK_CHUNK_CHARS = 1800
 
+# Ingest scan ONLY: how many sub-chunk masking POSTs to run concurrently against
+# the external pipeline. The scan discards masked text and uses only detection
+# spans, so vault races on the synthetic per-file key are harmless and order does
+# not matter — concurrency is safe here. It is deliberately NOT applied to the
+# chat-time masking path (which must stay sequential to keep masked-text order and
+# thread-vault placeholder numbering correct).
+PII_SCAN_CONCURRENCY = 8
+
 # User-visible message emitted on the tool/agentic path when masking is blocked.
 PII_MASKING_BLOCK_MESSAGE = (
     "Request blocked: attachment/tool content could not be PII-masked "
@@ -1201,29 +1209,68 @@ async def scan_file_content_for_pii(
     model_id = _resolve_pii_scan_model_id(models)
     if model_id is None:
         return []  # no PII filter configured -> nothing to scan
-    # total=60 (vs chat-time 30): a full-file scan may issue many sub-chunk POSTs.
+
+    feats = features if isinstance(features, dict) else {"pii_masking": True}
+    source_marker = {"type": "file", "file_id": file_id}
+    # Sub-chunk the whole file (newline-bounded, no token-cap truncation) and mask
+    # each piece. Unlike the chat-time path we DISCARD the masked text and keep only
+    # the detection spans, so the pieces are independent -> we run them CONCURRENTLY
+    # (bounded by PII_SCAN_CONCURRENCY). For a large document this turns ~100 serial
+    # round-trips into a handful of parallel batches (minutes -> tens of seconds).
+    pieces = _split_text_for_pii(content)
+    # total scales with the (bounded-concurrency) number of sub-chunk POSTs.
     timeout = aiohttp.ClientTimeout(
-        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=60
+        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=120
     )
-    try:
-        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
-            _masked, detections = await _mask_long_text_via_pii_pipeline(
+    semaphore = asyncio.Semaphore(PII_SCAN_CONCURRENCY)
+
+    async def _scan_piece(session, piece_start, piece):
+        async with semaphore:
+            _masked, piece_dets = await _mask_text_via_pii_pipeline(
                 request,
-                content,
+                piece,
                 session=session,
                 chat_id=f"file-{file_id}",  # synthetic vault key; result ignored
                 user=user,
                 model_id=model_id,
                 models=models,
-                features=features if isinstance(features, dict) else {"pii_masking": True},
-                source_marker={"type": "file", "file_id": file_id},
+                features=feats,
+                source_marker=source_marker,
             )
-        return detections
+        # Rebase chunk-relative offsets to file-relative.
+        return [
+            {"type": d["type"], "start": d["start"] + piece_start, "end": d["end"] + piece_start}
+            for d in piece_dets
+        ]
+
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            results = await asyncio.gather(
+                *(_scan_piece(session, ps, p) for ps, p in pieces),
+                return_exceptions=True,  # one bad chunk must not drop the rest
+            )
     except Exception as e:  # best-effort: log and degrade, never block ingest
         log.warning(
             "ingest PII scan failed for file %s: %s", file_id, e, exc_info=True
         )
         return []
+
+    # Merge + dedup per DOCUMENT by (type, start, end); skip chunks that errored.
+    seen = set()
+    detections = []
+    for chunk in results:
+        if isinstance(chunk, BaseException):
+            log.warning(
+                "ingest PII scan chunk failed for file %s: %s", file_id, chunk
+            )
+            continue
+        for d in chunk:
+            key = (d["type"], d["start"], d["end"])
+            if key in seen:
+                continue
+            seen.add(key)
+            detections.append(d)
+    return detections
 
 
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
