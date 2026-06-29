@@ -16,6 +16,7 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
+	import { getFileDataContentById } from '$lib/apis/files';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -94,18 +95,34 @@
 		return [];
 	})();
 
-	// OWUI keeps uploaded files attached to the whole chat (chatFiles) and resends
-	// them with every turn, so the response's detections cover ALL chat files, not
-	// just this message's. Scope the card to files actually attached to THIS user
-	// message (message-sourced detections — no fileId — always pass through).
-	$: messageFileIds = new Set(
-		(history?.messages?.[messageId]?.files ?? [])
-			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
-			.filter(Boolean)
-	);
-	$: piiDetectionsScoped = (piiDetections ?? []).filter(
-		(d: { fileId?: string }) => d?.fileId == null || messageFileIds.has(d.fileId)
-	);
+	let fileItems: { key: string; type: string; value: string; source?: string }[] = [];
+	let _piiFetchKey = '';
+	$: {
+		const files = history?.messages?.[messageId]?.files ?? [];
+		const ids = files.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id).filter(Boolean);
+		const key = ids.join(',');
+		if (key !== _piiFetchKey) {
+			_piiFetchKey = key;
+			(async () => {
+				const capturedKey = key; // capture before first await
+				const out: typeof fileItems = [];
+				for (const f of files) {
+					const id = f?.id ?? f?.file?.id;
+					if (!id) continue;
+					const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
+					const { content, pii_detections } = await getFileDataContentById(localStorage.token, id);
+					for (const d of pii_detections ?? []) {
+						const value = (content ?? '').slice(d.start, d.end);
+						if (!value) continue;
+						out.push({ key: JSON.stringify([d.type, value, name ?? null]), type: d.type, value, source: name });
+					}
+				}
+				// stale-result guard: only assign if this is still the latest fetch
+				if (_piiFetchKey === capturedKey) fileItems = out;
+			})();
+		}
+	}
+	$: piiDetectionsScoped = (piiDetections ?? []).filter((d: { fileId?: string }) => d?.fileId == null);
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -626,6 +643,7 @@
 						detections={piiDetectionsScoped}
 						originalText={piiOriginalText}
 						sources={piiSources}
+						{fileItems}
 					/>
 
 					{#if $settings?.chatBubble ?? true}

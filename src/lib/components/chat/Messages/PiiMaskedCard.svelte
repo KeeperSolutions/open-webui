@@ -33,6 +33,9 @@
 	// Citation sources for the same response — used to reconstruct file-sourced
 	// PII values locally (the original chunk text the user already received).
 	export let sources: CitationSource[] = [];
+	// Ingest-time file PII: already-reconstructed items from the full file content,
+	// fetched by UserMessage from GET /files/{id}/data/content.
+	export let fileItems: PiiItem[] = [];
 
 	let show = false;
 	let items: PiiItem[] = [];
@@ -54,9 +57,13 @@
 	// Reconstruct masked values locally and dedupe identical (type, value, source)
 	// triples. Nothing sensitive leaves the browser: the wire/DB only ever carried
 	// {type, start, end} (+ file/chunk refs for file-sourced detections).
+	// Map insertion order matters: file/ingest items come LAST so they win on a
+	// key collision — the ingest path is the authoritative, complete source of
+	// file PII, while the B2/detections path only covers retrieved chunks.
 	$: items = Array.from(
-		new Map(
-			(detections ?? [])
+		new Map([
+			// B2 / message-sourced items: reconstruct value from originalText or citation chunk
+			...((detections ?? [])
 				.map((d): [string, PiiItem] => {
 					const isFile = d.fileId != null;
 					const value = isFile
@@ -67,9 +74,12 @@
 					const key = JSON.stringify([d.type, value, source ?? null]);
 					return [key, { key, type: d.type, value, source }];
 				})
-				.filter(([, it]) => it.value !== '')
-		).values()
-	);
+				.filter(([, it]) => it.value !== '')),
+			// ingest-path items (already reconstructed, carry value + source) —
+			// authoritative on collision, so spread LAST.
+			...(fileItems ?? []).map((it): [string, PiiItem] => [it.key, it])
+		]).values()
+	).filter((it) => it.value !== '');
 	$: count = items.length;
 </script>
 

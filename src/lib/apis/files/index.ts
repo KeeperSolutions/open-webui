@@ -337,6 +337,16 @@ export const deleteFileById = async (token: string, id: string) => {
 	return res;
 };
 
+export const getFileDataContentById = async (token: string, id: string) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/data/content`, {
+		method: 'GET',
+		headers: { Accept: 'application/json', authorization: `Bearer ${token}` }
+	})
+		.then((r) => (r.ok ? r.json() : null))
+		.catch(() => null);
+	return res ?? { content: '', pii_detections: [] };
+};
+
 export const deleteAllFiles = async (token: string) => {
 	let error = null;
 
