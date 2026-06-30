@@ -185,3 +185,19 @@ def test_scan_partial_chunk_failure_keeps_other_detections():
             _request(), content, file_id="f1", user=_user(), models=_models()))
     vals = sorted(content[d["start"]:d["end"]] for d in dets)
     assert "11111111111" in vals and "33333333333" in vals
+
+
+def test_scan_caps_large_content(monkeypatch):
+    """Above PII_SCAN_MAX_CHARS only the prefix is scanned; tail PII is skipped,
+    and the surviving offsets still index correctly into the full content."""
+    import open_webui.utils.middleware as M
+
+    monkeypatch.setattr(M, "PII_SCAN_MAX_CHARS", 1000)
+    content = "OIB 11111111111 " + ("x" * 1500) + " OIB 33333333333 end"
+    captured = []
+    with _patch_session(captured):
+        dets = asyncio.run(scan_file_content_for_pii(
+            _request(), content, file_id="f1", user=_user(), models=_models()))
+    vals = {content[d["start"]:d["end"]] for d in dets}
+    assert "11111111111" in vals       # within the cap -> scanned
+    assert "33333333333" not in vals   # beyond the cap -> skipped

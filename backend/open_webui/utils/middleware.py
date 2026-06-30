@@ -916,7 +916,17 @@ PII_MASK_CHUNK_CHARS = 1800
 # not matter — concurrency is safe here. It is deliberately NOT applied to the
 # chat-time masking path (which must stay sequential to keep masked-text order and
 # thread-vault placeholder numbering correct).
-PII_SCAN_CONCURRENCY = 8
+# Kept modest: the external pipeline is a scale-to-zero Cloud Run service, so a
+# big fan-out triggers many cold-start instances and hurts more than it helps.
+PII_SCAN_CONCURRENCY = 3
+
+# Ingest scan ONLY: hard cap on how much of a file's text we route through the
+# external pipeline for the card. A multi-MB file would otherwise become
+# thousands of remote calls. Above this, only the first PII_SCAN_MAX_CHARS are
+# scanned (the card may be incomplete for very large files); offsets stay valid
+# because the card slices the full stored content, and detections live in the
+# scanned prefix.
+PII_SCAN_MAX_CHARS = 50000
 
 # User-visible message emitted on the tool/agentic path when masking is blocked.
 PII_MASKING_BLOCK_MESSAGE = (
@@ -1212,6 +1222,16 @@ async def scan_file_content_for_pii(
 
     feats = features if isinstance(features, dict) else {"pii_masking": True}
     source_marker = {"type": "file", "file_id": file_id}
+    # Hard cap the scanned volume so a huge file can't become thousands of remote
+    # calls. The card slices the FULL stored content, so prefix offsets stay valid.
+    if len(content) > PII_SCAN_MAX_CHARS:
+        log.info(
+            "ingest PII scan: capping file %s content %d -> %d chars",
+            file_id,
+            len(content),
+            PII_SCAN_MAX_CHARS,
+        )
+        content = content[:PII_SCAN_MAX_CHARS]
     # Sub-chunk the whole file (newline-bounded, no token-cap truncation) and mask
     # each piece. Unlike the chat-time path we DISCARD the masked text and keep only
     # the detection spans, so the pieces are independent -> we run them CONCURRENTLY

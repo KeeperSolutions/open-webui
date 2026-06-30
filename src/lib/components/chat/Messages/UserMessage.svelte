@@ -105,17 +105,31 @@
 			_piiFetchKey = key;
 			(async () => {
 				const capturedKey = key; // capture before first await
-				const out: typeof fileItems = [];
-				for (const f of files) {
-					const id = f?.id ?? f?.file?.id;
-					if (!id) continue;
-					const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
-					const { content, pii_detections } = await getFileDataContentById(localStorage.token, id);
-					for (const d of pii_detections ?? []) {
-						const value = (content ?? '').slice(d.start, d.end);
-						if (!value) continue;
-						out.push({ key: JSON.stringify([d.type, value, name ?? null]), type: d.type, value, source: name });
+				const buildOnce = async () => {
+					const out: typeof fileItems = [];
+					for (const f of files) {
+						const id = f?.id ?? f?.file?.id;
+						if (!id) continue;
+						const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
+						const { content, pii_detections } = await getFileDataContentById(localStorage.token, id);
+						for (const d of pii_detections ?? []) {
+							const value = (content ?? '').slice(d.start, d.end);
+							if (!value) continue;
+							out.push({ key: JSON.stringify([d.type, value, name ?? null]), type: d.type, value, source: name });
+						}
 					}
+					return out;
+				};
+				// The PII-card scan runs in the background AFTER the file is "ready",
+				// so the first fetch can land before detections are stored. Retry a
+				// few times while empty (bounded) so the card fills in shortly after;
+				// a file with genuinely no PII just ends with an empty list.
+				let out: typeof fileItems = [];
+				for (let attempt = 0; attempt < 6; attempt++) {
+					if (_piiFetchKey !== capturedKey) return; // superseded by a newer fetch
+					out = await buildOnce();
+					if (out.length > 0) break;
+					await new Promise((r) => setTimeout(r, 2500));
 				}
 				// stale-result guard: only assign if this is still the latest fetch
 				if (_piiFetchKey === capturedKey) fileItems = out;

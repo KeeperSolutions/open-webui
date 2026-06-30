@@ -1711,12 +1711,15 @@ def process_file(
                 {'content': text_content},
                 db=db,
             )
-            _store_ingest_pii_detections(request, file.id, text_content, user)
             hash = calculate_sha256_string(text_content)
 
             if request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
                 Files.update_file_data_by_id(file.id, {'status': 'completed'}, db=db)
                 Files.update_file_hash_by_id(file.id, hash, db=db)
+                # File is now "ready" for the user; run the PII-card scan AFTER so
+                # it never blocks the file becoming usable (it hits a remote,
+                # cold-start-prone pipeline). Best-effort; the card fills in later.
+                _store_ingest_pii_detections(request, file.id, text_content, user)
                 return {
                     'status': True,
                     'collection_name': None,
@@ -1763,12 +1766,19 @@ def process_file(
                             )
                             Files.update_file_hash_by_id(file.id, hash, db=session)
 
-                            return {
-                                'status': True,
-                                'collection_name': collection_name,
-                                'filename': file.filename,
-                                'content': text_content,
-                            }
+                        # File is now "ready"; PII-card scan runs AFTER the session
+                        # above is closed so it never blocks usability (it hits a
+                        # remote, cold-start-prone pipeline) and its own writes to
+                        # the same row don't contend with an open transaction.
+                        # Best-effort; the card fills in later.
+                        _store_ingest_pii_detections(request, file.id, text_content, user)
+
+                        return {
+                            'status': True,
+                            'collection_name': collection_name,
+                            'filename': file.filename,
+                            'content': text_content,
+                        }
                     else:
                         raise Exception('Error saving document to vector database')
                 except Exception as e:
