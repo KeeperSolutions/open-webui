@@ -201,3 +201,43 @@ def test_scan_caps_large_content(monkeypatch):
     vals = {content[d["start"]:d["end"]] for d in dets}
     assert "11111111111" in vals       # within the cap -> scanned
     assert "33333333333" not in vals   # beyond the cap -> skipped
+
+
+def test_scan_retries_transient_chunk_failure():
+    """A chunk whose call fails ONCE then succeeds must be RECOVERED, not dropped.
+    Guards against the non-deterministic under-count (same file -> 85/60/25)."""
+    import re
+
+    head = "OIB 11111111111 " + ("x" * 1900)
+    flap = " OIB 22222222222 " + ("y" * 1900)  # this chunk fails once, then succeeds
+    content = head + flap
+    OIB = re.compile(r"\b\d{11}\b")
+    calls = {"n": 0}
+
+    def _cm(req):
+        body = copy.deepcopy(req["body"])
+        text = body["messages"][0]["content"][:2048]
+        dets = [{"type": "HR_OIB", "start": m.start(), "end": m.end()} for m in OIB.finditer(text)]
+        body["messages"][0]["content"] = "[m]"
+        body.setdefault("metadata", {})["pii_detections_public"] = dets
+        resp = MagicMock(); resp.json = AsyncMock(return_value=body)
+        resp.raise_for_status = MagicMock(); resp.content_type = "application/json"
+        cm = MagicMock(); cm.__aenter__ = AsyncMock(return_value=resp); cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    def _post(url, *, headers, json, ssl):
+        if "22222222222" in json["body"]["messages"][0]["content"]:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise aiohttp.ClientConnectionError("transient")
+        return _cm(json)
+
+    s = MagicMock(); s.post = _post
+    scm = MagicMock(); scm.__aenter__ = AsyncMock(return_value=s); scm.__aexit__ = AsyncMock(return_value=False)
+    with patch("open_webui.utils.middleware.aiohttp.ClientSession", return_value=scm):
+        dets = asyncio.run(scan_file_content_for_pii(
+            _request(), content, file_id="f1", user=_user(), models=_models()))
+    vals = {content[d["start"]:d["end"]] for d in dets}
+    assert "11111111111" in vals
+    assert "22222222222" in vals      # recovered via retry (would be dropped without it)
+    assert calls["n"] >= 2            # proves the chunk was retried

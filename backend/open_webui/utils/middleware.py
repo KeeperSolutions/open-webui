@@ -928,6 +928,12 @@ PII_SCAN_CONCURRENCY = 3
 # scanned prefix.
 PII_SCAN_MAX_CHARS = 50000
 
+# Ingest scan ONLY: retry a sub-chunk whose pipeline call fails (cold-start
+# storm, timeout, transient connection error) instead of silently dropping its
+# detections. Without this the card under-reports PII non-deterministically
+# (same file -> different counts run to run).
+PII_SCAN_PIECE_RETRIES = 3
+
 # User-visible message emitted on the tool/agentic path when masking is blocked.
 PII_MASKING_BLOCK_MESSAGE = (
     "Request blocked: attachment/tool content could not be PII-masked "
@@ -1245,23 +1251,39 @@ async def scan_file_content_for_pii(
     semaphore = asyncio.Semaphore(PII_SCAN_CONCURRENCY)
 
     async def _scan_piece(session, piece_start, piece):
-        async with semaphore:
-            _masked, piece_dets = await _mask_text_via_pii_pipeline(
-                request,
-                piece,
-                session=session,
-                chat_id=f"file-{file_id}",  # synthetic vault key; result ignored
-                user=user,
-                model_id=model_id,
-                models=models,
-                features=feats,
-                source_marker=source_marker,
-            )
-        # Rebase chunk-relative offsets to file-relative.
-        return [
-            {"type": d["type"], "start": d["start"] + piece_start, "end": d["end"] + piece_start}
-            for d in piece_dets
-        ]
+        last_exc = None
+        for attempt in range(PII_SCAN_PIECE_RETRIES):
+            try:
+                async with semaphore:
+                    _masked, piece_dets = await _mask_text_via_pii_pipeline(
+                        request,
+                        piece,
+                        session=session,
+                        chat_id=f"file-{file_id}",  # synthetic vault key; result ignored
+                        user=user,
+                        model_id=model_id,
+                        models=models,
+                        features=feats,
+                        source_marker=source_marker,
+                    )
+                # Rebase chunk-relative offsets to file-relative.
+                return [
+                    {"type": d["type"], "start": d["start"] + piece_start, "end": d["end"] + piece_start}
+                    for d in piece_dets
+                ]
+            except Exception as e:
+                # Transient (cold start / timeout / connection). Back off and retry
+                # — the semaphore is released during the sleep so peers proceed.
+                last_exc = e
+                if attempt + 1 < PII_SCAN_PIECE_RETRIES:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        log.warning(
+            "ingest PII scan chunk failed after %d attempts for file %s: %s",
+            PII_SCAN_PIECE_RETRIES,
+            file_id,
+            last_exc,
+        )
+        return []  # drop only this chunk after exhausting retries; keep the rest
 
     try:
         async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:

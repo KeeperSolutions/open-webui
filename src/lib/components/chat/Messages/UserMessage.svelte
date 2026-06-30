@@ -125,7 +125,7 @@
 				// few times while empty (bounded) so the card fills in shortly after;
 				// a file with genuinely no PII just ends with an empty list.
 				let out: typeof fileItems = [];
-				for (let attempt = 0; attempt < 6; attempt++) {
+				for (let attempt = 0; attempt < 12; attempt++) {
 					if (_piiFetchKey !== capturedKey) return; // superseded by a newer fetch
 					out = await buildOnce();
 					if (out.length > 0) break;
