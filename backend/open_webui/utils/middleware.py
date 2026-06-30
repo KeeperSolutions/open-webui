@@ -934,6 +934,11 @@ PII_SCAN_MAX_CHARS = 50000
 # (same file -> different counts run to run).
 PII_SCAN_PIECE_RETRIES = 3
 
+# Verbose PII flow diagnostics to the server log. Set KEEPER_PII_DEBUG=1 (and
+# restart the backend) to trace, per request: what the ingest scan identified
+# (the CARD source) and what source text reaches the LLM (the chat path).
+PII_DEBUG = os.environ.get("KEEPER_PII_DEBUG", "").lower() in ("1", "true", "yes", "on")
+
 # User-visible message emitted on the tool/agentic path when masking is blocked.
 PII_MASKING_BLOCK_MESSAGE = (
     "Request blocked: attachment/tool content could not be PII-masked "
@@ -1249,6 +1254,8 @@ async def scan_file_content_for_pii(
         sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=120
     )
     semaphore = asyncio.Semaphore(PII_SCAN_CONCURRENCY)
+    _t0 = time.time()
+    _stats = {"ok": 0, "failed": 0}
 
     async def _scan_piece(session, piece_start, piece):
         last_exc = None
@@ -1266,6 +1273,7 @@ async def scan_file_content_for_pii(
                         features=feats,
                         source_marker=source_marker,
                     )
+                _stats["ok"] += 1
                 # Rebase chunk-relative offsets to file-relative.
                 return [
                     {"type": d["type"], "start": d["start"] + piece_start, "end": d["end"] + piece_start}
@@ -1283,6 +1291,7 @@ async def scan_file_content_for_pii(
             file_id,
             last_exc,
         )
+        _stats["failed"] += 1
         return []  # drop only this chunk after exhausting retries; keep the rest
 
     try:
@@ -1312,6 +1321,18 @@ async def scan_file_content_for_pii(
                 continue
             seen.add(key)
             detections.append(d)
+    if PII_DEBUG:
+        log.info(
+            "[PII-DEBUG][INGEST] file=%s chars=%d chunks=%d ok=%d failed=%d "
+            "detections=%d elapsed=%.1fs  <- this is what the PII CARD shows",
+            file_id,
+            len(content),
+            len(pieces),
+            _stats["ok"],
+            _stats["failed"],
+            len(detections),
+            time.time() - _t0,
+        )
     return detections
 
 
@@ -1362,6 +1383,9 @@ async def mask_sources_for_llm(
     """
     masked_sources = []
     detections: list[dict] = []
+    _dbg_docs = 0
+    _dbg_orig_chars = 0
+    _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
 
     # C.2: open ONE aiohttp session for every chunk-masking call this request,
     # instead of one session per chunk. Same timeout/SSL as the existing inlet.
@@ -1390,6 +1414,7 @@ async def mask_sources_for_llm(
                 # _mask_long_text_via_pii_pipeline sub-chunks any document longer
                 # than the pipeline's token cap so its tail is never silently
                 # truncated (TRAU-513). Short docs take a single masking call.
+                _orig_doc = doc
                 doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
                     request,
                     doc,
@@ -1402,6 +1427,18 @@ async def mask_sources_for_llm(
                     source_marker=source_marker,
                 )
                 masked_docs.append(doc)
+
+                if PII_DEBUG:
+                    _dbg_docs += 1
+                    _dbg_orig_chars += len(_orig_doc) if isinstance(_orig_doc, str) else 0
+                if PII_DEBUG_FILE:
+                    _dbg_blocks.append(
+                        (
+                            _orig_doc if isinstance(_orig_doc, str) else str(_orig_doc),
+                            doc if isinstance(doc, str) else str(doc),
+                            f"{src_meta.get('name') or src_meta.get('type') or 'source'} doc={doc_idx}",
+                        )
+                    )
 
                 # B2: tag each chunk-relative detection with the file + chunk it
                 # came from. The frontend slices the value out of the ORIGINAL
@@ -1422,6 +1459,28 @@ async def mask_sources_for_llm(
 
             masked_source = {**source, 'document': masked_docs}
             masked_sources.append(masked_source)
+
+    if PII_DEBUG:
+        log.info(
+            '[PII-DEBUG][SOURCES->LLM] full_context=%s sources=%d docs=%d '
+            'orig_chars=%d masked_entities=%d  <- this is what the LLM receives',
+            getattr(request.app.state.config, 'RAG_FULL_CONTEXT', None),
+            len(sources),
+            _dbg_docs,
+            _dbg_orig_chars,
+            len(detections),
+        )
+    if PII_DEBUG_FILE:
+        _pii_debug_dump(
+            header=(
+                f'[SOURCES->LLM] chat_id={chat_id} model={model_id} '
+                f"bypass={getattr(request.app.state.config, 'BYPASS_EMBEDDING_AND_RETRIEVAL', None)} "
+                f"full_context={getattr(request.app.state.config, 'RAG_FULL_CONTEXT', None)} "
+                f'sources={len(sources)} chunks={len(_dbg_blocks)}'
+            ),
+            blocks=_dbg_blocks,
+            context_string=get_source_context(masked_sources).strip(),
+        )
 
     return masked_sources, detections
 
