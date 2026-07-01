@@ -43,6 +43,7 @@
 	export let readOnly = false;
 	export let editCodeBlock = true;
 	export let topPadding = false;
+	export let piiMaskingEnabled = true;
 </script>
 
 <div
@@ -72,6 +73,7 @@
 				{readOnly}
 				{editCodeBlock}
 				{topPadding}
+				{piiMaskingEnabled}
 			/>
 		{:else if (history.messages[history.messages[messageId].parentId]?.models?.length ?? 1) === 1}
 			<ResponseMessage

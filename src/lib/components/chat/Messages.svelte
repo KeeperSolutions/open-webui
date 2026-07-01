@@ -50,6 +50,8 @@
 	export let readOnly = false;
 	export let editCodeBlock = true;
 
+	export let piiMaskingEnabled = true;
+
 	export let topPadding = false;
 	export let bottomPadding = false;
 	export let autoScroll;
@@ -491,6 +493,7 @@
 								{readOnly}
 								{editCodeBlock}
 								{topPadding}
+								{piiMaskingEnabled}
 							/>
 						{/each}
 					</ul>

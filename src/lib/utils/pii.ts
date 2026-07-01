@@ -7,6 +7,32 @@ import { getPipelines, getPipelinesList } from '$lib/apis';
 // connected pipeline server (local or cloud).
 export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
 
+/**
+ * Scope PII detections for the masked-values card on a user message.
+ *
+ * The card mixes two sources of file PII:
+ *  - the ingest scan (whole-file, authoritative) surfaced separately as fileItems, and
+ *  - chat-time B2 detections (`fileId` set) that reflect exactly what was masked to the
+ *    LLM at SEND time — the same signal ordinary text messages use.
+ *
+ * A file whose ingest scan owns the display (`ingestCoveredFileIds`) is shown via
+ * fileItems only, so its B2 detections are dropped to avoid double-counting. A file
+ * the ingest scan did NOT cover (e.g. masking was off at upload, then turned on before
+ * send) falls back to its B2 detections — scoped to the files on THIS message so PII
+ * from other turns' attachments doesn't bleed in. Message PII (no `fileId`) is always kept.
+ */
+export function scopeCardDetections<T extends { fileId?: string | null }>(
+	detections: T[],
+	ingestCoveredFileIds: Set<string>,
+	messageFileIds: Set<string>
+): T[] {
+	return (detections ?? []).filter((d) => {
+		if (d?.fileId == null) return true;
+		if (ingestCoveredFileIds.has(d.fileId)) return false;
+		return messageFileIds.has(d.fileId);
+	});
+}
+
 export function getPiiMaskingDefault(settings: {
 	pipelines?: { valves?: Record<string, Record<string, unknown>> };
 }): boolean {

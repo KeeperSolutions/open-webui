@@ -9,7 +9,8 @@ import { getPipelines, getPipelinesList } from '$lib/apis';
 import {
 	getPiiMaskingDefault,
 	isPiiPipelineConfigured,
-	resetPiiPipelineConfiguredCache
+	resetPiiPipelineConfiguredCache,
+	scopeCardDetections
 } from './pii';
 
 describe('getPiiMaskingDefault', () => {
@@ -177,5 +178,40 @@ describe('isPiiPipelineConfigured', () => {
 		// force re-queries.
 		await isPiiPipelineConfigured('tok', { force: true });
 		expect(mockList).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('scopeCardDetections', () => {
+	const msg = { type: 'PERSON', start: 0, end: 3 }; // message PII (no fileId)
+	const fileA = { type: 'EMAIL', start: 0, end: 5, fileId: 'a' };
+	const fileB = { type: 'PHONE', start: 0, end: 5, fileId: 'b' };
+
+	it('always keeps message PII (no fileId)', () => {
+		expect(scopeCardDetections([msg], new Set(), new Set())).toEqual([msg]);
+	});
+
+	it('drops file PII whose ingest scan owns the display (avoids double-count)', () => {
+		// file "a" is ingest-covered -> fileItems is authoritative, so B2 is dropped.
+		expect(scopeCardDetections([fileA], new Set(['a']), new Set(['a']))).toEqual([]);
+	});
+
+	it('keeps file PII (B2 fallback) when ingest did NOT cover the file', () => {
+		// toggle off at upload -> no ingest scan -> B2 is the only source -> keep it.
+		expect(scopeCardDetections([fileA], new Set(), new Set(['a']))).toEqual([fileA]);
+	});
+
+	it('drops file PII for a file not attached to this message (scoping)', () => {
+		// "b" was resent in the turn but is not on THIS user message.
+		expect(scopeCardDetections([fileB], new Set(), new Set(['a']))).toEqual([]);
+	});
+
+	it('handles a mixed batch', () => {
+		const covered = new Set(['a']); // a via ingest, b falls back to B2
+		const onMessage = new Set(['a', 'b']);
+		expect(scopeCardDetections([msg, fileA, fileB], covered, onMessage)).toEqual([msg, fileB]);
+	});
+
+	it('returns [] for nullish input', () => {
+		expect(scopeCardDetections(undefined as never, new Set(), new Set())).toEqual([]);
 	});
 });

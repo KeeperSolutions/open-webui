@@ -36,6 +36,7 @@
 	// Ingest-time file PII: already-reconstructed items from the full file content,
 	// fetched by UserMessage from GET /files/{id}/data/content.
 	export let fileItems: PiiItem[] = [];
+	export let scanning = false;
 
 	let show = false;
 	let items: PiiItem[] = [];
@@ -83,7 +84,16 @@
 	$: count = items.length;
 </script>
 
-{#if count > 0}
+{#if scanning && count === 0}
+	<div
+		class="flex items-center gap-1 h-9 px-3 py-1 self-center rounded-full bg-stone-50 dark:bg-gray-800"
+	>
+		<HgIconShield class="size-3.5 text-hg-text-secondary dark:text-gray-400 animate-pulse" />
+		<span class="font-hg-body text-xs font-normal text-hg-text-secondary dark:text-gray-400 whitespace-nowrap"
+			>{$i18n.t('PII scan in progress…')}</span
+		>
+	</div>
+{:else if count > 0}
 	<Popover.Root bind:open={show}>
 		<!-- Badge — Figma "PiiMaskingResult" pill; chevron flips while open -->
 		<Popover.Trigger
