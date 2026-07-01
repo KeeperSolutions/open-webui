@@ -1004,6 +1004,12 @@ async def _mask_text_via_pii_pipeline(
         # Masking not requested and no machinery -> benign, nothing to do.
         return text, []
 
+    # User explicitly disabled PII masking (features.pii_masking=False) -> pass
+    # through without calling the pipeline.  The fail-closed guarantee only
+    # applies when masking is expected; an explicit opt-out is a valid no-op.
+    if not pii_expected:
+        return text, []
+
     # user.settings -> ui.pipelines.valves (mirror process_pipeline_inlet_filter).
     user_settings = getattr(user, "settings", None)
     if isinstance(user_settings, dict):

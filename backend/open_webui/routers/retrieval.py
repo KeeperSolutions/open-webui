@@ -1528,14 +1528,44 @@ class ProcessFileForm(BaseModel):
     file_id: str
     content: Optional[str] = None
     collection_name: Optional[str] = None
+    pii_masking_enabled: Optional[bool] = None
 
 
-def _store_ingest_pii_detections(request, file_id, text_content, user):
+# Mirror of the frontend PII_FILTER_IDS constant (pii.ts).
+_PII_FILTER_IDS = ("pii_filter", "pii_filter_pipeline")
+
+
+def _user_pii_masking_enabled(user) -> bool:
+    """Read the user's persisted pii_masking_enabled valve setting (default True).
+    Mirrors getPiiMaskingDefault() on the frontend."""
+    user_settings = getattr(user, "settings", None) or {}
+    if not isinstance(user_settings, dict):
+        try:
+            user_settings = user_settings.model_dump()
+        except Exception:
+            user_settings = {}
+    valves = user_settings.get("ui", {}).get("pipelines", {}).get("valves", {})
+    for filter_id in _PII_FILTER_IDS:
+        valve_val = (valves.get(filter_id) or {}).get("pii_masking_enabled")
+        if isinstance(valve_val, bool):
+            return valve_val
+    return True
+
+
+def _store_ingest_pii_detections(request, file_id, text_content, user, pii_masking_enabled=None):
     """Best-effort: scan the full extracted content for PII and persist span-only
     detections under file.data['pii_detections']. Swallows everything -- ingest
     must never fail because of the card. process_file is a sync route (threadpool),
     so asyncio.run is safe here; if it ever runs inside an event loop the
-    RuntimeError is caught and the scan is simply skipped."""
+    RuntimeError is caught and the scan is simply skipped.
+
+    pii_masking_enabled: per-request override (from the chat-input toggle, sent at
+    upload time). Takes priority over the user's persisted valve settings. None
+    means "not specified by caller" → fall back to the user's persisted setting."""
+    effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(user)
+    if not effective:
+        return
+    Files.update_file_data_by_id(file_id, {"pii_scan_status": "running"})
     try:
         # Lazy import to avoid circular import at module init time
         # (middleware -> retrieval chain). The global name is also set here so
@@ -1549,12 +1579,15 @@ def _store_ingest_pii_detections(request, file_id, text_content, user):
                 request, text_content, file_id=file_id, user=user
             )
         )
+        update: dict = {"pii_scan_status": "completed"}
         if detections:
-            Files.update_file_data_by_id(file_id, {"pii_detections": detections})
+            update["pii_detections"] = detections
+        Files.update_file_data_by_id(file_id, update)
     except Exception as e:
         log.warning(
             "failed to store ingest PII detections for %s: %s", file_id, e, exc_info=True
         )
+        Files.update_file_data_by_id(file_id, {"pii_scan_status": "failed"})
 
 
 @router.post('/process/file')
@@ -1719,7 +1752,7 @@ def process_file(
                 # File is now "ready" for the user; run the PII-card scan AFTER so
                 # it never blocks the file becoming usable (it hits a remote,
                 # cold-start-prone pipeline). Best-effort; the card fills in later.
-                _store_ingest_pii_detections(request, file.id, text_content, user)
+                _store_ingest_pii_detections(request, file.id, text_content, user, pii_masking_enabled=form_data.pii_masking_enabled)
                 return {
                     'status': True,
                     'collection_name': None,
@@ -1771,7 +1804,13 @@ def process_file(
                         # remote, cold-start-prone pipeline) and its own writes to
                         # the same row don't contend with an open transaction.
                         # Best-effort; the card fills in later.
-                        _store_ingest_pii_detections(request, file.id, text_content, user)
+                        _store_ingest_pii_detections(
+                            request,
+                            file.id,
+                            text_content,
+                            user,
+                            pii_masking_enabled=form_data.pii_masking_enabled,
+                        )
 
                         return {
                             'status': True,

@@ -95,6 +95,7 @@ def process_uploaded_file(
     file_item,
     file_metadata,
     user,
+    pii_masking: Optional[bool] = None,
     db: Optional[Session] = None,
 ):
     def _process_handler(db_session):
@@ -115,7 +116,11 @@ def process_uploaded_file(
 
                     process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            content=result.get('text', ''),
+                            pii_masking_enabled=pii_masking,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -124,7 +129,10 @@ def process_uploaded_file(
                 ):
                     process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            pii_masking_enabled=pii_masking,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -134,7 +142,10 @@ def process_uploaded_file(
                 log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
                 process_file(
                     request,
-                    ProcessFileForm(file_id=file_item.id),
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        pii_masking_enabled=pii_masking,
+                    ),
                     user=user,
                     db=db_session,
                 )
@@ -165,6 +176,7 @@ def upload_file(
     metadata: Optional[dict | str] = Form(None),
     process: bool = Query(True),
     process_in_background: bool = Query(True),
+    pii_masking: Optional[bool] = Query(None),
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
@@ -174,6 +186,7 @@ def upload_file(
         metadata=metadata,
         process=process,
         process_in_background=process_in_background,
+        pii_masking=pii_masking,
         user=user,
         background_tasks=background_tasks,
         db=db,
@@ -186,6 +199,7 @@ def upload_file_handler(
     metadata: Optional[dict | str] = Form(None),
     process: bool = Query(True),
     process_in_background: bool = Query(True),
+    pii_masking: Optional[bool] = None,
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[Session] = None,
@@ -272,6 +286,7 @@ def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    pii_masking=pii_masking,
                 )
                 return {'status': True, **file_item.model_dump()}
             else:
@@ -282,6 +297,7 @@ def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    pii_masking=pii_masking,
                     db=db,
                 )
                 return {'status': True, **file_item.model_dump()}
@@ -508,6 +524,7 @@ async def get_file_data_content_by_id(id: str, user=Depends(get_verified_user), 
         return {
             'content': file.data.get('content', ''),
             'pii_detections': file.data.get('pii_detections', []),
+            'pii_scan_status': file.data.get('pii_scan_status', None),
         }
     else:
         raise HTTPException(

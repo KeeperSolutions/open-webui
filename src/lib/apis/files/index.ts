@@ -5,7 +5,8 @@ export const uploadFile = async (
 	token: string,
 	file: File,
 	metadata?: object | null,
-	process?: boolean | null
+	process?: boolean | null,
+	piiMasking?: boolean | null
 ) => {
 	const data = new FormData();
 	data.append('file', file);
@@ -16,6 +17,9 @@ export const uploadFile = async (
 	const searchParams = new URLSearchParams();
 	if (process !== undefined && process !== null) {
 		searchParams.append('process', String(process));
+	}
+	if (piiMasking !== undefined && piiMasking !== null) {
+		searchParams.append('pii_masking', String(piiMasking));
 	}
 
 	let error = null;
@@ -344,7 +348,7 @@ export const getFileDataContentById = async (token: string, id: string) => {
 	})
 		.then((r) => (r.ok ? r.json() : null))
 		.catch(() => null);
-	return res ?? { content: '', pii_detections: [] };
+	return res ?? { content: '', pii_detections: [], pii_scan_status: null };
 };
 
 export const deleteAllFiles = async (token: string) => {
