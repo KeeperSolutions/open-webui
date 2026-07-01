@@ -1749,13 +1749,18 @@
 														>PII Masking</span
 													>
 												</div>
-												{#if piiMaskingEnabled}
-													<HgIconToggleOn class="w-5 h-5 text-hg-blue dark:text-white" />
-												{:else}
-													<HgIconToggleOff
-														class="w-5 h-5 text-hg-text-tertiary dark:text-gray-600"
+												<div class="relative w-5 h-5">
+													<HgIconToggleOn
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+															? 'opacity-100'
+															: 'opacity-0'}"
 													/>
-												{/if}
+													<HgIconToggleOff
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+															? 'opacity-0'
+															: 'opacity-100'}"
+													/>
+												</div>
 											</button>
 										</Tooltip>
 
