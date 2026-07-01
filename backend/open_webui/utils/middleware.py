@@ -934,10 +934,59 @@ PII_SCAN_MAX_CHARS = 50000
 # (same file -> different counts run to run).
 PII_SCAN_PIECE_RETRIES = 3
 
+# Chat-time (fail-closed) masking: retry a source-chunk POST whose pipeline call
+# fails transiently (5xx, timeout, connection) before giving up. The pipeline's
+# per-request vault snapshot occasionally trips its own DB command_timeout when
+# many chunks/files hit it in one turn; a bounded retry of just the failed chunk
+# rides that out automatically instead of surfacing a hard "PII inlet failed"
+# error to the user (who then manually regenerates the WHOLE message). Still
+# FAIL-CLOSED: after exhausting retries the block is raised and no unmasked text
+# reaches the LLM. Retrying one chunk (~seconds) is far cheaper than a regenerate.
+PII_MASK_POST_RETRIES = 3
+
 # Verbose PII flow diagnostics to the server log. Set KEEPER_PII_DEBUG=1 (and
 # restart the backend) to trace, per request: what the ingest scan identified
 # (the CARD source) and what source text reaches the LLM (the chat path).
 PII_DEBUG = os.environ.get("KEEPER_PII_DEBUG", "").lower() in ("1", "true", "yes", "on")
+
+# Full-content dump: when KEEPER_PII_DEBUG_FILE points at a path, every request
+# that carries file/RAG sources appends a human-readable block to that file
+# showing, per chunk, the ORIGINAL text vs the MASKED text, plus the exact
+# context_string that gets wrapped in the RAG template and sent to the LLM.
+# This is what you `tail -f` to watch what the model actually reads — works
+# identically for bypass-embedding and RAG (top-K) paths, since both funnel
+# through apply_source_context_to_messages. Leave unset in production.
+PII_DEBUG_FILE = os.environ.get("KEEPER_PII_DEBUG_FILE", "").strip()
+
+
+def _pii_debug_dump(header: str, blocks: list, context_string: str):
+    """Append a readable request block to KEEPER_PII_DEBUG_FILE. Best-effort:
+    any I/O error is swallowed so diagnostics never break a chat request."""
+    if not PII_DEBUG_FILE:
+        return
+    try:
+        lines = [
+            "=" * 80,
+            header,
+            "=" * 80,
+        ]
+        for i, (orig, masked, marker) in enumerate(blocks):
+            changed = "CHANGED" if orig != masked else "unchanged"
+            lines.append(
+                f"\n--- chunk {i} [{marker}] "
+                f"(orig {len(orig)} chars -> masked {len(masked)} chars, {changed}) ---"
+            )
+            lines.append("[ORIGINAL]")
+            lines.append(orig)
+            lines.append("[MASKED -> LLM]")
+            lines.append(masked)
+        lines.append("\n" + "-" * 40 + " FINAL context_string SENT TO LLM " + "-" * 40)
+        lines.append(context_string)
+        lines.append("\n")
+        with open(PII_DEBUG_FILE, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except Exception as e:
+        log.warning("[PII-DEBUG] could not write dump file %s: %s", PII_DEBUG_FILE, e)
 
 # User-visible message emitted on the tool/agentic path when masking is blocked.
 PII_MASKING_BLOCK_MESSAGE = (
@@ -957,6 +1006,7 @@ async def _mask_text_via_pii_pipeline(
     models,
     features,
     source_marker,
+    post_retries: int = 1,
 ):
     """Route one source-text chunk through the external Presidio PII inlet and
     return the masked text. FAIL-CLOSED clone of ``process_pipeline_inlet_filter``:
@@ -1066,23 +1116,39 @@ async def _mask_text_via_pii_pipeline(
         headers = {"Authorization": f"Bearer {key}"}
         request_data = {"user": user_with_valves, "body": payload}
 
-        try:
-            async with session.post(
-                f"{url}/{filter['id']}/filter/inlet",
-                headers=headers,
-                json=request_data,
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as response:
-                response.raise_for_status()
-                payload = await response.json()
-            # Count a fully successful POST+parse. An unchanged-text response
-            # (filter found no PII) still counts — it is a valid pass, not a leak.
-            masked_count += 1
-        except Exception as e:
-            # FAIL-CLOSED: never return unmasked text (contrast pipelines.py:166).
+        # Retry the POST on transient failure (5xx / timeout / connection). The
+        # ONLY thing retried is this network round-trip; every deterministic guard
+        # above (missing chat_id, unknown model, keyless filter) has already run
+        # once and won't change on a retry. post_retries defaults to 1 (single
+        # attempt) so the ingest path — which has its own outer retry — is
+        # unchanged; the chat-time caller passes PII_MASK_POST_RETRIES.
+        last_exc = None
+        for attempt in range(max(1, post_retries)):
+            try:
+                async with session.post(
+                    f"{url}/{filter['id']}/filter/inlet",
+                    headers=headers,
+                    json=request_data,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                ) as response:
+                    response.raise_for_status()
+                    payload = await response.json()
+                # Count a fully successful POST+parse. An unchanged-text response
+                # (filter found no PII) still counts — it is a valid pass, not a leak.
+                masked_count += 1
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt + 1 < max(1, post_retries):
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        if last_exc is not None:
+            # FAIL-CLOSED after exhausting retries: never return unmasked text
+            # (contrast pipelines.py:166, which fails open).
             raise PiiMaskingBlockedError(
-                f"PII inlet failed for filter {filter.get('id')!r}: {e}"
-            ) from e
+                f"PII inlet failed for filter {filter.get('id')!r} "
+                f"after {max(1, post_retries)} attempt(s): {last_exc}"
+            ) from last_exc
 
     # C.1 keyless-filter guard: filters were present but every one was skipped
     # (no API key / invalid urlIdx) so nothing was actually masked. Fail closed
@@ -1431,6 +1497,7 @@ async def mask_sources_for_llm(
                     models=models if models is not None else request.app.state.MODELS,
                     features=features,
                     source_marker=source_marker,
+                    post_retries=PII_MASK_POST_RETRIES,
                 )
                 masked_docs.append(doc)
 

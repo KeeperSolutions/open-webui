@@ -38,6 +38,7 @@ from open_webui.utils.middleware import (
     _mask_long_text_via_pii_pipeline,  # noqa: F401
     _split_text_for_pii,
     PII_MASK_CHUNK_CHARS,
+    PII_MASK_POST_RETRIES,
     PiiMaskingBlockedError,
 )
 
@@ -734,3 +735,100 @@ def test_u16_masked_doc_reassembled_no_pii_leak():
     dumped = json.dumps(result)
     for _typ, val in _expected_entities(text):
         assert val not in dumped, f"unmasked PII leaked into model context: {val}"
+
+
+# ---------------------------------------------------------------------------
+# U17–U18  Chat-time transient-retry (the pipeline vault snapshot occasionally
+# trips its own DB command_timeout when many chunks/files hit it in one turn).
+# ---------------------------------------------------------------------------
+
+
+def _patch_mw_session_flaky(captured, *, fail_first, masked_text=None):
+    """Patch middleware.aiohttp.ClientSession so session.post raises a transient
+    error on its first ``fail_first`` calls, then succeeds (echo, or mask when
+    masked_text is set). Also patches middleware.asyncio.sleep to a no-op so the
+    retry backoff doesn't slow the test."""
+    state = {"calls": 0}
+
+    def _make_response_cm(request_data):
+        body = request_data["body"]
+        if masked_text is not None:
+            body = copy.deepcopy(body)
+            body["messages"][0]["content"] = masked_text
+        resp = MagicMock()
+        resp.json = AsyncMock(return_value=body)
+        resp.raise_for_status = MagicMock()
+        resp.content_type = "application/json"
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    def _fake_post(url, *, headers, json, ssl):
+        captured.append(json)
+        state["calls"] += 1
+        if state["calls"] <= fail_first:
+            raise aiohttp.ClientConnectionError("transient: vault snapshot timeout")
+        return _make_response_cm(json)
+
+    session = MagicMock()
+    session.post = _fake_post
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    return patch.multiple(
+        "open_webui.utils.middleware.aiohttp",
+        ClientSession=MagicMock(return_value=session_cm),
+    ), patch("open_webui.utils.middleware.asyncio.sleep", new=AsyncMock())
+
+
+def test_u17_chat_time_retry_succeeds_after_transient_failures():
+    """A transient POST failure that clears within PII_MASK_POST_RETRIES must NOT
+    surface a block: the chunk is retried and the masked text reaches the LLM."""
+    assert PII_MASK_POST_RETRIES >= 2  # test needs headroom for a retry
+    captured = []
+    session_patch, sleep_patch = _patch_mw_session_flaky(
+        captured, fail_first=PII_MASK_POST_RETRIES - 1, masked_text="John [REDACTED]"
+    )
+    with session_patch, sleep_patch:
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources("John Smith SSN 123-45-6789"),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+            )
+        )
+    # Failed (PII_MASK_POST_RETRIES-1) times, then one success = PII_MASK_POST_RETRIES POSTs.
+    assert len(captured) == PII_MASK_POST_RETRIES
+    assert any("[REDACTED]" in json.dumps(m) for m in result)
+
+
+def test_u18_chat_time_retry_exhausted_still_fail_closed():
+    """A persistent transient failure across ALL retries still fails closed:
+    PiiMaskingBlockedError is raised (no unmasked text) after exactly
+    PII_MASK_POST_RETRIES attempts."""
+    captured = []
+    session_patch, sleep_patch = _patch_mw_session_flaky(captured, fail_first=10_000)
+    with session_patch, sleep_patch:
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    _file_sources("John Smith SSN 123-45-6789"),
+                    "q",
+                    chat_id="chat-1",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+    assert len(captured) == PII_MASK_POST_RETRIES  # tried exactly N times, then blocked
