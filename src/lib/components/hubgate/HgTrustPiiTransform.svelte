@@ -25,7 +25,7 @@
 					{#each data.inputSegments as seg}{#if seg.pii}<span class="underline decoration-hg-orange">{seg.text}</span>{:else}{seg.text}{/if}{/each}
 				</p>
 			</div>
-			<div class="hidden md:flex items-center justify-center px-2 text-hg-text-tertiary">→</div>
+			<div class="hidden md:flex items-center justify-center px-2 text-hg-text-tertiary" aria-hidden="true">→</div>
 			<div class="p-10 flex flex-col gap-2 bg-hg-orange-50">
 				<p class="font-hg-body text-sm font-semibold text-hg-text-primary">{data.outputHeading}</p>
 				<p class="font-hg-body text-sm leading-[1.6] text-hg-text-primary">
@@ -35,7 +35,7 @@
 		</div>
 		<!-- Footnote -->
 		<div class="flex items-center gap-2 px-5 h-[42px] border-t border-hg-border-subtle">
-			<span class="text-hg-success-600">✓</span>
+			<span class="text-hg-success-600" aria-hidden="true">✓</span>
 			<span class="font-hg-body text-xs text-hg-text-secondary">{data.footnote}</span>
 		</div>
 	</div>
