@@ -146,19 +146,25 @@ def _check_credits_exhausted(email: str, user_id: str) -> None:
     """Raise 402 with detail='credits_exhausted' if the user has no remaining credits.
 
     Trial credits are lifetime (alltime cost). Pro/premium reset monthly.
-    When no user_credits row exists, falls back to the plan's default balance so
-    users who raced past onboarding are still enforced (not silently allowed through).
+    Reads from credit_balances (subscription_credits + topup_credits = total allowance).
+    Falls back to PLAN_CREDITS default if no credit_balances row exists yet.
     """
     try:
-        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB, eur_to_credits
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, eur_to_credits
 
         record = StripeBillings.get_by_user_id(user_id)
         if not record or record.plan_tier not in CREDITS_TIERS:
             return
 
-        row = UserCreditsDB.get(email)
-        balance = row.balance if row else PLAN_CREDITS.get(record.plan_tier, 0)
-        rate = row.credits_per_eur_cent if row else CREDITS_PER_EUR_CENT
+        bal = CreditBalances.get("user", email)
+        if bal:
+            total_credits = bal.subscription_credits + bal.topup_credits
+            rate = bal.credits_per_eur_cent
+        else:
+            # No credit_balances row yet (race on first login) — use plan default
+            total_credits = PLAN_CREDITS.get(record.plan_tier, 0)
+            rate = CREDITS_PER_EUR_CENT
 
         if record.plan_tier == PLAN_TIER_TRIAL:
             cost_eur = _get_user_alltime_cost(email, record.created_at or 0)
@@ -166,7 +172,7 @@ def _check_credits_exhausted(email: str, user_id: str) -> None:
             cost_eur = _get_user_current_month_cost(email)
 
         used = eur_to_credits(cost_eur, rate)
-        if used >= balance:
+        if used >= total_credits:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="credits_exhausted",
@@ -175,6 +181,40 @@ def _check_credits_exhausted(email: str, user_id: str) -> None:
         raise
     except Exception as e:
         log.warning("[billing] credits exhaustion check failed for %s: %s", email, e)
+
+
+def _check_team_credits_exhausted(team_id: str, member: bool = False) -> None:
+    """Raise 402 if the team has consumed all its credits (subscription + topup)."""
+    try:
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, eur_to_credits
+
+        bal = CreditBalances.get("team", team_id)
+        if not bal:
+            return  # No balance row yet — allow through (will be set on next renewal)
+
+        total_credits = bal.subscription_credits + bal.topup_credits
+        if total_credits <= 0:
+            return  # Not configured — allow through
+
+        used_eur = _get_team_current_month_cost(team_id)
+        used_credits = eur_to_credits(used_eur, bal.credits_per_eur_cent)
+        if used_credits >= total_credits:
+            detail = (
+                "Your team's usage credits have been exhausted. "
+                "Ask your team owner to buy more at /billing."
+            ) if member else (
+                f"Team usage credits exhausted (used {used_credits}/{total_credits}). "
+                "Buy more at /billing."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=detail,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.warning("[billing] team credits exhaustion check failed for team_id=%s: %s", team_id, e)
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
@@ -257,17 +297,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Your team subscription is not active. Please visit /billing.",
             )
-        if team.monthly_usage_budget_eur > 0:
-            used = _get_team_current_month_cost(team.id)
-            total_budget = team.monthly_usage_budget_eur + (team.top_up_credits or 0)
-            if used >= total_budget:
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=(
-                        f"Team usage budget of €{total_budget:.2f} exceeded "
-                        f"(used €{used:.4f}). Buy more usage at /billing."
-                    ),
-                )
+        _check_team_credits_exhausted(team.id)
         return user
 
     if record.plan_tier == PLAN_TIER_TEAM_MEMBER:
@@ -282,17 +312,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Your team subscription is not active. Please contact your team owner.",
             )
-        if team.monthly_usage_budget_eur > 0:
-            used = _get_team_current_month_cost(team.id)
-            total_budget = team.monthly_usage_budget_eur + (team.top_up_credits or 0)
-            if used >= total_budget:
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=(
-                        "Your team's usage budget has been exceeded. "
-                        "Ask your team owner to buy more usage at /billing."
-                    ),
-                )
+        _check_team_credits_exhausted(team.id, member=True)
         return user
 
     if record.plan_tier == PLAN_TIER_TRIAL:
@@ -365,11 +385,16 @@ async def auto_onboard_user(user, request=None):
             plan_tier=PLAN_TIER_TRIAL,
             free_tier_credit_applied=free_tier_applied,
         )
-        # Assign trial credits at current global rate
-        from open_webui.models.user_credits import UserCreditsDB, CREDITS_PER_EUR_CENT
+        # Assign trial credits to credit_balances at current global rate
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
         from open_webui.models.billing_plans import get_trial_credits
         trial_credits = get_trial_credits(CREDITS_PER_EUR_CENT)
-        UserCreditsDB.set_plan(user.email, trial_credits, CREDITS_PER_EUR_CENT)
+        CreditBalances.upsert_trial(
+            owner_id=user.email,
+            credits=trial_credits,
+            credits_per_eur_cent=CREDITS_PER_EUR_CENT,
+        )
         log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={trial_credits})")
 
     except stripe.StripeError as e:
