@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Component } from 'svelte';
+	import HgIconDownload from '$lib/components/icons/HgIconDownload.svelte';
 	export let icon: Component;
 	export let title: string;
 	export let meta: string;
@@ -8,14 +9,16 @@
 
 <a
 	{href}
-	class="bg-white border border-hg-border-subtle rounded-[18px] shadow-[0px_2px_12px_0px_rgba(0,0,0,0.02)] p-6 flex items-center gap-4 hover:border-hg-border transition-colors"
+	class="bg-white border border-hg-border rounded-[24px] shadow-[0px_30px_60px_0px_rgba(240,201,150,0.07),0px_6px_16px_0px_rgba(108,108,109,0.06)] p-6 flex items-center justify-between gap-2 hover:border-hg-blue transition-colors"
 >
-	<div class="w-[46px] h-[46px] rounded-[12px] bg-hg-orange-50 flex items-center justify-center shrink-0">
-		<svelte:component this={icon} class="text-hg-orange" />
+	<div class="flex items-center gap-2 min-w-0">
+		<div class="w-[46px] h-[46px] rounded-[12px] bg-hg-info-bg text-hg-blue flex items-center justify-center shrink-0">
+			<svelte:component this={icon} class="h-6 w-auto" />
+		</div>
+		<div class="flex flex-col gap-1 min-w-0">
+			<span class="font-hg-heading font-medium text-lg text-hg-text-primary">{title}</span>
+			<span class="font-hg-body text-sm text-hg-text-tertiary">{meta}</span>
+		</div>
 	</div>
-	<div class="flex flex-col gap-1 flex-1">
-		<span class="font-hg-heading font-medium text-lg text-hg-text-primary">{title}</span>
-		<span class="font-hg-body text-xs text-hg-text-tertiary">{meta}</span>
-	</div>
-	<span class="text-hg-text-tertiary shrink-0" aria-hidden="true">↓</span>
+	<HgIconDownload class="text-hg-blue shrink-0 w-6 h-6" />
 </a>
