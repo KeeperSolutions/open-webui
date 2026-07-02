@@ -12,8 +12,13 @@ describe('HgTrustPiiTransform', () => {
 		expect(screen.getByText('[ACCOUNT_1]')).toBeInTheDocument();
 	});
 
-	it('renders the caption', () => {
+	it('renders the caption with "Toggle masking" emphasised', () => {
 		render(HgTrustPiiTransform, { props: { data: piiTransform } });
-		expect(screen.getByText(/Toggle masking to see what leaves your perimeter/)).toBeInTheDocument();
+		// Emphasised word is a separate span coloured with the primary text token
+		const emphasis = screen.getByText('Toggle masking');
+		expect(emphasis).toBeInTheDocument();
+		expect(emphasis.className).toMatch(/text-hg-text-primary/);
+		// Surrounding copy is still present
+		expect(screen.getByText(/Evidential control, not a pinky promise/)).toBeInTheDocument();
 	});
 });

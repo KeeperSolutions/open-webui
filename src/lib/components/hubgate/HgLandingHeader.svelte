@@ -54,6 +54,13 @@
 			>
 				Trust Centre
 			</a>
+			<a
+				href="/pricing"
+				aria-current={$page.url.pathname === '/pricing' ? 'page' : undefined}
+				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full {$page.url.pathname === '/pricing' ? 'text-hg-text-primary' : ''}"
+			>
+				Pricing
+			</a>
 			<button
 				type="button"
 				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full"

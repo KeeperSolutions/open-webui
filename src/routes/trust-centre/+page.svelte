@@ -70,29 +70,29 @@
 				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 flex flex-col gap-12">
 					<HgTrustSectionHeader {...trust.pillarsSection} />
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-						{#each trust.pillars as p}<HgTrustPillarCard icon={p.icon} title={p.title} body={p.body} />{/each}
+						{#each trust.pillars as p}<HgTrustPillarCard icon={p.icon} color={p.color} title={p.title} body={p.body} />{/each}
 					</div>
 				</section>
 
 				<!-- Hosting & residency -->
-				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-					<div class="flex flex-col gap-8">
-						<HgTrustSectionHeader {...trust.hostingSection} />
-						<div class="flex flex-col gap-6">
-							{#each trust.hostingList as item}<HgTrustListItem icon={item.icon} title={item.title} body={item.body} />{/each}
+				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-start">
+					<div class="flex flex-col gap-4">
+						<HgTrustSectionHeader {...trust.hostingSection} align="left" />
+						<div class="flex flex-col [&>*]:py-3 [&>*]:border-b [&>*]:border-hg-border-subtle [&>*:last-child]:border-b-0">
+							{#each trust.hostingList as item}<HgTrustListItem title={item.title} body={item.body} />{/each}
 						</div>
 					</div>
 					<HgTrustSpecTable title="Model catalogue" rows={modelCatalogueRows} headerBadge={modelCatalogueBadgeRow.badge} />
 				</section>
 
 				<!-- Encryption band -->
-				<section class="w-full bg-hg-bg-pattern border-y border-hg-border">
-					<div class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 py-16 grid grid-cols-1 lg:grid-cols-2 gap-8">
+				<section class="w-full">
+					<div class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 py-16 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16 items-start">
 						<HgTrustSpecTable title="Data handling at a glance" rows={trust.dataHandlingRows} />
-						<div class="flex flex-col gap-8">
-							<HgTrustSectionHeader {...trust.encryptionSection} />
-							<div class="flex flex-col gap-6">
-								{#each trust.encryptionList as item}<HgTrustListItem icon={item.icon} title={item.title} body={item.body} />{/each}
+						<div class="flex flex-col gap-4">
+							<HgTrustSectionHeader {...trust.encryptionSection} align="left" />
+							<div class="flex flex-col [&>*]:py-3 [&>*]:border-b [&>*]:border-hg-border-subtle [&>*:last-child]:border-b-0">
+								{#each trust.encryptionList as item}<HgTrustListItem title={item.title} body={item.body} />{/each}
 							</div>
 						</div>
 					</div>
@@ -102,34 +102,38 @@
 				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 flex flex-col gap-12">
 					<HgTrustSectionHeader {...trust.certsSection} />
 					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-						{#each trust.certifications as c}<HgTrustCertCard name={c.name} badge={c.badge} body={c.body} />{/each}
+						{#each trust.certifications as c}<HgTrustCertCard name={c.name} badge={c.badge} body={c.body} bodyAccent={c.bodyAccent} />{/each}
 					</div>
 				</section>
 
 				<!-- Audit signature -->
-				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-					<div class="flex flex-col gap-8">
-						<HgTrustSectionHeader {...trust.auditSection} />
-						<div class="flex flex-col gap-6">
-							{#each trust.auditList as item}<HgTrustListItem icon={item.icon} title={item.title} body={item.body} />{/each}
+				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6">
+					<div
+						class="bg-white border border-hg-border-subtle rounded-[24px] overflow-hidden shadow-[0px_30px_60px_-24px_rgba(240,201,150,0.07),0px_6px_16px_0px_rgba(108,108,109,0.06)] grid grid-cols-1 lg:grid-cols-2 items-stretch"
+					>
+						<div class="p-8 flex flex-col gap-4">
+							<HgTrustSectionHeader {...trust.auditSection} align="left" />
+							<div class="flex flex-col [&>*]:py-3">
+								{#each trust.auditList as item}<HgTrustListItem title={item.title} body={item.body} />{/each}
+							</div>
 						</div>
+						<HgTrustLogsPanel />
 					</div>
-					<HgTrustLogsPanel stats={trust.auditStats} />
 				</section>
 
 				<!-- Know Your Agent band -->
-				<section class="w-full bg-hg-bg-pattern border-y border-hg-border">
-					<div class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 py-16 flex flex-col gap-12">
+				<section class="w-full">
+					<div class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 py-12 flex flex-col gap-6">
 						<HgTrustSectionHeader {...trust.kyaSection} />
-						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-							{#each trust.kyaCards as k}<HgTrustPillarCard icon={k.icon} title={k.title} body={k.body} />{/each}
+						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+							{#each trust.kyaCards as k}<HgTrustPillarCard icon={k.icon} color={k.color} title={k.title} body={k.body} />{/each}
 						</div>
 					</div>
 				</section>
 
 				<!-- Downloads -->
-				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 flex flex-col gap-12">
-					<HgTrustSectionHeader {...trust.downloadsSection} />
+				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6 flex flex-col gap-6">
+					<HgTrustSectionHeader {...trust.downloadsSection} descNarrow />
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						{#each trust.downloads as d}<HgTrustDownloadCard icon={d.icon} title={d.title} meta={d.meta} href={d.href} />{/each}
 					</div>
