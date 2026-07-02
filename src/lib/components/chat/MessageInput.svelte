@@ -1730,7 +1730,7 @@
 										<!-- PII Masking toggle (stub) -->
 										<Tooltip
 											content={$i18n.t(
-												'Dynamic PII Masking: A dual-stage filter built on proven open-source NER (Microsoft Presidio and spaCy), enhanced with proprietary tuning and 15+ custom regional recognizers. It automatically detects and replaces Personally Identifiable Information (PII) with secure placeholders before queries leave your secure environment, ensuring zero raw PII reaches public LLMs.'
+												'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
 											)}
 											placement="top"
 										>
