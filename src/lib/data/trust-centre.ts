@@ -6,9 +6,7 @@ import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 import HgIconKey from '$lib/components/icons/HgIconKey.svelte';
 import HgIconDocument from '$lib/components/icons/HgIconDocument.svelte';
 import HgIconPolicy from '$lib/components/icons/HgIconPolicy.svelte';
-import HgIconReview from '$lib/components/icons/HgIconReview.svelte';
 import HgIconPixelMask from '$lib/components/icons/HgIconPixelMask.svelte';
-import HgIconOpenBox from '$lib/components/icons/HgIconOpenBox.svelte';
 
 // Icons not yet created — Task 3 creates these exact components.
 import HgIconCertificate from '$lib/components/icons/HgIconCertificate.svelte';
