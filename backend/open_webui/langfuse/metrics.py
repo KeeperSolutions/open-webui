@@ -11,9 +11,9 @@ from dotenv import load_dotenv
 
 def load_env() -> Tuple[str, str, str]:
     load_dotenv()
-    pk = os.getenv("LANGFUSE_PK", os.getenv("PK", ""))
-    sk = os.getenv("LANGFUSE_SK", os.getenv("SK", ""))
-    host = os.getenv("LANGFUSE_HOST", os.getenv("HOST", "https://cloud.langfuse.com"))
+    pk = os.getenv("LANGFUSE_PUBLIC_KEY", os.getenv("LANGFUSE_PK", os.getenv("PK", "")))
+    sk = os.getenv("LANGFUSE_SECRET_KEY", os.getenv("LANGFUSE_SK", os.getenv("SK", "")))
+    host = os.getenv("LANGFUSE_BASE_URL", os.getenv("LANGFUSE_HOST", os.getenv("HOST", "https://cloud.langfuse.com")))
     return pk, sk, host
 
 

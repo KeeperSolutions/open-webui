@@ -359,9 +359,9 @@ class TestGetTrialCredits:
 
     def test_user_credits_mutation_consistent_with_function(self):
         import open_webui.models.user_credits as uc_mod
-        from open_webui.models.billing_plans import PLAN_CREDITS, PLAN_TIER_TRIAL, get_trial_credits
-        # The value written into PLAN_CREDITS at import must match get_trial_credits()
-        assert PLAN_CREDITS[PLAN_TIER_TRIAL] == get_trial_credits(uc_mod.CREDITS_PER_EUR_CENT)
+        from open_webui.models.billing_plans import get_trial_credits
+        # get_trial_credits should match what the rate produces
+        assert get_trial_credits(uc_mod.CREDITS_PER_EUR_CENT) == round(2.00 * 100 * uc_mod.CREDITS_PER_EUR_CENT)
 
 
 # ---------------------------------------------------------------------------

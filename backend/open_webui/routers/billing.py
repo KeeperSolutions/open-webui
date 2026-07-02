@@ -23,7 +23,6 @@ from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
 from open_webui.models.billing_plans import (
     CREDITS_TIERS,
-    PLAN_CREDITS,
     PLAN_TIER_INTERNAL,
     PLAN_TIER_PREMIUM,
     PLAN_TIER_PRO,
@@ -147,7 +146,7 @@ def _check_credits_exhausted(email: str, user_id: str) -> None:
 
     Trial credits are lifetime (alltime cost). Pro/premium reset monthly.
     Reads from credit_balances (subscription_credits + topup_credits = total allowance).
-    Falls back to PLAN_CREDITS default if no credit_balances row exists yet.
+    Skips the check if no credit_balances row exists yet (race on first login).
     """
     try:
         from open_webui.models.credit_balances import CreditBalances
@@ -158,13 +157,11 @@ def _check_credits_exhausted(email: str, user_id: str) -> None:
             return
 
         bal = CreditBalances.get("user", email)
-        if bal:
-            total_credits = bal.subscription_credits + bal.topup_credits
-            rate = bal.credits_per_eur_cent
-        else:
-            # No credit_balances row yet (race on first login) — use plan default
-            total_credits = PLAN_CREDITS.get(record.plan_tier, 0)
-            rate = CREDITS_PER_EUR_CENT
+        if not bal:
+            # No credit_balances row yet (race on first login) — skip check
+            return
+        total_credits = bal.subscription_credits + bal.topup_credits
+        rate = bal.credits_per_eur_cent
 
         if record.plan_tier == PLAN_TIER_TRIAL:
             cost_eur = _get_user_alltime_cost(email, record.created_at or 0)
@@ -1504,7 +1501,7 @@ async def _handle_stripe_event(event_type: str, data):
                 price_id = _price_id_from_session(data)
                 pkg = StripePackages.get_by_price_id(price_id) if price_id else None
                 plan_tier = (pkg.plan_tier if pkg else None) or _tier_from_price_id(price_id)
-                credits = pkg.credits if pkg else PLAN_CREDITS.get(plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+                credits = pkg.credits if pkg else 0
 
                 StripeBillings.upsert(
                     user_id=record.user_id,
@@ -1656,7 +1653,7 @@ async def _handle_stripe_event(event_type: str, data):
                     if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
                         u = _Users.get_user_by_id(record.user_id)
                         if u:
-                            credits = pkg.credits if pkg else PLAN_CREDITS.get(record.plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+                            credits = pkg.credits if pkg else 0
                             existing_bal = CreditBalances.get("user", u.email)
                             rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
                             CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
@@ -1808,7 +1805,7 @@ async def get_my_usage(user=Depends(get_verified_user)):
     require_billing_enabled()
 
     from open_webui.models.usage_ledger import UsageLedgerDB
-    from open_webui.models.user_credits import UserCreditsDB, eur_to_credits
+    from open_webui.models.user_credits import eur_to_credits
 
     cost_eur = UsageLedgerDB.get_cost_eur_for_user_current_month(user.email)
     cost_usd = UsageLedgerDB.get_cost_usd_for_user_current_month(user.email)
@@ -1821,10 +1818,11 @@ async def get_my_usage(user=Depends(get_verified_user)):
     credits_per_eur_cent = 0.0
 
     if record and record.plan_tier in CREDITS_TIERS:
+        from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
-        row = UserCreditsDB.get(user.email)
-        rate = row.credits_per_eur_cent if row else CREDITS_PER_EUR_CENT
-        balance = row.balance if row else PLAN_CREDITS.get(record.plan_tier, 0)
+        bal = CreditBalances.get("user", user.email)
+        rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
+        balance = (bal.subscription_credits + bal.topup_credits) if bal else 0
         credits_per_eur_cent = rate
         credits_balance = balance
         credits_used = eur_to_credits(cost_eur, rate)

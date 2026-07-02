@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Float, Index, Integer, Text
 
 from open_webui.internal.db import Base, get_db
-from open_webui.models.billing_plans import PLAN_CREDITS, PLAN_TIER_TRIAL, get_trial_credits  # noqa: F401 — re-exported for callers
+from open_webui.models.billing_plans import PLAN_TIER_TRIAL, get_trial_credits  # noqa: F401 — re-exported for callers
 
 
 def _load_credits_per_eur_cent() -> float:
@@ -18,11 +18,6 @@ def _load_credits_per_eur_cent() -> float:
 
 
 CREDITS_PER_EUR_CENT: float = _load_credits_per_eur_cent()
-
-# Populate the trial entry now that we have the rate. This is a convenience for
-# legacy callers that read PLAN_CREDITS[PLAN_TIER_TRIAL] directly. New code should
-# call get_trial_credits(rate) from billing_plans instead to avoid import-order dependency.
-PLAN_CREDITS[PLAN_TIER_TRIAL] = get_trial_credits(CREDITS_PER_EUR_CENT)
 
 
 def eur_to_credits(eur: float, rate: float) -> int:
