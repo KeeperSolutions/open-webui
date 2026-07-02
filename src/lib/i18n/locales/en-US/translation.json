@@ -1401,6 +1401,7 @@
 	"PDF document (.pdf)": "",
 	"PII masked": "",
 	"PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.": "",
+	"PII scan in progress…": "",
 	"Page": "",
 	"Page mode creates one document per page. Single mode combines all pages into one document for better chunking across page boundaries.": "",
 	"Paginate": "",

@@ -117,7 +117,9 @@
 	let ingestCoveredFileIds = new Set<string>();
 	$: {
 		const files = history?.messages?.[messageId]?.files ?? [];
-		const ids = files.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id).filter(Boolean);
+		const ids = files
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id));
 		const key = ids.join(',');
 		// When masking is disabled, clear any stale card state and skip polling.
 		if (!piiMaskingEnabled) {
