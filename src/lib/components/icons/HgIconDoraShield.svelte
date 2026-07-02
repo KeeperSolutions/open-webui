@@ -1,0 +1,38 @@
+<script lang="ts">
+	let className = '';
+	export { className as class };
+</script>
+
+<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 19.4251 24.0004" fill="none" class={className}>
+	<path d="M17.1451 3.42735V4.57485H18.2851V16.0049H19.4251V3.42735H18.2851V2.28735H15.9976V3.42735H17.1451Z" fill="currentColor"/>
+	<path d="M18.2845 16.0049H17.1445V18.2849H18.2845V16.0049Z" fill="currentColor"/>
+	<path d="M17.1451 18.2849H15.9976V19.4324H17.1451V18.2849Z" fill="currentColor"/>
+	<path d="M17.1451 4.57471H15.9976V16.0047H17.1451V4.57471Z" fill="currentColor"/>
+	<path d="M15.9979 19.4326H14.8579V20.5726H15.9979V19.4326Z" fill="currentColor"/>
+	<path d="M15.9979 16.0049H14.8579V18.2849H15.9979V16.0049Z" fill="currentColor"/>
+	<path d="M14.8568 20.5723H13.7168V21.7198H14.8568V20.5723Z" fill="currentColor"/>
+	<path d="M14.8568 18.2849H13.7168V19.4324H14.8568V18.2849Z" fill="currentColor"/>
+	<path d="M15.9968 3.42773H13.7168V4.57523H15.9968V3.42773Z" fill="currentColor"/>
+	<path d="M15.9968 1.14771H13.7168V2.28771H15.9968V1.14771Z" fill="currentColor"/>
+	<path d="M13.7177 21.72H11.4302V22.86H13.7177V21.72Z" fill="currentColor"/>
+	<path d="M13.7177 19.4326H11.4302V20.5726H13.7177V19.4326Z" fill="currentColor"/>
+	<path d="M8.00186 10.2899V8.00244H6.85436V10.2899H5.71436V16.0049H6.85436V17.1449H12.5694V16.0049H13.7169V10.2899H12.5694V8.00244H11.4294V10.2899H8.00186ZM10.2819 13.7174H9.14186V11.4299H10.2819V13.7174Z" fill="currentColor"/>
+	<path d="M11.4299 22.8604H8.00244V24.0004H11.4299V22.8604Z" fill="currentColor"/>
+	<path d="M11.4299 20.5723H8.00244V21.7198H11.4299V20.5723Z" fill="currentColor"/>
+	<path d="M11.4299 6.86279H8.00244V8.00279H11.4299V6.86279Z" fill="currentColor"/>
+	<path d="M8.00186 21.72H5.71436V22.86H8.00186V21.72Z" fill="currentColor"/>
+	<path d="M8.00186 19.4326H5.71436V20.5726H8.00186V19.4326Z" fill="currentColor"/>
+	<path d="M13.7169 2.28735H5.71436V3.42735H13.7169V2.28735Z" fill="currentColor"/>
+	<path d="M13.7169 0H5.71436V1.1475H13.7169V0Z" fill="currentColor"/>
+	<path d="M5.71488 20.5723H4.56738V21.7198H5.71488V20.5723Z" fill="currentColor"/>
+	<path d="M5.71488 18.2849H4.56738V19.4324H5.71488V18.2849Z" fill="currentColor"/>
+	<path d="M5.71523 3.42773H3.42773V4.57523H5.71523V3.42773Z" fill="currentColor"/>
+	<path d="M5.71523 1.14771H3.42773V2.28771H5.71523V1.14771Z" fill="currentColor"/>
+	<path d="M4.56773 19.4326H3.42773V20.5726H4.56773V19.4326Z" fill="currentColor"/>
+	<path d="M4.56773 16.0049H3.42773V18.2849H4.56773V16.0049Z" fill="currentColor"/>
+	<path d="M3.42809 18.2849H2.28809V19.4324H3.42809V18.2849Z" fill="currentColor"/>
+	<path d="M3.42809 4.57471H2.28809V16.0047H3.42809V4.57471Z" fill="currentColor"/>
+	<path d="M3.42715 2.28735H1.13965V3.42735H3.42715V2.28735Z" fill="currentColor"/>
+	<path d="M2.28715 16.0049H1.13965V18.2849H2.28715V16.0049Z" fill="currentColor"/>
+	<path d="M1.14 3.42773H0V16.0052H1.14V3.42773Z" fill="currentColor"/>
+</svg>
