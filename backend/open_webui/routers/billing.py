@@ -424,10 +424,10 @@ class BillingStatusResponse(BaseModel):
     seat_used: Optional[int] = None
     team_month_cost_eur: Optional[float] = None  # aggregate cost for owner view
 
-    # Team usage budget fields (owner + member view)
-    usage_budget_eur: Optional[float] = None       # monthly included budget
-    extra_credit_eur: Optional[float] = None       # purchased top-up credits
-    usage_budget_remaining_eur: Optional[float] = None  # budget + extra - used
+    # Credits (all paid tiers)
+    subscription_credits: int = 0
+    topup_credits: int = 0
+    credits_remaining: int = 0
 
     # Team member view
     team_owner_name: Optional[str] = None
@@ -539,9 +539,14 @@ async def get_billing_status(user=Depends(get_verified_user)):
             except stripe.StripeError:
                 pass
 
-        budget = team.monthly_usage_budget_eur or 0.0
-        extra = team.top_up_credits or 0
-        remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
+
+        bal = CreditBalances.get("team", team.id)
+        sub_credits = bal.subscription_credits if bal else 0
+        topup_cred = bal.topup_credits if bal else 0
+        rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
+        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate))
 
         return BillingStatusResponse(
             enabled=True,
@@ -554,9 +559,9 @@ async def get_billing_status(user=Depends(get_verified_user)):
             seat_limit=team.seat_limit,
             seat_used=seat_used,
             team_month_cost_eur=round(team_month_cost, 4),
-            usage_budget_eur=budget if budget > 0 else None,
-            extra_credit_eur=extra if extra > 0 else None,
-            usage_budget_remaining_eur=round(remaining, 4) if remaining is not None else None,
+            subscription_credits=sub_credits,
+            topup_credits=topup_cred,
+            credits_remaining=credits_rem,
             current_month_cost_eur=current_month_cost,
         )
 
@@ -577,12 +582,16 @@ async def get_billing_status(user=Depends(get_verified_user)):
                 current_month_cost_eur=current_month_cost,
             )
         from open_webui.models.users import Users as UsersModel
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
 
         owner = UsersModel.get_user_by_id(team.owner_user_id)
-        budget = team.monthly_usage_budget_eur or 0.0
-        extra = team.top_up_credits or 0
         team_month_cost = _get_team_current_month_cost(team.id)
-        remaining = max(0.0, budget + extra - team_month_cost) if budget > 0 else None
+        bal = CreditBalances.get("team", team.id)
+        sub_credits = bal.subscription_credits if bal else 0
+        topup_cred = bal.topup_credits if bal else 0
+        rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
+        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate))
         return BillingStatusResponse(
             enabled=True,
             plan_tier=PLAN_TIER_TEAM_MEMBER,
@@ -591,9 +600,42 @@ async def get_billing_status(user=Depends(get_verified_user)):
             team_id=team.id,
             team_name=team.name,
             team_owner_name=owner.name if owner else None,
-            usage_budget_eur=budget if budget > 0 else None,
-            extra_credit_eur=extra if extra > 0 else None,
-            usage_budget_remaining_eur=round(remaining, 4) if remaining is not None else None,
+            subscription_credits=sub_credits,
+            topup_credits=topup_cred,
+            credits_remaining=credits_rem,
+            current_month_cost_eur=current_month_cost,
+        )
+
+    if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
+
+        upcoming_eur: Optional[float] = None
+        if record.stripe_subscription_id and record.stripe_customer_id:
+            try:
+                client = get_stripe_client()
+                invoice = client.v1.invoices.create_preview(
+                    params={"customer": record.stripe_customer_id, "subscription": record.stripe_subscription_id}
+                )
+                upcoming_eur = invoice.amount_due / 100
+            except stripe.StripeError:
+                pass
+
+        bal = CreditBalances.get("user", user.email)
+        sub_credits = bal.subscription_credits if bal else 0
+        topup_cred = bal.topup_credits if bal else 0
+        rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
+        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(current_month_cost, rate))
+
+        return BillingStatusResponse(
+            enabled=True,
+            plan_tier=record.plan_tier,
+            is_configured=True,
+            subscription_status=record.subscription_status,
+            upcoming_invoice_eur=upcoming_eur,
+            subscription_credits=sub_credits,
+            topup_credits=topup_cred,
+            credits_remaining=credits_rem,
             current_month_cost_eur=current_month_cost,
         )
 

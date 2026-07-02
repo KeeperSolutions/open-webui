@@ -23,9 +23,9 @@ export type BillingStatus = {
 	team_month_cost_eur: number | null;
 
 	// Team usage budget (owner + member view)
-	usage_budget_eur: number | null;
-	extra_credit_eur: number | null;
-	usage_budget_remaining_eur: number | null;
+	subscription_credits: number;
+	topup_credits: number;
+	credits_remaining: number;
 
 	// Team member fields
 	team_owner_name: string | null;

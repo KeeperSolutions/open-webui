@@ -242,10 +242,10 @@
 	};
 
 	$: teamBudgetTotal =
-		(status?.usage_budget_eur ?? 0) + (status?.extra_credit_eur ?? 0);
+		(status?.subscription_credits ?? 0) + (status?.topup_credits ?? 0);
 	$: teamBudgetPct =
 		teamBudgetTotal > 0
-			? Math.min(100, ((status?.team_month_cost_eur ?? 0) / teamBudgetTotal) * 100)
+			? Math.min(100, (1 - (status?.credits_remaining ?? 0) / teamBudgetTotal) * 100)
 			: 0;
 	$: teamLowBalance = teamBudgetPct >= 75;
 
@@ -474,7 +474,7 @@
 				<div class="mt-4 space-y-1.5">
 					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
 					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
-						{#if status.usage_budget_eur}
+						{#if status.subscription_credits}
 							<div
 								class="h-2 rounded-full transition-all {teamLowBalance ? 'bg-red-500' : 'bg-green-500'}"
 								style="width: {teamBudgetPct}%"
@@ -522,9 +522,9 @@
 					</div>
 				</div>
 
-				{#if status.usage_budget_eur}
-					{@const total = (status.usage_budget_eur ?? 0) + (status.extra_credit_eur ?? 0)}
-					{@const pct = total > 0 ? Math.min(100, (1 - (status.usage_budget_remaining_eur ?? 0) / total) * 100) : 0}
+			{#if status.subscription_credits}
+				{@const total = (status.subscription_credits ?? 0) + (status.topup_credits ?? 0)}
+				{@const pct = total > 0 ? Math.min(100, (1 - (status.credits_remaining ?? 0) / total) * 100) : 0}
 					<div class="mt-4 space-y-1.5">
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team budget used')}</div>
 						<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
