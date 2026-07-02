@@ -659,12 +659,10 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
             log.error(f"Stripe checkout session create error: {e}")
             raise HTTPException(status_code=502, detail="Failed to create checkout session.")
 
-    # Store checkout session ID so webhook can match it
     StripeBillings.upsert(
         user_id=user.id,
         stripe_customer_id=customer_id,
         plan_tier=record.plan_tier if record else "trial",
-        checkout_session_id=session.id,
         free_tier_credit_applied=record.free_tier_credit_applied if record else False,
     )
 
@@ -839,8 +837,6 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         log.error(f"[billing] Team customer create error: {e}")
         raise HTTPException(status_code=502, detail="Failed to create Stripe customer.")
 
-    usage_budget = float(tier_config.get("usage_budget_eur", 0))
-
     # Create checkout session before persisting the team — avoids orphaned rows on Stripe failure
     try:
         session = client.v1.checkout.sessions.create(
@@ -863,9 +859,8 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             name=body.name,
             owner_user_id=user.id,
             seat_limit=seat_count,
-            monthly_usage_budget_eur=usage_budget,
         )
-        Teams.update(team.id, stripe_customer_id=customer_id, checkout_session_id=session.id)
+        Teams.update(team.id, stripe_customer_id=customer_id)
         TeamMembers.add(team.id, user.id, role="owner")
     except Exception as e:
         log.error(f"[billing] Team DB persist failed after Stripe session created (customer={customer_id}, session={session.id}): {e}")
@@ -1147,9 +1142,7 @@ async def create_topup(body: TopupRequest, request: Request, user=Depends(get_ve
         log.error(f"[billing] Topup checkout error: {e}")
         raise HTTPException(status_code=502, detail="Failed to create top-up checkout.")
 
-    # Do not store topup_checkout_session_id here for teams or users.
-    # It is written only after successful payment inside the webhook handler
-    # so the idempotency guard does not short-circuit the first real event.
+    # Idempotency is handled in the webhook via stripe_purchase_history.stripe_checkout_session_id.
 
     return CheckoutResponse(url=session.url)
 
@@ -1326,59 +1319,77 @@ async def _handle_stripe_event(event_type: str, data):
             except Exception:
                 metadata = getattr(raw_meta, "_data", {}) or {}
 
-        # Handle top-up (team or individual)
+        # ── Top-up (team or individual) ────────────────────────────────────
         if metadata.get("type") == "topup":
-            from open_webui.models.topup import TopupPacks, TopupPack
+            from open_webui.models.topup import TopupPacks
+            from open_webui.models.credit_balances import CreditBalances
+            from open_webui.models.purchase_history import PurchaseHistory
 
             team_id = metadata.get("team_id")
             user_id = metadata.get("user_id")
             top_up_id = metadata.get("top_up_id")
-            session_id = getattr(data, "id", None)
 
             # Require successful payment capture before crediting
             if getattr(data, "payment_status", None) != "paid":
                 return {"received": True}
 
-            # Idempotency: skip if this checkout session was already processed
-            if session_id:
+            # Idempotency via purchase_history
+            if session_id and PurchaseHistory.already_processed(stripe_checkout_session_id=session_id):
+                return {"received": True}
+
+            pack = TopupPacks.get_by_id(top_up_id) if top_up_id else None
+            if pack:
+                credits = pack.credits
                 if team_id:
-                    existing = Teams.get_by_topup_checkout_session_id(session_id)
-                    if existing:
-                        return {"received": True}
+                    CreditBalances.add_topup("team", team_id, credits)
+                    team = Teams.get_by_id(team_id)
+                    owner_user_id = team.owner_user_id if team else (user_id or "")
+                    PurchaseHistory.insert(
+                        user_id=owner_user_id,
+                        event_type="topup",
+                        team_id=team_id,
+                        stripe_customer_id=customer_id,
+                        stripe_checkout_session_id=session_id,
+                        topup_credits_granted=credits,
+                        amount_eur=pack.price_eur,
+                    )
+                    log.info("[billing] Team topup: team_id=%s credits=%d", team_id, credits)
                 elif user_id:
-                    existing = StripeBillings.get_by_topup_checkout_session_id(session_id)
-                    if existing:
-                        return {"received": True}
-
-            if top_up_id:
-                pack = TopupPacks.get_by_id(top_up_id)
-                if pack:
-                    credits = pack.credits
-                    if team_id:
-                        Teams.add_top_up_credits(team_id, credits)
-                    elif user_id:
-                        StripeBillings.add_top_up_credits(user_id, credits)
-
-                    # Mark session as processed
-                    if team_id:
-                        Teams.update(team_id, topup_checkout_session_id=session_id)
-                    elif user_id:
-                        StripeBillings.update_topup_checkout_session_id(user_id, session_id)
+                    from open_webui.models.users import Users as _Users
+                    u = _Users.get_user_by_id(user_id)
+                    owner_id = u.email if u else user_id
+                    CreditBalances.add_topup("user", owner_id, credits)
+                    PurchaseHistory.insert(
+                        user_id=user_id,
+                        event_type="topup",
+                        stripe_customer_id=customer_id,
+                        stripe_checkout_session_id=session_id,
+                        topup_credits_granted=credits,
+                        amount_eur=pack.price_eur,
+                    )
+                    log.info("[billing] User topup: user_id=%s credits=%d", user_id, credits)
             return {"received": True}
 
-        # Check if this is a team subscription checkout
-        team = None
-        if session_id:
-            team = Teams.get_by_checkout_session_id(session_id)
-        if team is None and customer_id:
-            team = Teams.get_by_customer_id(customer_id)
+        # ── Team subscription checkout ──────────────────────────────────────
+        # Match team by customer_id (checkout_session_id column no longer exists)
+        team = Teams.get_by_customer_id(customer_id) if customer_id else None
 
         if team:
+            from open_webui.models.credit_balances import CreditBalances
+            from open_webui.models.purchase_history import PurchaseHistory
+            from open_webui.models.stripe_packages import StripePackages
+
+            price_id = _price_id_from_session(data)
+            pkg = StripePackages.get_by_price_id(price_id) if price_id else None
+            credits = pkg.credits if pkg else 0
+            plan_tier = pkg.plan_tier if pkg else PLAN_TIER_TEAM
+
             Teams.update(
                 team.id,
                 stripe_customer_id=customer_id,
                 stripe_subscription_id=subscription_id,
                 subscription_status="active",
+                monthly_credits=credits,
             )
             StripeBillings.upsert(
                 user_id=team.owner_user_id,
@@ -1387,18 +1398,47 @@ async def _handle_stripe_event(event_type: str, data):
                 subscription_status="active",
                 team_id=team.id,
             )
-            log.info(f"[billing] Team checkout completed: team_id={team.id} → active")
+
+            from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+            existing_bal = CreditBalances.get("team", team.id)
+            rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+            CreditBalances.set_subscription(
+                owner_type="team",
+                owner_id=team.id,
+                credits=credits,
+                credits_per_eur_cent=rate,
+                period_start=int(_time.time()),
+            )
+            PurchaseHistory.insert(
+                user_id=team.owner_user_id,
+                event_type="subscription_start",
+                team_id=team.id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                stripe_checkout_session_id=session_id,
+                plan_tier=plan_tier,
+                package_id=pkg.id if pkg else None,
+                subscription_credits_granted=credits,
+                amount_eur=pkg.price_eur if pkg else None,
+            )
+            log.info("[billing] Team checkout completed: team_id=%s plan=%s credits=%d", team.id, plan_tier, credits)
+
         else:
-            # Individual user checkout
-            record = None
-            if session_id:
-                record = StripeBillings.get_by_checkout_session_id(session_id)
-            if record is None and customer_id:
-                record = StripeBillings.get_by_customer_id(customer_id)
+            # ── Individual user subscription checkout ───────────────────────
+            record = StripeBillings.get_by_customer_id(customer_id) if customer_id else None
 
             if record:
+                from open_webui.models.credit_balances import CreditBalances
+                from open_webui.models.purchase_history import PurchaseHistory
+                from open_webui.models.stripe_packages import StripePackages
+                from open_webui.models.users import Users as _Users
+                from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
                 price_id = _price_id_from_session(data)
-                plan_tier = _tier_from_price_id(price_id)
+                pkg = StripePackages.get_by_price_id(price_id) if price_id else None
+                plan_tier = (pkg.plan_tier if pkg else None) or _tier_from_price_id(price_id)
+                credits = pkg.credits if pkg else PLAN_CREDITS.get(plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+
                 StripeBillings.upsert(
                     user_id=record.user_id,
                     stripe_customer_id=customer_id,
@@ -1407,56 +1447,164 @@ async def _handle_stripe_event(event_type: str, data):
                     subscription_status="active",
                     free_tier_credit_applied=record.free_tier_credit_applied,
                 )
-                log.info(f"[billing] Checkout completed: user_id={record.user_id} → {plan_tier}")
-                from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB
-                from open_webui.models.users import Users as _Users
+
                 u = _Users.get_user_by_id(record.user_id)
-                if u:
-                    credits = PLAN_CREDITS.get(plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
-                    UserCreditsDB.set_plan(u.email, credits, CREDITS_PER_EUR_CENT)
-                    log.info("[billing] Credits assigned: user=%s plan=%s balance=%d rate=%s", u.email, plan_tier, credits, CREDITS_PER_EUR_CENT)
+                owner_id = u.email if u else record.user_id
+                existing_bal = CreditBalances.get("user", owner_id)
+                rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                CreditBalances.set_subscription(
+                    owner_type="user",
+                    owner_id=owner_id,
+                    credits=credits,
+                    credits_per_eur_cent=rate,
+                    period_start=int(_time.time()),
+                )
+                PurchaseHistory.insert(
+                    user_id=record.user_id,
+                    event_type="subscription_start",
+                    stripe_customer_id=customer_id,
+                    stripe_subscription_id=subscription_id,
+                    stripe_checkout_session_id=session_id,
+                    plan_tier=plan_tier,
+                    package_id=pkg.id if pkg else None,
+                    subscription_credits_granted=credits,
+                    amount_eur=pkg.price_eur if pkg else None,
+                )
+                log.info("[billing] Checkout completed: user_id=%s plan=%s credits=%d", record.user_id, plan_tier, credits)
 
     elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
         customer_id = getattr(data, "customer", None)
         new_status = getattr(data, "status", None)
         if customer_id and new_status:
-            # Update team subscription if applicable
             if not Teams.update_subscription_status(customer_id, new_status):
-                # Fall back to individual billing
                 StripeBillings.update_subscription_status(customer_id, new_status)
+
             if event_type == "customer.subscription.deleted" or new_status == "canceled":
+                from open_webui.models.credit_balances import CreditBalances
+                from open_webui.models.purchase_history import PurchaseHistory
+                from open_webui.models.users import Users as _Users
+
+                team = Teams.get_by_customer_id(customer_id)
+                if team:
+                    CreditBalances.reset_all("team", team.id)
+                    PurchaseHistory.insert(
+                        user_id=team.owner_user_id,
+                        event_type="cancellation",
+                        team_id=team.id,
+                        stripe_customer_id=customer_id,
+                        stripe_subscription_id=getattr(data, "id", None),
+                    )
+                else:
+                    record = StripeBillings.get_by_customer_id(customer_id)
+                    if record:
+                        u = _Users.get_user_by_id(record.user_id)
+                        owner_id = u.email if u else record.user_id
+                        CreditBalances.reset_all("user", owner_id)
+                        PurchaseHistory.insert(
+                            user_id=record.user_id,
+                            event_type="cancellation",
+                            stripe_customer_id=customer_id,
+                            stripe_subscription_id=getattr(data, "id", None),
+                            plan_tier=record.plan_tier,
+                        )
+
                 _revert_team_members_to_trial(customer_id)
-            log.info(f"[billing] Subscription updated: customer={customer_id} status={new_status}")
+            log.info("[billing] Subscription updated: customer=%s status=%s", customer_id, new_status)
 
     elif event_type == "invoice.payment_failed":
         customer_id = getattr(data, "customer", None)
         if customer_id:
             if not Teams.update_subscription_status(customer_id, "past_due"):
                 StripeBillings.update_subscription_status(customer_id, "past_due")
-            log.warning(f"[billing] Payment failed: customer={customer_id}")
+            log.warning("[billing] Payment failed: customer=%s", customer_id)
 
     elif event_type == "invoice.paid":
         customer_id = getattr(data, "customer", None)
+        invoice_id = getattr(data, "id", None)
+        billing_reason = getattr(data, "billing_reason", None)
+
+        # The initial invoice fires right after checkout.session.completed which already
+        # set credits. Skip it here to avoid a duplicate renewal history entry.
+        if billing_reason == "subscription_create":
+            return {"received": True}
+
         if customer_id:
+            from open_webui.models.credit_balances import CreditBalances
+            from open_webui.models.purchase_history import PurchaseHistory
+            from open_webui.models.stripe_packages import StripePackages
+            from open_webui.models.users import Users as _Users
+            from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
+            # Idempotency via invoice_id
+            if invoice_id and PurchaseHistory.already_processed(stripe_invoice_id=invoice_id):
+                return {"received": True}
+
+            subscription_id = getattr(data, "subscription", None)
+            amount_paid_cents = getattr(data, "amount_paid", None)
+            amount_eur = amount_paid_cents / 100 if amount_paid_cents is not None else None
+
+            # Resolve price → package from invoice line items
+            price_id = None
+            try:
+                lines = getattr(data, "lines", None)
+                if lines:
+                    line_data = getattr(lines, "data", None) or lines.get("data", [])
+                    if line_data:
+                        price = getattr(line_data[0], "price", None) or line_data[0].get("price", {})
+                        price_id = getattr(price, "id", None) or price.get("id", "")
+            except Exception:
+                pass
+            pkg = StripePackages.get_by_price_id(price_id) if price_id else None
+
             team = Teams.get_by_customer_id(customer_id)
-            if team and team.subscription_status == "past_due":
-                Teams.update_subscription_status(customer_id, "active")
-                log.info(f"[billing] Team payment recovered: customer={customer_id}")
+            if team:
+                if team.subscription_status == "past_due":
+                    Teams.update_subscription_status(customer_id, "active")
+                    log.info("[billing] Team payment recovered: customer=%s", customer_id)
+                if pkg:
+                    credits = pkg.credits
+                    existing_bal = CreditBalances.get("team", team.id)
+                    rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                    CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
+                    Teams.update(team.id, monthly_credits=credits)
+                    PurchaseHistory.insert(
+                        user_id=team.owner_user_id,
+                        event_type="renewal",
+                        team_id=team.id,
+                        stripe_customer_id=customer_id,
+                        stripe_subscription_id=subscription_id,
+                        stripe_invoice_id=invoice_id,
+                        plan_tier=pkg.plan_tier,
+                        package_id=pkg.id,
+                        subscription_credits_granted=credits,
+                        amount_eur=amount_eur,
+                    )
+                    log.info("[billing] Team renewal credits reset: team_id=%s credits=%d", team.id, credits)
             else:
                 record = StripeBillings.get_by_customer_id(customer_id)
                 if record:
                     if record.subscription_status == "past_due":
                         StripeBillings.update_subscription_status(customer_id, "active")
-                        log.info(f"[billing] Payment recovered: customer={customer_id}")
-                    # Monthly renewal — reset credits at current global rate
+                        log.info("[billing] Payment recovered: customer=%s", customer_id)
                     if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
-                        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT, UserCreditsDB
-                        from open_webui.models.users import Users as _Users
                         u = _Users.get_user_by_id(record.user_id)
                         if u:
-                            credits = PLAN_CREDITS.get(record.plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
-                            UserCreditsDB.set_plan(u.email, credits, CREDITS_PER_EUR_CENT)
-                            log.info("[billing] Monthly renewal credits reset: user=%s plan=%s balance=%d rate=%s", u.email, record.plan_tier, credits, CREDITS_PER_EUR_CENT)
+                            credits = pkg.credits if pkg else PLAN_CREDITS.get(record.plan_tier, PLAN_CREDITS[PLAN_TIER_PRO])
+                            existing_bal = CreditBalances.get("user", u.email)
+                            rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                            CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
+                            PurchaseHistory.insert(
+                                user_id=record.user_id,
+                                event_type="renewal",
+                                stripe_customer_id=customer_id,
+                                stripe_subscription_id=subscription_id,
+                                stripe_invoice_id=invoice_id,
+                                plan_tier=record.plan_tier,
+                                package_id=pkg.id if pkg else None,
+                                subscription_credits_granted=credits,
+                                amount_eur=amount_eur,
+                            )
+                            log.info("[billing] Monthly renewal credits reset: user=%s plan=%s credits=%d", u.email, record.plan_tier, credits)
 
     elif event_type == "payment_method.attached":
         customer_id = getattr(data, "customer", None)
