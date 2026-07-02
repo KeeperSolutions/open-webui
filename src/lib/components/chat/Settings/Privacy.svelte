@@ -16,24 +16,29 @@
 			label: 'Identity',
 			items: [
 				'Person names',
-				'HR OIB',
-				'HR JMBG',
+				'Usernames',
 				'IE PPSN',
-				'RO CNP',
 				'UK NINO',
 				'UK UTR',
 				'UK NHS',
 				'US SSN',
-				'US EIN'
+				'US EIN',
+				'HR OIB',
+				'HR JMBG',
+				'RO CNP'
 			]
 		},
 		{
 			label: 'Financial',
-			items: ['HR IBAN', 'IE IBAN', 'RO IBAN', 'GB IBAN', 'EU IBANs', 'Credit cards']
+			items: [ 'EU IBANs', 'IE IBAN', 'GB IBAN',  'HR IBAN', 'RO IBAN', 'Credit cards']
 		},
 		{
 			label: 'Contact & Location',
-			items: ['Email addresses', 'Phone numbers', 'Locations']
+			items: ['Email addresses', 'Phone numbers', 'IP addresses', 'Postal address']
+		},
+		{
+			label: 'Secrets',
+			items: ['Passwords', 'API keys', 'Tokens']
 		}
 	];
 
