@@ -329,6 +329,13 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
+						<button
+							on:click={handlePortal}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
+						>
+							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
+						</button>
 						{#if teamTiers.length > 0}
 							<button
 								on:click={() => (showCreateTeam = true)}
