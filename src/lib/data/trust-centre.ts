@@ -3,20 +3,13 @@ import type { Component } from 'svelte';
 // Reused existing icons
 import HgIconLock from '$lib/components/icons/HgIconLock.svelte';
 import HgIconShieldPixel from '$lib/components/icons/HgIconShieldPixel.svelte';
-import HgIconDocument from '$lib/components/icons/HgIconDocument.svelte';
-import HgIconPolicy from '$lib/components/icons/HgIconPolicy.svelte';
-import HgIconPixelMask from '$lib/components/icons/HgIconPixelMask.svelte';
 
 // Icons not yet created — Task 3 creates these exact components.
 import HgIconCertificate from '$lib/components/icons/HgIconCertificate.svelte';
 import HgIconGlobe from '$lib/components/icons/HgIconGlobe.svelte';
-import HgIconRoute from '$lib/components/icons/HgIconRoute.svelte';
-import HgIconBan from '$lib/components/icons/HgIconBan.svelte';
 import HgIconFingerprint from '$lib/components/icons/HgIconFingerprint.svelte';
 import HgIconList from '$lib/components/icons/HgIconList.svelte';
 import HgIconUsers from '$lib/components/icons/HgIconUsers.svelte';
-import HgIconRefresh from '$lib/components/icons/HgIconRefresh.svelte';
-import HgIconLayers from '$lib/components/icons/HgIconLayers.svelte';
 import HgIconRobot from '$lib/components/icons/HgIconRobot.svelte';
 import HgIconShieldLock from '$lib/components/icons/HgIconShieldLock.svelte';
 import HgIconSearchBug from '$lib/components/icons/HgIconSearchBug.svelte';
@@ -46,7 +39,7 @@ export interface TrustCert {
 	bodyAccent?: string;
 }
 export interface TrustListItem {
-	icon: Component;
+	// List items render a uniform check icon in HgTrustListItem — no per-item icon.
 	title: string;
 	body: string;
 }
@@ -185,22 +178,18 @@ export const hostingSection: SectionCopy = {
 };
 export const hostingList: TrustListItem[] = [
 	{
-		icon: HgIconGlobe,
 		title: 'EU data residency',
-		body: 'Workspace data is stored and processed in EU regions — hosted with [?]' // TODO host name
+		body: 'Workspace data is stored and processed in EU regions.' // TODO append host name once confirmed
 	},
 	{
-		icon: HgIconLayers,
 		title: 'European models in the catalogue',
 		body: 'Route to EU-built models such as Mistral (France) when sovereignty matters, alongside leading global models.'
 	},
 	{
-		icon: HgIconRoute,
 		title: 'Per-policy model routing',
 		body: 'Admins choose which models are available to which teams — and can restrict workloads to EU-only inference.'
 	},
 	{
-		icon: HgIconBan,
 		title: 'No training, contractually',
 		body: 'All providers in the catalogue operate under no-training, no-retention terms for your content.'
 	}
@@ -231,17 +220,14 @@ export const dataHandlingRows: SpecRow[] = [
 ];
 export const encryptionList: TrustListItem[] = [
 	{
-		icon: HgIconFingerprint,
 		title: 'Dual-stage PII detection',
 		body: 'Built on proven open-source NER (Presidio, spaCy) with proprietary tuning for finance, legal and healthcare entities.'
 	},
 	{
-		icon: HgIconRefresh,
 		title: 'Reversible only inside your perimeter',
 		body: "The token-to-value map stays within the gateway; real values are restored to responses, never sent onward."
 	},
 	{
-		icon: HgIconPolicy,
 		title: 'Policy-controlled, not optional',
 		body: "Admins can enforce masking for whole teams or document types — users can't silently turn protection off."
 	}
@@ -299,12 +285,10 @@ export const auditSection: SectionCopy = {
 };
 export const auditList: TrustListItem[] = [
 	{
-		icon: HgIconDocument,
 		title: 'Immutable, exportable logs',
 		body: 'Model, provider, token usage and masked-prompt counts per call.'
 	},
 	{
-		icon: HgIconPixelMask,
 		title: 'Pseudonymised by design',
 		body: 'User identifiers can be pseudonymised before any external sharing.'
 	}
