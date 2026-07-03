@@ -8,6 +8,7 @@
 
 	const links = [
 		{ href: '/pricing', label: 'Pricing' },
+		{ href: '/trust-centre', label: 'Trust Centre' },
 		{ href: '/privacy', label: 'Privacy Policy' },
 		{ href: '/terms', label: 'Terms of Use' }
 	];
