@@ -31,7 +31,7 @@
 			<button
 				type="button"
 				on:click={() => copyEmail(c.email)}
-				aria-label={`Copy ${c.email} to clipboard`}
+				aria-label={`${c.label} — copy ${c.email} to clipboard`}
 				class="text-left w-full rounded-[14px] border border-white/[0.12] bg-white/[0.06] px-[21px] py-[19px] flex flex-col gap-[3px] hover:bg-white/[0.1] transition-colors"
 			>
 				<span class="font-hg-body font-semibold text-xs uppercase tracking-[0.096em] text-[#8a93a3]">
