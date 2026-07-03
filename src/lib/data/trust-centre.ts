@@ -360,22 +360,20 @@ export const downloads: TrustDownload[] = [
 		icon: HgIconFileNote,
 		title: 'Security whitepaper',
 		meta: 'Architecture, PII masking & controls · PDF',
-		href: '#' // TODO real PDF
+		href: '/hubgate/documents/security-whitepaper.pdf'
 	},
 	{
 		icon: HgIconCertificate,
 		title: 'ISO 27001 certificate',
 		meta: 'Keeper Solutions ISMS · PDF',
-		href: '#' // TODO real PDF
+		href: '/hubgate/documents/iso-27001-certificate.pdf'
 	}
 ];
 
 // ── Contact CTA (block 12) ───────────────────────────────────────────────────
 export const contactCta = {
 	title: 'Talk to our security team.',
-	body: "Need a completed questionnaire, a signed DPA, or a walkthrough of the masking architecture? We'll get you what your review needs.",
-	buttonLabel: 'Request security pack',
-	buttonHref: 'mailto:security@hubgate.io'
+	body: "Need a completed questionnaire, a signed DPA, or a walkthrough of the masking architecture? We'll get you what your review needs."
 };
 export const contacts: TrustContact[] = [
 	{ label: 'Security & trust enquiries', email: 'security@hubgate.io' },

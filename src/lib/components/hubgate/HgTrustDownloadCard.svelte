@@ -9,6 +9,7 @@
 
 <a
 	{href}
+	download
 	class="bg-white border border-hg-border rounded-[24px] shadow-[0px_30px_60px_0px_rgba(240,201,150,0.07),0px_6px_16px_0px_rgba(108,108,109,0.06)] p-6 flex items-center justify-between gap-2 hover:border-hg-blue transition-colors"
 >
 	<div class="flex items-center gap-2 min-w-0">

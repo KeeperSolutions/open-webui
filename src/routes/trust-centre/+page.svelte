@@ -141,7 +141,7 @@
 
 				<!-- Contact CTA -->
 				<section class="max-w-[1248px] mx-auto w-full px-4 sm:px-6">
-					<HgTrustContactCta title={trust.contactCta.title} body={trust.contactCta.body} buttonLabel={trust.contactCta.buttonLabel} buttonHref={trust.contactCta.buttonHref} contacts={trust.contacts} />
+					<HgTrustContactCta title={trust.contactCta.title} body={trust.contactCta.body} contacts={trust.contacts} />
 				</section>
 			</main>
 
