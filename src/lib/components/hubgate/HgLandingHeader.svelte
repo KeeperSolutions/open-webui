@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { handleAuthSuccess } from '$lib/utils/auth';
 
 	import HgButton from './HgButton.svelte';
@@ -46,6 +47,20 @@
 
 		<!-- Right: Sign In (sm+) + Get Started (all) -->
 		<nav class="flex items-center gap-2">
+			<a
+				href="/trust-centre"
+				aria-current={$page.url.pathname === '/trust-centre' ? 'page' : undefined}
+				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full {$page.url.pathname === '/trust-centre' ? 'text-hg-text-primary' : ''}"
+			>
+				Trust Centre
+			</a>
+			<a
+				href="/pricing"
+				aria-current={$page.url.pathname === '/pricing' ? 'page' : undefined}
+				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full {$page.url.pathname === '/pricing' ? 'text-hg-text-primary' : ''}"
+			>
+				Pricing
+			</a>
 			<button
 				type="button"
 				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full"

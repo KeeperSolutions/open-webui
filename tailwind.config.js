@@ -13,7 +13,8 @@ export default {
 					hover: '#1d4ed8'
 				},
 				'hg-orange': {
-					DEFAULT: '#f97316'
+					DEFAULT: '#f97316',
+					50: '#fff7ed'         // brand/accent/50 (also feature/pii/bg)
 				},
 				'hg-accent': {
 					400: '#fb923c',
@@ -32,15 +33,26 @@ export default {
 				},
 				'hg-bg': {
 					surface: '#ffffff',
-					muted: '#f5f5f4'
+					muted: '#f5f5f4',
+					pattern: '#fcf8f6'    // bg/pattern
 				},
 				'hg-error': {
 					text: '#991b1b',
 					bg: '#fef2f2'
 				},
 				'hg-success': {
+					50: '#f0fdf4',        // status/success/bg
 					400: '#34d399',
-					600: '#16a34a'
+					600: '#16a34a',
+					700: '#166534'        // status/success/text
+				},
+				'hg-info': {
+					bg: '#eff6ff',        // status/info/bg
+					text: '#1e40af'       // status/info/text
+				},
+				'hg-warning': {
+					100: '#fef3c7',       // semantic/warning/100
+					600: '#d97706'        // semantic/warning/600
 				},
 				gray: {
 					50: 'var(--color-gray-50, #f9f9f9)',

@@ -837,7 +837,7 @@
 				} else {
 					// Don't redirect if we're already on auth or the landing page
 					// Needed because we pass in tokens from OAuth logins via URL fragments
-					const publicPaths = ['/', '/auth', '/landing', '/pricing', '/terms', '/privacy'];
+					const publicPaths = ['/', '/auth', '/landing', '/pricing', '/terms', '/privacy', '/trust-centre'];
 					if (!publicPaths.includes($page.url.pathname)) {
 						await goto('/');
 					}
