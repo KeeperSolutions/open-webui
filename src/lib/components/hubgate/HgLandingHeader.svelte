@@ -9,6 +9,7 @@
 
 	let menuOpen = false;
 	let showModal = false;
+	let modalForm: string | null = null;
 
 	const onSuccess = async (e: CustomEvent) => {
 		showModal = false;
@@ -64,11 +65,11 @@
 			<button
 				type="button"
 				class="hidden sm:inline-flex h-10 px-4 items-center font-hg-body font-semibold text-sm text-hg-text-secondary hover:text-hg-text-primary transition-colors rounded-hg-full"
-				on:click={() => (showModal = true)}
+			on:click={() => { modalForm = null; showModal = true; }}
 			>
 				Sign In
 			</button>
-			<HgButton variant="primary" size="md" on:click={() => (showModal = true)}>
+			<HgButton variant="primary" size="md" on:click={() => { modalForm = 'signup'; showModal = true; }}>
 				Get Started
 			</HgButton>
 		</nav>
@@ -84,4 +85,4 @@
 	}}
 />
 
-<HgAuthModal bind:open={showModal} on:success={onSuccess} />
+<HgAuthModal bind:open={showModal} form={modalForm} on:success={onSuccess} />

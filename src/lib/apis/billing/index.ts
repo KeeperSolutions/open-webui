@@ -65,11 +65,14 @@ async function request<T>(url: string, token: string, options: RequestInit = {})
 export const getBillingStatus = (token: string) =>
 	request<BillingStatus>(`${base}/status`, token);
 
-export const createCheckoutSession = (token: string) =>
-	request<{ url: string }>(`${base}/checkout`, token, { method: 'POST' });
+export const createCheckoutSession = (token: string, plan_tier: 'pro' | 'premium' = 'pro') =>
+	request<{ url: string }>(`${base}/checkout`, token, { method: 'POST', body: JSON.stringify({ plan_tier }) });
 
 export const getBillingPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/portal`, token, { method: 'POST' });
+
+export const getBillingPortalUpdatePlanUrl = (token: string) =>
+	request<{ url: string }>(`${base}/portal/update-plan`, token, { method: 'POST' });
 
 export const getInvoices = (token: string) => request<Invoice[]>(`${base}/invoices`, token);
 
@@ -228,3 +231,17 @@ export const createTeamTopup = (token: string, amount_eur: number) =>
 		method: 'POST',
 		body: JSON.stringify({ amount_eur })
 	});
+
+// --- Available plans ---
+
+export type AvailablePlan = {
+	id: string;
+	name: string;
+	plan_tier: string;
+	price_eur: number;
+	credits: number;
+	seat_count: number | null;
+};
+
+export const getAvailablePlans = (token: string) =>
+	request<AvailablePlan[]>(`${base}/plans`, token);

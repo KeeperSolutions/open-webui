@@ -19,7 +19,7 @@
 
 	export let form: string | null = null;
 
-	let mode: string = $config?.features.enable_ldap ? 'ldap' : 'signin';
+	let mode: string = form === 'signup' ? 'signup' : ($config?.features.enable_ldap ? 'ldap' : 'signin');
 
 	let name = '';
 	let email = '';

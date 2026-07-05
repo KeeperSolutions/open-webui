@@ -7,6 +7,7 @@
 		getBillingStatus,
 		createCheckoutSession,
 		getBillingPortalUrl,
+		getBillingPortalUpdatePlanUrl,
 		getTeamPortalUrl,
 		getTopupOptions,
 		createTeamTopup,
@@ -17,14 +18,18 @@
 		removeTeamMember,
 		getModelBreakdown,
 		getMyUsage,
+		getAvailablePlans,
 		type BillingStatus,
 		type TopupOption,
 		type TeamTier,
 		type TeamStatus,
 		type ModelBreakdown,
-		type MyUsage
+		type MyUsage,
+		type AvailablePlan
 	} from '$lib/apis/billing';
 	import { PLAN_TIER, isCreditsUser as _isCreditsUser, isInternalUser } from '$lib/billing/planTiers';
+	import { plans, type PricingPlan } from '$lib/data/pricing-plans';
+	import HgPricingCard from '$lib/components/hubgate/HgPricingCard.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -60,6 +65,10 @@
 	let pendingRemoveUserId: string | null = null;
 	let pendingRemoveName: string | null = null;
 
+	// View Plans
+	let showPlans = false;
+	let availablePlans: AvailablePlan[] = [];
+
 	const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 
 	onMount(async () => {
@@ -86,13 +95,7 @@
 						.then((d) => { myUsage = d; })
 						.catch(() => {})
 				);
-			}
-
-			if (status?.plan_tier === PLAN_TIER.TEAM) {
-				extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
-				extras.push(getTopupOptions(localStorage.token).then((d) => (topupOptions = d)).catch(() => {}));
-			}
-			if (status?.plan_tier === PLAN_TIER.TRIAL || status?.plan_tier === PLAN_TIER.PRO || status?.plan_tier === PLAN_TIER.PREMIUM) {
+			extras.push(getAvailablePlans(localStorage.token).then((d) => (availablePlans = d)).catch(() => {}));
 				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
 			}
 
@@ -108,7 +111,7 @@
 		checkingOut = true;
 		try {
 			const { url } = await createCheckoutSession(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
 			checkingOut = false;
@@ -119,7 +122,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getBillingPortalUrl(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
@@ -130,7 +133,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getTeamPortalUrl(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
@@ -141,7 +144,7 @@
 		toppingUp = true;
 		try {
 			const { url } = await createTeamTopup(localStorage.token, amount_eur);
-			window.location.href = url;
+			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start top-up'));
 			toppingUp = false;
@@ -153,7 +156,7 @@
 		creatingTeam = true;
 		try {
 			const { url } = await createTeam(localStorage.token, teamName.trim(), selectedSeatCount);
-			window.location.href = url;
+			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to create team'));
 			creatingTeam = false;
@@ -220,6 +223,76 @@
 		for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xffffffff;
 		return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 	}
+
+	const PLAN_NAME_TO_TIER: Record<string, string> = {
+		'Free Trial': PLAN_TIER.TRIAL,
+		'Pro': PLAN_TIER.PRO,
+		'Premium': PLAN_TIER.PREMIUM,
+		'Business': PLAN_TIER.TEAM,
+	};
+
+	type BillingDisplayPlan = PricingPlan & { tier: string };
+
+	function buildBillingPlans(
+		staticPlans: PricingPlan[],
+		dbPlans: AvailablePlan[],
+		currentTier: string | null
+	): BillingDisplayPlan[] {
+		return staticPlans.map((staticPlan) => {
+			const tier = PLAN_NAME_TO_TIER[staticPlan.name] ?? '';
+			const isCurrentPlan = tier === currentTier;
+			const ctaLabel = isCurrentPlan ? 'Current plan' : staticPlan.ctaLabel;
+			// Trial and Business (team): use static data entirely
+			if (tier === PLAN_TIER.TRIAL || tier === PLAN_TIER.TEAM) {
+				return { ...staticPlan, tier, ctaLabel };
+			}
+			// Pro / Premium: override price and credits from DB
+			const dbPlan = dbPlans.find((p) => p.plan_tier === tier);
+			if (dbPlan) {
+				return {
+					...staticPlan,
+					tier,
+					ctaLabel,
+					price: dbPlan.price_eur,
+					creditsHighlight: dbPlan.credits.toLocaleString(),
+				};
+			}
+			return { ...staticPlan, tier, ctaLabel };
+		});
+	}
+
+	const handlePlanCta = async (tier: string) => {
+		if (tier === PLAN_TIER.TRIAL || tier === status?.plan_tier) return;
+		if (tier === PLAN_TIER.TEAM) {
+			showPlans = false;
+			showCreateTeam = true;
+			return;
+		}
+		// Already on a paid plan → open Stripe portal directly on the plan-change screen.
+		// Creating a new checkout session would generate a second subscription.
+		if (status?.plan_tier === PLAN_TIER.PRO || status?.plan_tier === PLAN_TIER.PREMIUM) {
+			openingPortal = true;
+			try {
+				const { url } = await getBillingPortalUpdatePlanUrl(localStorage.token);
+				window.open(url, '_blank');
+			} catch (e: any) {
+				toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
+				openingPortal = false;
+			}
+			return;
+		}
+		// Trial user → new checkout session.
+		checkingOut = true;
+		try {
+			const { url } = await createCheckoutSession(localStorage.token, tier as 'pro' | 'premium');
+			window.open(url, '_blank');
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
+			checkingOut = false;
+		}
+	};
+
+	$: billingPlans = buildBillingPlans(plans, availablePlans, status?.plan_tier ?? null);
 
 	$: isCreditsUser = _isCreditsUser(status?.plan_tier) && (myUsage?.credits_per_eur_cent ?? 0) > 0;
 	$: showCredits = !!status && !isInternalUser(status.plan_tier) && status.plan_tier !== null;
@@ -336,9 +409,9 @@
 						>
 							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
 						</button>
-						{#if teamTiers.length > 0}
+						{#if availablePlans.length > 0}
 							<button
-								on:click={() => (showCreateTeam = true)}
+								on:click={() => (showPlans = !showPlans)}
 								class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
 							>
 								{$i18n.t('View Plans')}
@@ -423,14 +496,14 @@
 						>
 							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
 						</button>
-						{#if teamTiers.length > 0}
-							<button
-								on:click={() => (showCreateTeam = true)}
-								class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
-							>
-								{$i18n.t('Start a Team')}
-							</button>
-						{/if}
+					{#if availablePlans.length > 0}
+						<button
+							on:click={() => (showPlans = !showPlans)}
+							class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
+						>
+							{$i18n.t('View Plans')}
+						</button>
+					{/if}
 					</div>
 				</div>
 
@@ -551,6 +624,35 @@
 		{:else}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-6 text-sm text-gray-400">
 				{$i18n.t('Your billing account is being set up. Please refresh in a moment.')}
+			</div>
+		{/if}
+
+		<!-- ===== VIEW PLANS ===== -->
+		{#if showPlans && status && (status.plan_tier === PLAN_TIER.TRIAL || status.plan_tier === PLAN_TIER.PRO || status.plan_tier === PLAN_TIER.PREMIUM)}
+			<div class="pt-6">
+				<div class="flex items-center justify-between pb-3">
+					<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
+						{$i18n.t('Choose your plan')}
+					</p>
+					<button
+						on:click={() => (showPlans = false)}
+						aria-label={$i18n.t('Close')}
+						class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+					{#each billingPlans as bp}
+						<HgPricingCard
+							plan={bp}
+							disabled={bp.tier === PLAN_TIER.TRIAL || bp.tier === status.plan_tier}
+							on:cta={() => handlePlanCta(bp.tier)}
+						/>
+					{/each}
+				</div>
 			</div>
 		{/if}
 

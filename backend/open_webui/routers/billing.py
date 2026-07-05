@@ -11,9 +11,6 @@ from open_webui.env import (
     BILLING_ENABLED,
     INTERNAL_EMAIL_DOMAINS,
     STRIPE_FREE_TIER_CENTS,
-    STRIPE_PRICE_ID,
-    STRIPE_PRICE_ID_PRO,
-    STRIPE_PRICE_ID_PREMIUM,
     STRIPE_SECRET_KEY,
     STRIPE_TEAM_TIERS,
     STRIPE_WEBHOOK_SECRET,
@@ -75,10 +72,10 @@ _team_cost_cache: _TTLCache = _TTLCache(maxsize=256, ttl=_TEAM_COST_CACHE_TTL)
 
 
 def _tier_from_price_id(price_id: str) -> str:
-    """Map a Stripe price ID to a plan tier string. Defaults to pro for unknown IDs."""
-    if STRIPE_PRICE_ID_PREMIUM and price_id == STRIPE_PRICE_ID_PREMIUM:
-        return PLAN_TIER_PREMIUM
-    return PLAN_TIER_PRO
+    """Map a Stripe price ID to a plan tier string via stripe_packages DB. Defaults to pro."""
+    from open_webui.models.stripe_packages import StripePackages
+    pkg = StripePackages.get_by_price_id(price_id)
+    return pkg.plan_tier if pkg else PLAN_TIER_PRO
 
 
 def _price_id_from_session(session) -> str:
@@ -439,11 +436,43 @@ class CheckoutResponse(BaseModel):
     url: str
 
 
+class CheckoutRequest(BaseModel):
+    plan_tier: str = PLAN_TIER_PRO
+
+
 class PortalResponse(BaseModel):
     url: str
 
 
+class AvailablePlanResponse(BaseModel):
+    id: str
+    name: str
+    plan_tier: str
+    price_eur: float
+    credits: int
+    seat_count: Optional[int] = None
+
+
 # ---------- Endpoints ----------
+
+
+@router.get("/plans", response_model=list[AvailablePlanResponse])
+async def get_available_plans(user=Depends(get_verified_user)):
+    """Return all active purchasable plans from the database."""
+    require_billing_enabled()
+    from open_webui.models.stripe_packages import StripePackages
+    packages = StripePackages.get_all()
+    return [
+        AvailablePlanResponse(
+            id=pkg.id,
+            name=pkg.name,
+            plan_tier=pkg.plan_tier,
+            price_eur=pkg.price_eur,
+            credits=pkg.credits,
+            seat_count=pkg.seat_count,
+        )
+        for pkg in packages
+    ]
 
 
 @router.get("/status", response_model=BillingStatusResponse)
@@ -646,15 +675,23 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
 
 @router.post("/checkout", response_model=CheckoutResponse)
-async def create_checkout_session(request: Request, user=Depends(get_verified_user)):
-    """Create a Stripe Checkout Session for the €45/month flat subscription."""
+async def create_checkout_session(
+    request: Request,
+    payload: CheckoutRequest = CheckoutRequest(),
+    user=Depends(get_verified_user),
+):
+    """Create a Stripe Checkout Session for a subscription plan."""
     require_billing_enabled()
 
-    if not STRIPE_PRICE_ID:
+    from open_webui.models.stripe_packages import StripePackages
+
+    pkg = StripePackages.get_by_tier(payload.plan_tier)
+    if not pkg or not pkg.stripe_price_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="STRIPE_PRICE_ID is not configured.",
+            detail=f"No active package configured for plan tier '{payload.plan_tier}'.",
         )
+    price_id = pkg.stripe_price_id
 
     record = StripeBillings.get_by_user_id(user.id)
 
@@ -688,17 +725,38 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
             log.error(f"Stripe customer create error: {e}")
             raise HTTPException(status_code=502, detail="Failed to create Stripe customer.")
 
+    # Zero out any trial credit balance so it isn't applied to the first invoice.
+    # Trial credit is stored as a negative customer balance (credit); debit it back to 0.
     try:
-        session = client.v1.checkout.sessions.create(
+        customer = client.v1.customers.retrieve(customer_id)
+        balance = getattr(customer, "balance", 0) or 0
+        if balance < 0:
+            client.v1.customers.balance_transactions.create(
+                customer_id,
+                params={
+                    "amount": -balance,  # positive amount = debit, brings balance to 0
+                    "currency": "eur",
+                    "description": "Trial credit forfeited on subscription upgrade",
+                },
+            )
+            log.info(f"[billing] Zeroed trial credit balance for customer {customer_id} (was {balance} cents)")
+    except stripe.StripeError as e:
+        log.warning(f"[billing] Could not zero customer balance for {customer_id}: {e}")
+
+    def _create_session(cid: str) -> object:
+        return client.v1.checkout.sessions.create(
             params={
-                "customer": customer_id,
+                "customer": cid,
                 "mode": "subscription",
-                "line_items": [{"price": STRIPE_PRICE_ID, "quantity": 1}],
+                "line_items": [{"price": price_id, "quantity": 1}],
                 "success_url": f"{webui_url}/billing?checkout=success",
                 "cancel_url": f"{webui_url}/billing?checkout=canceled",
-                "metadata": {"user_id": user.id},
+                "metadata": {"user_id": user.id, "price_id": price_id},
             }
         )
+
+    try:
+        session = _create_session(customer_id)
     except stripe.StripeError as e:
         error_str = str(e)
         if "No such customer" in error_str:
@@ -706,16 +764,7 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
             log.warning(f"[billing] Customer {customer_id} not found in Stripe, creating a new one.")
             try:
                 customer_id = _create_customer()
-                session = client.v1.checkout.sessions.create(
-                    params={
-                        "customer": customer_id,
-                        "mode": "subscription",
-                        "line_items": [{"price": STRIPE_PRICE_ID, "quantity": 1}],
-                        "success_url": f"{webui_url}/billing?checkout=success",
-                        "cancel_url": f"{webui_url}/billing?checkout=canceled",
-                        "metadata": {"user_id": user.id},
-                    }
-                )
+                session = _create_session(customer_id)
             except stripe.StripeError as e2:
                 log.error(f"Stripe checkout session create error after customer retry: {e2}")
                 raise HTTPException(status_code=502, detail="Failed to create checkout session.")
@@ -726,7 +775,7 @@ async def create_checkout_session(request: Request, user=Depends(get_verified_us
     StripeBillings.upsert(
         user_id=user.id,
         stripe_customer_id=customer_id,
-        plan_tier=record.plan_tier if record else "trial",
+        plan_tier=record.plan_tier if record else PLAN_TIER_TRIAL,
         free_tier_credit_applied=record.free_tier_credit_applied if record else False,
     )
 
@@ -760,7 +809,43 @@ async def billing_portal(request: Request, user=Depends(get_verified_user)):
     return PortalResponse(url=session.url)
 
 
-@router.get("/invoices")
+@router.post("/portal/update-plan", response_model=PortalResponse)
+async def billing_portal_update_plan(request: Request, user=Depends(get_verified_user)):
+    """Create a portal session that lands directly on the subscription update (plan change) screen."""
+    require_billing_enabled()
+    client = get_stripe_client()
+
+    record = StripeBillings.get_by_user_id(user.id)
+    if not record or not record.stripe_customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No billing account found.",
+        )
+    if not record.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active subscription found.",
+        )
+
+    webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
+    try:
+        session = client.v1.billing_portal.sessions.create(
+            params={
+                "customer": record.stripe_customer_id,
+                "return_url": f"{webui_url}/billing",
+                "flow_data": {
+                    "type": "subscription_update",
+                    "subscription_update": {
+                        "subscription": record.stripe_subscription_id,
+                    },
+                },
+            }
+        )
+    except stripe.StripeError as e:
+        log.error(f"Stripe portal update-plan session error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+
+    return PortalResponse(url=session.url)
 async def get_invoices(user=Depends(get_verified_user)):
     require_billing_enabled()
     client = get_stripe_client()
@@ -910,7 +995,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
                 "line_items": [{"price": tier_config["price_id"], "quantity": 1}],
                 "success_url": f"{webui_url}/billing?checkout=success",
                 "cancel_url": f"{webui_url}/billing?checkout=canceled",
-                "metadata": {"user_id": user.id},
+                "metadata": {"user_id": user.id, "price_id": tier_config["price_id"]},
             }
         )
     except stripe.StripeError as e:
@@ -1445,6 +1530,24 @@ async def _handle_stripe_event(event_type: str, data):
 
             price_id = _price_id_from_session(data)
             pkg = StripePackages.get_by_price_id(price_id) if price_id else None
+
+            # Fallback: fetch the subscription from Stripe to resolve the price when
+            # the checkout session metadata didn't include price_id (legacy sessions).
+            if pkg is None and subscription_id:
+                try:
+                    _client = get_stripe_client()
+                    _sub = _client.v1.subscriptions.retrieve(subscription_id)
+                    _items = getattr(_sub, "items", None)
+                    _item_data = getattr(_items, "data", None) or []
+                    if _item_data:
+                        _price = getattr(_item_data[0], "price", None)
+                        _sub_price_id = getattr(_price, "id", None)
+                        if _sub_price_id:
+                            pkg = StripePackages.get_by_price_id(_sub_price_id)
+                            log.info("[billing] Resolved team pkg via subscription fetch: price_id=%s pkg=%s", _sub_price_id, pkg.id if pkg else None)
+                except Exception as _fe:
+                    log.warning("[billing] Could not fetch subscription to resolve team price: %s", _fe)
+
             credits = pkg.credits if pkg else 0
             plan_tier = pkg.plan_tier if pkg else PLAN_TIER_TEAM
 
@@ -1516,13 +1619,17 @@ async def _handle_stripe_event(event_type: str, data):
                 owner_id = u.email if u else record.user_id
                 existing_bal = CreditBalances.get("user", owner_id)
                 rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                CreditBalances.set_subscription(
-                    owner_type="user",
-                    owner_id=owner_id,
-                    credits=credits,
-                    credits_per_eur_cent=rate,
-                    period_start=int(_time.time()),
-                )
+                # Only set credits if we resolved a valid package — avoids overwriting
+                # credits already set by a concurrent invoice.paid webhook when
+                # price_id lookup fails (credits would be 0 and would wipe correct balance).
+                if credits > 0:
+                    CreditBalances.set_subscription(
+                        owner_type="user",
+                        owner_id=owner_id,
+                        credits=credits,
+                        credits_per_eur_cent=rate,
+                        period_start=int(_time.time()),
+                    )
                 PurchaseHistory.insert(
                     user_id=record.user_id,
                     event_type="subscription_start",
@@ -1542,6 +1649,91 @@ async def _handle_stripe_event(event_type: str, data):
         if customer_id and new_status:
             if not Teams.update_subscription_status(customer_id, new_status):
                 StripeBillings.update_subscription_status(customer_id, new_status)
+
+            # ── Plan upgrade/downgrade detection ───────────────────────────
+            # Read the current price from the subscription items to detect plan changes.
+            if event_type == "customer.subscription.updated" and new_status == "active":
+                from open_webui.models.credit_balances import CreditBalances
+                from open_webui.models.stripe_packages import StripePackages
+                from open_webui.models.users import Users as _Users
+                from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
+                try:
+                    items = getattr(data, "items", None)
+                    item_data = getattr(items, "data", None) or (items.get("data", []) if items else [])
+                    new_price_id = None
+                    if item_data:
+                        price = getattr(item_data[0], "price", None) or item_data[0].get("price", {})
+                        new_price_id = getattr(price, "id", None) or price.get("id", "")
+
+                    if new_price_id:
+                        pkg = StripePackages.get_by_price_id(new_price_id)
+                        if pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
+                            team = Teams.get_by_customer_id(customer_id)
+                            if not team:
+                                record = StripeBillings.get_by_customer_id(customer_id)
+                                if record:
+                                    # Always sync plan tier and credits to match the active subscription
+                                    StripeBillings.upsert(
+                                        user_id=record.user_id,
+                                        stripe_customer_id=customer_id,
+                                        plan_tier=pkg.plan_tier,
+                                        subscription_status="active",
+                                        free_tier_credit_applied=record.free_tier_credit_applied,
+                                    )
+                                    u = _Users.get_user_by_id(record.user_id)
+                                    if u:
+                                        existing_bal = CreditBalances.get("user", u.email)
+                                        rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                        CreditBalances.set_subscription(
+                                            "user", u.email, pkg.credits, rate, int(_time.time())
+                                        )
+                                        log.info(
+                                            "[billing] Subscription synced: user=%s plan=%s credits=%d",
+                                            u.email, pkg.plan_tier, pkg.credits,
+                                        )
+                except Exception as _e:
+                    log.warning("[billing] Plan-change detection failed: %s", _e)
+
+            cancel_at_period_end = getattr(data, "cancel_at_period_end", False)
+
+            # ── Scheduled cancellation (cancel at period end) ──────────────
+            # Status stays "active" but cancel_at_period_end flips to True.
+            # Record it so the history table shows the intent; credits are NOT
+            # reset yet — they keep running until the subscription actually ends.
+            if (
+                event_type == "customer.subscription.updated"
+                and cancel_at_period_end
+                and new_status == "active"
+            ):
+                from open_webui.models.purchase_history import PurchaseHistory
+                from open_webui.models.users import Users as _Users
+
+                sub_id = getattr(data, "id", None)
+                cancel_at = getattr(data, "cancel_at", None)
+                team = Teams.get_by_customer_id(customer_id)
+                if team:
+                    PurchaseHistory.insert(
+                        user_id=team.owner_user_id,
+                        event_type="cancellation_scheduled",
+                        team_id=team.id,
+                        stripe_customer_id=customer_id,
+                        stripe_subscription_id=sub_id,
+                    )
+                else:
+                    record = StripeBillings.get_by_customer_id(customer_id)
+                    if record:
+                        PurchaseHistory.insert(
+                            user_id=record.user_id,
+                            event_type="cancellation_scheduled",
+                            stripe_customer_id=customer_id,
+                            stripe_subscription_id=sub_id,
+                            plan_tier=record.plan_tier,
+                        )
+                log.info(
+                    "[billing] Subscription scheduled for cancellation: customer=%s cancel_at=%s",
+                    customer_id, cancel_at,
+                )
 
             if event_type == "customer.subscription.deleted" or new_status == "canceled":
                 from open_webui.models.credit_balances import CreditBalances
@@ -1607,18 +1799,39 @@ async def _handle_stripe_event(event_type: str, data):
             amount_paid_cents = getattr(data, "amount_paid", None)
             amount_eur = amount_paid_cents / 100 if amount_paid_cents is not None else None
 
-            # Resolve price → package from invoice line items
+            # Resolve price → package from invoice line items.
+            # Upgrade invoices have multiple lines (proration credits + new subscription charge).
+            # Prefer the subscription line item (type="subscription") with a positive amount;
+            # fall back to the first line item if none match.
             price_id = None
             try:
                 lines = getattr(data, "lines", None)
                 if lines:
                     line_data = getattr(lines, "data", None) or lines.get("data", [])
                     if line_data:
-                        price = getattr(line_data[0], "price", None) or line_data[0].get("price", {})
+                        # Find the subscription line with a positive amount first
+                        chosen = None
+                        for item in line_data:
+                            item_type = getattr(item, "type", None) or item.get("type", "")
+                            item_amount = getattr(item, "amount", None) or item.get("amount", 0)
+                            if item_type == "subscription" and item_amount > 0:
+                                chosen = item
+                                break
+                        # Fall back to first subscription line, then first line overall
+                        if chosen is None:
+                            for item in line_data:
+                                item_type = getattr(item, "type", None) or item.get("type", "")
+                                if item_type == "subscription":
+                                    chosen = item
+                                    break
+                        if chosen is None:
+                            chosen = line_data[0]
+                        price = getattr(chosen, "price", None) or chosen.get("price", {})
                         price_id = getattr(price, "id", None) or price.get("id", "")
             except Exception:
                 pass
             pkg = StripePackages.get_by_price_id(price_id) if price_id else None
+            log.info("[billing] invoice.paid price_id=%s pkg=%s", price_id, pkg.plan_tier if pkg else None)
 
             team = Teams.get_by_customer_id(customer_id)
             if team:
@@ -1650,9 +1863,10 @@ async def _handle_stripe_event(event_type: str, data):
                     if record.subscription_status == "past_due":
                         StripeBillings.update_subscription_status(customer_id, "active")
                         log.info("[billing] Payment recovered: customer=%s", customer_id)
-                    if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
+                    if record.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) or (pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM)):
                         u = _Users.get_user_by_id(record.user_id)
                         if u:
+                            effective_plan_tier = pkg.plan_tier if pkg else record.plan_tier
                             credits = pkg.credits if pkg else 0
                             existing_bal = CreditBalances.get("user", u.email)
                             rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
@@ -1663,12 +1877,12 @@ async def _handle_stripe_event(event_type: str, data):
                                 stripe_customer_id=customer_id,
                                 stripe_subscription_id=subscription_id,
                                 stripe_invoice_id=invoice_id,
-                                plan_tier=record.plan_tier,
+                                plan_tier=effective_plan_tier,
                                 package_id=pkg.id if pkg else None,
                                 subscription_credits_granted=credits,
                                 amount_eur=amount_eur,
                             )
-                            log.info("[billing] Monthly renewal credits reset: user=%s plan=%s credits=%d", u.email, record.plan_tier, credits)
+                            log.info("[billing] Monthly renewal credits reset: user=%s plan=%s credits=%d", u.email, effective_plan_tier, credits)
 
     elif event_type == "payment_method.attached":
         customer_id = getattr(data, "customer", None)
@@ -1825,7 +2039,15 @@ async def get_my_usage(user=Depends(get_verified_user)):
         balance = (bal.subscription_credits + bal.topup_credits) if bal else 0
         credits_per_eur_cent = rate
         credits_balance = balance
-        credits_used = eur_to_credits(cost_eur, rate)
+        # Only count usage since the subscription period started to avoid
+        # trial usage counting against subscription credits.
+        period_start = bal.period_start if bal else None
+        usage_eur = (
+            UsageLedgerDB.get_cost_eur_for_user_since(user.email, period_start)
+            if period_start
+            else cost_eur
+        )
+        credits_used = eur_to_credits(usage_eur, rate)
         credits_remaining = max(0, balance - credits_used)
 
     return MyUsageResponse(

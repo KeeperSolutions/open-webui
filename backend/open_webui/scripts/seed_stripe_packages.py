@@ -1,58 +1,73 @@
-"""Seed stripe_packages table with plan definitions from .env.
+"""Seed stripe_packages table with plan definitions.
 
 Run from the backend/ directory:
     python -m open_webui.scripts.seed_stripe_packages
 
-Skips rows that already exist (idempotent).
+Package definitions (price IDs, credits, prices) are hardcoded here.
+Update this file when plans change and re-run — the script is idempotent
+(skips rows that already exist by id).
 """
-import os
 import sys
 import time
-import uuid
 
 # Allow running from backend/ root
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.dirname(__import__('os').path.abspath(__file__))))
+
+
+# ---------------------------------------------------------------------------
+# Package definitions — update these when Stripe prices change
+# ---------------------------------------------------------------------------
+PACKAGES = [
+    {
+        "id": "pkg_pro",
+        "name": "Pro",
+        "plan_tier": "pro",
+        "stripe_price_id": "price_1TPe2LHM5MSzOp4WlwOsugVN",
+        "price_eur": 15.0,
+        "credits": 1300,
+        "seat_count": None,
+    },
+    {
+        "id": "pkg_premium",
+        "name": "Premium",
+        "plan_tier": "premium",
+        "stripe_price_id": "",  # TODO: add Stripe price ID when Premium plan is created
+        "price_eur": 45.0,
+        "credits": 3800,
+        "seat_count": None,
+    },
+    {
+        "id": "pkg_team_10",
+        "name": "Team – 10 seats",
+        "plan_tier": "team",
+        "stripe_price_id": "price_1ToNI9HM5MSzOp4Wa5fjWFGH",
+        "price_eur": 229.0,
+        "credits": 10000,
+        "seat_count": 10,
+    },
+    {
+        "id": "pkg_team_20",
+        "name": "Team – 20 seats",
+        "plan_tier": "team",
+        "stripe_price_id": "price_1ToNIAHM5MSzOp4WKCQeFLan",
+        "price_eur": 379.0,
+        "credits": 20000,
+        "seat_count": 20,
+    },
+    {
+        "id": "pkg_team_50",
+        "name": "Team – 50 seats",
+        "plan_tier": "team",
+        "stripe_price_id": "price_1ToNIBHM5MSzOp4WLadXlLtY",
+        "price_eur": 829.0,
+        "credits": 50000,
+        "seat_count": 50,
+    },
+]
 
 
 def seed():
-    packages = [
-        {
-            "id": "pkg_pro",
-            "name": "Pro",
-            "plan_tier": "pro",
-            "stripe_price_id": os.environ.get("STRIPE_PRICE_ID", ""),
-            "price_eur": 15.0,
-            "credits": 1300,
-            "seat_count": None,
-        },
-        {
-            "id": "pkg_team_10",
-            "name": "Team – 10 seats",
-            "plan_tier": "team",
-            "stripe_price_id": os.environ.get("STRIPE_PRICE_TEAM_10", ""),
-            "price_eur": 229.0,
-            "credits": 10000,
-            "seat_count": 10,
-        },
-        {
-            "id": "pkg_team_20",
-            "name": "Team – 20 seats",
-            "plan_tier": "team",
-            "stripe_price_id": os.environ.get("STRIPE_PRICE_TEAM_20", ""),
-            "price_eur": 379.0,
-            "credits": 20000,
-            "seat_count": 20,
-        },
-        {
-            "id": "pkg_team_50",
-            "name": "Team – 50 seats",
-            "plan_tier": "team",
-            "stripe_price_id": os.environ.get("STRIPE_PRICE_TEAM_50", ""),
-            "price_eur": 829.0,
-            "credits": 50000,
-            "seat_count": 50,
-        },
-    ]
+    packages = PACKAGES
     from open_webui.internal.db import get_db
     from open_webui.models.stripe_packages import StripePackage
 
