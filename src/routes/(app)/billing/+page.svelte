@@ -120,7 +120,7 @@
 		checkingOut = true;
 		try {
 			const { url } = await createCheckoutSession(localStorage.token);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
 			checkingOut = false;
@@ -131,7 +131,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getBillingPortalUrl(localStorage.token);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
@@ -142,7 +142,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getTeamPortalUrl(localStorage.token);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
@@ -153,7 +153,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getTeamPortalUpdatePlanUrl(localStorage.token);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open plan change portal'));
 			openingPortal = false;
@@ -179,7 +179,7 @@
 		toppingUp = true;
 		try {
 			const { url } = await createTeamTopup(localStorage.token, amount_eur);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start top-up'));
 			toppingUp = false;
@@ -191,7 +191,7 @@
 		creatingTeam = true;
 		try {
 			const { url } = await createTeam(localStorage.token, teamName.trim(), selectedSeatCount);
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to create team'));
 			creatingTeam = false;
@@ -314,7 +314,7 @@
 			openingPortal = true;
 			try {
 				const { url } = await getBillingPortalUpdatePlanUrl(localStorage.token);
-				window.open(url, '_blank');
+				window.open(url, '_blank', 'noopener,noreferrer');
 			} catch (e: any) {
 				toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 				openingPortal = false;
@@ -325,7 +325,7 @@
 		checkingOut = true;
 		try {
 			const { url } = await createCheckoutSession(localStorage.token, tier as 'pro' | 'premium');
-			window.open(url, '_blank');
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
 			checkingOut = false;
