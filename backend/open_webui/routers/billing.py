@@ -847,33 +847,6 @@ async def billing_portal_update_plan(request: Request, user=Depends(get_verified
         raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
 
     return PortalResponse(url=session.url)
-async def get_invoices(user=Depends(get_verified_user)):
-    require_billing_enabled()
-    client = get_stripe_client()
-
-    record = StripeBillings.get_by_user_id(user.id)
-    if not record or not record.stripe_customer_id:
-        return []
-
-    try:
-        invoices = client.v1.invoices.list(
-            params={"customer": record.stripe_customer_id, "limit": 24}
-        )
-    except stripe.StripeError as e:
-        log.error(f"Stripe invoices list error: {e}")
-        return []
-
-    return [
-        {
-            "id": inv.id,
-            "date": inv.created,
-            "amount_eur": inv.amount_due / 100,
-            "status": inv.status,
-            "pdf_url": inv.invoice_pdf,
-            "hosted_url": inv.hosted_invoice_url,
-        }
-        for inv in invoices.data
-    ]
 
 
 def _revert_team_members_to_trial(stripe_customer_id: str, subscription_id: Optional[str] = None) -> None:

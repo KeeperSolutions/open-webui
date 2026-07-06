@@ -35,15 +35,6 @@ export type BillingStatus = {
 	current_month_cost_eur: number;
 };
 
-export type Invoice = {
-	id: string;
-	date: number;
-	amount_eur: number;
-	status: string;
-	pdf_url: string | null;
-	hosted_url: string | null;
-};
-
 const base = `${WEBUI_API_BASE_URL}/billing`;
 
 async function request<T>(url: string, token: string, options: RequestInit = {}): Promise<T> {
@@ -74,8 +65,6 @@ export const getBillingPortalUrl = (token: string) =>
 
 export const getBillingPortalUpdatePlanUrl = (token: string) =>
 	request<{ url: string }>(`${base}/portal/update-plan`, token, { method: 'POST' });
-
-export const getInvoices = (token: string) => request<Invoice[]>(`${base}/invoices`, token);
 
 export type AdminBillingRow = {
 	user_id: string;
