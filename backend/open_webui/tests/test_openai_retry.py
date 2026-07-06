@@ -329,3 +329,18 @@ def test_streaming_success_returns_streamingresponse():
     )
     assert isinstance(result, StreamingResponse)
     assert sess.call_count == 1
+
+
+def test_event_stream_with_retryable_status_is_retried():
+    # A proxy can return an error status WITH a text/event-stream content-type.
+    # Only 200 + event-stream is a streaming success; a 503 + event-stream must
+    # NOT short-circuit as streaming — it is retried like any transient error.
+    request = _make_request()
+    result, sess = _run(
+        request,
+        _make_model(),
+        [_resp(503, content_type="text/event-stream"),
+         _resp(200, content_type="text/event-stream")],
+    )
+    assert isinstance(result, StreamingResponse)
+    assert sess.call_count == 2  # the 503 event-stream was retried, not returned

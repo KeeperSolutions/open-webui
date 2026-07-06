@@ -1057,10 +1057,15 @@ async def generate_chat_completion(
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 )
 
-                # Check if response is SSE. A streaming response is a success and
-                # is returned as-is — never retried (mid-stream failures are out
-                # of scope, see above).
-                if "text/event-stream" in r.headers.get("Content-Type", ""):
+                # Check if response is SSE. Only a validated 200 + event-stream
+                # is a streaming success returned as-is (never retried; mid-stream
+                # failures are out of scope, see above). An event-stream that
+                # carries a retryable error status (e.g. 503 from a proxy) must
+                # NOT short-circuit here — it falls through to the status check
+                # below and is retried like any other transient error.
+                if r.status == 200 and "text/event-stream" in r.headers.get(
+                    "Content-Type", ""
+                ):
                     streaming = True
                     return StreamingResponse(
                         stream_chunks_handler(r.content),
