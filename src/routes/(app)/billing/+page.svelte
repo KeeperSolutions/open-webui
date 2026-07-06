@@ -701,9 +701,15 @@
 					</div>
 				{/if}
 
-				<div class="mt-4">
-					<div class="text-xl font-bold">€{status.current_month_cost_eur.toFixed(2)}</div>
-					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
+				<div class="mt-4 grid grid-cols-2 gap-4">
+					<div>
+						<div class="text-xl font-bold">{Math.round(status.current_month_cost_eur * 100 * (myUsage?.credits_per_eur_cent ?? 0)).toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{(status.credits_remaining ?? 0).toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team credits remaining')}</div>
+					</div>
 				</div>
 
 				{#if status.subscription_status === 'past_due' || status.subscription_status === 'canceled'}
