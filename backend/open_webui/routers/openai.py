@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 from typing import Optional
 
 import aiohttp
@@ -57,6 +58,36 @@ from open_webui.utils.headers import include_user_info_headers
 
 
 log = logging.getLogger(__name__)
+
+
+# LLM chat-completion transient-error retry (TRAU-520).
+#
+# When the upstream chat-completion call fails on a TRANSIENT error — a
+# connection drop, a timeout, or a retryable HTTP status (429 / 5xx) — retry it
+# a few times with a short linear backoff instead of crashing the chat on a
+# blip. Non-retryable failures (400/401/403/404/422, including a 400
+# "context_length_exceeded" for oversized input) are NOT retried — they
+# propagate immediately, unchanged, exactly as before.
+#
+#   LLM_RETRY_MAX                  total attempts incl. the first (3 = 1 try + 2
+#                                  retries). Hardcoded, not env-driven, to match
+#                                  the existing transient-retry idiom on this
+#                                  codebase (utils/middleware.py).
+#   LLM_RETRY_RETRYABLE_STATUS     upstream HTTP statuses worth retrying; every
+#                                  other status (notably non-retryable 4xx)
+#                                  propagates on the first hit. Needed because
+#                                  session.request() does NOT raise on an error
+#                                  status, so the decision is made explicitly on
+#                                  r.status rather than via raise_for_status().
+#   LLM_RETRY_TOTAL_BUDGET_SECONDS wall-clock cap across ALL attempts. Required
+#                                  because AIOHTTP_CLIENT_TIMEOUT (total)
+#                                  defaults to None (no per-request cap), so
+#                                  without this a run of attempts each hanging on
+#                                  sock_read could pile up unbounded and DoS our
+#                                  own handler. Checked before each new attempt.
+LLM_RETRY_MAX = 3
+LLM_RETRY_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+LLM_RETRY_TOTAL_BUDGET_SECONDS = 90
 
 
 ##########################################
@@ -952,48 +983,149 @@ async def generate_chat_completion(
     streaming = False
     response = None
 
+    # --- LLM transient-error retry (TRAU-520) ---
+    # Pre-stream retry around the upstream call: r.status and r.headers are known
+    # before any byte reaches the client, so this covers BOTH the streaming and
+    # non-streaming branches. A validated "200 + text/event-stream" response is
+    # handed back immediately and never retried.
+    #
+    # KNOWN LIMITATION: a failure that happens MID-STREAM (after an SSE body has
+    # already started emitting) is out of scope — we do not buffer or resume the
+    # stream, so those still surface to the client exactly as they do today.
+    #
+    # The skeleton (for-attempt loop, linear 0.5*(attempt+1) backoff,
+    # sleep-guard) mirrors the transient-retry idiom already used on this
+    # codebase (utils/middleware.py). Two things that idiom does NOT need,
+    # but this call site does, because it uses session.request() directly rather
+    # than raise_for_status() + `async with`:
+    #   1. STATUS CLASSIFICATION — session.request() does not raise on an error
+    #      status, so retryable vs non-retryable is decided explicitly on
+    #      r.status against LLM_RETRY_RETRYABLE_STATUS. A 400
+    #      "context_length_exceeded" stays non-retryable by status and
+    #      propagates on the first hit.
+    #   2. MANUAL PER-ATTEMPT CLEANUP — we must inspect r before deciding whether
+    #      to hand back a StreamingResponse, so we can't wrap the request in
+    #      `async with`; a failed attempt's response/session are closed by hand
+    #      before the next attempt to avoid a connection leak. The finally block
+    #      below only covers the final (non-stream) attempt.
+    #
+    # Pipeline models are NOT retried (single attempt): their POST can carry side
+    # effects and is not necessarily idempotent, so a double POST is unsafe.
+    max_attempts = 1 if model.get("pipeline") else LLM_RETRY_MAX
+    retry_deadline = time.monotonic() + LLM_RETRY_TOTAL_BUDGET_SECONDS
+
     try:
-        session = aiohttp.ClientSession(
-            trust_env=True,
-            timeout=aiohttp.ClientTimeout(
-                total=AIOHTTP_CLIENT_TIMEOUT, sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
-            ),
-        )
+        for attempt in range(max_attempts):
+            # Total wall-clock budget across all attempts (see the constant):
+            # stop starting new attempts once the budget is spent, even if
+            # attempts remain.
+            if attempt > 0 and time.monotonic() >= retry_deadline:
+                log.warning(
+                    "LLM retry budget (%ss) exhausted after %d attempt(s); "
+                    "propagating last error.",
+                    LLM_RETRY_TOTAL_BUDGET_SECONDS,
+                    attempt,
+                )
+                break
 
-        r = await session.request(
-            method="POST",
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-        )
-
-        # Check if response is SSE
-        if "text/event-stream" in r.headers.get("Content-Type", ""):
-            streaming = True
-            return StreamingResponse(
-                stream_chunks_handler(r.content),
-                status_code=r.status,
-                headers=dict(r.headers),
-                background=BackgroundTask(
-                    cleanup_response, response=r, session=session
-                ),
-            )
-        else:
             try:
-                response = await r.json()
+                session = aiohttp.ClientSession(
+                    trust_env=True,
+                    timeout=aiohttp.ClientTimeout(
+                        total=AIOHTTP_CLIENT_TIMEOUT,
+                        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+                    ),
+                )
+
+                r = await session.request(
+                    method="POST",
+                    url=request_url,
+                    data=payload,
+                    headers=headers,
+                    cookies=cookies,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                )
+
+                # Check if response is SSE. A streaming response is a success and
+                # is returned as-is — never retried (mid-stream failures are out
+                # of scope, see above).
+                if "text/event-stream" in r.headers.get("Content-Type", ""):
+                    streaming = True
+                    return StreamingResponse(
+                        stream_chunks_handler(r.content),
+                        status_code=r.status,
+                        headers=dict(r.headers),
+                        background=BackgroundTask(
+                            cleanup_response, response=r, session=session
+                        ),
+                    )
+
+                # Non-stream transient upstream status (429/5xx): retry while
+                # attempts AND budget remain. Every other status — success or a
+                # non-retryable 4xx — falls through and is returned below.
+                if (
+                    r.status in LLM_RETRY_RETRYABLE_STATUS
+                    and attempt + 1 < max_attempts
+                    and time.monotonic() < retry_deadline
+                ):
+                    log.warning(
+                        "LLM call returned retryable status %s "
+                        "(attempt %d/%d); retrying.",
+                        r.status,
+                        attempt + 1,
+                        max_attempts,
+                    )
+                    # DODATAK 2: close this attempt's response/session by hand
+                    # before backing off, or we leak the connection.
+                    await cleanup_response(r, session)
+                    r = None
+                    session = None
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+
+                try:
+                    response = await r.json()
+                except Exception as e:
+                    log.error(e)
+                    response = await r.text()
+
+                if r.status >= 400:
+                    if isinstance(response, (dict, list)):
+                        return JSONResponse(status_code=r.status, content=response)
+                    else:
+                        return PlainTextResponse(status_code=r.status, content=response)
+
+                return response
             except Exception as e:
-                log.error(e)
-                response = await r.text()
+                # Transient connection/timeout error (session.request raised).
+                # Retry while attempts and budget remain; otherwise re-raise to
+                # the terminal handler below (preserves existing behavior).
+                log.warning(
+                    "LLM call raised %s (attempt %d/%d).",
+                    type(e).__name__,
+                    attempt + 1,
+                    max_attempts,
+                )
+                # DODATAK 2: manual per-attempt cleanup before retry/terminal.
+                await cleanup_response(r, session)
+                r = None
+                session = None
+                if attempt + 1 < max_attempts and time.monotonic() < retry_deadline:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
-            if r.status >= 400:
-                if isinstance(response, (dict, list)):
-                    return JSONResponse(status_code=r.status, content=response)
-                else:
-                    return PlainTextResponse(status_code=r.status, content=response)
-
-            return response
+        # Reached only when the loop broke out on the budget guard after a
+        # retryable-status backoff (no exception in flight). Surface a terminal
+        # connection error rather than falling through to a None return.
+        raise HTTPException(
+            status_code=503,
+            detail="Open WebUI: Server Connection Error",
+        )
+    except HTTPException:
+        # Already a terminal HTTP error (the budget-exhaustion raise above) —
+        # propagate unchanged, don't re-wrap it as a 500.
+        raise
     except Exception as e:
         log.exception(e)
 
