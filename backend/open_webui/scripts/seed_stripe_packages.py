@@ -31,7 +31,7 @@ PACKAGES = [
         "id": "pkg_premium",
         "name": "Premium",
         "plan_tier": "premium",
-        "stripe_price_id": "",  # TODO: add Stripe price ID when Premium plan is created
+        "stripe_price_id": "price_1To0aHHM5MSzOp4WDroBKkmT",
         "price_eur": 45.0,
         "credits": 3800,
         "seat_count": None,
@@ -78,7 +78,7 @@ def seed():
     with get_db() as db:
         for pkg in packages:
             if not pkg["stripe_price_id"]:
-                print(f"[seed] SKIP {pkg['id']} — stripe_price_id not set in env")
+                print(f"[seed] SKIP {pkg['id']} — stripe_price_id not set")
                 skipped += 1
                 continue
 
