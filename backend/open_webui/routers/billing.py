@@ -422,6 +422,7 @@ class BillingStatusResponse(BaseModel):
     subscription_credits: int = 0
     topup_credits: int = 0
     credits_remaining: int = 0
+    credits_per_eur_cent: float = 0.0
 
     # Team member view
     team_owner_name: Optional[str] = None
@@ -588,6 +589,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
             subscription_credits=sub_credits,
             topup_credits=topup_cred,
             credits_remaining=credits_rem,
+            credits_per_eur_cent=rate,
             current_month_cost_eur=current_month_cost,
         )
 

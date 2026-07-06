@@ -26,6 +26,7 @@ export type BillingStatus = {
 	subscription_credits: number;
 	topup_credits: number;
 	credits_remaining: number;
+	credits_per_eur_cent: number;
 
 	// Team member fields
 	team_owner_name: string | null;
@@ -200,6 +201,9 @@ export const removeTeamMember = (token: string, userId: string) =>
 
 export const getTeamPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/team/portal`, token, { method: 'POST' });
+
+export const getTeamPortalUpdatePlanUrl = (token: string) =>
+	request<{ url: string }>(`${base}/team/portal/update-plan`, token, { method: 'POST' });
 
 export const getInviteInfo = (token: string, inviteToken: string) =>
 	request<InviteInfo>(`${base}/invite/${inviteToken}`, token);

@@ -9,6 +9,7 @@
 		getBillingPortalUrl,
 		getBillingPortalUpdatePlanUrl,
 		getTeamPortalUrl,
+		getTeamPortalUpdatePlanUrl,
 		getTopupOptions,
 		createTeamTopup,
 		createTeam,
@@ -97,6 +98,9 @@
 				);
 			extras.push(getAvailablePlans(localStorage.token).then((d) => (availablePlans = d)).catch(() => {}));
 				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
+				if (status?.plan_tier === PLAN_TIER.TEAM) {
+					extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
+				}
 			}
 
 			await Promise.all(extras);
@@ -136,6 +140,17 @@
 			window.open(url, '_blank');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
+			openingPortal = false;
+		}
+	};
+
+	const handleTeamPortalUpdatePlan = async () => {
+		openingPortal = true;
+		try {
+			const { url } = await getTeamPortalUpdatePlanUrl(localStorage.token);
+			window.open(url, '_blank');
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to open plan change portal'));
 			openingPortal = false;
 		}
 	};
@@ -261,10 +276,15 @@
 		});
 	}
 
+	$: teamPlans = availablePlans
+		.filter((p) => p.plan_tier === 'team')
+		.sort((a, b) => (a.seat_count ?? 0) - (b.seat_count ?? 0));
+
 	const handlePlanCta = async (tier: string) => {
 		if (tier === PLAN_TIER.TRIAL || tier === status?.plan_tier) return;
 		if (tier === PLAN_TIER.TEAM) {
 			showPlans = false;
+			if (teamPlans.length === 1) selectedSeatCount = teamPlans[0].seat_count ?? null;
 			showCreateTeam = true;
 			return;
 		}
@@ -325,6 +345,8 @@
 	$: activeMembers = teamStatus?.members?.length ?? 0;
 	$: avgPerMember =
 		activeMembers > 0 ? (teamStatus?.team_month_cost_eur ?? 0) / activeMembers : 0;
+	$: teamCreditsUsed = Math.max(0, teamBudgetTotal - (status?.credits_remaining ?? 0));
+	$: avgCreditsPerMember = activeMembers > 0 ? Math.round(teamCreditsUsed / activeMembers) : 0;
 </script>
 
 <div
@@ -525,6 +547,21 @@
 						</p>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
+						{#if (status.seat_used ?? 0) < (status.seat_limit ?? 0)}
+							<button
+								on:click|stopPropagation={() => (showInviteModal = true)}
+								class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
+							>
+								{$i18n.t('Invite Member')}
+							</button>
+						{/if}
+						<button
+							on:click={handleTeamPortalUpdatePlan}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
+						>
+							{$i18n.t('Change Seats')}
+						</button>
 						<button
 							on:click={handleTeamPortal}
 							disabled={openingPortal}
@@ -545,7 +582,7 @@
 
 				<!-- Usage bar -->
 				<div class="mt-4 space-y-1.5">
-					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{teamCreditsUsed.toLocaleString()} / {teamBudgetTotal.toLocaleString()} {$i18n.t('credits used')}</div>
 					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
 						{#if status.subscription_credits}
 							<div
@@ -561,16 +598,16 @@
 				<!-- Stats row -->
 				<div class="mt-4 grid grid-cols-3 gap-4">
 					<div>
-						<div class="text-xl font-bold">€{(status.team_month_cost_eur ?? 0).toFixed(2)}</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Usage this month')}</div>
+						<div class="text-xl font-bold">{teamCreditsUsed.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</div>
 					</div>
 					<div>
-						<div class="text-xl font-bold">{activeMembers}</div>
+						<div class="text-xl font-bold">{(status.credits_remaining ?? 0).toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits remaining')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{activeMembers} / {status.seat_limit ?? 0}</div>
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Active members')}</div>
-					</div>
-					<div>
-						<div class="text-xl font-bold">€{avgPerMember.toFixed(2)}</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Avg per member')}</div>
 					</div>
 				</div>
 
@@ -708,7 +745,7 @@
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Role')}</th>
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Status')}</th>
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">{$i18n.t('Models Used')}</th>
-								<th class="text-right px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Total spend')}</th>
+								<th class="text-right px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</th>
 								<th class="px-3 py-3"></th>
 							</tr>
 						</thead>
@@ -802,7 +839,7 @@
 									<td class="px-3 py-3 hidden md:table-cell">
 										<span class="text-xs text-gray-400">–</span>
 									</td>
-									<td class="px-5 py-3 text-right font-semibold text-gray-400">€0.00</td>
+									<td class="px-5 py-3 text-right font-semibold text-gray-400">0</td>
 									<td class="px-3 py-3"></td>
 								</tr>
 							{/each}
@@ -903,18 +940,24 @@
 			<div class="space-y-1.5">
 				<div class="text-sm font-medium">{$i18n.t('Seat plan')}</div>
 				<div class="space-y-2">
-					{#each [...teamTiers].sort((a, b) => a.seat_count - b.seat_count) as tier}
+					{#each teamPlans as plan}
 						<button
-							on:click={() => (selectedSeatCount = tier.seat_count)}
+							on:click={() => (selectedSeatCount = plan.seat_count ?? 0)}
 							class="w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition
-								{selectedSeatCount === tier.seat_count
+								{selectedSeatCount === plan.seat_count
 									? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
 									: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'}"
 						>
-							<div class="text-sm font-medium">{tier.seat_count} {$i18n.t('seats')}</div>
-							<div class="text-sm font-semibold">€{tier.price_eur.toFixed(0)}/mo</div>
+							<div class="text-left">
+								<div class="text-sm font-medium">{plan.seat_count} {$i18n.t('seats')}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">{plan.credits.toLocaleString()} {$i18n.t('credits/mo')}</div>
+							</div>
+							<div class="text-sm font-semibold">€{plan.price_eur.toFixed(0)}/mo</div>
 						</button>
 					{/each}
+					{#if teamPlans.length === 0}
+						<p class="text-sm text-gray-400 text-center py-2">{$i18n.t('No team plans available.')}</p>
+					{/if}
 				</div>
 			</div>
 
