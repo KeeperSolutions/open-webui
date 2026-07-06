@@ -12,7 +12,6 @@ from open_webui.env import (
     INTERNAL_EMAIL_DOMAINS,
     STRIPE_FREE_TIER_CENTS,
     STRIPE_SECRET_KEY,
-    STRIPE_TEAM_TIERS,
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
 )
@@ -982,10 +981,11 @@ class TeamStatusResponse(BaseModel):
 async def get_team_tiers(user=Depends(get_verified_user)):
     """Return available team subscription tiers (seat count + price)."""
     require_billing_enabled()
+    from open_webui.models.stripe_packages import StripePackages
     return [
-        {"seat_count": int(seats), "price_eur": float(cfg.get("price_eur", 0))}
-        for seats, cfg in STRIPE_TEAM_TIERS.items()
-        if cfg.get("price_id")
+        {"seat_count": p.seat_count, "price_eur": p.price_eur}
+        for p in StripePackages.get_all_by_tier(PLAN_TIER_TEAM)
+        if p.seat_count
     ]
 
 
@@ -1004,19 +1004,15 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
     """
     require_billing_enabled()
 
-    if not STRIPE_TEAM_TIERS:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="STRIPE_TEAM_TIERS is not configured.",
-        )
-
     seat_count = body.seat_count
-    tier_config = STRIPE_TEAM_TIERS.get(str(seat_count))
-    if not tier_config or not tier_config.get("price_id"):
-        available = list(STRIPE_TEAM_TIERS.keys())
+    from open_webui.models.stripe_packages import StripePackages
+    team_plans = StripePackages.get_all_by_tier(PLAN_TIER_TEAM)
+    tier_config = next((p for p in team_plans if p.seat_count == seat_count), None)
+    if not tier_config:
+        available = sorted({p.seat_count for p in team_plans if p.seat_count})
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid seat count. Available tiers: {available}",
+            detail=f"Invalid seat count. Available options: {available}",
         )
 
     # Prevent creating multiple active teams
@@ -1035,7 +1031,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             detail="No billing account found. Please complete account setup first.",
         )
     customer_id = record.stripe_customer_id
-    team_price_id = tier_config["price_id"]
+    team_price_id = tier_config.stripe_price_id
 
     client = get_stripe_client()
     webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
