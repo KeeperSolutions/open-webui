@@ -650,8 +650,8 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
 
-    from open_webui.tasks.billing import periodic_billing_usage_reporter, periodic_ledger_poller
-    asyncio.create_task(periodic_billing_usage_reporter())
+    from open_webui.tasks.billing import periodic_nightly_deep_rescan, periodic_ledger_poller
+    asyncio.create_task(periodic_nightly_deep_rescan())
     asyncio.create_task(periodic_ledger_poller())
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:

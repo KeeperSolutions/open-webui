@@ -5,12 +5,13 @@
 	import type { PricingPlan } from '$lib/data/pricing-plans';
 
 	export let plan: PricingPlan;
+	export let disabled: boolean = false;
 
 	const dispatch = createEventDispatcher();
 </script>
 
 <div
-	class="group relative bg-hg-bg-surface border border-hg-border rounded-[24px] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] hover:border-hg-border-focus hover:shadow-[0px_0px_24px_-11px_rgba(33,45,72,0.4)] overflow-hidden flex flex-col w-full max-w-[300px] mx-auto md:max-w-none md:mx-0 transition-[border-color,box-shadow] duration-200"
+	class="group relative bg-hg-bg-surface border border-hg-border rounded-[24px] shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col w-full max-w-[300px] mx-auto md:max-w-none md:mx-0 transition-[border-color,box-shadow] duration-200 {disabled ? 'opacity-50 cursor-default' : 'hover:border-hg-border-focus hover:shadow-[0px_0px_24px_-11px_rgba(33,45,72,0.4)]'}"
 >
 	<!-- Header -->
 	<div class="relative p-4 lg:px-3 flex flex-col gap-2">
@@ -83,7 +84,8 @@
 		<div class="flex flex-col items-center gap-1">
 			<button
 				type="button"
-				class="w-full h-8 px-4 rounded-hg-full bg-hg-text-primary text-white font-hg-body text-xs flex items-center justify-center transition-colors duration-200 group-hover:bg-hg-blue group-active:bg-hg-blue/80"
+				{disabled}
+				class="w-full h-8 px-4 rounded-hg-full bg-hg-text-primary text-white font-hg-body text-xs flex items-center justify-center transition-colors duration-200 {disabled ? 'pointer-events-none' : 'group-hover:bg-hg-blue group-active:bg-hg-blue/80'}"
 				on:click={() => dispatch('cta')}
 			>
 				{plan.ctaLabel}

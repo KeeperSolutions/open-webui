@@ -14,83 +14,6 @@ _priced_models_recovered: Set[str] = set()   # subset of above that have since b
 _poller_started_at: float = 0.0
 
 
-async def _run_usage_report():
-    """Push current-month Langfuse costs to Stripe for all active subscribers."""
-    from open_webui.env import BILLING_ENABLED, STRIPE_SECRET_KEY
-    from open_webui.models.billing import StripeBillings
-    from open_webui.models.users import Users
-
-    if not BILLING_ENABLED or not STRIPE_SECRET_KEY:
-        return
-
-    import stripe
-
-    stripe.api_key = STRIPE_SECRET_KEY
-
-    # Fetch current-month costs from the usage ledger (already in EUR)
-    try:
-        from open_webui.models.usage_ledger import UsageLedgerDB
-
-        cost_by_email = UsageLedgerDB.get_all_users_cost_current_month()
-    except Exception as e:
-        log.error(f"[billing-reporter] Failed to fetch ledger costs: {e}")
-        return
-
-    # --- Individual paid subscribers ---
-    active_records = StripeBillings.get_all_active()
-    individual_paid = [r for r in active_records if r.plan_tier == "paid"]
-
-    log.info(f"[billing-reporter] Reporting usage for {len(individual_paid)} individual subscribers.")
-
-    for record in individual_paid:
-        if not record.stripe_subscription_item_id:
-            log.warning(f"[billing-reporter] user_id={record.user_id} has no subscription item ID, skipping.")
-            continue
-
-        try:
-            user = Users.get_user_by_id(record.user_id)
-            if not user:
-                log.warning(f"[billing-reporter] user_id={record.user_id} not found, skipping.")
-                continue
-            email = user.email
-        except Exception as e:
-            log.warning(f"[billing-reporter] Could not resolve user_id={record.user_id}: {e}")
-            continue
-
-        cost_eur = cost_by_email.get(email, 0.0)
-        quantity = max(0, int(round(cost_eur * 100)))
-
-        try:
-            stripe.SubscriptionItem.create_usage_record(
-                record.stripe_subscription_item_id,
-                quantity=quantity,
-                timestamp="now",
-                action="set",
-            )
-            log.info(
-                f"[billing-reporter] Reported {quantity} cents (€{cost_eur:.4f}) "
-                f"for {email} (sub_item={record.stripe_subscription_item_id})"
-            )
-        except Exception as e:
-            log.error(f"[billing-reporter] Failed to report usage for {email}: {e}")
-
-    # --- Teams use flat billing; no Stripe usage reporting needed.
-    # Reset top_up_credits monthly so purchased credits don't roll over.
-    # Use month_start_epoch() rather than day==1 so a missed reset (e.g. service
-    # down on the 1st) is caught on the next daily run.
-    from open_webui.models.billing import Teams
-    from open_webui.models.usage_ledger import _month_start_epoch
-
-    active_teams = Teams.get_all_active()
-    month_start = _month_start_epoch()
-    for team in active_teams:
-        # updated_at is set by reset_top_up_credits; if it's before month_start
-        # the reset hasn't happened yet this month.
-        if (team.updated_at or 0) < month_start and team.top_up_credits:
-            Teams.reset_top_up_credits(team.id)
-            log.info(f"[billing-reporter] Reset top-up credits for team_id={team.id}")
-
-
 def _seconds_until_next_midnight_utc() -> float:
     """Returns seconds until the next UTC midnight."""
     now = datetime.datetime.utcnow()
@@ -100,37 +23,30 @@ def _seconds_until_next_midnight_utc() -> float:
     return (tomorrow - now).total_seconds()
 
 
-async def periodic_billing_usage_reporter():
+async def periodic_nightly_deep_rescan():
     """
-    Async task that wakes up daily at UTC midnight and pushes usage to Stripe.
+    Async task that wakes daily at UTC midnight and runs a 7-day deep rescan of
+    Langfuse observations to backfill cost_eur for previously-unpriced models.
     Designed to be launched with asyncio.create_task() at app startup.
     """
     from open_webui.env import BILLING_ENABLED
     if not BILLING_ENABLED:
         return
 
-    log.info("[billing-reporter] Task started.")
+    log.info("[nightly-rescan] Task started.")
 
     while True:
         wait = _seconds_until_next_midnight_utc()
-        log.debug(f"[billing-reporter] Next run in {wait:.0f}s ({wait/3600:.1f}h).")
+        log.debug(f"[nightly-rescan] Next run in {wait:.0f}s ({wait/3600:.1f}h).")
         await asyncio.sleep(wait)
 
-        # Deep rescan runs first so backfilled Langfuse pricing is in the ledger
-        # before _run_usage_report() reads it for Stripe billing.
         try:
             loop = asyncio.get_running_loop()
             rescan_since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
-            log.info("[billing-reporter] Starting nightly deep rescan from %s.", rescan_since.isoformat())
+            log.info("[nightly-rescan] Starting deep rescan from %s.", rescan_since.isoformat())
             await loop.run_in_executor(None, lambda: _sync_observations(rescan_since, deep_rescan=True))
         except Exception as e:
-            log.error(f"[billing-reporter] Deep rescan failed: {e}")
-
-        log.info("[billing-reporter] Running daily usage report.")
-        try:
-            await _run_usage_report()
-        except Exception as e:
-            log.error(f"[billing-reporter] Unexpected error: {e}")
+            log.error(f"[nightly-rescan] Deep rescan failed: {e}")
 
         # Small buffer to avoid drift from midnight into the same second
         await asyncio.sleep(5)

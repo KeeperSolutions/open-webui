@@ -23,24 +23,16 @@ export type BillingStatus = {
 	team_month_cost_eur: number | null;
 
 	// Team usage budget (owner + member view)
-	usage_budget_eur: number | null;
-	extra_credit_eur: number | null;
-	usage_budget_remaining_eur: number | null;
+	subscription_credits: number;
+	topup_credits: number;
+	credits_remaining: number;
+	credits_per_eur_cent: number;
 
 	// Team member fields
 	team_owner_name: string | null;
 
 	// All tiers
 	current_month_cost_eur: number;
-};
-
-export type Invoice = {
-	id: string;
-	date: number;
-	amount_eur: number;
-	status: string;
-	pdf_url: string | null;
-	hosted_url: string | null;
 };
 
 const base = `${WEBUI_API_BASE_URL}/billing`;
@@ -65,13 +57,14 @@ async function request<T>(url: string, token: string, options: RequestInit = {})
 export const getBillingStatus = (token: string) =>
 	request<BillingStatus>(`${base}/status`, token);
 
-export const createCheckoutSession = (token: string) =>
-	request<{ url: string }>(`${base}/checkout`, token, { method: 'POST' });
+export const createCheckoutSession = (token: string, plan_tier: 'pro' | 'premium' = 'pro') =>
+	request<{ url: string }>(`${base}/checkout`, token, { method: 'POST', body: JSON.stringify({ plan_tier }) });
 
 export const getBillingPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/portal`, token, { method: 'POST' });
 
-export const getInvoices = (token: string) => request<Invoice[]>(`${base}/invoices`, token);
+export const getBillingPortalUpdatePlanUrl = (token: string) =>
+	request<{ url: string }>(`${base}/portal/update-plan`, token, { method: 'POST' });
 
 export type AdminBillingRow = {
 	user_id: string;
@@ -185,6 +178,12 @@ export const createTeam = (token: string, name: string, seat_count: number) =>
 export const getTeamStatus = (token: string) =>
 	request<TeamStatus>(`${base}/team`, token);
 
+export const updateTeamName = (token: string, name: string) =>
+	request<{ name: string }>(`${base}/team/name`, token, {
+		method: 'PATCH',
+		body: JSON.stringify({ name })
+	});
+
 export const inviteTeamMember = (token: string, email: string) =>
 	request<{ invite_id: string; token: string; invited_email: string; expires_at: number }>(
 		`${base}/team/invite`,
@@ -197,6 +196,9 @@ export const removeTeamMember = (token: string, userId: string) =>
 
 export const getTeamPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/team/portal`, token, { method: 'POST' });
+
+export const getTeamPortalUpdatePlanUrl = (token: string) =>
+	request<{ url: string }>(`${base}/team/portal/update-plan`, token, { method: 'POST' });
 
 export const getInviteInfo = (token: string, inviteToken: string) =>
 	request<InviteInfo>(`${base}/invite/${inviteToken}`, token);
@@ -228,3 +230,17 @@ export const createTeamTopup = (token: string, amount_eur: number) =>
 		method: 'POST',
 		body: JSON.stringify({ amount_eur })
 	});
+
+// --- Available plans ---
+
+export type AvailablePlan = {
+	id: string;
+	name: string;
+	plan_tier: string;
+	price_eur: number;
+	credits: number;
+	seat_count: number | null;
+};
+
+export const getAvailablePlans = (token: string) =>
+	request<AvailablePlan[]>(`${base}/plans`, token);

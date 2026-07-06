@@ -3,6 +3,7 @@
 	import HgAuthCard from './HgAuthCard.svelte';
 
 	export let open = false;
+	export let form: string | null = null;
 
 	const dispatch = createEventDispatcher();
 
@@ -34,7 +35,7 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="relative z-10" on:click|stopPropagation>
-			<HgAuthCard on:success={onSuccess} />
+			<HgAuthCard {form} on:success={onSuccess} />
 		</div>
 	</div>
 {/if}
