@@ -689,28 +689,64 @@
 
 			{#if status.subscription_credits}
 				{@const total = (status.subscription_credits ?? 0) + (status.topup_credits ?? 0)}
-				{@const pct = total > 0 ? Math.min(100, (1 - (status.credits_remaining ?? 0) / total) * 100) : 0}
+				{@const rate = myUsage?.credits_per_eur_cent ?? 0}
+				{@const myCredits = Math.round(status.current_month_cost_eur * 100 * rate)}
+				{@const teamRemaining = status.credits_remaining ?? 0}
+				{@const restUsed = Math.max(0, total - myCredits - teamRemaining)}
+				{@const myPct = total > 0 ? Math.min(100, (myCredits / total) * 100) : 0}
+				{@const restPct = total > 0 ? Math.min(100 - myPct, (restUsed / total) * 100) : 0}
+				{@const overallPct = total > 0 ? Math.min(100, ((total - teamRemaining) / total) * 100) : 0}
+				{@const critical = overallPct >= 75}
 					<div class="mt-4 space-y-1.5">
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team budget used')}</div>
-						<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+						<div class="relative w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2 overflow-hidden flex">
 							<div
-								class="h-2 rounded-full transition-all {pct >= 75 ? 'bg-red-500' : 'bg-green-500'}"
-								style="width: {pct}%"
+								class="h-2 transition-all {critical ? 'bg-red-500' : 'bg-green-500'}"
+								style="width: {myPct}%"
+							></div>
+							<div
+								class="h-2 transition-all {critical ? 'bg-red-200 dark:bg-red-900' : 'bg-green-200 dark:bg-green-900'}"
+								style="width: {restPct}%"
 							></div>
 						</div>
+						<!-- Legend -->
+						<div class="flex items-center gap-3 pt-0.5">
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full {critical ? 'bg-red-500' : 'bg-green-500'}"></span>
+								{$i18n.t('You')}
+							</span>
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full {critical ? 'bg-red-200 dark:bg-red-900' : 'bg-green-200 dark:bg-green-900'}"></span>
+								{$i18n.t('Rest of team')}
+							</span>
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700"></span>
+								{$i18n.t('Unused')}
+							</span>
+						</div>
 					</div>
-				{/if}
 
-				<div class="mt-4 grid grid-cols-2 gap-4">
+				<!-- Stats row -->
+				<div class="mt-4 grid grid-cols-3 gap-4">
 					<div>
-						<div class="text-xl font-bold">{Math.round(status.current_month_cost_eur * 100 * (myUsage?.credits_per_eur_cent ?? 0)).toLocaleString()}</div>
+						<div class="text-xl font-bold">{myCredits.toLocaleString()}</div>
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
 					</div>
 					<div>
-						<div class="text-xl font-bold">{(status.credits_remaining ?? 0).toLocaleString()}</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team credits remaining')}</div>
+						<div class="text-xl font-bold">{restUsed.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Rest of team')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{teamRemaining.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Unused')}</div>
 					</div>
 				</div>
+			{:else}
+				<div class="mt-4">
+					<div class="text-xl font-bold">{Math.round(status.current_month_cost_eur * 100 * (myUsage?.credits_per_eur_cent ?? 0)).toLocaleString()}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
+				</div>
+			{/if}
 
 				{#if status.subscription_status === 'past_due' || status.subscription_status === 'canceled'}
 					<div class="mt-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
