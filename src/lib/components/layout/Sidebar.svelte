@@ -1270,12 +1270,18 @@
 											tippyOptions={{ allowHTML: true }}
 										>
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
-												{$i18n.t('This month')}:
 												{#if isInternalUser($billingStatus?.plan_tier)}
+													{$i18n.t('This month')}:
 													<span class="font-medium text-gray-700 dark:text-gray-300"
 														>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
 													>
+												{:else if $billingStatus?.plan_tier === 'team' || $billingStatus?.plan_tier === 'team_member'}
+													{$i18n.t('Your usage')}:
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>{(myUsage.credits_used ?? 0).toLocaleString()} {$i18n.t('cr')}</span
+													>
 												{:else}
+													{$i18n.t('This month')}:
 													<span class="font-medium text-gray-700 dark:text-gray-300"
 														>{myUsage.credits_used ?? 0} / {myUsage.credits_balance}
 														{$i18n.t('credits')}</span
@@ -1283,6 +1289,11 @@
 												{/if}
 											</div>
 										</Tooltip>
+										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && ($billingStatus?.credits_remaining ?? 0) > 0}
+											<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
+												{$i18n.t('Left in pool')}: <span class="font-medium text-gray-700 dark:text-gray-300">{($billingStatus.credits_remaining).toLocaleString()} {$i18n.t('cr')}</span>
+											</div>
+										{/if}
 									{:else}
 										<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
 											{$i18n.t('Usage unavailable')}

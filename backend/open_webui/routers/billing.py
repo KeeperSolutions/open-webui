@@ -2302,6 +2302,18 @@ async def get_my_usage(user=Depends(get_verified_user)):
         )
         credits_used = eur_to_credits(usage_eur, rate)
         credits_remaining = max(0, balance - credits_used)
+    elif record and record.plan_tier == PLAN_TIER_TEAM and record.team_id:
+        # Team owner: resolve rate from the team's credit balance, compute personal usage
+        from open_webui.models.credit_balances import CreditBalances
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+        team = Teams.get_by_id(record.team_id)
+        rate = CREDITS_PER_EUR_CENT
+        if team:
+            bal = CreditBalances.get("team", team.id)
+            if bal:
+                rate = bal.credits_per_eur_cent
+        credits_per_eur_cent = rate
+        credits_used = eur_to_credits(cost_eur, rate)
     elif record and record.plan_tier == PLAN_TIER_TEAM_MEMBER and record.team_id:
         # Team members: resolve the conversion rate from the team owner's credit balance
         from open_webui.models.credit_balances import CreditBalances
