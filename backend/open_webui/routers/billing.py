@@ -1170,6 +1170,26 @@ async def get_team_status(user=Depends(get_verified_user)):
     )
 
 
+class TeamUpdateNameRequest(BaseModel):
+    name: str
+
+
+@router.patch("/team/name")
+async def update_team_name(body: TeamUpdateNameRequest, user=Depends(get_verified_user)):
+    """Update the team name. Only the team owner may call this."""
+    require_billing_enabled()
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Team name cannot be empty.")
+    team = Teams.get_by_owner_user_id(user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own a team.")
+    updated = Teams.update(team.id, name=name)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update team name.")
+    return {"name": updated.name}
+
+
 @router.post("/team/invite")
 async def invite_team_member(body: TeamInviteRequest, user=Depends(get_verified_user)):
     """Invite a user to the team by email."""

@@ -189,6 +189,12 @@ export const createTeam = (token: string, name: string, seat_count: number) =>
 export const getTeamStatus = (token: string) =>
 	request<TeamStatus>(`${base}/team`, token);
 
+export const updateTeamName = (token: string, name: string) =>
+	request<{ name: string }>(`${base}/team/name`, token, {
+		method: 'PATCH',
+		body: JSON.stringify({ name })
+	});
+
 export const inviteTeamMember = (token: string, email: string) =>
 	request<{ invite_id: string; token: string; invited_email: string; expires_at: number }>(
 		`${base}/team/invite`,

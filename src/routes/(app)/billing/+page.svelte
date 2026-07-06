@@ -15,6 +15,7 @@
 		createTeam,
 		getTeamTiers,
 		getTeamStatus,
+		updateTeamName,
 		inviteTeamMember,
 		removeTeamMember,
 		getModelBreakdown,
@@ -31,6 +32,7 @@
 	import { PLAN_TIER, isCreditsUser as _isCreditsUser, isInternalUser } from '$lib/billing/planTiers';
 	import { plans, type PricingPlan } from '$lib/data/pricing-plans';
 	import HgPricingCard from '$lib/components/hubgate/HgPricingCard.svelte';
+	import Pencil from '$lib/components/icons/Pencil.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -43,6 +45,9 @@
 
 	let checkingOut = false;
 	let openingPortal = false;
+	let editingTeamName = false;
+	let editingTeamNameValue = '';
+	let savingTeamName = false;
 
 	// Create team modal
 	let showCreateTeam = false;
@@ -152,6 +157,21 @@
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open plan change portal'));
 			openingPortal = false;
+		}
+	};
+
+	const handleSaveTeamName = async () => {
+		const name = editingTeamNameValue.trim();
+		if (!name || !teamStatus) return;
+		savingTeamName = true;
+		try {
+			const result = await updateTeamName(localStorage.token, name);
+			teamStatus = { ...teamStatus, name: result.name };
+			editingTeamName = false;
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to update team name'));
+		} finally {
+			savingTeamName = false;
 		}
 	};
 
@@ -541,7 +561,42 @@
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
-						<h2 class="text-lg font-bold">{$i18n.t('Team Subscription')}</h2>
+						{#if editingTeamName}
+							<div class="flex items-center gap-2">
+								<input
+									bind:value={editingTeamNameValue}
+									on:keydown={(e) => { if (e.key === 'Enter') handleSaveTeamName(); else if (e.key === 'Escape') editingTeamName = false; }}
+									class="text-lg font-bold bg-transparent border-b border-gray-400 dark:border-gray-500 outline-none w-56"
+									autofocus
+								/>
+								<button
+									on:click={handleSaveTeamName}
+									disabled={savingTeamName}
+									class="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+								>
+									{savingTeamName ? $i18n.t('Saving...') : $i18n.t('Save')}
+								</button>
+								<button
+									on:click={() => (editingTeamName = false)}
+									class="text-xs text-gray-500 dark:text-gray-400 hover:underline"
+								>
+									{$i18n.t('Cancel')}
+								</button>
+							</div>
+						{:else}
+							<div class="flex items-center gap-2">
+								<h2 class="text-lg font-bold">{teamStatus?.name ?? $i18n.t('Team Subscription')}</h2>
+								{#if teamStatus}
+									<button
+										on:click={() => { editingTeamNameValue = teamStatus?.name ?? ''; editingTeamName = true; }}
+										class="rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200"
+										title={$i18n.t('Edit team name')}
+									>
+										<Pencil className="size-4" />
+									</button>
+								{/if}
+							</div>
+						{/if}
 						<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
 							{$i18n.t("Your team is on a shared usage plan. Each member's activity is tracked individually.")}
 						</p>
