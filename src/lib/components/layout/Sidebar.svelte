@@ -1289,7 +1289,7 @@
 												{/if}
 											</div>
 										</Tooltip>
-										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && ($billingStatus?.credits_remaining ?? 0) > 0}
+										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && $billingStatus?.credits_remaining !== undefined}
 											<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
 												{$i18n.t('Left in pool')}: <span class="font-medium text-gray-700 dark:text-gray-300">{($billingStatus.credits_remaining).toLocaleString()} {$i18n.t('cr')}</span>
 											</div>
