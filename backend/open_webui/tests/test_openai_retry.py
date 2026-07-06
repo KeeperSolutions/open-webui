@@ -267,7 +267,26 @@ def test_connection_exception_then_success():
     assert sess.call_count == 3
 
 
-def test_exception_on_every_attempt_raises_terminal_502_or_500():
+def test_non_network_exception_not_retried():
+    # A non-network exception (a real bug, e.g. ValueError) must NOT be retried
+    # or masked as a transient blip — it propagates on the first attempt.
+    request = _make_request()
+    request.app.state.OPENAI_MODELS = {"gpt-4": _make_model()}
+    fd = {"model": "gpt-4", "messages": []}
+    with _SessionPatch([ValueError("bug"), _resp(200)]) as sess, \
+        patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
+        patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
+        patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)), \
+        patch.object(openai_router.asyncio, "sleep", AsyncMock()), \
+        patch.object(openai_router, "time", _fake_clock([0.0])):
+        with pytest.raises(HTTPException):
+            asyncio.run(
+                generate_chat_completion(request, fd, user=_make_user(), bypass_filter=True, db=None)
+            )
+    assert sess.call_count == 1  # not retried
+
+
+def test_exception_on_every_attempt_raises_terminal_500():
     request = _make_request()
     with patch.object(openai_router, "time", _fake_clock([0.0])):
         with pytest.raises(HTTPException) as ei:

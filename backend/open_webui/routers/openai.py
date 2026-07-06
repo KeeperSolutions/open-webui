@@ -1092,7 +1092,7 @@ async def generate_chat_completion(
                         attempt + 1,
                         max_attempts,
                     )
-                    # DODATAK 2: close this attempt's response/session by hand
+                    # NOTE: close this attempt's response/session by hand
                     # before backing off, or we leak the connection.
                     await cleanup_response(r, session)
                     r = None
@@ -1113,17 +1113,20 @@ async def generate_chat_completion(
                         return PlainTextResponse(status_code=r.status, content=response)
 
                 return response
-            except Exception as e:
-                # Transient connection/timeout error (session.request raised).
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                # Transient network/timeout error (session build or request).
                 # Retry while attempts and budget remain; otherwise re-raise to
-                # the terminal handler below (preserves existing behavior).
+                # the terminal handler below. ONLY network/timeout exceptions are
+                # caught here — any other exception (a real bug) propagates
+                # straight to the outer handler, unretried, so it is neither
+                # masked as a transient blip nor delayed by backoff.
                 log.warning(
                     "LLM call raised %s (attempt %d/%d).",
                     type(e).__name__,
                     attempt + 1,
                     max_attempts,
                 )
-                # DODATAK 2: manual per-attempt cleanup before retry/terminal.
+                # NOTE: manual per-attempt cleanup before retry/terminal.
                 await cleanup_response(r, session)
                 r = None
                 session = None
