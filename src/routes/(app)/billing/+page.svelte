@@ -785,7 +785,7 @@
 										</span>
 									</td>
 									<td class="px-5 py-3 text-right font-semibold">
-										€{member.current_month_cost_eur.toFixed(2)}
+										{Math.round(member.current_month_cost_eur * 100 * (status?.credits_per_eur_cent ?? 0)).toLocaleString()}
 									</td>
 									<td class="px-3 py-3 relative">
 										{#if member.role !== 'owner'}
