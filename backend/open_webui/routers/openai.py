@@ -63,11 +63,11 @@ log = logging.getLogger(__name__)
 # LLM chat-completion transient-error retry (TRAU-520).
 #
 # When the upstream chat-completion call fails on a TRANSIENT error — a
-# connection drop, a timeout, or a retryable HTTP status (429 / 5xx) — retry it
-# a few times with a short linear backoff instead of crashing the chat on a
-# blip. Non-retryable failures (400/401/403/404/422, including a 400
-# "context_length_exceeded" for oversized input) are NOT retried — they
-# propagate immediately, unchanged, exactly as before.
+# connection drop, a timeout, or a transient HTTP status (429, or a transient
+# 5xx — see LLM_RETRY_RETRYABLE_STATUS) — retry it a few times with a short
+# linear backoff instead of crashing the chat on a blip. Non-retryable failures
+# (400/401/403/404/422, including a 400 "context_length_exceeded" for oversized
+# input) are NOT retried — they propagate immediately, unchanged, as before.
 #
 #   LLM_RETRY_MAX                  total attempts incl. the first (3 = 1 try + 2
 #                                  retries). Hardcoded, not env-driven, to match
@@ -79,6 +79,12 @@ log = logging.getLogger(__name__)
 #                                  session.request() does NOT raise on an error
 #                                  status, so the decision is made explicitly on
 #                                  r.status rather than via raise_for_status().
+#                                  Covers the standard transient 5xx (500/502/
+#                                  503/504), Cloudflare origin errors (520-524)
+#                                  and provider "overloaded" (529). Deterministic
+#                                  5xx (501 Not Implemented, 505, 510, 511) are
+#                                  intentionally EXCLUDED so a real config error
+#                                  surfaces immediately instead of being retried.
 #   LLM_RETRY_TOTAL_BUDGET_SECONDS wall-clock cap across ALL attempts. Required
 #                                  because AIOHTTP_CLIENT_TIMEOUT (total)
 #                                  defaults to None (no per-request cap), so
@@ -86,7 +92,12 @@ log = logging.getLogger(__name__)
 #                                  sock_read could pile up unbounded and DoS our
 #                                  own handler. Checked before each new attempt.
 LLM_RETRY_MAX = 3
-LLM_RETRY_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+LLM_RETRY_RETRYABLE_STATUS = {
+    429,  # Too Many Requests (rate limit)
+    500, 502, 503, 504,  # standard transient 5xx
+    520, 521, 522, 523, 524,  # Cloudflare origin errors (transient)
+    529,  # provider "overloaded" (e.g. Anthropic)
+}
 LLM_RETRY_TOTAL_BUDGET_SECONDS = 90
 
 
@@ -1060,9 +1071,10 @@ async def generate_chat_completion(
                         ),
                     )
 
-                # Non-stream transient upstream status (429/5xx): retry while
-                # attempts AND budget remain. Every other status — success or a
-                # non-retryable 4xx — falls through and is returned below.
+                # Non-stream transient upstream status (429 / transient 5xx):
+                # retry while attempts AND budget remain. Every other status —
+                # success or a non-retryable 4xx — falls through and is returned
+                # below.
                 if (
                     r.status in LLM_RETRY_RETRYABLE_STATUS
                     and attempt + 1 < max_attempts

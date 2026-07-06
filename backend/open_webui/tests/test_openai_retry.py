@@ -176,9 +176,36 @@ def test_retryable_backoff_sleeps_between_attempts():
         assert sleep_mock.await_count == 1  # backoff before the single retry
 
 
+def test_cloudflare_5xx_is_retried():
+    # 522 (Cloudflare "connection timed out") is transient -> must be retried.
+    request = _make_request()
+    body = {"choices": []}
+    result, sess = _run(request, _make_model(), [_resp(522), _resp(200, body=body)])
+    assert result == body
+    assert sess.call_count == 2
+
+
+def test_provider_overloaded_529_is_retried():
+    # 529 ("overloaded", e.g. Anthropic) is transient -> must be retried.
+    request = _make_request()
+    body = {"choices": []}
+    result, sess = _run(request, _make_model(), [_resp(529), _resp(200, body=body)])
+    assert result == body
+    assert sess.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # 2. Non-retryable status is NOT retried
 # ---------------------------------------------------------------------------
+
+
+def test_deterministic_5xx_not_retried():
+    # 501 (Not Implemented) is deterministic, NOT transient -> propagate at once.
+    request = _make_request()
+    result, sess = _run(request, _make_model(), [_resp(501, body={"error": "nope"})])
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 501
+    assert sess.call_count == 1  # no retry on a deterministic 5xx
 
 def test_non_retryable_400_returns_immediately():
     request = _make_request()
