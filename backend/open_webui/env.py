@@ -980,6 +980,14 @@ INTERNAL_EMAIL_DOMAINS = [
     for d in os.environ.get("INTERNAL_EMAIL_DOMAINS", "").split(",")
     if d.strip()
 ]
+
+# Comma-separated list of specific emails that should have unlimited credits
+# (in addition to internal domains). Example: "user126@gmail.com,another@example.com"
+UNLIMITED_USER_EMAILS: set[str] = {
+    e.strip().lower()
+    for e in os.environ.get("UNLIMITED_USER_EMAILS", "").split(",")
+    if e.strip()
+}
 TRIAL_CREDIT_EUR = float(os.environ.get("TRIAL_CREDIT_EUR", "2.0"))
 
 # Days of Langfuse observation history to import on first deploy (when usage_ledger is empty).

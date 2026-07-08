@@ -72,14 +72,15 @@
 			billingStatus = await getBillingStatus(localStorage.token);
 			billingStatusStore.set(billingStatus);
 			const isPastDue = billingStatus?.subscription_status === 'past_due';
-			showPastDueBanner = isPastDue;
+			const isInternal = billingStatus?.plan_tier === PLAN_TIER.INTERNAL;
+			showPastDueBanner = isPastDue && !isInternal;
 			const capturedStatus = billingStatus;
 			getMyUsage(localStorage.token)
 				.then((u) => {
 					myUsageStore.set(u);
 					const isTrialExhausted =
 						capturedStatus?.plan_tier === PLAN_TIER.TRIAL && (u?.credits_remaining ?? 1) <= 0;
-					if (isTrialExhausted) showPastDueBanner = true;
+					if (isTrialExhausted && !isInternal) showPastDueBanner = true;
 				})
 				.catch(() => {});
 		} catch {
@@ -424,12 +425,12 @@
 
 				{#if showPastDueBanner}
 					<div
-						class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm"
+						class="fixed top-0 left-0 md:left-[var(--sidebar-width)] right-0 z-50 flex items-center justify-between gap-4 bg-red-500 text-white px-4 py-2.5 text-sm"
 					>
 						<span>
 							{#if billingStatus?.plan_tier === PLAN_TIER.TRIAL}
 								{$i18n.t('Your trial credit is used up. Please')}
-								<a href="/billing" class="underline font-semibold hover:opacity-80">
+								<a href="/billing?plans=1" class="underline font-semibold hover:opacity-80">
 									{$i18n.t('upgrade your plan')}
 								</a>
 								{$i18n.t('to continue.')}
@@ -449,8 +450,7 @@
 							✕
 						</button>
 					</div>
-					<!-- Push content below the banner -->
-					<div class="h-10 w-full shrink-0"></div>
+
 				{/if}
 
 				<Sidebar />
