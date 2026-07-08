@@ -92,6 +92,10 @@
 		try {
 			status = await getBillingStatus(localStorage.token);
 
+			if (params.get('plans') === '1' && status?.plan_tier === PLAN_TIER.TRIAL) {
+				showPlans = true;
+			}
+
 			const extras: Promise<any>[] = [];
 
 			if (status?.enabled) {
@@ -101,7 +105,7 @@
 						.then((d) => { myUsage = d; })
 						.catch(() => {})
 				);
-			extras.push(getAvailablePlans(localStorage.token).then((d) => (availablePlans = d)).catch(() => {}));
+				extras.push(getAvailablePlans(localStorage.token).then((d) => (availablePlans = d)).catch(() => {}));
 				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
 				if (status?.plan_tier === PLAN_TIER.TEAM) {
 					extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
@@ -860,7 +864,7 @@
 											</div>
 										</div>
 									</td>
-									<td class="px-3 py-3">
+									<td class="px-3 py-3 w-20 whitespace-nowrap">
 										{#if member.role === 'owner'}
 											<span class="text-xs px-2 py-0.5 rounded-full bg-gray-900 text-white dark:bg-white dark:text-gray-900 font-medium">
 												{$i18n.t('Admin')}
@@ -871,7 +875,7 @@
 											</span>
 										{/if}
 									</td>
-									<td class="px-3 py-3">
+									<td class="px-3 py-3 w-20 whitespace-nowrap">
 										<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-medium">
 											{$i18n.t('Active')}
 										</span>
