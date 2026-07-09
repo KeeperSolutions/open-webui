@@ -340,16 +340,17 @@ async def auto_onboard_user(user, request=None):
         return
 
     existing = StripeBillings.get_by_user_id(user.id)
+    if has_unlimited_access(user.email):
+        if existing is None or existing.plan_tier != PLAN_TIER_INTERNAL:
+            StripeBillings.upsert(
+                user_id=user.id,
+                plan_tier=PLAN_TIER_INTERNAL,
+            )
+            log.info(f"[billing] Unlimited user onboarded: {user.email}")
+        return
+
     if existing is not None:
         return  # Already onboarded
-
-    if has_unlimited_access(user.email):
-        StripeBillings.upsert(
-            user_id=user.id,
-            plan_tier=PLAN_TIER_INTERNAL,
-        )
-        log.info(f"[billing] Unlimited user onboarded: {user.email}")
-        return
 
     # External user — create Stripe Customer
     if not STRIPE_SECRET_KEY:
