@@ -2275,9 +2275,9 @@ async def get_my_usage(user=Depends(get_verified_user)):
             total_cost_eur=round(cost_eur, 4),
             exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
             ledger_ready=UsageLedgerDB.is_ledger_ready(),
-            credits_balance=-1,
+            credits_balance=0,
             credits_used=0,
-            credits_remaining=-1,
+            credits_remaining=0,
             credits_per_eur_cent=0.0,
         )
 
