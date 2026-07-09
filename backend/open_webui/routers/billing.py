@@ -14,6 +14,7 @@ from open_webui.env import (
     STRIPE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
+    UNLIMITED_USER_EMAILS,
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
@@ -94,9 +95,19 @@ def _price_id_from_session(session) -> str:
     return ""
 
 
-def is_internal_user(email: str) -> bool:
-    domain = email.split("@")[-1].lower()
-    return domain in INTERNAL_EMAIL_DOMAINS
+def has_unlimited_access(email: str) -> bool:
+    if not email:
+        return False
+    email = email.lower()
+    domain = email.split("@")[-1]
+    if domain in INTERNAL_EMAIL_DOMAINS:
+        return True
+    return email in UNLIMITED_USER_EMAILS
+
+
+def is_internal_plan(record) -> bool:
+    """Returns True if the billing record indicates an unlimited/internal user."""
+    return record is not None and record.plan_tier == PLAN_TIER_INTERNAL
 
 
 def require_billing_enabled():
@@ -258,7 +269,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
     billing_test_mode = os.environ.get("BILLING_TEST_MODE", "false").lower() == "true"
     if user.role == "admin" and not billing_test_mode:
         return user
-    if is_internal_user(user.email) and not billing_test_mode:
+    if has_unlimited_access(user.email) and not billing_test_mode:
         return user
 
     record = StripeBillings.get_by_user_id(user.id)
@@ -329,16 +340,17 @@ async def auto_onboard_user(user, request=None):
         return
 
     existing = StripeBillings.get_by_user_id(user.id)
+    if has_unlimited_access(user.email):
+        if existing is None or existing.plan_tier != PLAN_TIER_INTERNAL:
+            StripeBillings.upsert(
+                user_id=user.id,
+                plan_tier=PLAN_TIER_INTERNAL,
+            )
+            log.info(f"[billing] Unlimited user onboarded: {user.email}")
+        return
+
     if existing is not None:
         return  # Already onboarded
-
-    if is_internal_user(user.email):
-        StripeBillings.upsert(
-            user_id=user.id,
-            plan_tier=PLAN_TIER_INTERNAL,
-        )
-        log.info(f"[billing] Internal user onboarded: {user.email}")
-        return
 
     # External user — create Stripe Customer
     if not STRIPE_SECRET_KEY:
@@ -495,7 +507,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
             current_month_cost_eur=current_month_cost,
         )
 
-    if record.plan_tier == PLAN_TIER_INTERNAL:
+    if record.plan_tier == PLAN_TIER_INTERNAL or has_unlimited_access(user.email):
         return BillingStatusResponse(
             enabled=True,
             plan_tier=PLAN_TIER_INTERNAL,
@@ -2252,6 +2264,23 @@ async def get_my_usage(user=Depends(get_verified_user)):
     now = datetime.datetime.utcnow()
 
     record = StripeBillings.get_by_user_id(user.id)
+
+    # Unlimited users (internal domains or explicit UNLIMITED_USER_EMAILS) get no credits
+    if has_unlimited_access(user.email) or is_internal_plan(record):
+        return MyUsageResponse(
+            month=now.month,
+            year=now.year,
+            total_tokens=total_tokens,
+            total_cost_usd=round(cost_usd, 6),
+            total_cost_eur=round(cost_eur, 4),
+            exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
+            ledger_ready=UsageLedgerDB.is_ledger_ready(),
+            credits_balance=0,
+            credits_used=0,
+            credits_remaining=0,
+            credits_per_eur_cent=0.0,
+        )
+
     credits_balance = credits_used = credits_remaining = 0
     credits_per_eur_cent = 0.0
 
