@@ -40,7 +40,7 @@ def upgrade():
                 COALESCE(pc.credits, 1300) AS subscription_credits,
                 1.82::float AS credits_per_eur_cent,
                 EXTRACT(EPOCH FROM NOW())::bigint AS now_ts
-            FROM stripe_billings sb
+            FROM stripe_billing sb
             LEFT JOIN plan_credits pc ON pc.plan_tier = sb.plan_tier
             WHERE sb.plan_tier IN ('pro', 'premium', 'team')
               AND (sb.stripe_subscription_status = 'active' OR sb.stripe_subscription_status IS NULL)
