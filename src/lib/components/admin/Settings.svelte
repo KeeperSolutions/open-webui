@@ -22,6 +22,7 @@
 	import CodeExecution from './Settings/CodeExecution.svelte';
 	import Tools from './Settings/Tools.svelte';
 	import Providers from './Settings/Providers.svelte';
+	import ModelClasses from './Settings/ModelClasses.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
@@ -41,6 +42,7 @@
 			'connections',
 			'models',
 			'providers',
+			'model-classes',
 			'evaluations',
 			'tools',
 			'documents',
@@ -143,6 +145,12 @@
 				'patterns',
 				'branding'
 			]
+		},
+		{
+			id: 'model-classes',
+			title: 'Model Classes',
+			route: '/admin/settings/model-classes',
+			keywords: ['model', 'class', 'classes', 'order', 'credit', 'tier']
 		},
 		{
 			id: 'evaluations',
@@ -402,6 +410,15 @@
 								clip-rule="evenodd"
 							/>
 						</svg>
+					{:else if tab.id === 'model-classes'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 16 16"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9zM4 5h8v1H4V5zm0 3h8v1H4V8zm0 3h5v1H4v-1z" />
+						</svg>
 					{:else if tab.id === 'evaluations'}
 						<DocumentChartBar />
 					{:else if tab.id === 'tools'}
@@ -559,6 +576,8 @@
 			<Models />
 		{:else if selectedTab === 'providers'}
 			<Providers />
+		{:else if selectedTab === 'model-classes'}
+			<ModelClasses />
 		{:else if selectedTab === 'evaluations'}
 			<Evaluations />
 		{:else if selectedTab === 'tools'}

@@ -1730,7 +1730,7 @@
 										<!-- PII Masking toggle (stub) -->
 										<Tooltip
 											content={$i18n.t(
-												'Dynamic PII Masking: A dual-stage filter built on proven open-source NER (Microsoft Presidio and spaCy), enhanced with proprietary tuning and 15+ custom regional recognizers. It automatically detects and replaces Personally Identifiable Information (PII) with secure placeholders before queries leave your secure environment, ensuring zero raw PII reaches public LLMs.'
+												'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
 											)}
 											placement="top"
 										>
@@ -1749,13 +1749,18 @@
 														>PII Masking</span
 													>
 												</div>
-												{#if piiMaskingEnabled}
-													<HgIconToggleOn class="w-5 h-5 text-hg-blue dark:text-white" />
-												{:else}
-													<HgIconToggleOff
-														class="w-5 h-5 text-hg-text-tertiary dark:text-gray-600"
+												<div class="relative w-5 h-5">
+													<HgIconToggleOn
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+															? 'opacity-100'
+															: 'opacity-0'}"
 													/>
-												{/if}
+													<HgIconToggleOff
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+															? 'opacity-0'
+															: 'opacity-100'}"
+													/>
+												</div>
 											</button>
 										</Tooltip>
 

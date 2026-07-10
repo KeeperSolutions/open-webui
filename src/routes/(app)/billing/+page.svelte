@@ -2,35 +2,52 @@
 	import { onMount, getContext } from 'svelte';
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
+	import { showSidebar } from '$lib/stores';
 	import {
 		getBillingStatus,
 		createCheckoutSession,
 		getBillingPortalUrl,
+		getBillingPortalUpdatePlanUrl,
 		getTeamPortalUrl,
+		getTeamPortalUpdatePlanUrl,
 		getTopupOptions,
 		createTeamTopup,
 		createTeam,
 		getTeamTiers,
 		getTeamStatus,
+		updateTeamName,
 		inviteTeamMember,
 		removeTeamMember,
 		getModelBreakdown,
+		getMyUsage,
+		getAvailablePlans,
 		type BillingStatus,
 		type TopupOption,
 		type TeamTier,
 		type TeamStatus,
-		type ModelBreakdown
+		type ModelBreakdown,
+		type MyUsage,
+		type AvailablePlan
 	} from '$lib/apis/billing';
+	import { PLAN_TIER, isCreditsUser as _isCreditsUser, isInternalUser } from '$lib/billing/planTiers';
+	import { plans, type PricingPlan } from '$lib/data/pricing-plans';
+	import HgPricingCard from '$lib/components/hubgate/HgPricingCard.svelte';
+	import Pencil from '$lib/components/icons/Pencil.svelte';
 
 	const i18n = getContext('i18n');
 
 	let status: BillingStatus | null = null;
 	let teamStatus: TeamStatus | null = null;
 	let modelBreakdown: ModelBreakdown | null = null;
+	let myUsage: MyUsage | null = null;
+	let showCredits = false;
 	let loading = true;
 
 	let checkingOut = false;
 	let openingPortal = false;
+	let editingTeamName = false;
+	let editingTeamNameValue = '';
+	let savingTeamName = false;
 
 	// Create team modal
 	let showCreateTeam = false;
@@ -51,6 +68,12 @@
 
 	// Member actions
 	let openMenuUserId: string | null = null;
+	let pendingRemoveUserId: string | null = null;
+	let pendingRemoveName: string | null = null;
+
+	// View Plans
+	let showPlans = false;
+	let availablePlans: AvailablePlan[] = [];
 
 	const currentMonth = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 
@@ -69,18 +92,24 @@
 		try {
 			status = await getBillingStatus(localStorage.token);
 
+			if (params.get('plans') === '1' && status?.plan_tier === PLAN_TIER.TRIAL) {
+				showPlans = true;
+			}
+
 			const extras: Promise<any>[] = [];
 
 			if (status?.enabled) {
 				extras.push(getModelBreakdown(localStorage.token).then((d) => (modelBreakdown = d)).catch(() => {}));
-			}
-
-			if (status?.plan_tier === 'team') {
-				extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
-				extras.push(getTopupOptions(localStorage.token).then((d) => (topupOptions = d)).catch(() => {}));
-			}
-			if (status?.plan_tier === 'trial' || status?.plan_tier === 'paid') {
+				extras.push(
+					getMyUsage(localStorage.token)
+						.then((d) => { myUsage = d; })
+						.catch(() => {})
+				);
+				extras.push(getAvailablePlans(localStorage.token).then((d) => (availablePlans = d)).catch(() => {}));
 				extras.push(getTeamTiers(localStorage.token).then((d) => (teamTiers = d)).catch(() => {}));
+				if (status?.plan_tier === PLAN_TIER.TEAM) {
+					extras.push(getTeamStatus(localStorage.token).then((d) => (teamStatus = d)).catch(() => {}));
+				}
 			}
 
 			await Promise.all(extras);
@@ -95,7 +124,7 @@
 		checkingOut = true;
 		try {
 			const { url } = await createCheckoutSession(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
 			checkingOut = false;
@@ -106,7 +135,7 @@
 		openingPortal = true;
 		try {
 			const { url } = await getBillingPortalUrl(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
@@ -117,10 +146,36 @@
 		openingPortal = true;
 		try {
 			const { url } = await getTeamPortalUrl(localStorage.token);
-			window.location.href = url;
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
 			openingPortal = false;
+		}
+	};
+
+	const handleTeamPortalUpdatePlan = async () => {
+		openingPortal = true;
+		try {
+			const { url } = await getTeamPortalUpdatePlanUrl(localStorage.token);
+			window.open(url, '_blank', 'noopener,noreferrer');
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to open plan change portal'));
+			openingPortal = false;
+		}
+	};
+
+	const handleSaveTeamName = async () => {
+		const name = editingTeamNameValue.trim();
+		if (!name || !teamStatus) return;
+		savingTeamName = true;
+		try {
+			const result = await updateTeamName(localStorage.token, name);
+			teamStatus = { ...teamStatus, name: result.name };
+			editingTeamName = false;
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to update team name'));
+		} finally {
+			savingTeamName = false;
 		}
 	};
 
@@ -128,7 +183,7 @@
 		toppingUp = true;
 		try {
 			const { url } = await createTeamTopup(localStorage.token, amount_eur);
-			window.location.href = url;
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to start top-up'));
 			toppingUp = false;
@@ -140,7 +195,7 @@
 		creatingTeam = true;
 		try {
 			const { url } = await createTeam(localStorage.token, teamName.trim(), selectedSeatCount);
-			window.location.href = url;
+			window.open(url, '_blank', 'noopener,noreferrer');
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to create team'));
 			creatingTeam = false;
@@ -163,9 +218,18 @@
 		}
 	};
 
-	const handleRemoveMember = async (userId: string, name: string) => {
+	const handleRemoveMember = (userId: string, name: string) => {
 		openMenuUserId = null;
-		if (!confirm($i18n.t('Remove {{name}} from the team?', { name }))) return;
+		pendingRemoveUserId = userId;
+		pendingRemoveName = name;
+	};
+
+	const confirmRemoveMember = async () => {
+		if (!pendingRemoveUserId) return;
+		const userId = pendingRemoveUserId;
+		const name = pendingRemoveName ?? '';
+		pendingRemoveUserId = null;
+		pendingRemoveName = null;
 		try {
 			await removeTeamMember(localStorage.token, userId);
 			toast.success($i18n.t('{{name}} removed from team', { name }));
@@ -199,26 +263,121 @@
 		return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 	}
 
-	$: trialPct =
-		status?.plan_tier === 'trial' && (status.credit_limit_eur ?? 0) > 0
-			? Math.min(100, ((status.credit_used_eur ?? 0) / status.credit_limit_eur) * 100)
+	const PLAN_NAME_TO_TIER: Record<string, string> = {
+		'Free Trial': PLAN_TIER.TRIAL,
+		'Pro': PLAN_TIER.PRO,
+		'Premium': PLAN_TIER.PREMIUM,
+		'Business': PLAN_TIER.TEAM,
+	};
+
+	type BillingDisplayPlan = PricingPlan & { tier: string };
+
+	function buildBillingPlans(
+		staticPlans: PricingPlan[],
+		dbPlans: AvailablePlan[],
+		currentTier: string | null
+	): BillingDisplayPlan[] {
+		return staticPlans.map((staticPlan) => {
+			const tier = PLAN_NAME_TO_TIER[staticPlan.name] ?? '';
+			const isCurrentPlan = tier === currentTier;
+			const ctaLabel = isCurrentPlan ? 'Current plan' : staticPlan.ctaLabel;
+			// Trial and Business (team): use static data entirely
+			if (tier === PLAN_TIER.TRIAL || tier === PLAN_TIER.TEAM) {
+				return { ...staticPlan, tier, ctaLabel };
+			}
+			// Pro / Premium: override price and credits from DB
+			const dbPlan = dbPlans.find((p) => p.plan_tier === tier);
+			if (dbPlan) {
+				return {
+					...staticPlan,
+					tier,
+					ctaLabel,
+					price: dbPlan.price_eur,
+					creditsHighlight: dbPlan.credits.toLocaleString(),
+				};
+			}
+			return { ...staticPlan, tier, ctaLabel };
+		});
+	}
+
+	$: teamPlans = availablePlans
+		.filter((p) => p.plan_tier === 'team')
+		.sort((a, b) => (a.seat_count ?? 0) - (b.seat_count ?? 0));
+
+	const handlePlanCta = async (tier: string) => {
+		if (tier === PLAN_TIER.TRIAL || tier === status?.plan_tier) return;
+		if (tier === PLAN_TIER.TEAM) {
+			showPlans = false;
+			if (teamPlans.length === 1) selectedSeatCount = teamPlans[0].seat_count ?? null;
+			showCreateTeam = true;
+			return;
+		}
+		// Already on a paid plan → open Stripe portal directly on the plan-change screen.
+		// Creating a new checkout session would generate a second subscription.
+		if (status?.plan_tier === PLAN_TIER.PRO || status?.plan_tier === PLAN_TIER.PREMIUM) {
+			openingPortal = true;
+			try {
+				const { url } = await getBillingPortalUpdatePlanUrl(localStorage.token);
+				window.open(url, '_blank', 'noopener,noreferrer');
+			} catch (e: any) {
+				toast.error(e?.message ?? $i18n.t('Failed to open billing portal'));
+				openingPortal = false;
+			}
+			return;
+		}
+		// Trial user → new checkout session.
+		checkingOut = true;
+		try {
+			const { url } = await createCheckoutSession(localStorage.token, tier as 'pro' | 'premium');
+			window.open(url, '_blank', 'noopener,noreferrer');
+		} catch (e: any) {
+			toast.error(e?.message ?? $i18n.t('Failed to start checkout'));
+			checkingOut = false;
+		}
+	};
+
+	$: billingPlans = buildBillingPlans(plans, availablePlans, status?.plan_tier ?? null);
+
+	$: isCreditsUser = _isCreditsUser(status?.plan_tier) && (myUsage?.credits_per_eur_cent ?? 0) > 0;
+	$: showCredits = !!status && !isInternalUser(status.plan_tier) && status.plan_tier !== null;
+
+	// What percentage of the credits balance has been consumed (0–100)
+	$: creditsUsedPercentage =
+		isCreditsUser && (myUsage?.credits_balance ?? 0) > 0
+			? Math.min(100, ((myUsage?.credits_used ?? 0) / (myUsage?.credits_balance ?? 1)) * 100)
 			: 0;
 
+	$: trialPct = creditsUsedPercentage;
 	$: trialLowBalance = trialPct >= 75;
 
+	// Format a EUR cost as either "€0.0042" or "7 cr" depending on the active display tab
+	$: formatCost = (eur: number) => {
+		if (showCredits && myUsage && myUsage.credits_per_eur_cent > 0) {
+			return `${Math.round(eur * 100 * myUsage.credits_per_eur_cent).toLocaleString()} cr`;
+		}
+		return `€${eur.toFixed(2)}`;
+	};
+
 	$: teamBudgetTotal =
-		(status?.usage_budget_eur ?? 0) + (status?.extra_credit_eur ?? 0);
+		(status?.subscription_credits ?? 0) + (status?.topup_credits ?? 0);
 	$: teamBudgetPct =
 		teamBudgetTotal > 0
-			? Math.min(100, ((status?.team_month_cost_eur ?? 0) / teamBudgetTotal) * 100)
+			? Math.min(100, (1 - (status?.credits_remaining ?? 0) / teamBudgetTotal) * 100)
 			: 0;
 	$: teamLowBalance = teamBudgetPct >= 75;
 
 	$: activeMembers = teamStatus?.members?.length ?? 0;
 	$: avgPerMember =
 		activeMembers > 0 ? (teamStatus?.team_month_cost_eur ?? 0) / activeMembers : 0;
+	$: teamCreditsUsed = Math.max(0, teamBudgetTotal - (status?.credits_remaining ?? 0));
+	$: avgCreditsPerMember = activeMembers > 0 ? Math.round(teamCreditsUsed / activeMembers) : 0;
 </script>
 
+<div
+	class="w-full flex-1 transition-width duration-200 ease-in-out {$showSidebar
+		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
+		: ''} overflow-y-auto h-screen"
+>
 <div
 	class="w-full max-w-3xl mx-auto px-4 py-8 space-y-1"
 	on:click={() => (openMenuUserId = null)}
@@ -241,12 +400,14 @@
 		</div>
 
 	{:else}
-		<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide pb-2">
-			{$i18n.t('Plan & subscription')}
-		</p>
+		<div class="pb-2">
+			<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
+				{$i18n.t('Plan & subscription')}
+			</p>
+		</div>
 
 		<!-- ===== INTERNAL ===== -->
-		{#if status.plan_tier === 'internal'}
+		{#if status.plan_tier === PLAN_TIER.INTERNAL}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4">
 					<div>
@@ -264,15 +425,21 @@
 			</div>
 
 		<!-- ===== FREE TRIAL ===== -->
-		{:else if status.plan_tier === 'trial'}
+		{:else if status.plan_tier === PLAN_TIER.TRIAL}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
 						<h2 class="text-lg font-bold">{$i18n.t('Free Trial')}</h2>
 						<div class="flex items-center gap-2 mt-1">
-							<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
-								€{status.credit_used_eur.toFixed(2)} {$i18n.t('of')} €{status.credit_limit_eur.toFixed(2)} {$i18n.t('used')}
-							</span>
+							{#if showCredits && myUsage}
+								<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									{myUsage.credits_used.toLocaleString()} {$i18n.t('of')} {myUsage.credits_balance.toLocaleString()} {$i18n.t('credits used')}
+								</span>
+							{:else}
+								<span class="text-sm {trialLowBalance ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									€{status.credit_used_eur.toFixed(2)} {$i18n.t('of')} €{status.credit_limit_eur.toFixed(2)} {$i18n.t('used')}
+								</span>
+							{/if}
 							{#if trialLowBalance}
 								<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
 									{$i18n.t('Low balance')}
@@ -281,9 +448,16 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
-						{#if teamTiers.length > 0}
+						<button
+							on:click={handlePortal}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
+						>
+							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
+						</button>
+						{#if availablePlans.length > 0}
 							<button
-								on:click={() => (showCreateTeam = true)}
+								on:click={() => (showPlans = !showPlans)}
 								class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
 							>
 								{$i18n.t('View Plans')}
@@ -300,7 +474,7 @@
 				</div>
 
 				<div class="mt-4 space-y-1.5">
-					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</div>
 					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
 						<div
 							class="h-2 rounded-full transition-all {trialLowBalance ? 'bg-red-500' : 'bg-green-500'}"
@@ -310,8 +484,10 @@
 				</div>
 
 				<p class="text-sm text-gray-500 dark:text-gray-400 mt-3">
-					{#if status.credit_remaining_eur <= 0}
+					{#if isCreditsUser && myUsage && myUsage.credits_remaining <= 0}
 						{$i18n.t('Your free exploratory credits are exhausted. Upgrade to continue using Hubgate.')}
+					{:else if isCreditsUser && myUsage}
+						{$i18n.t('You have')} <strong>{showCredits ? `${myUsage.credits_remaining.toLocaleString()} cr` : `€${status.credit_remaining_eur.toFixed(2)}`}</strong> {$i18n.t('remaining of your free exploratory credits. Upgrade to continue using Hubgate after your trial ends.')}
 					{:else}
 						{$i18n.t('You have')} <strong>€{status.credit_remaining_eur.toFixed(2)}</strong> {$i18n.t('remaining of your free exploratory credits. Upgrade to continue using Hubgate after your trial ends.')}
 					{/if}
@@ -319,16 +495,44 @@
 			</div>
 
 		<!-- ===== PAID ===== -->
-		{:else if status.plan_tier === 'paid'}
+		{:else if status.plan_tier === PLAN_TIER.PRO || status.plan_tier === PLAN_TIER.PREMIUM}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
 						<h2 class="text-lg font-bold">{$i18n.t('Pro Plan')}</h2>
 						<div class="flex items-center gap-2 mt-1">
-							<span class="text-sm text-gray-500 dark:text-gray-400">
-								€{status.current_month_cost_eur.toFixed(2)} {$i18n.t('used this month')}
-							</span>
+							{#if showCredits && myUsage}
+								<span class="text-sm {creditsUsedPercentage >= 75 ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}">
+									{myUsage.credits_used.toLocaleString()} {$i18n.t('of')} {myUsage.credits_balance.toLocaleString()} {$i18n.t('credits used')}
+								</span>
+								{#if myUsage.credits_remaining <= 0}
+									<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
+										{$i18n.t('Exhausted')}
+									</span>
+								{:else if creditsUsedPercentage >= 75}
+									<span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-medium">
+										{$i18n.t('Low balance')}
+									</span>
+								{/if}
+							{:else}
+								<span class="text-sm text-gray-500 dark:text-gray-400">
+									€{status.current_month_cost_eur.toFixed(2)} {$i18n.t('used this month')}
+								</span>
+							{/if}
 						</div>
+						{#if showCredits && myUsage}
+							<div class="mt-3 space-y-1.5">
+								<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+									<div
+										class="h-2 rounded-full transition-all {creditsUsedPercentage >= 75 ? 'bg-red-500' : 'bg-green-500'}"
+										style="width: {creditsUsedPercentage}%"
+									></div>
+								</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">
+									{myUsage.credits_remaining.toLocaleString()} {$i18n.t('credits remaining')}
+								</div>
+							</div>
+						{/if}
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
 						<button
@@ -338,14 +542,14 @@
 						>
 							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
 						</button>
-						{#if teamTiers.length > 0}
-							<button
-								on:click={() => (showCreateTeam = true)}
-								class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
-							>
-								{$i18n.t('Start a Team')}
-							</button>
-						{/if}
+					{#if availablePlans.length > 0}
+						<button
+							on:click={() => (showPlans = !showPlans)}
+							class="px-4 py-2 rounded-full text-sm bg-blue-600 text-white hover:bg-blue-700 transition font-medium"
+						>
+							{$i18n.t('View Plans')}
+						</button>
+					{/if}
 					</div>
 				</div>
 
@@ -357,16 +561,66 @@
 			</div>
 
 		<!-- ===== TEAM OWNER ===== -->
-		{:else if status.plan_tier === 'team'}
+		{:else if status.plan_tier === PLAN_TIER.TEAM}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
-						<h2 class="text-lg font-bold">{$i18n.t('Team Subscription')}</h2>
+						{#if editingTeamName}
+							<div class="flex items-center gap-2">
+								<input
+									bind:value={editingTeamNameValue}
+									on:keydown={(e) => { if (e.key === 'Enter') handleSaveTeamName(); else if (e.key === 'Escape') editingTeamName = false; }}
+									class="text-lg font-bold bg-transparent border-b border-gray-400 dark:border-gray-500 outline-none w-56"
+									autofocus
+								/>
+								<button
+									on:click={handleSaveTeamName}
+									disabled={savingTeamName}
+									class="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+								>
+									{savingTeamName ? $i18n.t('Saving...') : $i18n.t('Save')}
+								</button>
+								<button
+									on:click={() => (editingTeamName = false)}
+									class="text-xs text-gray-500 dark:text-gray-400 hover:underline"
+								>
+									{$i18n.t('Cancel')}
+								</button>
+							</div>
+						{:else}
+							<div class="flex items-center gap-2">
+								<h2 class="text-lg font-bold">{teamStatus?.name ?? $i18n.t('Team Subscription')}</h2>
+								{#if teamStatus}
+									<button
+										on:click={() => { editingTeamNameValue = teamStatus?.name ?? ''; editingTeamName = true; }}
+										class="rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200"
+										title={$i18n.t('Edit team name')}
+									>
+										<Pencil className="size-4" />
+									</button>
+								{/if}
+							</div>
+						{/if}
 						<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
 							{$i18n.t("Your team is on a shared usage plan. Each member's activity is tracked individually.")}
 						</p>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
+						{#if (status.seat_used ?? 0) < (status.seat_limit ?? 0)}
+							<button
+								on:click|stopPropagation={() => (showInviteModal = true)}
+								class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
+							>
+								{$i18n.t('Invite Member')}
+							</button>
+						{/if}
+						<button
+							on:click={handleTeamPortalUpdatePlan}
+							disabled={openingPortal}
+							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
+						>
+							{$i18n.t('Change Seats')}
+						</button>
 						<button
 							on:click={handleTeamPortal}
 							disabled={openingPortal}
@@ -387,9 +641,9 @@
 
 				<!-- Usage bar -->
 				<div class="mt-4 space-y-1.5">
-					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credit used')}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{teamCreditsUsed.toLocaleString()} / {teamBudgetTotal.toLocaleString()} {$i18n.t('credits used')}</div>
 					<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
-						{#if status.usage_budget_eur}
+						{#if status.subscription_credits}
 							<div
 								class="h-2 rounded-full transition-all {teamLowBalance ? 'bg-red-500' : 'bg-green-500'}"
 								style="width: {teamBudgetPct}%"
@@ -403,16 +657,16 @@
 				<!-- Stats row -->
 				<div class="mt-4 grid grid-cols-3 gap-4">
 					<div>
-						<div class="text-xl font-bold">€{(status.team_month_cost_eur ?? 0).toFixed(2)}</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Usage this month')}</div>
+						<div class="text-xl font-bold">{teamCreditsUsed.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</div>
 					</div>
 					<div>
-						<div class="text-xl font-bold">{activeMembers}</div>
+						<div class="text-xl font-bold">{(status.credits_remaining ?? 0).toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Credits remaining')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{activeMembers} / {status.seat_limit ?? 0}</div>
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Active members')}</div>
-					</div>
-					<div>
-						<div class="text-xl font-bold">€{avgPerMember.toFixed(2)}</div>
-						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Avg per member')}</div>
 					</div>
 				</div>
 
@@ -424,7 +678,7 @@
 			</div>
 
 		<!-- ===== TEAM MEMBER ===== -->
-		{:else if status.plan_tier === 'team_member'}
+		{:else if status.plan_tier === PLAN_TIER.TEAM_MEMBER}
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6">
 				<div class="flex items-start justify-between gap-4 flex-wrap">
 					<div>
@@ -437,24 +691,66 @@
 					</div>
 				</div>
 
-				{#if status.usage_budget_eur}
-					{@const total = (status.usage_budget_eur ?? 0) + (status.extra_credit_eur ?? 0)}
-					{@const pct = total > 0 ? Math.min(100, (1 - (status.usage_budget_remaining_eur ?? 0) / total) * 100) : 0}
+			{#if status.subscription_credits}
+				{@const total = (status.subscription_credits ?? 0) + (status.topup_credits ?? 0)}
+				{@const rate = myUsage?.credits_per_eur_cent ?? 0}
+				{@const myCredits = Math.round(status.current_month_cost_eur * 100 * rate)}
+				{@const teamRemaining = status.credits_remaining ?? 0}
+				{@const restUsed = Math.max(0, total - myCredits - teamRemaining)}
+				{@const myPct = total > 0 ? Math.min(100, (myCredits / total) * 100) : 0}
+				{@const restPct = total > 0 ? Math.min(100 - myPct, (restUsed / total) * 100) : 0}
+				{@const overallPct = total > 0 ? Math.min(100, ((total - teamRemaining) / total) * 100) : 0}
+				{@const critical = overallPct >= 75}
 					<div class="mt-4 space-y-1.5">
 						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Team budget used')}</div>
-						<div class="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2">
+						<div class="relative w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2 overflow-hidden flex">
 							<div
-								class="h-2 rounded-full transition-all {pct >= 75 ? 'bg-red-500' : 'bg-green-500'}"
-								style="width: {pct}%"
+								class="h-2 transition-all {critical ? 'bg-red-500' : 'bg-green-500'}"
+								style="width: {myPct}%"
+							></div>
+							<div
+								class="h-2 transition-all {critical ? 'bg-red-200 dark:bg-red-900' : 'bg-green-200 dark:bg-green-900'}"
+								style="width: {restPct}%"
 							></div>
 						</div>
+						<!-- Legend -->
+						<div class="flex items-center gap-3 pt-0.5">
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full {critical ? 'bg-red-500' : 'bg-green-500'}"></span>
+								{$i18n.t('You')}
+							</span>
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full {critical ? 'bg-red-200 dark:bg-red-900' : 'bg-green-200 dark:bg-green-900'}"></span>
+								{$i18n.t('Rest of team')}
+							</span>
+							<span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+								<span class="inline-block w-2 h-2 rounded-full bg-gray-200 dark:bg-gray-700"></span>
+								{$i18n.t('Unused')}
+							</span>
+						</div>
 					</div>
-				{/if}
 
+				<!-- Stats row -->
+				<div class="mt-4 grid grid-cols-3 gap-4">
+					<div>
+						<div class="text-xl font-bold">{myCredits.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{restUsed.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Rest of team')}</div>
+					</div>
+					<div>
+						<div class="text-xl font-bold">{teamRemaining.toLocaleString()}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Unused')}</div>
+					</div>
+				</div>
+			{:else}
 				<div class="mt-4">
-					<div class="text-xl font-bold">€{status.current_month_cost_eur.toFixed(2)}</div>
+					<div class="text-xl font-bold">{Math.round(status.current_month_cost_eur * 100 * (myUsage?.credits_per_eur_cent ?? 0)).toLocaleString()}</div>
 					<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Your usage this month')}</div>
 				</div>
+			{/if}
 
 				{#if status.subscription_status === 'past_due' || status.subscription_status === 'canceled'}
 					<div class="mt-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
@@ -469,6 +765,35 @@
 			</div>
 		{/if}
 
+		<!-- ===== VIEW PLANS ===== -->
+		{#if showPlans && status && (status.plan_tier === PLAN_TIER.TRIAL || status.plan_tier === PLAN_TIER.PRO || status.plan_tier === PLAN_TIER.PREMIUM)}
+			<div class="pt-6">
+				<div class="flex items-center justify-between pb-3">
+					<p class="text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wide">
+						{$i18n.t('Choose your plan')}
+					</p>
+					<button
+						on:click={() => (showPlans = false)}
+						aria-label={$i18n.t('Close')}
+						class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+					{#each billingPlans as bp}
+						<HgPricingCard
+							plan={bp}
+							disabled={bp.tier === PLAN_TIER.TRIAL || bp.tier === status.plan_tier}
+							on:cta={() => handlePlanCta(bp.tier)}
+						/>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		<!-- ===== PER-MODEL BREAKDOWN ===== -->
 		{#if modelBreakdown && modelBreakdown.models.length > 0}
 			<div class="pt-6">
@@ -480,21 +805,21 @@
 						<div class="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 last:border-b-0">
 							<span class="text-sm font-medium">{m.model}</span>
 							<div class="flex items-center gap-4">
-								<span class="text-sm font-semibold">€{m.cost.toFixed(2)}</span>
+								<span class="text-sm font-semibold">{formatCost(m.cost)}</span>
 								<span class="text-xs text-gray-400 dark:text-gray-500 w-8 text-right">{m.pct}%</span>
 							</div>
 						</div>
 					{/each}
 					<div class="flex items-center justify-between px-5 py-3.5 bg-gray-50 dark:bg-gray-800/50">
 						<span class="text-sm font-medium">{$i18n.t('Total spent')} – {modelBreakdown.month}</span>
-						<span class="text-sm font-bold">€{modelBreakdown.total.toFixed(2)}</span>
+						<span class="text-sm font-bold">{formatCost(modelBreakdown.total)}</span>
 					</div>
 				</div>
 			</div>
 		{/if}
 
 		<!-- ===== TEAM LEADERBOARD (team owner only) ===== -->
-		{#if status.plan_tier === 'team' && teamStatus}
+		{#if status.plan_tier === PLAN_TIER.TEAM && teamStatus}
 			<div class="pt-6">
 				<div class="flex items-center justify-between pb-3">
 					<p class="text-xs text-gray-400 dark:text-gray-500 font-medium">
@@ -521,7 +846,7 @@
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Role')}</th>
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Status')}</th>
 								<th class="text-left px-3 py-3 text-xs font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">{$i18n.t('Models Used')}</th>
-								<th class="text-right px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Total spend')}</th>
+								<th class="text-right px-5 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Credits used')}</th>
 								<th class="px-3 py-3"></th>
 							</tr>
 						</thead>
@@ -539,7 +864,7 @@
 											</div>
 										</div>
 									</td>
-									<td class="px-3 py-3">
+									<td class="px-3 py-3 w-20 whitespace-nowrap">
 										{#if member.role === 'owner'}
 											<span class="text-xs px-2 py-0.5 rounded-full bg-gray-900 text-white dark:bg-white dark:text-gray-900 font-medium">
 												{$i18n.t('Admin')}
@@ -550,7 +875,7 @@
 											</span>
 										{/if}
 									</td>
-									<td class="px-3 py-3">
+									<td class="px-3 py-3 w-20 whitespace-nowrap">
 										<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-medium">
 											{$i18n.t('Active')}
 										</span>
@@ -561,7 +886,7 @@
 										</span>
 									</td>
 									<td class="px-5 py-3 text-right font-semibold">
-										€{member.current_month_cost_eur.toFixed(2)}
+										{Math.round(member.current_month_cost_eur * 100 * (status?.credits_per_eur_cent ?? 0)).toLocaleString()}
 									</td>
 									<td class="px-3 py-3 relative">
 										{#if member.role !== 'owner'}
@@ -615,7 +940,7 @@
 									<td class="px-3 py-3 hidden md:table-cell">
 										<span class="text-xs text-gray-400">–</span>
 									</td>
-									<td class="px-5 py-3 text-right font-semibold text-gray-400">€0.00</td>
+									<td class="px-5 py-3 text-right font-semibold text-gray-400">0</td>
 									<td class="px-3 py-3"></td>
 								</tr>
 							{/each}
@@ -625,6 +950,7 @@
 			</div>
 		{/if}
 	{/if}
+</div>
 </div>
 
 <!-- ===== INVITE MODAL ===== -->
@@ -715,18 +1041,24 @@
 			<div class="space-y-1.5">
 				<div class="text-sm font-medium">{$i18n.t('Seat plan')}</div>
 				<div class="space-y-2">
-					{#each [...teamTiers].sort((a, b) => a.seat_count - b.seat_count) as tier}
+					{#each teamPlans as plan}
 						<button
-							on:click={() => (selectedSeatCount = tier.seat_count)}
+							on:click={() => (selectedSeatCount = plan.seat_count ?? 0)}
 							class="w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition
-								{selectedSeatCount === tier.seat_count
+								{selectedSeatCount === plan.seat_count
 									? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
 									: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'}"
 						>
-							<div class="text-sm font-medium">{tier.seat_count} {$i18n.t('seats')}</div>
-							<div class="text-sm font-semibold">€{tier.price_eur.toFixed(0)}/mo</div>
+							<div class="text-left">
+								<div class="text-sm font-medium">{plan.seat_count} {$i18n.t('seats')}</div>
+								<div class="text-xs text-gray-500 dark:text-gray-400">{plan.credits.toLocaleString()} {$i18n.t('credits/mo')}</div>
+							</div>
+							<div class="text-sm font-semibold">€{plan.price_eur.toFixed(0)}/mo</div>
 						</button>
 					{/each}
+					{#if teamPlans.length === 0}
+						<p class="text-sm text-gray-400 text-center py-2">{$i18n.t('No team plans available.')}</p>
+					{/if}
 				</div>
 			</div>
 
@@ -776,6 +1108,39 @@
 			{#if toppingUp}
 				<div class="text-center text-sm text-gray-400 animate-pulse">{$i18n.t('Redirecting to checkout...')}</div>
 			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- ===== REMOVE MEMBER CONFIRM ===== -->
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && pendingRemoveUserId) { pendingRemoveUserId = null; pendingRemoveName = null; } }} />
+{#if pendingRemoveUserId}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+		on:click|self={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}
+		role="dialog"
+		aria-modal="true"
+		tabindex="-1"
+	>
+		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+			<h2 class="font-semibold text-base">{$i18n.t('Remove team member?')}</h2>
+			<p class="text-sm text-gray-500 dark:text-gray-400">
+				{$i18n.t('{{name}} will lose access to the team immediately.', { name: pendingRemoveName ?? '' })}
+			</p>
+			<div class="flex gap-2">
+				<button
+					on:click={confirmRemoveMember}
+					class="flex-1 py-2.5 rounded-lg text-sm bg-red-600 text-white hover:bg-red-700 transition font-medium"
+				>
+					{$i18n.t('Remove')}
+				</button>
+				<button
+					on:click={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}
+					class="flex-1 py-2.5 rounded-lg text-sm border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium"
+				>
+					{$i18n.t('Cancel')}
+				</button>
+			</div>
 		</div>
 	</div>
 {/if}

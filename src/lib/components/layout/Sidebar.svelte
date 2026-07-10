@@ -7,7 +7,6 @@
 		user,
 		chats,
 		settings,
-		showSettings,
 		chatId,
 		tags,
 		folders as _folders,
@@ -25,7 +24,8 @@
 		isApp,
 		models,
 		selectedFolder,
-		WEBUI_NAME
+		WEBUI_NAME,
+		billingStatus
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
@@ -41,6 +41,7 @@
 		importChat
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
+	import { isInternalUser } from '$lib/billing/planTiers';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -51,7 +52,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
-	import { getMyLangfuseUsage, type MyUsage } from '$lib/apis/langfuse';
+	import { getMyUsage, type MyUsage } from '$lib/apis/billing';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
 	import PencilSquare from '../icons/PencilSquare.svelte';
@@ -78,10 +79,16 @@
 	let myUsage: MyUsage | null = null;
 	let myUsageLoading = true;
 
-	const loadMyUsage = async () => {
+	const loadMyUsage = async ({ retryIfEmpty = false } = {}) => {
 		myUsageLoading = true;
 		try {
-			myUsage = await getMyLangfuseUsage(localStorage.token);
+			myUsage = await getMyUsage(localStorage.token);
+			// ledger_ready is false when the poller hasn't completed its first sync yet.
+			// Retry after 30s so the sidebar populates without waiting the full 5-minute poll interval.
+			if (retryIfEmpty && myUsage && !myUsage.ledger_ready) {
+				if (usageRetryTimer) clearTimeout(usageRetryTimer);
+				usageRetryTimer = setTimeout(() => loadMyUsage({ retryIfEmpty: true }), 30 * 1000);
+			}
 		} catch {
 			myUsage = null;
 		} finally {
@@ -89,24 +96,15 @@
 		}
 	};
 
-	let lastChatUpdate: string | null = null;
-	let usageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-
-	$: {
-		const latest = ($chats as any[])?.[0]?.updated_at ?? null;
-		if (latest && latest !== lastChatUpdate) {
-			lastChatUpdate = latest;
-			if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
-			usageRefreshTimer = setTimeout(loadMyUsage, 5000);
-		}
-	}
+	let usagePollingInterval: ReturnType<typeof setInterval> | null = null;
+	let usageRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: myUsageTooltip = myUsage
 		? (() => {
 				const monthName = new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', {
 					month: 'long'
 				});
-				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div><div>Estimated cost: €${myUsage.total_cost.toFixed(2)}</div></div>`;
+				return `<div class="text-left space-y-0.5"><div class="font-semibold mb-1">${monthName} ${myUsage.year}</div><div>Total tokens: ${myUsage.total_tokens.toLocaleString()}</div></div>`;
 			})()
 		: '';
 
@@ -380,7 +378,8 @@
 	let unsubscribers = [];
 	onMount(async () => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
-		loadMyUsage();
+		loadMyUsage({ retryIfEmpty: true });
+		usagePollingInterval = setInterval(loadMyUsage, 5 * 60 * 1000);
 		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
 		unsubscribers = [
@@ -465,7 +464,8 @@
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 
-		if (usageRefreshTimer) clearTimeout(usageRefreshTimer);
+		if (usagePollingInterval) clearInterval(usagePollingInterval);
+		if (usageRetryTimer) clearTimeout(usageRetryTimer);
 	});
 
 	const newChatHandler = async () => {
@@ -1270,12 +1270,30 @@
 											tippyOptions={{ allowHTML: true }}
 										>
 											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
-												{$i18n.t('This month')}:
-												<span class="font-medium text-gray-700 dark:text-gray-300"
-													>€{myUsage.total_cost.toFixed(2)}</span
-												>
+												{#if isInternalUser($billingStatus?.plan_tier)}
+													{$i18n.t('This month')}:
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
+													>
+												{:else if $billingStatus?.plan_tier === 'team' || $billingStatus?.plan_tier === 'team_member'}
+													{$i18n.t('Your usage')}:
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>{(myUsage.credits_used ?? 0).toLocaleString()} {$i18n.t('cr')}</span
+													>
+												{:else}
+													{$i18n.t('This month')}:
+													<span class="font-medium text-gray-700 dark:text-gray-300"
+														>{myUsage.credits_used ?? 0} / {myUsage.credits_balance}
+														{$i18n.t('credits')}</span
+													>
+												{/if}
 											</div>
 										</Tooltip>
+										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && $billingStatus?.credits_remaining !== undefined}
+											<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
+												{$i18n.t('Left in pool')}: <span class="font-medium text-gray-700 dark:text-gray-300">{($billingStatus.credits_remaining).toLocaleString()} {$i18n.t('cr')}</span>
+											</div>
+										{/if}
 									{:else}
 										<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
 											{$i18n.t('Usage unavailable')}

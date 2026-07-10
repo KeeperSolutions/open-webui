@@ -30,8 +30,7 @@ class StripeBilling(Base):
 
     subscription_status = Column(Text, nullable=True)  # active | past_due | canceled | incomplete
     free_tier_credit_applied = Column(Boolean, default=False, nullable=False)
-    plan_tier = Column(Text, nullable=True)  # internal | trial | paid | team | team_member
-    checkout_session_id = Column(Text, nullable=True)
+    plan_tier = Column(Text, nullable=True)  # internal | trial | pro | premium | team | team_member
     team_id = Column(Text, nullable=True)  # set for plan_tier "team" and "team_member"
 
     created_at = Column(BigInteger, nullable=False)
@@ -51,8 +50,7 @@ class StripeBillingModel(BaseModel):
 
     subscription_status: Optional[str] = None
     free_tier_credit_applied: bool = False
-    plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member
-    checkout_session_id: Optional[str] = None
+    plan_tier: Optional[str] = None  # internal | trial | pro | premium | team | team_member
     team_id: Optional[str] = None
 
     created_at: int
@@ -70,11 +68,6 @@ class StripeBillingTable:
             row = db.query(StripeBilling).filter_by(user_id=user_id).first()
             return StripeBillingModel.model_validate(row) if row else None
 
-    def get_by_checkout_session_id(self, session_id: str) -> Optional[StripeBillingModel]:
-        with get_db() as db:
-            row = db.query(StripeBilling).filter_by(checkout_session_id=session_id).first()
-            return StripeBillingModel.model_validate(row) if row else None
-
     def get_by_customer_id(self, customer_id: str) -> Optional[StripeBillingModel]:
         with get_db() as db:
             row = db.query(StripeBilling).filter_by(stripe_customer_id=customer_id).first()
@@ -90,7 +83,6 @@ class StripeBillingTable:
         subscription_status: Optional[str] = None,
         free_tier_credit_applied: Optional[bool] = None,
         plan_tier: Optional[str] = None,
-        checkout_session_id: Optional[str] = None,
         team_id: Optional[str] = None,
     ) -> StripeBillingModel:
         with get_db() as db:
@@ -107,7 +99,6 @@ class StripeBillingTable:
                     subscription_status=subscription_status,
                     free_tier_credit_applied=free_tier_credit_applied or False,
                     plan_tier=plan_tier,
-                    checkout_session_id=checkout_session_id,
                     team_id=team_id,
                     created_at=now,
                     updated_at=now,
@@ -126,8 +117,6 @@ class StripeBillingTable:
                     row.subscription_status = subscription_status
                 if plan_tier is not None:
                     row.plan_tier = plan_tier
-                if checkout_session_id is not None:
-                    row.checkout_session_id = checkout_session_id
                 if free_tier_credit_applied is not None:
                     row.free_tier_credit_applied = free_tier_credit_applied
                 if team_id is not None:
@@ -195,13 +184,8 @@ class Team(Base):
 
     subscription_status = Column(Text, nullable=True)
     seat_limit = Column(Integer, nullable=False, default=5)
-    checkout_session_id = Column(Text, nullable=True)
-    topup_checkout_session_id = Column(Text, nullable=True)
-
-    # Usage budget included with the flat subscription
-    monthly_usage_budget_eur = Column(Float, nullable=False, default=0.0)
-    # Extra credits purchased via top-up; owner can buy more when budget is exhausted
-    extra_usage_credit_eur = Column(Float, nullable=False, default=0.0)
+    # How many subscription credits this plan includes per month (display only; authoritative value is in credit_balances)
+    monthly_credits = Column(Integer, nullable=False, default=0)
 
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
@@ -221,11 +205,7 @@ class TeamModel(BaseModel):
 
     subscription_status: Optional[str] = None
     seat_limit: int = 5
-    checkout_session_id: Optional[str] = None
-    topup_checkout_session_id: Optional[str] = None
-
-    monthly_usage_budget_eur: float = 0.0
-    extra_usage_credit_eur: float = 0.0
+    monthly_credits: int = 0
 
     created_at: int
     updated_at: int
@@ -237,7 +217,7 @@ class TeamsTable:
         name: str,
         owner_user_id: str,
         seat_limit: int,
-        monthly_usage_budget_eur: float = 0.0,
+        monthly_credits: int = 0,
     ) -> TeamModel:
         with get_db() as db:
             now = int(time.time())
@@ -246,8 +226,7 @@ class TeamsTable:
                 name=name,
                 owner_user_id=owner_user_id,
                 seat_limit=seat_limit,
-                monthly_usage_budget_eur=monthly_usage_budget_eur,
-                extra_usage_credit_eur=0.0,
+                monthly_credits=monthly_credits,
                 created_at=now,
                 updated_at=now,
             )
@@ -264,11 +243,6 @@ class TeamsTable:
     def get_by_owner_user_id(self, user_id: str) -> Optional[TeamModel]:
         with get_db() as db:
             row = db.query(Team).filter_by(owner_user_id=user_id).first()
-            return TeamModel.model_validate(row) if row else None
-
-    def get_by_checkout_session_id(self, session_id: str) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(checkout_session_id=session_id).first()
             return TeamModel.model_validate(row) if row else None
 
     def get_by_customer_id(self, customer_id: str) -> Optional[TeamModel]:
@@ -305,29 +279,6 @@ class TeamsTable:
             )
             db.commit()
             return updated > 0
-
-    def add_usage_credit(self, team_id: str, amount_eur: float) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(id=team_id).first()
-            if not row:
-                return None
-            row.extra_usage_credit_eur = (row.extra_usage_credit_eur or 0.0) + amount_eur
-            row.updated_at = int(time.time())
-            db.commit()
-            db.refresh(row)
-            return TeamModel.model_validate(row)
-
-    def reset_extra_credit(self, team_id: str) -> None:
-        with get_db() as db:
-            db.query(Team).filter_by(id=team_id).update(
-                {"extra_usage_credit_eur": 0.0, "updated_at": int(time.time())}
-            )
-            db.commit()
-
-    def get_by_topup_checkout_session_id(self, session_id: str) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(topup_checkout_session_id=session_id).first()
-            return TeamModel.model_validate(row) if row else None
 
 
 Teams = TeamsTable()

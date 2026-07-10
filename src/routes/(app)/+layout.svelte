@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, onDestroy, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -13,7 +13,8 @@
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
 	import { getUserSettings } from '$lib/apis/users';
-	import { getBillingStatus, type BillingStatus } from '$lib/apis/billing';
+	import { getBillingStatus, getMyUsage, type BillingStatus } from '$lib/apis/billing';
+	import { PLAN_TIER } from '$lib/billing/planTiers';
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -35,7 +36,9 @@
 		temporaryChatEnabled,
 		toolServers,
 		showSearch,
-		showSidebar
+		showSidebar,
+		billingStatus as billingStatusStore,
+		myUsage as myUsageStore
 	} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
@@ -47,6 +50,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { shouldShowTrustminderFeedback } from '$lib/utils/featureGates';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
+	import CreditsExhaustedModal from '$lib/components/billing/CreditsExhaustedModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -60,16 +64,25 @@
 	};
 	let billingStatus: BillingStatus | null = null;
 	let showPastDueBanner = false;
+	let showCreditsExhaustedModal = false;
 
 	const checkBillingStatus = async () => {
 		if (!($config?.features?.enable_billing ?? false)) return;
-		if ($user?.role === 'admin') return;
 		try {
 			billingStatus = await getBillingStatus(localStorage.token);
+			billingStatusStore.set(billingStatus);
 			const isPastDue = billingStatus?.subscription_status === 'past_due';
-			const isCreditExhausted =
-				billingStatus?.plan_tier === 'trial' && (billingStatus?.credit_remaining_eur ?? 1) <= 0;
-			showPastDueBanner = isPastDue || isCreditExhausted;
+			const isInternal = billingStatus?.plan_tier === PLAN_TIER.INTERNAL;
+			showPastDueBanner = isPastDue && !isInternal;
+			const capturedStatus = billingStatus;
+			getMyUsage(localStorage.token)
+				.then((u) => {
+					myUsageStore.set(u);
+					const isTrialExhausted =
+						capturedStatus?.plan_tier === PLAN_TIER.TRIAL && (u?.credits_remaining ?? 1) <= 0;
+					if (isTrialExhausted && !isInternal) showPastDueBanner = true;
+				})
+				.catch(() => {});
 		} catch {
 			// Billing unavailable — don't block the user
 		}
@@ -171,6 +184,10 @@
 		if (!['user', 'admin'].includes($user?.role)) {
 			return;
 		}
+
+		const onCreditsExhausted = () => { showCreditsExhaustedModal = true; };
+		window.addEventListener('billing:credits_exhausted', onCreditsExhausted);
+		onDestroy(() => window.removeEventListener('billing:credits_exhausted', onCreditsExhausted));
 
 		clearChatInputStorage();
 		await Promise.all([
@@ -408,12 +425,12 @@
 
 				{#if showPastDueBanner}
 					<div
-						class="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-4 bg-red-600 text-white px-4 py-2.5 text-sm"
+						class="fixed top-0 left-0 md:left-[var(--sidebar-width)] right-0 z-50 flex items-center justify-between gap-4 bg-red-500 text-white px-4 py-2.5 text-sm"
 					>
 						<span>
-							{#if billingStatus?.plan_tier === 'trial'}
+							{#if billingStatus?.plan_tier === PLAN_TIER.TRIAL}
 								{$i18n.t('Your trial credit is used up. Please')}
-								<a href="/billing" class="underline font-semibold hover:opacity-80">
+								<a href="/billing?plans=1" class="underline font-semibold hover:opacity-80">
 									{$i18n.t('upgrade your plan')}
 								</a>
 								{$i18n.t('to continue.')}
@@ -433,8 +450,7 @@
 							✕
 						</button>
 					</div>
-					<!-- Push content below the banner -->
-					<div class="h-10 w-full shrink-0"></div>
+
 				{/if}
 
 				<Sidebar />
@@ -453,6 +469,10 @@
 			{/if}
 		</div>
 	</div>
+{/if}
+
+{#if showCreditsExhaustedModal}
+	<CreditsExhaustedModal on:close={() => (showCreditsExhaustedModal = false)} />
 {/if}
 
 <style>

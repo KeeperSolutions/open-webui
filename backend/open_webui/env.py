@@ -88,8 +88,6 @@ if "cuda_error" in locals():
 SRC_LOG_LEVELS = {}  # Legacy variable, do not remove
 
 WEBUI_NAME = os.environ.get("WEBUI_NAME", "Open WebUI")
-if WEBUI_NAME != "Open WebUI":
-    WEBUI_NAME += " (Open WebUI)"
 
 WEBUI_FAVICON_URL = "https://openwebui.com/favicon.png"
 
@@ -550,9 +548,7 @@ if LICENSE_PUBLIC_KEY:
 -----BEGIN PUBLIC KEY-----
 {LICENSE_PUBLIC_KEY}
 -----END PUBLIC KEY-----
-""".encode(
-            "utf-8"
-        )
+""".encode("utf-8")
     )
 
 
@@ -744,9 +740,15 @@ else:
 
 # SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s.
 # None (keepalives disabled) when sock_read < 4 — interval would be 0 and busy-loop.
-_sse_keepalive_base = AIOHTTP_CLIENT_TIMEOUT_SOCK_READ if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None else 60
+_sse_keepalive_base = (
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
+    if AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None
+    else 60
+)
 _sse_keepalive_raw = _sse_keepalive_base // 4
-SSE_KEEPALIVE_INTERVAL = min(_sse_keepalive_raw, 20) if _sse_keepalive_raw >= 1 else None
+SSE_KEEPALIVE_INTERVAL = (
+    min(_sse_keepalive_raw, 20) if _sse_keepalive_raw >= 1 else None
+)
 _sse_keepalive_source = (
     "derived from default 60s"
     if _sock_read_source in ("default", "disabled")
@@ -967,8 +969,9 @@ EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
 BILLING_ENABLED = os.environ.get("BILLING_ENABLED", "false").lower() == "true"
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID = os.environ.get("STRIPE_PRICE_ID", "")  # €45/month flat subscription price
-STRIPE_FREE_TIER_CENTS = int(os.environ.get("STRIPE_FREE_TIER_CENTS", "200"))  # €2.00 trial credit
+STRIPE_FREE_TIER_CENTS = int(
+    os.environ.get("STRIPE_FREE_TIER_CENTS", "200")
+)  # €2.00 trial credit
 BILLING_GRACE_PERIOD_DAYS = int(os.environ.get("BILLING_GRACE_PERIOD_DAYS", "3"))
 
 # Comma-separated list of email domains considered internal (e.g. "keepersolutions.com")
@@ -977,22 +980,32 @@ INTERNAL_EMAIL_DOMAINS = [
     for d in os.environ.get("INTERNAL_EMAIL_DOMAINS", "").split(",")
     if d.strip()
 ]
+
+# Comma-separated list of specific emails that should have unlimited credits
+# (in addition to internal domains). Example: "user126@gmail.com,another@example.com"
+UNLIMITED_USER_EMAILS: set[str] = {
+    e.strip().lower()
+    for e in os.environ.get("UNLIMITED_USER_EMAILS", "").split(",")
+    if e.strip()
+}
 TRIAL_CREDIT_EUR = float(os.environ.get("TRIAL_CREDIT_EUR", "2.0"))
+
+# Days of Langfuse observation history to import on first deploy (when usage_ledger is empty).
+# After first sync the DB watermark takes over and this var is no longer consulted.
+try:
+    LEDGER_BOOTSTRAP_DAYS = int(os.environ.get("LEDGER_BOOTSTRAP_DAYS", "30"))
+except ValueError:
+    LEDGER_BOOTSTRAP_DAYS = 30
 
 # JSON mapping seat count → {price_id, price_eur, usage_budget_eur}
 # e.g. '{"5": {"price_id": "price_abc", "price_eur": 150, "usage_budget_eur": 250}}'
 import json as _json
+
 try:
     STRIPE_TEAM_TIERS: dict = _json.loads(os.environ.get("STRIPE_TEAM_TIERS", "{}"))
 except (ValueError, TypeError):
     STRIPE_TEAM_TIERS: dict = {}
 
-# JSON list of one-time top-up options: [{price_id, amount_eur}, ...]
-# e.g. '[{"price_id": "price_topup50", "amount_eur": 50}, {"price_id": "price_topup100", "amount_eur": 100}]'
-try:
-    STRIPE_TOPUP_AMOUNTS: list = _json.loads(os.environ.get("STRIPE_TOPUP_AMOUNTS", "[]"))
-except (ValueError, TypeError):
-    STRIPE_TOPUP_AMOUNTS: list = []
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
 SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
@@ -1000,4 +1013,9 @@ SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM_EMAIL: str = os.environ.get("SMTP_FROM_EMAIL", "")
-SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Keeper AI Gateway")
+SMTP_FROM_NAME: str = os.environ.get("SMTP_FROM_NAME", "Hubgate")
+SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() not in (
+    "false",
+    "0",
+    "no",
+)

@@ -231,6 +231,22 @@ async def update_config(
     request: Request, form_data: OpenAIConfigForm, user=Depends(get_admin_user)
 ):
     request.app.state.config.ENABLE_OPENAI_API = form_data.ENABLE_OPENAI_API
+
+    # Warn when a non-empty stored key is about to be replaced with a blank one.
+    # This helps diagnose intermittent connection loss.
+    existing_urls: list[str] = list(request.app.state.config.OPENAI_API_BASE_URLS)
+    existing_keys: list[str] = list(request.app.state.config.OPENAI_API_KEYS)
+    existing_key_by_url = dict(zip(existing_urls, existing_keys))
+    for idx, (url, new_key) in enumerate(
+        zip(form_data.OPENAI_API_BASE_URLS, form_data.OPENAI_API_KEYS)
+    ):
+        old_key = existing_key_by_url.get(url, "")
+        if old_key and not new_key:
+            log.warning(
+                f"[openai] update_config: key for URL[{idx}] is being "
+                f"cleared (was non-empty). Caller: user={user.id}"
+            )
+
     request.app.state.config.OPENAI_API_BASE_URLS = form_data.OPENAI_API_BASE_URLS
     request.app.state.config.OPENAI_API_KEYS = form_data.OPENAI_API_KEYS
 

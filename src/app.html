@@ -111,7 +111,7 @@
 			})();
 		</script>
 
-		<title>Keeper AI Gateway</title>
+		<title>Hubgate</title>
 
 		%sveltekit.head%
 
@@ -127,7 +127,9 @@
 				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-4MRPG904MH';
 				document.head.appendChild(s);
 				window.dataLayer = window.dataLayer || [];
-				function gtag() { dataLayer.push(arguments); }
+				function gtag() {
+					dataLayer.push(arguments);
+				}
 				gtag('js', new Date());
 				gtag('config', 'G-4MRPG904MH');
 			})();
