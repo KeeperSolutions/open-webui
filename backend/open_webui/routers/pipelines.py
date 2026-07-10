@@ -126,7 +126,16 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             # Per-request override from features.pii_masking takes precedence over the
             # stored user setting, allowing the per-chat toggle to control masking without
             # writing back to the DB.
+            #
+            # metadata.features coupling: the main chat-completion path sends `features`
+            # at the top level of the payload, but background task payloads (built in
+            # tasks.py from request.state.metadata) carry the per-chat toggle under
+            # metadata.features instead. Fall back to metadata.features so task payloads
+            # (title/tags/follow_ups/...) honour the per-chat toggle too. Top-level wins
+            # when present.
             features = payload.get("features")
+            if not isinstance(features, dict):
+                features = (payload.get("metadata") or {}).get("features")
             request_pii = features.get("pii_masking") if isinstance(features, dict) else None
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}

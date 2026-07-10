@@ -41,43 +41,94 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _report_task_usage(
+async def _report_task_usage_and_restore(
     request,
     user,
     payload: dict,
     response,
     models: dict,
-) -> None:
-    """Report task LLM usage to the pipeline outlet so Langfuse records it."""
+):
+    """Run the pipeline outlet on a background-task completion.
+
+    A single outlet call serves two purposes:
+
+      1. Langfuse usage reporting — the pipeline outlet records token usage as a
+         side-effect (unchanged intent from the original _report_task_usage: usage
+         is attached to the assistant message when present).
+      2. PII restore — task payloads are PII-masked on the inlet, so the raw
+         completion still contains placeholders ([PERSON_1], ...). The outlet
+         un-masks them back to the real values using the per-chat vault, which the
+         pipeline resolves by chat_id. outlet_body therefore MUST carry chat_id
+         (see below) so snapshot_for_request resolves the right thread.
+
+    Returns the restored assistant-message content (str), or None when restore
+    could not be performed (non-dict/streaming response, missing chat_id,
+    malformed outlet result, or any outlet failure). Callers must fall back to the
+    original (masked) response on None. Best-effort: this never raises.
+    """
     try:
         if not isinstance(response, dict):
-            return
-        usage = response.get("usage") or {}
-        if not usage:
-            return
+            # Streaming responses (e.g. moa with stream=True) are not dict-shaped —
+            # nothing to restore, keep the streamed body as-is.
+            return None
+
         choices = response.get("choices", [])
         assistant_content = ""
         if choices:
-            assistant_content = choices[0].get("message", {}).get("content", "")
-        chat_id = payload.get("metadata", {}).get("chat_id")
+            assistant_content = choices[0].get("message", {}).get("content", "") or ""
+
+        chat_id = (payload.get("metadata") or {}).get("chat_id")
         if not chat_id:
-            return
+            # The outlet resolves the PII vault by chat_id; without it there is
+            # neither a thread to report usage against nor a vault to restore from.
+            return None
+
+        usage = response.get("usage") or {}
+        assistant_message = {"role": "assistant", "content": assistant_content}
+        if usage:
+            assistant_message["usage"] = usage
+
         outlet_body = {
             "chat_id": chat_id,
             "model": payload["model"],
-            "messages": payload["messages"]
-            + [
-                {
-                    "role": "assistant",
-                    "content": assistant_content,
-                    "usage": usage,
-                }
-            ],
+            "messages": payload["messages"] + [assistant_message],
             "metadata": payload.get("metadata", {}),
         }
-        await process_pipeline_outlet_filter(request, outlet_body, user, models)
+
+        restored_body = await process_pipeline_outlet_filter(
+            request, outlet_body, user, models
+        )
+
+        # The outlet returns the processed body; the restored assistant content is
+        # the last message we appended. Extract it defensively.
+        if isinstance(restored_body, dict):
+            restored_messages = restored_body.get("messages") or []
+            if restored_messages:
+                restored_content = restored_messages[-1].get("content")
+                if isinstance(restored_content, str):
+                    return restored_content
+        return None
     except Exception as exc:
-        log.warning(f"_report_task_usage failed: {exc}")
+        log.warning(f"_report_task_usage_and_restore failed: {exc}")
+        return None
+
+
+def _apply_restored_content(response, restored_content):
+    """Overwrite the assistant content of an OpenAI-shaped response dict with the
+    outlet-restored value.
+
+    Returns the response unchanged when there is nothing to apply (restored_content
+    is None — e.g. masking OFF, streaming, or outlet failure) or the response is not
+    the expected shape, so callers can use it unconditionally:
+        return _apply_restored_content(response, restored)
+    """
+    if restored_content is None or not isinstance(response, dict):
+        return response
+    try:
+        response["choices"][0]["message"]["content"] = restored_content
+    except (KeyError, IndexError, TypeError):
+        pass
+    return response
 
 
 ##################################
@@ -257,8 +308,13 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        await _report_task_usage(request, user, payload, response, models)
-        return response
+        # PII restore: task inlet masking sent [PERSON_1] to the LLM, so `response`
+        # is masked. Un-mask it via the outlet before returning so persisted title/
+        # tags and follow-up chips show the real value (not [PERSON_1]).
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         log.error('Exception occurred', exc_info=True)
         return JSONResponse(
@@ -327,8 +383,13 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        await _report_task_usage(request, user, payload, response, models)
-        return response
+        # PII restore: task inlet masking sent [PERSON_1] to the LLM, so `response`
+        # is masked. Un-mask it via the outlet before returning so persisted title/
+        # tags and follow-up chips show the real value (not [PERSON_1]).
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         log.error('Exception occurred', exc_info=True)
         return JSONResponse(
@@ -397,8 +458,13 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 
     try:
         response = await generate_chat_completion(request, form_data=payload, user=user)
-        await _report_task_usage(request, user, payload, response, models)
-        return response
+        # PII restore: task inlet masking sent [PERSON_1] to the LLM, so `response`
+        # is masked. Un-mask it via the outlet before returning so persisted title/
+        # tags and follow-up chips show the real value (not [PERSON_1]).
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         log.error(f'Error generating chat completion: {e}')
         return JSONResponse(
@@ -460,6 +526,10 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
         raise e
 
     try:
+        # NO PII restore here (deliberate): the generated image prompt is fed to a
+        # downstream image-generation backend that may be external. Restoring
+        # [PERSON_1] -> real name would re-introduce PII into that external call and
+        # defeat masking. Keep the masked prompt. See per-task restore decision.
         return await generate_chat_completion(request, form_data=payload, user=user)
     except Exception as e:
         log.error('Exception occurred', exc_info=True)
@@ -540,6 +610,12 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
         raise e
 
     try:
+        # NO PII restore here (deliberate): generated queries are fed to a downstream
+        # search stage (web_search -> external engine; retrieval -> internal vector
+        # DB), never shown to the user. Restoring [PERSON_1] -> real name would leak
+        # PII to an external search engine. Keep the masked query. (Trade-off: masked
+        # queries retrieve worse against real-name docs in internal RAG — a known,
+        # out-of-scope cost of masking.) See per-task restore decision.
         return await generate_chat_completion(request, form_data=payload, user=user)
     except Exception as e:
         return JSONResponse(
@@ -618,7 +694,13 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        # PII restore: the autocompletion suggestion is shown to the user (typed into
+        # their input box), so un-mask [PERSON_1] before returning.
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         log.error(f'Error generating chat completion: {e}')
         return JSONResponse(
@@ -684,7 +766,14 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        # PII restore: the emoji is shown to the user. Restore for consistency —
+        # in practice a 4-token emoji almost never contains a placeholder, so this
+        # is effectively a no-op, but it keeps the user-visible path uniform.
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -736,7 +825,14 @@ async def generate_moa_response(request: Request, form_data: dict, user=Depends(
         raise e
 
     try:
-        return await generate_chat_completion(request, form_data=payload, user=user)
+        response = await generate_chat_completion(request, form_data=payload, user=user)
+        # PII restore: the MoA response is the final merged answer shown to the user.
+        # For streaming (stream=True) the response is not dict-shaped; the helper
+        # returns None and the streamed body is passed through unchanged.
+        restored = await _report_task_usage_and_restore(
+            request, user, payload, response, models
+        )
+        return _apply_restored_content(response, restored)
     except Exception as e:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
