@@ -72,6 +72,9 @@ fi
 PYTHON_CMD=$(command -v python3 || command -v python)
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
+# Run pending alembic migrations
+"$PYTHON_CMD" -m alembic -c open_webui/alembic.ini upgrade head
+
 # If script is called with arguments, use them; otherwise use default workers
 if [ "$#" -gt 0 ]; then
     ARGS=("$@")
