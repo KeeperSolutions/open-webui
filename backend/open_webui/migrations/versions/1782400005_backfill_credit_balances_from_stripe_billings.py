@@ -33,10 +33,11 @@ def upgrade():
     rows = bind.execute(
         sa.text(
             """
-            SELECT id, plan_tier, team_id, user_id
-            FROM stripe_billing
-            WHERE plan_tier IN ('pro', 'premium', 'team')
-              AND (subscription_status = 'active' OR subscription_status IS NULL)
+            SELECT sb.id, sb.plan_tier, sb.team_id, sb.user_id, u.email AS user_email
+            FROM stripe_billing sb
+            LEFT JOIN "user" u ON u.id = sb.user_id
+            WHERE sb.plan_tier IN ('pro', 'premium', 'team')
+              AND (sb.subscription_status = 'active' OR sb.subscription_status IS NULL)
             """
         )
     ).fetchall()
@@ -64,7 +65,11 @@ def upgrade():
     to_insert = []
     for row in rows:
         owner_type = "team" if row.plan_tier == "team" else "user"
-        owner_id = row.team_id if owner_type == "team" else row.user_id
+        # credit_balances keys "user" rows by email (see routers/billing.py),
+        # not by stripe_billing.user_id.
+        owner_id = row.team_id if owner_type == "team" else row.user_email
+        if owner_id is None:
+            continue
         if (owner_type, owner_id) in existing_owners:
             continue
         existing_owners.add((owner_type, owner_id))
