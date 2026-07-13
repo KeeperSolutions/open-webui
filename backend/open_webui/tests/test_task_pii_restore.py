@@ -19,8 +19,6 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 # stripe is an optional billing dependency not installed in the test environment.
 sys.modules.setdefault("stripe", MagicMock())
 
@@ -173,17 +171,32 @@ class TestReportTaskUsageAndRestore:
         assert captured["body"]["chat_id"] == "chat-1"
 
     def test_restore_runs_even_without_usage(self):
-        # No usage present, but chat_id is → restore must still run.
+        # No usage present, but chat_id is and the content is masked → restore
+        # must still run.
         outlet = _outlet_returning("Alice Smith")
         with patch.object(tasks, "process_pipeline_outlet_filter", outlet):
             restored = _run(_report_task_usage_and_restore(
                 _request(), _user(),
                 _payload(),
-                _masked_response("[PERSON_1]"),  # no usage
+                _masked_response("[PERSON_1]"),  # no usage, but masked
                 {},
             ))
         assert restored == "Alice Smith"
         assert outlet.await_count == 1
+
+    def test_skips_outlet_when_no_usage_and_no_placeholder(self):
+        # Nothing to do: no usage to report AND no placeholder to restore
+        # (masking off / nothing masked). Skip the extra outbound outlet call.
+        outlet = _outlet_returning("Alice Smith")
+        with patch.object(tasks, "process_pipeline_outlet_filter", outlet):
+            restored = _run(_report_task_usage_and_restore(
+                _request(), _user(),
+                _payload(),
+                _masked_response("Just a normal title"),  # no usage, no placeholder
+                {},
+            ))
+        assert restored is None
+        assert outlet.await_count == 0
 
 
 # ---------------------------------------------------------------------------

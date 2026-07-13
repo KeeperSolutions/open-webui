@@ -41,6 +41,11 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Matches the placeholder shape minted by the PII pipeline ([PERSON_1], [HR_OIB_2],
+# ...). Used to decide whether a task completion actually needs an outlet restore.
+_PII_PLACEHOLDER_RE = re.compile(r"\[[A-Z_]+_\d+\]")
+
+
 async def _report_task_usage_and_restore(
     request,
     user,
@@ -61,10 +66,16 @@ async def _report_task_usage_and_restore(
          pipeline resolves by chat_id. outlet_body therefore MUST carry chat_id
          (see below) so snapshot_for_request resolves the right thread.
 
+    The outlet is an extra outbound pipeline call, so it is skipped when it would
+    have nothing to do — no usage to report AND no masking placeholder to restore
+    (masking off / nothing masked). This restores the no-usage short-circuit of
+    the original _report_task_usage while still un-masking when needed.
+
     Returns the restored assistant-message content (str), or None when restore
-    could not be performed (non-dict/streaming response, missing chat_id,
-    malformed outlet result, or any outlet failure). Callers must fall back to the
-    original (masked) response on None. Best-effort: this never raises.
+    could not be performed or was unnecessary (non-dict/streaming response,
+    missing chat_id, nothing to report or restore, malformed outlet result, or any
+    outlet failure). Callers must fall back to the original (masked) response on
+    None. Best-effort: this never raises.
     """
     try:
         if not isinstance(response, dict):
@@ -84,6 +95,13 @@ async def _report_task_usage_and_restore(
             return None
 
         usage = response.get("usage") or {}
+
+        # Nothing to report and nothing masked to restore → skip the outbound
+        # outlet call. Usage reporting still runs whenever usage is present (even
+        # with masking off); restore runs whenever the content looks masked.
+        if not usage and not _PII_PLACEHOLDER_RE.search(assistant_content):
+            return None
+
         assistant_message = {"role": "assistant", "content": assistant_content}
         if usage:
             assistant_message["usage"] = usage
