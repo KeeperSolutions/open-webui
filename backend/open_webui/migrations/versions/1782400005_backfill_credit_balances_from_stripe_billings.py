@@ -9,6 +9,7 @@ Create Date: 2026-07-07
 """
 from typing import Sequence, Union
 
+import os
 import sqlalchemy as sa
 from alembic import op
 import uuid
@@ -21,7 +22,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 PLAN_CREDITS = {"pro": 1300, "premium": 3800, "team": 10000}
-CREDITS_PER_EUR_CENT = 1.82
+
+
+def _get_rate() -> float:
+    val = os.environ.get("CREDITS_PER_EUR_CENT", "1.82")
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return 1.82
 
 
 def upgrade():
@@ -29,11 +37,12 @@ def upgrade():
     # Done in Python (not raw dialect-specific SQL) so this runs on both
     # Postgres (staging/prod) and SQLite (local dev).
     bind = op.get_bind()
+    rate = _get_rate()
 
     rows = bind.execute(
         sa.text(
             """
-            SELECT sb.id, sb.plan_tier, sb.team_id, sb.user_id, u.email AS user_email
+            SELECT sb.plan_tier, sb.team_id, u.email AS user_email
             FROM stripe_billing sb
             LEFT JOIN "user" u ON u.id = sb.user_id
             WHERE sb.plan_tier IN ('pro', 'premium', 'team')
@@ -81,7 +90,7 @@ def upgrade():
                 "owner_id": owner_id,
                 "subscription_credits": PLAN_CREDITS.get(row.plan_tier, 1300),
                 "topup_credits": 0,
-                "credits_per_eur_cent": CREDITS_PER_EUR_CENT,
+                "credits_per_eur_cent": rate,
                 "period_start": now_ts,
                 "updated_at": now_ts,
             }
