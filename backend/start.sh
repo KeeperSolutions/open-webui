@@ -72,8 +72,25 @@ fi
 PYTHON_CMD=$(command -v python3 || command -v python)
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
-# Run pending alembic migrations
-"$PYTHON_CMD" -m alembic -c open_webui/alembic.ini upgrade head
+# Run pending Peewee + Alembic migrations once, in the order the app expects
+# (internal/db.py requires Peewee migrations to run before Alembic). Importing
+# open_webui.internal.db here runs the Peewee migration as a side effect, then
+# Alembic is run explicitly. Skipped entirely if migrations are disabled.
+if [[ "${ENABLE_DB_MIGRATIONS,,}" != "false" ]]; then
+  "$PYTHON_CMD" -c "
+import open_webui.internal.db  # noqa: F401 (runs Peewee migration on import)
+from alembic import command
+from alembic.config import Config
+
+alembic_cfg = Config('open_webui/alembic.ini')
+alembic_cfg.set_main_option('script_location', 'open_webui/migrations')
+command.upgrade(alembic_cfg, 'head')
+"
+fi
+
+# Migrations already ran above (or were skipped on purpose) — prevent the app
+# from also running them again on import.
+export ENABLE_DB_MIGRATIONS=false
 
 # If script is called with arguments, use them; otherwise use default workers
 if [ "$#" -gt 0 ]; then
