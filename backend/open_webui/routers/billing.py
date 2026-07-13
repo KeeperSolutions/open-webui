@@ -1643,7 +1643,7 @@ async def _handle_stripe_event(event_type: str, data):
 
         _csc_price_id = _price_id_from_session(data)
 
-        # Fallback: fetch subscription from Stripe when price_id absent from metadata
+        # Fallback 1: fetch subscription from Stripe when price_id absent from metadata
         if not _csc_price_id and subscription_id:
             try:
                 _c = get_stripe_client()
@@ -1658,6 +1658,22 @@ async def _handle_stripe_event(event_type: str, data):
                         log.info("[billing] checkout.session: resolved price_id=%s via subscription fetch", _csc_price_id)
             except Exception as _fe:
                 log.warning("[billing] checkout.session: could not fetch subscription for price fallback: %s", _fe)
+
+        # Fallback 2: retrieve the checkout session with expand to get line_items
+        if not _csc_price_id and session_id:
+            try:
+                _c = get_stripe_client()
+                _sess = _c.v1.checkout.sessions.retrieve(session_id, expand=["line_items"])
+                _li = getattr(_sess, "line_items", None)
+                _lid = getattr(_li, "data", None) or []
+                if _lid:
+                    _pr = getattr(_lid[0], "price", None)
+                    _pid = getattr(_pr, "id", None)
+                    if _pid:
+                        _csc_price_id = _pid
+                        log.info("[billing] checkout.session: resolved price_id=%s via session expand", _csc_price_id)
+            except Exception as _fe:
+                log.warning("[billing] checkout.session: could not expand session for price: %s", _fe)
 
         _csc_pkg = _SPs.get_by_price_id(_csc_price_id) if _csc_price_id else None
         _csc_tier = _csc_pkg.plan_tier if _csc_pkg else None
@@ -1740,7 +1756,7 @@ async def _handle_stripe_event(event_type: str, data):
                 from open_webui.models.users import Users as _Users
                 from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
 
-                price_id = _price_id_from_session(data)
+                price_id = _csc_price_id
                 pkg = StripePackages.get_by_price_id(price_id) if price_id else None
                 plan_tier = (pkg.plan_tier if pkg else None) or _tier_from_price_id(price_id)
                 credits = pkg.credits if pkg else 0
