@@ -76,8 +76,11 @@ UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 # (internal/db.py requires Peewee migrations to run before Alembic). Importing
 # open_webui.internal.db here runs the Peewee migration as a side effect, then
 # Alembic is run explicitly. Skipped entirely if migrations are disabled.
-if [[ "${ENABLE_DB_MIGRATIONS,,}" != "false" ]]; then
-  "$PYTHON_CMD" -c "
+# Matches open_webui.env's parsing: only the literal "true" (any case) enables
+# migrations; defaults to enabled when unset, same as the Python side.
+ENABLE_DB_MIGRATIONS="${ENABLE_DB_MIGRATIONS:-True}"
+if [[ "${ENABLE_DB_MIGRATIONS,,}" == "true" ]]; then
+  "$PYTHON_CMD" <<'PY'
 import open_webui.internal.db  # noqa: F401 (runs Peewee migration on import)
 from alembic import command
 from alembic.config import Config
@@ -85,7 +88,12 @@ from alembic.config import Config
 alembic_cfg = Config('open_webui/alembic.ini')
 alembic_cfg.set_main_option('script_location', 'open_webui/migrations')
 command.upgrade(alembic_cfg, 'head')
-"
+PY
+  migration_status=$?
+  if [ "$migration_status" -ne 0 ]; then
+    echo "Database migrations failed (exit code $migration_status). Refusing to start." >&2
+    exit "$migration_status"
+  fi
 fi
 
 # Migrations already ran above (or were skipped on purpose) — prevent the app
