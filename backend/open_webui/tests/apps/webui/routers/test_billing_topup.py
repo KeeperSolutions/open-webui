@@ -120,14 +120,16 @@ class TestCreateTopup:
                 object=SimpleNamespace(
                     id="cs_123",
                     payment_status="paid",
-                    metadata={"type": "topup", "user_id": "u1", "credits": "500"},
+                    metadata={"type": "topup", "user_id": "u1", "top_up_id": "pack_basic"},
                 )
             ),
         )
         with patch("open_webui.routers.billing.stripe.Webhook.construct_event", return_value=event):
-            with patch("open_webui.routers.billing.StripeBillings.get_by_topup_checkout_session_id", return_value=True):
-                r = client.post("/api/v1/billing/webhook", content=b"{}", headers={"stripe-signature": "sig"})
+            with patch("open_webui.models.purchase_history.PurchaseHistory.already_processed", return_value=True):
+                with patch("open_webui.models.credit_balances.CreditBalances.add_topup") as mock_add:
+                    r = client.post("/api/v1/billing/webhook", content=b"{}", headers={"stripe-signature": "sig"})
         assert r.status_code == 200
+        mock_add.assert_not_called()
 
     def test_webhook_topup_skipped_if_not_paid(self):
         event = SimpleNamespace(
@@ -136,12 +138,12 @@ class TestCreateTopup:
                 object=SimpleNamespace(
                     id="cs_123",
                     payment_status="unpaid",
-                    metadata={"type": "topup", "user_id": "u1", "credits": "500"},
+                    metadata={"type": "topup", "user_id": "u1", "top_up_id": "pack_basic"},
                 )
             ),
         )
         with patch("open_webui.routers.billing.stripe.Webhook.construct_event", return_value=event):
-            with patch("open_webui.routers.billing.StripeBillings.add_top_up_credits") as mock_add:
+            with patch("open_webui.models.credit_balances.CreditBalances.add_topup") as mock_add:
                 r = client.post("/api/v1/billing/webhook", content=b"{}", headers={"stripe-signature": "sig"})
         assert r.status_code == 200
         mock_add.assert_not_called()

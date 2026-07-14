@@ -10,15 +10,14 @@ column must be TEXT before any encrypted writes can happen.
 
 On PostgreSQL the USING clause casts the existing JSON value to its text
 representation (identical bytes, no data loss). On SQLite the column is
-already stored as TEXT at the storage level; the alter_column call updates
-the type annotation only.
+already stored as TEXT at the storage level, so upgrade()/downgrade() are
+no-ops there.
 
 Encryption status is inferred from the ENC1: prefix — no separate column needed.
 """
 
 from typing import Sequence, Union
 
-import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a1b2c3d4e5f6"
@@ -37,10 +36,10 @@ def upgrade():
         op.execute(
             "ALTER TABLE chat ALTER COLUMN chat TYPE TEXT USING chat::text"
         )
-    else:
-        # SQLite stores everything as TEXT already; update the type annotation
-        # so SQLAlchemy reflects the column correctly going forward.
-        op.alter_column("chat", "chat", existing_type=sa.JSON(), type_=sa.Text())
+    # SQLite stores everything as TEXT at the storage level regardless of the
+    # declared column type, so no DDL is needed here. (A plain op.alter_column
+    # would emit "ALTER TABLE chat ALTER COLUMN chat TYPE TEXT", which is not
+    # valid SQLite syntax and would need op.batch_alter_table instead.)
 
 
 def downgrade():
@@ -53,5 +52,4 @@ def downgrade():
         op.execute(
             "ALTER TABLE chat ALTER COLUMN chat TYPE JSON USING chat::json"
         )
-    else:
-        op.alter_column("chat", "chat", existing_type=sa.Text(), type_=sa.JSON())
+    # SQLite: no DDL was performed in upgrade(), so nothing to revert here.
