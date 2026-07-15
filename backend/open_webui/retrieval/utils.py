@@ -1254,6 +1254,7 @@ from typing import Optional, Sequence
 
 from langchain_core.callbacks import Callbacks
 from langchain_core.documents import BaseDocumentCompressor, Document
+from pydantic import ConfigDict
 
 
 class RerankCompressor(BaseDocumentCompressor):
@@ -1262,9 +1263,7 @@ class RerankCompressor(BaseDocumentCompressor):
     reranking_function: Any
     r_score: float
 
-    class Config:
-        extra = "forbid"
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     def compress_documents(
         self,

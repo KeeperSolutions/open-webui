@@ -36,7 +36,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, validator
+from pydantic import BaseModel, ConfigDict, model_validator
 from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
@@ -1212,18 +1212,15 @@ class ChatMessage(BaseModel):
     tool_calls: Optional[list[dict]] = None
     images: Optional[list[str]] = None
 
-    @validator("content", pre=True)
-    @classmethod
-    def check_at_least_one_field(cls, field_value, values, **kwargs):
+    @model_validator(mode="after")
+    def check_at_least_one_field(self):
         # Raise an error if both 'content' and 'tool_calls' are None
-        if field_value is None and (
-            "tool_calls" not in values or values["tool_calls"] is None
-        ):
+        if self.content is None and self.tool_calls is None:
             raise ValueError(
                 "At least one of 'content' or 'tool_calls' must be provided"
             )
 
-        return field_value
+        return self
 
 
 class GenerateChatCompletionForm(BaseModel):
