@@ -997,15 +997,6 @@ try:
 except ValueError:
     LEDGER_BOOTSTRAP_DAYS = 30
 
-# JSON mapping seat count → {price_id, price_eur, usage_budget_eur}
-# e.g. '{"5": {"price_id": "price_abc", "price_eur": 150, "usage_budget_eur": 250}}'
-import json as _json
-
-try:
-    STRIPE_TEAM_TIERS: dict = _json.loads(os.environ.get("STRIPE_TEAM_TIERS", "{}"))
-except (ValueError, TypeError):
-    STRIPE_TEAM_TIERS: dict = {}
-
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
 SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
