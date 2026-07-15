@@ -100,27 +100,29 @@ class TestCheckCreditsExhausted:
         record.plan_tier = "pro"
         record.created_at = 0
 
-        credits_row = MagicMock()
-        credits_row.balance = 100
-        credits_row.credits_per_eur_cent = 1.82
+        balance = MagicMock()
+        balance.subscription_credits = 100
+        balance.topup_credits = 0
+        balance.credits_per_eur_cent = 1.82
 
         mock_billings = MagicMock()
         mock_billings.get_by_user_id.return_value = record
-        mock_uc_db = MagicMock()
-        mock_uc_db.get.return_value = credits_row
+        mock_balances = MagicMock()
+        mock_balances.get.return_value = balance
 
-        with patch.dict(os.environ, {"CREDITS_PER_EUR_CENT": "1.82"}), \
-             patch.object(_billing, "StripeBillings", mock_billings), \
-             patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
-             patch.object(_billing, "PLAN_TIER_TRIAL", "trial"), \
-             patch.object(_billing, "_get_user_current_month_cost", return_value=1.0):
+        with patch.dict(os.environ, {"CREDITS_PER_EUR_CENT": "1.82"}):
+            import open_webui.models.credit_balances as cb_mod
             import open_webui.models.user_credits as uc_mod
-            with patch.object(uc_mod, "UserCreditsDB", mock_uc_db), \
-                 patch.object(uc_mod, "eur_to_credits", return_value=200):
-                with pytest.raises(HTTPException) as exc_info:
-                    _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
-                assert exc_info.value.status_code == 402
-                assert exc_info.value.detail == "credits_exhausted"
+            with patch.object(_billing, "StripeBillings", mock_billings), \
+                 patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
+                 patch.object(_billing, "PLAN_TIER_TRIAL", "trial"), \
+                 patch.object(_billing, "_get_user_current_month_cost", return_value=1.0), \
+                 patch.object(cb_mod, "CreditBalances", mock_balances), \
+                 patch.object(uc_mod, "eur_to_credits", return_value=200), \
+                 pytest.raises(HTTPException) as exc_info:
+                _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            assert exc_info.value.status_code == 402
+            assert exc_info.value.detail == "credits_exhausted"
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +271,7 @@ class TestAutoOnboardUserTierConstants:
         mock_billings.get_by_user_id.return_value = None  # not yet onboarded
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
-             patch.object(_billing, "is_internal_user", return_value=True):
+             patch.object(_billing, "has_unlimited_access", return_value=True):
             user = MagicMock()
             user.email = "staff@keeper.ai"
             user.id = "uid-internal"
@@ -292,7 +294,7 @@ class TestAutoOnboardUserTierConstants:
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
-             patch.object(_billing, "is_internal_user", return_value=False), \
+             patch.object(_billing, "has_unlimited_access", return_value=False), \
              patch.object(_billing, "STRIPE_SECRET_KEY", "sk_test"), \
              patch.object(_billing, "STRIPE_FREE_TIER_CENTS", 0), \
              patch.object(_billing, "get_stripe_client", return_value=mock_stripe), \
