@@ -4,7 +4,15 @@
 # Platform: Google Cloud Run
 
 steps:
-  # Build Docker image with layer caching enabled
+  # Pull previous image to seed the layer cache (best-effort — fails harmlessly on first build)
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: bash
+    args:
+      - '-c'
+      - 'docker pull ${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:latest || exit 0'
+    id: Pull
+
+  # Build Docker image, reusing cached layers (e.g. pip install) from the previous image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -12,12 +20,19 @@ steps:
       - '${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:${COMMIT_SHA}'
       - '-t'
       - '${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:latest'
+      - '--cache-from'
+      - '${_AR_HOSTNAME}/${_AR_PROJECT_ID}/${_AR_REPOSITORY}/${REPO_NAME}/${_SERVICE_NAME}:latest'
       - '-f'
       - 'Dockerfile'
       - '--build-arg'
       - 'DEPLOY_ENVIRONMENT=staging'
+      - '--build-arg'
+      - 'BUILDKIT_INLINE_CACHE=1'
       - '.'
     id: Build
+    waitFor: ['Pull']
+    env:
+      - 'DOCKER_BUILDKIT=1'
 
   # Push image with commit SHA tag to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
