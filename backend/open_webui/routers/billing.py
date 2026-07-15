@@ -41,7 +41,7 @@ class _TTLCache:
     def __init__(self, maxsize: int, ttl: float) -> None:
         self._maxsize = maxsize
         self._ttl = ttl
-        self._store: dict = {}   # key → (value, expires_at)
+        self._store: dict = {}  # key → (value, expires_at)
 
     def get(self, key, default=None):
         entry = self._store.get(key)
@@ -74,6 +74,7 @@ _team_cost_cache: _TTLCache = _TTLCache(maxsize=256, ttl=_TEAM_COST_CACHE_TTL)
 def _tier_from_price_id(price_id: str) -> str:
     """Map a Stripe price ID to a plan tier string via stripe_packages DB. Defaults to pro."""
     from open_webui.models.stripe_packages import StripePackages
+
     pkg = StripePackages.get_by_price_id(price_id)
     return pkg.plan_tier if pkg else PLAN_TIER_PRO
 
@@ -205,11 +206,15 @@ def _check_team_credits_exhausted(team_id: str, member: bool = False) -> None:
         used_credits = eur_to_credits(used_eur, bal.credits_per_eur_cent)
         if used_credits >= total_credits:
             detail = (
-                "Your team's usage credits have been exhausted. "
-                "Ask your team owner to buy more at /billing."
-            ) if member else (
-                f"Team usage credits exhausted (used {used_credits}/{total_credits}). "
-                "Buy more at /billing."
+                (
+                    "Your team's usage credits have been exhausted. "
+                    "Ask your team owner to buy more at /billing."
+                )
+                if member
+                else (
+                    f"Team usage credits exhausted (used {used_credits}/{total_credits}). "
+                    "Buy more at /billing."
+                )
             )
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -218,7 +223,11 @@ def _check_team_credits_exhausted(team_id: str, member: bool = False) -> None:
     except HTTPException:
         raise
     except Exception as e:
-        log.warning("[billing] team credits exhaustion check failed for team_id=%s: %s", team_id, e)
+        log.warning(
+            "[billing] team credits exhaustion check failed for team_id=%s: %s",
+            team_id,
+            e,
+        )
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
@@ -266,6 +275,7 @@ async def check_billing_access(user=Depends(get_verified_user)):
         return user
 
     import os
+
     billing_test_mode = os.environ.get("BILLING_TEST_MODE", "false").lower() == "true"
     if user.role == "admin" and not billing_test_mode:
         return user
@@ -354,7 +364,9 @@ async def auto_onboard_user(user, request=None):
 
     # External user — create Stripe Customer
     if not STRIPE_SECRET_KEY:
-        log.warning("[billing] STRIPE_SECRET_KEY not set; skipping external user onboarding.")
+        log.warning(
+            "[billing] STRIPE_SECRET_KEY not set; skipping external user onboarding."
+        )
         return
 
     try:
@@ -382,7 +394,9 @@ async def auto_onboard_user(user, request=None):
                 )
                 free_tier_applied = True
             except stripe.StripeError as e:
-                log.warning(f"[billing] Could not apply trial credit for {user.email}: {e}")
+                log.warning(
+                    f"[billing] Could not apply trial credit for {user.email}: {e}"
+                )
 
         StripeBillings.upsert(
             user_id=user.id,
@@ -394,13 +408,16 @@ async def auto_onboard_user(user, request=None):
         from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
         from open_webui.models.billing_plans import get_trial_credits
+
         trial_credits = get_trial_credits(CREDITS_PER_EUR_CENT)
         CreditBalances.upsert_trial(
             owner_id=user.email,
             credits=trial_credits,
             credits_per_eur_cent=CREDITS_PER_EUR_CENT,
         )
-        log.info(f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={trial_credits})")
+        log.info(
+            f"[billing] External user onboarded as trial: {user.email} (customer={customer_id}, credits={trial_credits})"
+        )
 
     except stripe.StripeError as e:
         log.error(f"[billing] Failed to onboard external user {user.email}: {e}")
@@ -411,7 +428,9 @@ async def auto_onboard_user(user, request=None):
 
 class BillingStatusResponse(BaseModel):
     enabled: bool
-    plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member | None
+    plan_tier: Optional[str] = (
+        None  # internal | trial | paid | team | team_member | None
+    )
 
     # Trial fields
     credit_limit_eur: float = 0.0
@@ -473,6 +492,7 @@ async def get_available_plans(user=Depends(get_verified_user)):
     """Return all active purchasable plans from the database."""
     require_billing_enabled()
     from open_webui.models.stripe_packages import StripePackages
+
     packages = StripePackages.get_all()
     return [
         AvailablePlanResponse(
@@ -554,7 +574,9 @@ async def get_billing_status(user=Depends(get_verified_user)):
             member_emails.append(user.email)
 
         try:
-            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(
+                member_emails
+            )
             team_month_cost = sum(cost_by_email.values())
         except Exception:
             team_month_cost = current_month_cost
@@ -571,7 +593,10 @@ async def get_billing_status(user=Depends(get_verified_user)):
             try:
                 client = get_stripe_client()
                 invoice = client.v1.invoices.create_preview(
-                    params={"customer": team.stripe_customer_id, "subscription": team.stripe_subscription_id}
+                    params={
+                        "customer": team.stripe_customer_id,
+                        "subscription": team.stripe_subscription_id,
+                    }
                 )
                 upcoming_eur = invoice.amount_due / 100
             except stripe.StripeError:
@@ -584,7 +609,9 @@ async def get_billing_status(user=Depends(get_verified_user)):
         sub_credits = bal.subscription_credits if bal else 0
         topup_cred = bal.topup_credits if bal else 0
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
-        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate))
+        credits_rem = max(
+            0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate)
+        )
 
         return BillingStatusResponse(
             enabled=True,
@@ -630,7 +657,9 @@ async def get_billing_status(user=Depends(get_verified_user)):
         sub_credits = bal.subscription_credits if bal else 0
         topup_cred = bal.topup_credits if bal else 0
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
-        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate))
+        credits_rem = max(
+            0, sub_credits + topup_cred - eur_to_credits(team_month_cost, rate)
+        )
         return BillingStatusResponse(
             enabled=True,
             plan_tier=PLAN_TIER_TEAM_MEMBER,
@@ -655,7 +684,10 @@ async def get_billing_status(user=Depends(get_verified_user)):
             try:
                 client = get_stripe_client()
                 invoice = client.v1.invoices.create_preview(
-                    params={"customer": record.stripe_customer_id, "subscription": record.stripe_subscription_id}
+                    params={
+                        "customer": record.stripe_customer_id,
+                        "subscription": record.stripe_subscription_id,
+                    }
                 )
                 upcoming_eur = invoice.amount_due / 100
             except stripe.StripeError:
@@ -665,7 +697,9 @@ async def get_billing_status(user=Depends(get_verified_user)):
         sub_credits = bal.subscription_credits if bal else 0
         topup_cred = bal.topup_credits if bal else 0
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
-        credits_rem = max(0, sub_credits + topup_cred - eur_to_credits(current_month_cost, rate))
+        credits_rem = max(
+            0, sub_credits + topup_cred - eur_to_credits(current_month_cost, rate)
+        )
 
         return BillingStatusResponse(
             enabled=True,
@@ -738,7 +772,9 @@ async def create_checkout_session(
             customer_id = _create_customer()
         except stripe.StripeError as e:
             log.error(f"Stripe customer create error: {e}")
-            raise HTTPException(status_code=502, detail="Failed to create Stripe customer.")
+            raise HTTPException(
+                status_code=502, detail="Failed to create Stripe customer."
+            )
 
     # Zero out any trial credit balance so it isn't applied to the first invoice.
     # Trial credit is stored as a negative customer balance (credit); debit it back to 0.
@@ -754,7 +790,9 @@ async def create_checkout_session(
                     "description": "Trial credit forfeited on subscription upgrade",
                 },
             )
-            log.info(f"[billing] Zeroed trial credit balance for customer {customer_id} (was {balance} cents)")
+            log.info(
+                f"[billing] Zeroed trial credit balance for customer {customer_id} (was {balance} cents)"
+            )
     except stripe.StripeError as e:
         log.warning(f"[billing] Could not zero customer balance for {customer_id}: {e}")
 
@@ -776,16 +814,24 @@ async def create_checkout_session(
         error_str = str(e)
         if "No such customer" in error_str:
             # Customer exists in DB but not in this Stripe environment (e.g. test vs live)
-            log.warning(f"[billing] Customer {customer_id} not found in Stripe, creating a new one.")
+            log.warning(
+                f"[billing] Customer {customer_id} not found in Stripe, creating a new one."
+            )
             try:
                 customer_id = _create_customer()
                 session = _create_session(customer_id)
             except stripe.StripeError as e2:
-                log.error(f"Stripe checkout session create error after customer retry: {e2}")
-                raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+                log.error(
+                    f"Stripe checkout session create error after customer retry: {e2}"
+                )
+                raise HTTPException(
+                    status_code=502, detail="Failed to create checkout session."
+                )
         else:
             log.error(f"Stripe checkout session create error: {e}")
-            raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+            raise HTTPException(
+                status_code=502, detail="Failed to create checkout session."
+            )
 
     StripeBillings.upsert(
         user_id=user.id,
@@ -819,7 +865,9 @@ async def billing_portal(request: Request, user=Depends(get_verified_user)):
         )
     except stripe.StripeError as e:
         log.error(f"Stripe portal session error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+        raise HTTPException(
+            status_code=502, detail="Failed to create billing portal session."
+        )
 
     return PortalResponse(url=session.url)
 
@@ -858,12 +906,16 @@ async def billing_portal_update_plan(request: Request, user=Depends(get_verified
         )
     except stripe.StripeError as e:
         log.error(f"Stripe portal update-plan session error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+        raise HTTPException(
+            status_code=502, detail="Failed to create billing portal session."
+        )
 
     return PortalResponse(url=session.url)
 
 
-def _revert_team_members_to_trial(stripe_customer_id: str, subscription_id: Optional[str] = None) -> None:
+def _revert_team_members_to_trial(
+    stripe_customer_id: str, subscription_id: Optional[str] = None
+) -> None:
     """Revert all members of a team to trial when the team subscription is canceled.
 
     When subscription_id is provided the revert is skipped if the team's recorded
@@ -873,9 +925,17 @@ def _revert_team_members_to_trial(stripe_customer_id: str, subscription_id: Opti
     team = Teams.get_by_customer_id(stripe_customer_id)
     if not team:
         return
-    if subscription_id and team.stripe_subscription_id and team.stripe_subscription_id != subscription_id:
-        log.info("[billing] Skipping team revert: sub_id mismatch (team=%s expected=%s got=%s)",
-                 team.id, team.stripe_subscription_id, subscription_id)
+    if (
+        subscription_id
+        and team.stripe_subscription_id
+        and team.stripe_subscription_id != subscription_id
+    ):
+        log.info(
+            "[billing] Skipping team revert: sub_id mismatch (team=%s expected=%s got=%s)",
+            team.id,
+            team.stripe_subscription_id,
+            subscription_id,
+        )
         return
     _revert_team_members_to_trial_by_team_id(team.id)
 
@@ -886,7 +946,9 @@ def _revert_team_members_to_trial_by_team_id(team_id: str) -> None:
     for m in members:
         if m.role != "owner":
             StripeBillings.revert_to_trial(m.user_id)
-    log.info("[billing] Reverted %d team members to trial for team %s", len(members), team_id)
+    log.info(
+        "[billing] Reverted %d team members to trial for team %s", len(members), team_id
+    )
 
 
 def _resolve_team_and_billing(
@@ -912,7 +974,10 @@ def _resolve_team_and_billing(
         # New model: personal customer shared with team subscription
         team = Teams.get_by_owner_user_id(record.user_id)
         if team and team.subscription_status in ("active", "trialing"):
-            if subscription_id is None or team.stripe_subscription_id == subscription_id:
+            if (
+                subscription_id is None
+                or team.stripe_subscription_id == subscription_id
+            ):
                 return team, record
         return None, record
 
@@ -969,6 +1034,7 @@ async def get_team_tiers(user=Depends(get_verified_user)):
     """Return available team subscription tiers (seat count + price)."""
     require_billing_enabled()
     from open_webui.models.stripe_packages import StripePackages
+
     return [
         {"seat_count": p.seat_count, "price_eur": p.price_eur}
         for p in StripePackages.get_all_by_tier(PLAN_TIER_TEAM)
@@ -977,7 +1043,9 @@ async def get_team_tiers(user=Depends(get_verified_user)):
 
 
 @router.post("/team/create", response_model=CheckoutResponse)
-async def create_team(body: TeamCreateRequest, request: Request, user=Depends(get_verified_user)):
+async def create_team(
+    body: TeamCreateRequest, request: Request, user=Depends(get_verified_user)
+):
     """Create a team and return a Stripe checkout or redirect URL.
 
     Uses the owner's existing personal Stripe customer (single-customer model) so
@@ -993,6 +1061,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
 
     seat_count = body.seat_count
     from open_webui.models.stripe_packages import StripePackages
+
     team_plans = StripePackages.get_all_by_tier(PLAN_TIER_TEAM)
     tier_config = next((p for p in team_plans if p.seat_count == seat_count), None)
     if not tier_config:
@@ -1057,7 +1126,9 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             )
         except stripe.StripeError as e:
             log.error(f"[billing] Team checkout session error: {e}")
-            raise HTTPException(status_code=502, detail="Failed to create checkout session.")
+            raise HTTPException(
+                status_code=502, detail="Failed to create checkout session."
+            )
         return CheckoutResponse(url=session.url)
 
     # ── Pro / Premium → update existing subscription in-place ────────────
@@ -1075,9 +1146,15 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         )
     except stripe.StripeError as e:
         log.error(f"[billing] Team subscription update error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to update subscription to team plan.")
+        raise HTTPException(
+            status_code=502, detail="Failed to update subscription to team plan."
+        )
 
-    log.info("[billing] Team subscription update initiated: user=%s seats=%d", user.id, seat_count)
+    log.info(
+        "[billing] Team subscription update initiated: user=%s seats=%d",
+        user.id,
+        seat_count,
+    )
     return CheckoutResponse(url=f"{webui_url}/billing?checkout=success")
 
 
@@ -1098,14 +1175,16 @@ async def get_team_status(user=Depends(get_verified_user)):
     from open_webui.models.usage_ledger import UsageLedgerDB
 
     user_by_id = {
-        m.user_id: u
-        for m in members_db
-        if (u := UsersModel.get_user_by_id(m.user_id))
+        m.user_id: u for m in members_db if (u := UsersModel.get_user_by_id(m.user_id))
     }
     member_emails = [u.email for u in user_by_id.values()]
     try:
-        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
-        models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
+        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(
+            member_emails
+        )
+        models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(
+            member_emails
+        )
     except Exception:
         cost_by_email = {}
         models_by_email = {}
@@ -1158,18 +1237,28 @@ class TeamUpdateNameRequest(BaseModel):
 
 
 @router.patch("/team/name")
-async def update_team_name(body: TeamUpdateNameRequest, user=Depends(get_verified_user)):
+async def update_team_name(
+    body: TeamUpdateNameRequest, user=Depends(get_verified_user)
+):
     """Update the team name. Only the team owner may call this."""
     require_billing_enabled()
     name = body.name.strip()
     if not name:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Team name cannot be empty.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Team name cannot be empty.",
+        )
     team = Teams.get_by_owner_user_id(user.id)
     if not team:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own a team.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="You do not own a team."
+        )
     updated = Teams.update(team.id, name=name)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update team name.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update team name.",
+        )
     return {"name": updated.name}
 
 
@@ -1286,13 +1375,17 @@ async def team_billing_portal(request: Request, user=Depends(get_verified_user))
         )
     except stripe.StripeError as e:
         log.error(f"[billing] Team portal error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+        raise HTTPException(
+            status_code=502, detail="Failed to create billing portal session."
+        )
 
     return PortalResponse(url=session.url)
 
 
 @router.post("/team/portal/update-plan", response_model=PortalResponse)
-async def team_billing_portal_update_plan(request: Request, user=Depends(get_verified_user)):
+async def team_billing_portal_update_plan(
+    request: Request, user=Depends(get_verified_user)
+):
     """Stripe portal landing directly on the team subscription update screen (seat tier change)."""
     require_billing_enabled()
 
@@ -1300,7 +1393,9 @@ async def team_billing_portal_update_plan(request: Request, user=Depends(get_ver
     if not team or not team.stripe_customer_id:
         raise HTTPException(status_code=404, detail="No team billing account found.")
     if not team.stripe_subscription_id:
-        raise HTTPException(status_code=400, detail="No active team subscription found.")
+        raise HTTPException(
+            status_code=400, detail="No active team subscription found."
+        )
 
     client = get_stripe_client()
     webui_url = (request.app.state.WEBUI_URL or str(request.base_url)).rstrip("/")
@@ -1319,7 +1414,9 @@ async def team_billing_portal_update_plan(request: Request, user=Depends(get_ver
         )
     except stripe.StripeError as e:
         log.error(f"[billing] Team portal update-plan error: {e}")
-        raise HTTPException(status_code=502, detail="Failed to create billing portal session.")
+        raise HTTPException(
+            status_code=502, detail="Failed to create billing portal session."
+        )
 
     return PortalResponse(url=session.url)
 
@@ -1342,21 +1439,30 @@ async def get_topup_options(user=Depends(get_verified_user)):
 
 
 @router.post("/topup", response_model=CheckoutResponse)
-async def create_topup(body: TopupRequest, request: Request, user=Depends(get_verified_user)):
+async def create_topup(
+    body: TopupRequest, request: Request, user=Depends(get_verified_user)
+):
     """Create a one-time Stripe checkout for a top-up pack (paid user or team)."""
     require_billing_enabled()
 
     from open_webui.models.topup import TopupPacks
 
     billing = StripeBillings.get_by_user_id(user.id)
-    if not billing or billing.plan_tier not in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM, PLAN_TIER_TEAM):
+    if not billing or billing.plan_tier not in (
+        PLAN_TIER_PRO,
+        PLAN_TIER_PREMIUM,
+        PLAN_TIER_TEAM,
+    ):
         # Explicitly reject team_member, trial, internal, and any other tier
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Top-up requires an active paid or team plan.",
         )
 
-    if billing.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) and billing.subscription_status not in ("active", "trialing"):
+    if billing.plan_tier in (
+        PLAN_TIER_PRO,
+        PLAN_TIER_PREMIUM,
+    ) and billing.subscription_status not in ("active", "trialing"):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Paid subscription is not active.",
@@ -1433,7 +1539,9 @@ async def get_invite_info(token: str, user=Depends(get_verified_user)):
 
     if _time.time() > invite.expires_at:
         TeamInvites.update_status(token, "expired")
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired.")
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Invite has expired."
+        )
 
     if user.email.lower() != invite.invited_email:
         raise HTTPException(
@@ -1475,7 +1583,9 @@ async def accept_invite(token: str, user=Depends(get_verified_user)):
 
     if _time.time() > invite.expires_at:
         TeamInvites.update_status(token, "expired")
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired.")
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE, detail="Invite has expired."
+        )
 
     if user.email.lower() != invite.invited_email:
         raise HTTPException(
@@ -1556,7 +1666,9 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Webhook secret not configured.")
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
     except stripe.errors.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature.")
 
@@ -1566,7 +1678,9 @@ async def stripe_webhook(request: Request):
     try:
         return await _handle_stripe_event(event_type, data)
     except Exception as exc:
-        log.exception(f"[billing] Webhook handler crashed for event_type={event_type}: {exc}")
+        log.exception(
+            f"[billing] Webhook handler crashed for event_type={event_type}: {exc}"
+        )
         raise HTTPException(status_code=500, detail="Webhook handler error")
 
 
@@ -1599,7 +1713,9 @@ async def _handle_stripe_event(event_type: str, data):
                 return {"received": True}
 
             # Idempotency via purchase_history
-            if session_id and PurchaseHistory.already_processed(stripe_checkout_session_id=session_id):
+            if session_id and PurchaseHistory.already_processed(
+                stripe_checkout_session_id=session_id
+            ):
                 return {"received": True}
 
             pack = TopupPacks.get_by_id(top_up_id) if top_up_id else None
@@ -1618,9 +1734,12 @@ async def _handle_stripe_event(event_type: str, data):
                         topup_credits_granted=credits,
                         amount_eur=pack.price_eur,
                     )
-                    log.info("[billing] Team topup: team_id=%s credits=%d", team_id, credits)
+                    log.info(
+                        "[billing] Team topup: team_id=%s credits=%d", team_id, credits
+                    )
                 elif user_id:
                     from open_webui.models.users import Users as _Users
+
                     u = _Users.get_user_by_id(user_id)
                     owner_id = u.email if u else user_id
                     CreditBalances.add_topup("user", owner_id, credits)
@@ -1632,7 +1751,9 @@ async def _handle_stripe_event(event_type: str, data):
                         topup_credits_granted=credits,
                         amount_eur=pack.price_eur,
                     )
-                    log.info("[billing] User topup: user_id=%s credits=%d", user_id, credits)
+                    log.info(
+                        "[billing] User topup: user_id=%s credits=%d", user_id, credits
+                    )
             return {"received": True}
 
         # ── Resolve purchased price/package ───────────────────────────────
@@ -1655,15 +1776,23 @@ async def _handle_stripe_event(event_type: str, data):
                     _pid = getattr(_pr, "id", None)
                     if _pid:
                         _csc_price_id = _pid
-                        log.info("[billing] checkout.session: resolved price_id=%s via subscription fetch", _csc_price_id)
+                        log.info(
+                            "[billing] checkout.session: resolved price_id=%s via subscription fetch",
+                            _csc_price_id,
+                        )
             except Exception as _fe:
-                log.warning("[billing] checkout.session: could not fetch subscription for price fallback: %s", _fe)
+                log.warning(
+                    "[billing] checkout.session: could not fetch subscription for price fallback: %s",
+                    _fe,
+                )
 
         # Fallback 2: retrieve the checkout session with expand to get line_items
         if not _csc_price_id and session_id:
             try:
                 _c = get_stripe_client()
-                _sess = _c.v1.checkout.sessions.retrieve(session_id, expand=["line_items"])
+                _sess = _c.v1.checkout.sessions.retrieve(
+                    session_id, expand=["line_items"]
+                )
                 _li = getattr(_sess, "line_items", None)
                 _lid = getattr(_li, "data", None) or []
                 if _lid:
@@ -1671,9 +1800,15 @@ async def _handle_stripe_event(event_type: str, data):
                     _pid = getattr(_pr, "id", None)
                     if _pid:
                         _csc_price_id = _pid
-                        log.info("[billing] checkout.session: resolved price_id=%s via session expand", _csc_price_id)
+                        log.info(
+                            "[billing] checkout.session: resolved price_id=%s via session expand",
+                            _csc_price_id,
+                        )
             except Exception as _fe:
-                log.warning("[billing] checkout.session: could not expand session for price: %s", _fe)
+                log.warning(
+                    "[billing] checkout.session: could not expand session for price: %s",
+                    _fe,
+                )
 
         _csc_pkg = _SPs.get_by_price_id(_csc_price_id) if _csc_price_id else None
         _csc_tier = _csc_pkg.plan_tier if _csc_pkg else None
@@ -1684,13 +1819,19 @@ async def _handle_stripe_event(event_type: str, data):
             from open_webui.models.purchase_history import PurchaseHistory
 
             # New single-customer model: find team via billing record → owner
-            billing_rec = StripeBillings.get_by_customer_id(customer_id) if customer_id else None
-            team = Teams.get_by_owner_user_id(billing_rec.user_id) if billing_rec else None
+            billing_rec = (
+                StripeBillings.get_by_customer_id(customer_id) if customer_id else None
+            )
+            team = (
+                Teams.get_by_owner_user_id(billing_rec.user_id) if billing_rec else None
+            )
 
             # Legacy fallback: team with its own separate Stripe customer
             if team is None:
                 team = Teams.get_by_customer_id(customer_id) if customer_id else None
-                billing_rec = None  # no shared StripeBillings record for legacy separate customer
+                billing_rec = (
+                    None  # no shared StripeBillings record for legacy separate customer
+                )
 
             if team:
                 pkg = _csc_pkg
@@ -1714,8 +1855,13 @@ async def _handle_stripe_event(event_type: str, data):
                 )
 
                 from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
                 existing_bal = CreditBalances.get("team", team.id)
-                rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                rate = (
+                    existing_bal.credits_per_eur_cent
+                    if existing_bal
+                    else CREDITS_PER_EUR_CENT
+                )
                 CreditBalances.set_subscription(
                     owner_type="team",
                     owner_id=team.id,
@@ -1726,6 +1872,7 @@ async def _handle_stripe_event(event_type: str, data):
                 # Zero out the owner's personal credit balance — they are now
                 # on a team plan and must use team credits exclusively.
                 from open_webui.models.users import Users as _CscUsers
+
                 _csc_owner = _CscUsers.get_user_by_id(owner_user_id)
                 if _csc_owner:
                     CreditBalances.reset_all("user", _csc_owner.email)
@@ -1741,13 +1888,24 @@ async def _handle_stripe_event(event_type: str, data):
                     subscription_credits_granted=credits,
                     amount_eur=pkg.price_eur if pkg else None,
                 )
-                log.info("[billing] Team checkout completed: team_id=%s plan=%s credits=%d", team.id, plan_tier, credits)
+                log.info(
+                    "[billing] Team checkout completed: team_id=%s plan=%s credits=%d",
+                    team.id,
+                    plan_tier,
+                    credits,
+                )
             else:
-                log.warning("[billing] Team checkout: no team found for customer_id=%s price_id=%s", customer_id, _csc_price_id)
+                log.warning(
+                    "[billing] Team checkout: no team found for customer_id=%s price_id=%s",
+                    customer_id,
+                    _csc_price_id,
+                )
 
         else:
             # ── Individual user subscription checkout ─────────────────────
-            record = StripeBillings.get_by_customer_id(customer_id) if customer_id else None
+            record = (
+                StripeBillings.get_by_customer_id(customer_id) if customer_id else None
+            )
 
             if record:
                 from open_webui.models.credit_balances import CreditBalances
@@ -1758,7 +1916,9 @@ async def _handle_stripe_event(event_type: str, data):
 
                 price_id = _csc_price_id
                 pkg = StripePackages.get_by_price_id(price_id) if price_id else None
-                plan_tier = (pkg.plan_tier if pkg else None) or _tier_from_price_id(price_id)
+                plan_tier = (pkg.plan_tier if pkg else None) or _tier_from_price_id(
+                    price_id
+                )
                 credits = pkg.credits if pkg else 0
 
                 StripeBillings.upsert(
@@ -1773,7 +1933,11 @@ async def _handle_stripe_event(event_type: str, data):
                 u = _Users.get_user_by_id(record.user_id)
                 owner_id = u.email if u else record.user_id
                 existing_bal = CreditBalances.get("user", owner_id)
-                rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                rate = (
+                    existing_bal.credits_per_eur_cent
+                    if existing_bal
+                    else CREDITS_PER_EUR_CENT
+                )
                 # Only set credits if we resolved a valid package — avoids overwriting
                 # credits already set by a concurrent invoice.paid webhook when
                 # price_id lookup fails (credits would be 0 and would wipe correct balance).
@@ -1796,9 +1960,17 @@ async def _handle_stripe_event(event_type: str, data):
                     subscription_credits_granted=credits,
                     amount_eur=pkg.price_eur if pkg else None,
                 )
-                log.info("[billing] Checkout completed: user_id=%s plan=%s credits=%d", record.user_id, plan_tier, credits)
+                log.info(
+                    "[billing] Checkout completed: user_id=%s plan=%s credits=%d",
+                    record.user_id,
+                    plan_tier,
+                    credits,
+                )
 
-    elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
+    elif event_type in (
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
         customer_id = getattr(data, "customer", None)
         new_status = getattr(data, "status", None)
         if customer_id and new_status:
@@ -1811,7 +1983,10 @@ async def _handle_stripe_event(event_type: str, data):
             if rec_su:
                 # New model: personal customer shared with team
                 team_su = Teams.get_by_owner_user_id(rec_su.user_id)
-                if team_su and (not team_su.stripe_subscription_id or team_su.stripe_subscription_id == sub_id_evt):
+                if team_su and (
+                    not team_su.stripe_subscription_id
+                    or team_su.stripe_subscription_id == sub_id_evt
+                ):
                     Teams.update(team_su.id, subscription_status=new_status)
                 StripeBillings.update_subscription_status(customer_id, new_status)
             else:
@@ -1829,10 +2004,14 @@ async def _handle_stripe_event(event_type: str, data):
 
                 try:
                     items = getattr(data, "items", None)
-                    item_data = getattr(items, "data", None) or (items.get("data", []) if items else [])
+                    item_data = getattr(items, "data", None) or (
+                        items.get("data", []) if items else []
+                    )
                     new_price_id = None
                     if item_data:
-                        price = getattr(item_data[0], "price", None) or item_data[0].get("price", {})
+                        price = getattr(item_data[0], "price", None) or item_data[
+                            0
+                        ].get("price", {})
                         new_price_id = getattr(price, "id", None) or price.get("id", "")
 
                     if new_price_id:
@@ -1842,7 +2021,9 @@ async def _handle_stripe_event(event_type: str, data):
                         if pkg and pkg.plan_tier == PLAN_TIER_TEAM:
                             rec = StripeBillings.get_by_customer_id(customer_id)
                             if rec:
-                                team = Teams.get_by_owner_user_id(rec.user_id) or Teams.get_by_customer_id(customer_id)
+                                team = Teams.get_by_owner_user_id(
+                                    rec.user_id
+                                ) or Teams.get_by_customer_id(customer_id)
                                 if not team:
                                     # No team record — user upgraded via the Stripe billing portal
                                     # without going through the in-app create_team API. Create the
@@ -1858,14 +2039,21 @@ async def _handle_stripe_event(event_type: str, data):
                                         owner_user_id=rec.user_id,
                                         seat_limit=pkg.seat_count or 5,
                                     )
-                                    Teams.update(team.id, stripe_customer_id=customer_id)
+                                    Teams.update(
+                                        team.id, stripe_customer_id=customer_id
+                                    )
                                     TeamMembers.add(team.id, rec.user_id, role="owner")
                                     log.info(
                                         "[billing] Auto-created team on portal upgrade: team=%s user=%s",
-                                        team.id, rec.user_id,
+                                        team.id,
+                                        rec.user_id,
                                     )
                                 if team:
-                                    seat_limit_new = pkg.seat_count if pkg.seat_count else team.seat_limit
+                                    seat_limit_new = (
+                                        pkg.seat_count
+                                        if pkg.seat_count
+                                        else team.seat_limit
+                                    )
                                     Teams.update(
                                         team.id,
                                         stripe_subscription_id=sub_id_evt,
@@ -1881,16 +2069,27 @@ async def _handle_stripe_event(event_type: str, data):
                                         team_id=team.id,
                                     )
                                     existing_bal = CreditBalances.get("team", team.id)
-                                    rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    rate = (
+                                        existing_bal.credits_per_eur_cent
+                                        if existing_bal
+                                        else CREDITS_PER_EUR_CENT
+                                    )
                                     CreditBalances.set_subscription(
-                                        "team", team.id, pkg.credits, rate, int(_time.time())
+                                        "team",
+                                        team.id,
+                                        pkg.credits,
+                                        rate,
+                                        int(_time.time()),
                                     )
                                     # Zero out the owner's personal credit balance — they are now
                                     # on a team plan and must use team credits exclusively.
                                     _owner_u = _Users.get_user_by_id(rec.user_id)
                                     if _owner_u:
                                         CreditBalances.reset_all("user", _owner_u.email)
-                                    from open_webui.models.purchase_history import PurchaseHistory
+                                    from open_webui.models.purchase_history import (
+                                        PurchaseHistory,
+                                    )
+
                                     PurchaseHistory.insert(
                                         user_id=rec.user_id,
                                         event_type="subscription_start",
@@ -1904,13 +2103,22 @@ async def _handle_stripe_event(event_type: str, data):
                                     )
                                     log.info(
                                         "[billing] Team subscription synced: team=%s plan=%s credits=%d seats=%d",
-                                        team.id, pkg.plan_tier, pkg.credits, seat_limit_new,
+                                        team.id,
+                                        pkg.plan_tier,
+                                        pkg.credits,
+                                        seat_limit_new,
                                     )
                                 else:
-                                    log.warning("[billing] subscription.updated team: no team found for user=%s", rec.user_id)
+                                    log.warning(
+                                        "[billing] subscription.updated team: no team found for user=%s",
+                                        rec.user_id,
+                                    )
 
                         # ── Switched to an individual plan ──────────────────
-                        elif pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM):
+                        elif pkg and pkg.plan_tier in (
+                            PLAN_TIER_PRO,
+                            PLAN_TIER_PREMIUM,
+                        ):
                             rec = StripeBillings.get_by_customer_id(customer_id)
                             if rec:
                                 was_team = rec.plan_tier == PLAN_TIER_TEAM
@@ -1923,21 +2131,40 @@ async def _handle_stripe_event(event_type: str, data):
                                 u = _Users.get_user_by_id(rec.user_id)
                                 if u:
                                     existing_bal = CreditBalances.get("user", u.email)
-                                    rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    rate = (
+                                        existing_bal.credits_per_eur_cent
+                                        if existing_bal
+                                        else CREDITS_PER_EUR_CENT
+                                    )
                                     CreditBalances.set_subscription(
-                                        "user", u.email, pkg.credits, rate, int(_time.time())
+                                        "user",
+                                        u.email,
+                                        pkg.credits,
+                                        rate,
+                                        int(_time.time()),
                                     )
                                     log.info(
                                         "[billing] Subscription synced: user=%s plan=%s credits=%d",
-                                        u.email, pkg.plan_tier, pkg.credits,
+                                        u.email,
+                                        pkg.plan_tier,
+                                        pkg.credits,
                                     )
                                 if was_team:
                                     # Owner downgraded from team to individual — dissolve team members
-                                    team = Teams.get_by_owner_user_id(rec.user_id) or Teams.get_by_customer_id(customer_id)
+                                    team = Teams.get_by_owner_user_id(
+                                        rec.user_id
+                                    ) or Teams.get_by_customer_id(customer_id)
                                     if team:
-                                        _revert_team_members_to_trial_by_team_id(team.id)
-                                        Teams.update(team.id, subscription_status="canceled")
-                                        log.info("[billing] Team dissolved on individual downgrade: team=%s", team.id)
+                                        _revert_team_members_to_trial_by_team_id(
+                                            team.id
+                                        )
+                                        Teams.update(
+                                            team.id, subscription_status="canceled"
+                                        )
+                                        log.info(
+                                            "[billing] Team dissolved on individual downgrade: team=%s",
+                                            team.id,
+                                        )
 
                 except Exception as _e:
                     log.warning("[billing] Plan-change detection failed: %s", _e)
@@ -1972,15 +2199,21 @@ async def _handle_stripe_event(event_type: str, data):
                     )
                 log.info(
                     "[billing] Subscription scheduled for cancellation: customer=%s cancel_at=%s",
-                    customer_id, cancel_at,
+                    customer_id,
+                    cancel_at,
                 )
 
-            if event_type == "customer.subscription.deleted" or new_status == "canceled":
+            if (
+                event_type == "customer.subscription.deleted"
+                or new_status == "canceled"
+            ):
                 from open_webui.models.credit_balances import CreditBalances
                 from open_webui.models.purchase_history import PurchaseHistory
                 from open_webui.models.users import Users as _Users
 
-                team_del, record_del = _resolve_team_and_billing(customer_id, sub_id_evt)
+                team_del, record_del = _resolve_team_and_billing(
+                    customer_id, sub_id_evt
+                )
                 if team_del:
                     CreditBalances.reset_all("team", team_del.id)
                     PurchaseHistory.insert(
@@ -2003,7 +2236,11 @@ async def _handle_stripe_event(event_type: str, data):
                     )
 
                 _revert_team_members_to_trial(customer_id, subscription_id=sub_id_evt)
-            log.info("[billing] Subscription updated: customer=%s status=%s", customer_id, new_status)
+            log.info(
+                "[billing] Subscription updated: customer=%s status=%s",
+                customer_id,
+                new_status,
+            )
 
     elif event_type == "invoice.payment_failed":
         customer_id = getattr(data, "customer", None)
@@ -2040,12 +2277,16 @@ async def _handle_stripe_event(event_type: str, data):
             from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
 
             # Idempotency via invoice_id
-            if invoice_id and PurchaseHistory.already_processed(stripe_invoice_id=invoice_id):
+            if invoice_id and PurchaseHistory.already_processed(
+                stripe_invoice_id=invoice_id
+            ):
                 return {"received": True}
 
             subscription_id = getattr(data, "subscription", None)
             amount_paid_cents = getattr(data, "amount_paid", None)
-            amount_eur = amount_paid_cents / 100 if amount_paid_cents is not None else None
+            amount_eur = (
+                amount_paid_cents / 100 if amount_paid_cents is not None else None
+            )
 
             # Resolve price → package from invoice line items.
             # Upgrade invoices have multiple lines (proration credits + new subscription charge).
@@ -2060,37 +2301,57 @@ async def _handle_stripe_event(event_type: str, data):
                         # Find the subscription line with a positive amount first
                         chosen = None
                         for item in line_data:
-                            item_type = getattr(item, "type", None) or item.get("type", "")
-                            item_amount = getattr(item, "amount", None) or item.get("amount", 0)
+                            item_type = getattr(item, "type", None) or item.get(
+                                "type", ""
+                            )
+                            item_amount = getattr(item, "amount", None) or item.get(
+                                "amount", 0
+                            )
                             if item_type == "subscription" and item_amount > 0:
                                 chosen = item
                                 break
                         # Fall back to first subscription line, then first line overall
                         if chosen is None:
                             for item in line_data:
-                                item_type = getattr(item, "type", None) or item.get("type", "")
+                                item_type = getattr(item, "type", None) or item.get(
+                                    "type", ""
+                                )
                                 if item_type == "subscription":
                                     chosen = item
                                     break
                         if chosen is None:
                             chosen = line_data[0]
-                        price = getattr(chosen, "price", None) or chosen.get("price", {})
+                        price = getattr(chosen, "price", None) or chosen.get(
+                            "price", {}
+                        )
                         price_id = getattr(price, "id", None) or price.get("id", "")
             except Exception:
                 pass
             pkg = StripePackages.get_by_price_id(price_id) if price_id else None
-            log.info("[billing] invoice.paid price_id=%s pkg=%s", price_id, pkg.plan_tier if pkg else None)
+            log.info(
+                "[billing] invoice.paid price_id=%s pkg=%s",
+                price_id,
+                pkg.plan_tier if pkg else None,
+            )
 
             team_ip, record_ip = _resolve_team_and_billing(customer_id, subscription_id)
             if team_ip:
                 if team_ip.subscription_status == "past_due":
                     Teams.update(team_ip.id, subscription_status="active")
-                    log.info("[billing] Team payment recovered: customer=%s", customer_id)
+                    log.info(
+                        "[billing] Team payment recovered: customer=%s", customer_id
+                    )
                 if pkg:
                     credits = pkg.credits
                     existing_bal = CreditBalances.get("team", team_ip.id)
-                    rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                    CreditBalances.set_subscription("team", team_ip.id, credits, rate, int(_time.time()))
+                    rate = (
+                        existing_bal.credits_per_eur_cent
+                        if existing_bal
+                        else CREDITS_PER_EUR_CENT
+                    )
+                    CreditBalances.set_subscription(
+                        "team", team_ip.id, credits, rate, int(_time.time())
+                    )
                     Teams.update(team_ip.id, monthly_credits=credits)
                     PurchaseHistory.insert(
                         user_id=team_ip.owner_user_id,
@@ -2104,19 +2365,33 @@ async def _handle_stripe_event(event_type: str, data):
                         subscription_credits_granted=credits,
                         amount_eur=amount_eur,
                     )
-                    log.info("[billing] Team renewal credits reset: team_id=%s credits=%d", team_ip.id, credits)
+                    log.info(
+                        "[billing] Team renewal credits reset: team_id=%s credits=%d",
+                        team_ip.id,
+                        credits,
+                    )
             elif record_ip:
                 if record_ip.subscription_status == "past_due":
                     StripeBillings.update_subscription_status(customer_id, "active")
                     log.info("[billing] Payment recovered: customer=%s", customer_id)
-                if record_ip.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) or (pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM)):
+                if record_ip.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) or (
+                    pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM)
+                ):
                     u = _Users.get_user_by_id(record_ip.user_id)
                     if u:
-                        effective_plan_tier = pkg.plan_tier if pkg else record_ip.plan_tier
+                        effective_plan_tier = (
+                            pkg.plan_tier if pkg else record_ip.plan_tier
+                        )
                         credits = pkg.credits if pkg else 0
                         existing_bal = CreditBalances.get("user", u.email)
-                        rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                        CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
+                        rate = (
+                            existing_bal.credits_per_eur_cent
+                            if existing_bal
+                            else CREDITS_PER_EUR_CENT
+                        )
+                        CreditBalances.set_subscription(
+                            "user", u.email, credits, rate, int(_time.time())
+                        )
                         PurchaseHistory.insert(
                             user_id=record_ip.user_id,
                             event_type="renewal",
@@ -2128,7 +2403,12 @@ async def _handle_stripe_event(event_type: str, data):
                             subscription_credits_granted=credits,
                             amount_eur=amount_eur,
                         )
-                        log.info("[billing] Monthly renewal credits reset: user=%s plan=%s credits=%d", u.email, effective_plan_tier, credits)
+                        log.info(
+                            "[billing] Monthly renewal credits reset: user=%s plan=%s credits=%d",
+                            u.email,
+                            effective_plan_tier,
+                            credits,
+                        )
 
     elif event_type == "payment_method.attached":
         customer_id = getattr(data, "customer", None)
@@ -2159,12 +2439,21 @@ async def _handle_stripe_event(event_type: str, data):
 async def test_email(request: Request, user=Depends(get_admin_user)):
     """Send a test email to the logged-in admin to verify SMTP config."""
     from open_webui.utils.email import send_email
-    from open_webui.env import SMTP_HOST, SMTP_FROM_EMAIL
+    from open_webui.env import SMTP_HOST, SMTP_FROM_EMAIL, WEBUI_NAME
+
     if not SMTP_HOST or not SMTP_FROM_EMAIL:
-        raise HTTPException(status_code=400, detail=f"SMTP not configured (SMTP_HOST={SMTP_HOST!r}, SMTP_FROM_EMAIL={SMTP_FROM_EMAIL!r})")
-    ok = send_email(user.email, "Keeper AI — SMTP test", "<p>SMTP is working correctly.</p>")
+        raise HTTPException(
+            status_code=400,
+            detail=f"SMTP not configured (SMTP_HOST={SMTP_HOST!r}, SMTP_FROM_EMAIL={SMTP_FROM_EMAIL!r})",
+        )
+    ok = send_email(
+        user.email, f"{WEBUI_NAME} SMTP test", "<p>SMTP is working correctly.</p>"
+    )
     if not ok:
-        raise HTTPException(status_code=500, detail="Email send failed — check backend logs for [email] error")
+        raise HTTPException(
+            status_code=500,
+            detail="Email send failed — check backend logs for [email] error",
+        )
     return {"sent": True, "to": user.email}
 
 
@@ -2246,7 +2535,7 @@ async def get_model_breakdown(user=Depends(get_verified_user)):
 class ExchangeRateEntry(BaseModel):
     usd_per_eur: float  # USD per 1 EUR (ECB D.USD.EUR.SP00.A series)
     from_: int = Field(alias="from")  # unix epoch
-    to: int             # unix epoch
+    to: int  # unix epoch
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -2289,7 +2578,16 @@ async def get_my_usage(user=Depends(get_verified_user)):
             total_tokens=total_tokens,
             total_cost_usd=round(cost_usd, 6),
             total_cost_eur=round(cost_eur, 4),
-            exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
+            exchange_rates=[
+                ExchangeRateEntry(
+                    **{
+                        "from": r["from"],
+                        "to": r["to"],
+                        "usd_per_eur": r["usd_per_eur"],
+                    }
+                )
+                for r in rates
+            ],
             ledger_ready=UsageLedgerDB.is_ledger_ready(),
             credits_balance=0,
             credits_used=0,
@@ -2303,6 +2601,7 @@ async def get_my_usage(user=Depends(get_verified_user)):
     if record and record.plan_tier in CREDITS_TIERS:
         from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
         bal = CreditBalances.get("user", user.email)
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
         balance = (bal.subscription_credits + bal.topup_credits) if bal else 0
@@ -2322,6 +2621,7 @@ async def get_my_usage(user=Depends(get_verified_user)):
         # Team owner: resolve rate from the team's credit balance, compute personal usage
         from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
         team = Teams.get_by_id(record.team_id)
         rate = CREDITS_PER_EUR_CENT
         if team:
@@ -2334,6 +2634,7 @@ async def get_my_usage(user=Depends(get_verified_user)):
         # Team members: resolve the conversion rate from the team's credit balance
         from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+
         bal = CreditBalances.get("team", record.team_id)
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
         credits_per_eur_cent = rate
@@ -2345,7 +2646,12 @@ async def get_my_usage(user=Depends(get_verified_user)):
         total_tokens=total_tokens,
         total_cost_usd=round(cost_usd, 6),
         total_cost_eur=round(cost_eur, 4),
-        exchange_rates=[ExchangeRateEntry(**{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}) for r in rates],
+        exchange_rates=[
+            ExchangeRateEntry(
+                **{"from": r["from"], "to": r["to"], "usd_per_eur": r["usd_per_eur"]}
+            )
+            for r in rates
+        ],
         ledger_ready=UsageLedgerDB.is_ledger_ready(),
         credits_balance=credits_balance,
         credits_used=credits_used,
