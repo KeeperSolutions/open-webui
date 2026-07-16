@@ -2159,10 +2159,10 @@ async def _handle_stripe_event(event_type: str, data):
 async def test_email(request: Request, user=Depends(get_admin_user)):
     """Send a test email to the logged-in admin to verify SMTP config."""
     from open_webui.utils.email import send_email
-    from open_webui.env import SMTP_HOST, SMTP_FROM_EMAIL
+    from open_webui.env import SMTP_HOST, SMTP_FROM_EMAIL, WEBUI_NAME
     if not SMTP_HOST or not SMTP_FROM_EMAIL:
         raise HTTPException(status_code=400, detail=f"SMTP not configured (SMTP_HOST={SMTP_HOST!r}, SMTP_FROM_EMAIL={SMTP_FROM_EMAIL!r})")
-    ok = send_email(user.email, "Keeper AI — SMTP test", "<p>SMTP is working correctly.</p>")
+    ok = send_email(user.email, f"[{WEBUI_NAME}] SMTP test", "<p>SMTP is working correctly.</p>")
     if not ok:
         raise HTTPException(status_code=500, detail="Email send failed — check backend logs for [email] error")
     return {"sent": True, "to": user.email}
