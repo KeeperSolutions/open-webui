@@ -98,7 +98,8 @@ async def _report_task_usage_and_restore(
         if choices:
             assistant_content = choices[0].get("message", {}).get("content", "") or ""
 
-        chat_id = (payload.get("metadata") or {}).get("chat_id")
+        metadata = payload.get("metadata")
+        chat_id = metadata.get("chat_id") if isinstance(metadata, dict) else None
         if not chat_id:
             # The outlet resolves the PII vault by chat_id; without it there is
             # neither a thread to report usage against nor a vault to restore from.
@@ -120,7 +121,9 @@ async def _report_task_usage_and_restore(
             "chat_id": chat_id,
             "model": payload["model"],
             "messages": payload["messages"] + [assistant_message],
-            "metadata": payload.get("metadata", {}),
+            # `metadata` is guaranteed a dict here: we returned early above unless
+            # chat_id was truthy, and chat_id only comes from a dict metadata.
+            "metadata": metadata,
         }
 
         # Bound the outlet call so a slow/stuck pipeline can never hang or crash

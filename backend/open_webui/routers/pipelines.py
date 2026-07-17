@@ -68,7 +68,8 @@ def resolve_request_pii_masking(payload) -> Optional[bool]:
     """
     features = payload.get("features")
     if not isinstance(features, dict):
-        features = (payload.get("metadata") or {}).get("features")
+        metadata = payload.get("metadata")
+        features = metadata.get("features") if isinstance(metadata, dict) else None
     value = features.get("pii_masking") if isinstance(features, dict) else None
     return value if isinstance(value, bool) else None
 
