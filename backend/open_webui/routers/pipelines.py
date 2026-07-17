@@ -17,7 +17,11 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 from typing import Optional
 
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
+from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
+    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+    PII_FILTER_IDS,
+)
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
 
@@ -36,6 +40,62 @@ log = logging.getLogger(__name__)
 # improve it. Let each stage leave it better than it found.
 #
 ##################################
+
+
+class PiiMaskingUnavailableError(Exception):
+    """Raised when PII masking is required for a request but the masking pipeline
+    could not be applied — unreachable (connection error) or not present in the
+    resolved model registry. FAIL-CLOSED: the request must be refused so unmasked
+    PII never reaches the LLM. Its str() is shown to the user verbatim (surfaced
+    via chat:message:error), so keep the message clear and non-technical.
+    """
+
+    DEFAULT_MESSAGE = (
+        "PII masking is currently unavailable, so your message was not sent. "
+        "Please try again in a moment."
+    )
+
+    def __init__(self, message: Optional[str] = None):
+        super().__init__(message or self.DEFAULT_MESSAGE)
+
+
+def resolve_request_pii_masking(payload) -> Optional[bool]:
+    """Effective per-request PII masking flag, read from the payload's `features`
+    (top-level, else `metadata.features` — the TRAU-522 Layer-1 coupling). Returns
+    True/False when explicitly set, or None when unspecified. This is the SAME
+    signal the inlet override (below) uses, so the fail-closed guard and the
+    pipeline agree on whether masking was requested.
+    """
+    features = payload.get("features")
+    if not isinstance(features, dict):
+        features = (payload.get("metadata") or {}).get("features")
+    value = features.get("pii_masking") if isinstance(features, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+def assert_pii_masking_available(payload, model_id, models) -> None:
+    """FAIL-CLOSED guard for Mechanism 2 (registry pruning).
+
+    When PII masking is requested for this request (features.pii_masking=True) but
+    NO PII filter is present in the resolved filters — e.g. the pipeline is down
+    and its filter was pruned from `app.state.MODELS` because its `/models` fetch
+    returned None — the inlet loop would silently skip masking and PII would reach
+    the LLM. Refuse the request instead.
+
+    No-ops (does NOT block) when:
+      * enforcement is disabled (`PII_FILTER_IDS` empty), or
+      * masking is not explicitly requested (features.pii_masking is not True) —
+        so a chat with masking OFF is never blocked by pipeline unavailability, or
+      * a PII filter IS present in the resolved filters (normal path; if the call
+        then fails, the inlet's own fail-closed re-raise handles it).
+    """
+    if not PII_FILTER_IDS:
+        return
+    if resolve_request_pii_masking(payload) is not True:
+        return
+    resolved_ids = {f.get("id") for f in get_sorted_filters(model_id, models)}
+    if not (resolved_ids & PII_FILTER_IDS):
+        raise PiiMaskingUnavailableError()
 
 
 def get_sorted_filters(model_id, models):
@@ -93,6 +153,16 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     }
     model_id = payload["model"]
     sorted_filters = get_sorted_filters(model_id, models)
+
+    # FAIL-CLOSED guard (Mechanism 2), enforced HERE — the single chokepoint every
+    # inlet caller flows through (main chat AND all task generators). If PII
+    # masking is requested for this request but no PII filter is present in the
+    # resolved filters (e.g. the pipeline is down and its filter was pruned from
+    # app.state.MODELS because its /models fetch returned None), the loop below
+    # would silently skip masking and PII would reach the LLM. Refuse first.
+    # No-op when masking is OFF/unspecified or no PII filter is configured.
+    assert_pii_masking_available(payload, model_id, models)
+
     model = models[model_id]
 
     if 'pipeline' in model:
@@ -123,20 +193,11 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             if not isinstance(per_filter_valves, dict):
                 per_filter_valves = {}
 
-            # Per-request override from features.pii_masking takes precedence over the
-            # stored user setting, allowing the per-chat toggle to control masking without
-            # writing back to the DB.
-            #
-            # metadata.features coupling: the main chat-completion path sends `features`
-            # at the top level of the payload, but background task payloads (built in
-            # tasks.py from request.state.metadata) carry the per-chat toggle under
-            # metadata.features instead. Fall back to metadata.features so task payloads
-            # (title/tags/follow_ups/...) honour the per-chat toggle too. Top-level wins
-            # when present.
-            features = payload.get("features")
-            if not isinstance(features, dict):
-                features = (payload.get("metadata") or {}).get("features")
-            request_pii = features.get("pii_masking") if isinstance(features, dict) else None
+            # Per-request override from features.pii_masking (top-level, else
+            # metadata.features — see resolve_request_pii_masking) takes precedence
+            # over the stored user setting, letting the per-chat toggle control
+            # masking without a DB write. Top-level wins when both are present.
+            request_pii = resolve_request_pii_masking(payload)
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
 
@@ -167,6 +228,18 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
                     raise Exception(response.status, res['detail'])
             except Exception as e:
                 log.exception(f'Connection error: {e}')
+                # FAIL-CLOSED for PII filters (Mechanism 1): a connection error
+                # here means masking did NOT run. For a required PII filter with
+                # masking enabled, the original (unmasked) `payload` must NOT be
+                # returned to the caller — refuse the request instead. Every other
+                # filter keeps best-effort passthrough (e.g. a telemetry outage
+                # must never block chat). `pii_masking_enabled` defaults to True
+                # (the pipeline default) when neither the per-request override nor
+                # a stored valve set it.
+                if filter_id in PII_FILTER_IDS and per_filter_valves.get(
+                    "pii_masking_enabled", True
+                ):
+                    raise PiiMaskingUnavailableError() from e
 
     return payload
 

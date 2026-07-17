@@ -198,6 +198,36 @@ class TestReportTaskUsageAndRestore:
         assert restored is None
         assert outlet.await_count == 0
 
+    def test_outlet_timeout_falls_back_to_none(self):
+        # A stuck/slow pipeline outlet must not hang the chat: the bounded call
+        # times out and we fall back to masked content (None) instead of blocking.
+        async def _hang(request, body, user, models):
+            await asyncio.sleep(1)  # longer than the patched timeout
+            return body
+
+        with patch.object(tasks, "process_pipeline_outlet_filter", AsyncMock(side_effect=_hang)), \
+             patch.object(tasks, "PII_TASK_OUTLET_RESTORE_TIMEOUT", 0.05):
+            restored = _run(_report_task_usage_and_restore(
+                _request(), _user(),
+                _payload(),
+                _masked_response("[PERSON_1]", usage={"total_tokens": 10}),
+                {},
+            ))
+        assert restored is None  # timed out → masked fallback, no raise
+
+    def test_outlet_cancellation_is_swallowed(self):
+        # CancelledError (BaseException) from the outlet must NOT propagate up to
+        # crash the chat response handler — it is caught and we fall back.
+        cancelling = AsyncMock(side_effect=asyncio.CancelledError())
+        with patch.object(tasks, "process_pipeline_outlet_filter", cancelling):
+            restored = _run(_report_task_usage_and_restore(
+                _request(), _user(),
+                _payload(),
+                _masked_response("[PERSON_1]", usage={"total_tokens": 10}),
+                {},
+            ))
+        assert restored is None  # cancellation swallowed, not propagated
+
 
 # ---------------------------------------------------------------------------
 # _apply_restored_content — write-back into the response
@@ -319,4 +349,21 @@ class TestGenerateTitlePersistedValue:
         ))
         content = res["choices"][0]["message"]["content"]
         # No crash; masked value returned (title generation must not fail).
+        assert json.loads(content)["title"] == "Chat with [PERSON_1]"
+
+    def test_hanging_outlet_does_not_hang_or_crash_title(self):
+        # End-to-end: a pipeline outlet that hangs past the bound must not block
+        # or crash title generation — the chat survives with the masked title.
+        async def _hang(request, body, user, models):
+            await asyncio.sleep(1)  # longer than the patched bound
+            return body
+
+        outlet = AsyncMock(side_effect=_hang)
+        patches = _patch_title_pipeline(outlet)
+        with patch.object(tasks, "PII_TASK_OUTLET_RESTORE_TIMEOUT", 0.05):
+            res = _apply_patches(patches, lambda: _run(
+                generate_title(_title_request(), _title_form(), _user())
+            ))
+        content = res["choices"][0]["message"]["content"]
+        # Outlet hung → bounded out → masked title returned, no crash.
         assert json.loads(content)["title"] == "Chat with [PERSON_1]"

@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
 import logging
 import re
 
@@ -44,6 +45,15 @@ router = APIRouter()
 # Matches the placeholder shape minted by the PII pipeline ([PERSON_1], [HR_OIB_2],
 # ...). Used to decide whether a task completion actually needs an outlet restore.
 _PII_PLACEHOLDER_RE = re.compile(r"\[[A-Z_]+_\d+\]")
+
+# Upper bound (seconds) for the task-restore outlet call. This runs on the chat
+# response critical path (background_tasks_handler awaits the task generators), so
+# a slow/stuck pipeline outlet must never hang or crash the response. 8s sits
+# comfortably above a healthy restore (vault snapshot + placeholder substitution,
+# well under ~2s) and above the vault's own 5s command_timeout, while being far
+# below the 60s aiohttp sock_read that currently lets the call hang. On
+# timeout/cancel we fall back to the masked content — the chat survives.
+PII_TASK_OUTLET_RESTORE_TIMEOUT = 8
 
 
 async def _report_task_usage_and_restore(
@@ -113,9 +123,31 @@ async def _report_task_usage_and_restore(
             "metadata": payload.get("metadata", {}),
         }
 
-        restored_body = await process_pipeline_outlet_filter(
-            request, outlet_body, user, models
-        )
+        # Bound the outlet call so a slow/stuck pipeline can never hang or crash
+        # the chat response (this runs on the awaited critical path). On timeout
+        # or cancellation, fall back to the masked content.
+        try:
+            restored_body = await asyncio.wait_for(
+                process_pipeline_outlet_filter(request, outlet_body, user, models),
+                timeout=PII_TASK_OUTLET_RESTORE_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            log.warning(
+                "PII task outlet restore timed out after %ss; "
+                "falling back to masked content",
+                PII_TASK_OUTLET_RESTORE_TIMEOUT,
+            )
+            return None
+        except asyncio.CancelledError:
+            # CancelledError is a BaseException, so the outer `except Exception`
+            # does NOT catch it — without this it propagates up through
+            # background_tasks_handler and crashes the whole chat response. This
+            # restore is a best-effort enhancement; swallow it and fall back to
+            # the masked content so the chat survives.
+            log.warning(
+                "PII task outlet restore cancelled; falling back to masked content"
+            )
+            return None
 
         # The outlet returns the processed body; the restored assistant content is
         # the last message we appended. Extract it defensively.
