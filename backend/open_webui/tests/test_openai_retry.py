@@ -363,3 +363,22 @@ def test_event_stream_with_retryable_status_is_retried():
     )
     assert isinstance(result, StreamingResponse)
     assert sess.call_count == 2  # the 503 event-stream was retried, not returned
+
+
+# ---------------------------------------------------------------------------
+# 8. Jittered backoff: bounds + a growing window that decorrelates retries
+# ---------------------------------------------------------------------------
+
+def test_backoff_is_jittered_within_growing_bounds():
+    # Equal-jitter idiom (mirrors socket/main.py): the wait for the retry after
+    # attempt N is drawn uniformly from [nominal/2, nominal] with nominal =
+    # 0.5*(N+1). Bounds must hold for every draw, and the window must grow per
+    # attempt so later retries wait longer.
+    for attempt in range(4):
+        nominal = 0.5 * (attempt + 1)
+        draws = [openai_router._llm_retry_backoff_seconds(attempt) for _ in range(1000)]
+        assert all(nominal / 2 <= d <= nominal for d in draws)
+
+    # Jitter actually varies (not a constant) — decorrelation is the whole point.
+    same_attempt = {openai_router._llm_retry_backoff_seconds(0) for _ in range(50)}
+    assert len(same_attempt) > 1

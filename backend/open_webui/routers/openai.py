@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import random
 import time
 from typing import Optional
 
@@ -36,6 +37,9 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     ENABLE_FORWARD_USER_INFO_HEADERS,
     BYPASS_MODEL_ACCESS_CONTROL,
+    LLM_RETRY_MAX,
+    LLM_RETRY_RETRYABLE_STATUS,
+    LLM_RETRY_MAX_DURATION_SECONDS,
 )
 from open_webui.models.users import UserModel
 
@@ -65,40 +69,38 @@ log = logging.getLogger(__name__)
 # When the upstream chat-completion call fails on a TRANSIENT error — a
 # connection drop, a timeout, or a transient HTTP status (429, or a transient
 # 5xx — see LLM_RETRY_RETRYABLE_STATUS) — retry it a few times with a short
-# linear backoff instead of crashing the chat on a blip. Non-retryable failures
+# jittered backoff instead of crashing the chat on a blip. Non-retryable failures
 # (400/401/403/404/422, including a 400 "context_length_exceeded" for oversized
 # input) are NOT retried — they propagate immediately, unchanged, as before.
 #
-#   LLM_RETRY_MAX                  total attempts incl. the first (3 = 1 try + 2
-#                                  retries). Hardcoded, not env-driven, to match
-#                                  the existing transient-retry idiom on this
-#                                  codebase (utils/middleware.py).
+# The three knobs are env-driven (declared in env.py alongside
+# AIOHTTP_CLIENT_TIMEOUT) so a deployment can tune them without a code change:
+#   LLM_RETRY_MAX                  total attempts incl. the first (default 3 =
+#                                  1 try + 2 retries).
 #   LLM_RETRY_RETRYABLE_STATUS     upstream HTTP statuses worth retrying; every
 #                                  other status (notably non-retryable 4xx)
-#                                  propagates on the first hit. Needed because
-#                                  session.request() does NOT raise on an error
-#                                  status, so the decision is made explicitly on
-#                                  r.status rather than via raise_for_status().
-#                                  Covers the standard transient 5xx (500/502/
-#                                  503/504), Cloudflare origin errors (520-524)
-#                                  and provider "overloaded" (529). Deterministic
-#                                  5xx (501 Not Implemented, 505, 510, 511) are
-#                                  intentionally EXCLUDED so a real config error
-#                                  surfaces immediately instead of being retried.
-#   LLM_RETRY_TOTAL_BUDGET_SECONDS wall-clock cap across ALL attempts. Required
-#                                  because AIOHTTP_CLIENT_TIMEOUT (total)
-#                                  defaults to None (no per-request cap), so
-#                                  without this a run of attempts each hanging on
-#                                  sock_read could pile up unbounded and DoS our
-#                                  own handler. Checked before each new attempt.
-LLM_RETRY_MAX = 3
-LLM_RETRY_RETRYABLE_STATUS = {
-    429,  # Too Many Requests (rate limit)
-    500, 502, 503, 504,  # standard transient 5xx
-    520, 521, 522, 523, 524,  # Cloudflare origin errors (transient)
-    529,  # provider "overloaded" (e.g. Anthropic)
-}
-LLM_RETRY_TOTAL_BUDGET_SECONDS = 90
+#                                  propagates on the first hit. Consulted
+#                                  explicitly because session.request() does NOT
+#                                  raise on an error status.
+#   LLM_RETRY_MAX_DURATION_SECONDS wall-clock cap across ALL attempts (default
+#                                  90s), checked before each new attempt. Guards
+#                                  against attempts each hanging on sock_read
+#                                  piling up unbounded (AIOHTTP_CLIENT_TIMEOUT
+#                                  total defaults to None, i.e. no per-request
+#                                  cap).
+
+
+def _llm_retry_backoff_seconds(attempt: int) -> float:
+    """Jittered backoff (seconds) to wait before the retry that follows `attempt`
+    (0-based). The nominal delay grows linearly — 0.5s, 1.0s, 1.5s, … — but the
+    actual sleep is drawn uniformly from the lower half of that window
+    (nominal/2 .. nominal), the same equal-jitter idiom used for the websocket
+    cleanup lock in socket/main.py. The randomness DECORRELATES a burst of
+    requests that failed together (e.g. one upstream 429/503 spike) so they do
+    not all retry in lockstep and re-create the same thundering herd, while the
+    lower bound keeps a sensible minimum wait."""
+    nominal = 0.5 * (attempt + 1)
+    return random.uniform(nominal / 2, nominal)
 
 
 ##########################################
@@ -1023,7 +1025,7 @@ async def generate_chat_completion(
     # Pipeline models are NOT retried (single attempt): their POST can carry side
     # effects and is not necessarily idempotent, so a double POST is unsafe.
     max_attempts = 1 if model.get("pipeline") else LLM_RETRY_MAX
-    retry_deadline = time.monotonic() + LLM_RETRY_TOTAL_BUDGET_SECONDS
+    retry_deadline = time.monotonic() + LLM_RETRY_MAX_DURATION_SECONDS
 
     try:
         for attempt in range(max_attempts):
@@ -1034,12 +1036,21 @@ async def generate_chat_completion(
                 log.warning(
                     "LLM retry budget (%ss) exhausted after %d attempt(s); "
                     "propagating last error.",
-                    LLM_RETRY_TOTAL_BUDGET_SECONDS,
+                    LLM_RETRY_MAX_DURATION_SECONDS,
                     attempt,
                 )
                 break
 
             try:
+                # A FRESH session (and connection) per attempt is intentional,
+                # not an oversight. Hoisting one session out of the loop would
+                # save at most a single TCP+TLS handshake on a retry, but (a) the
+                # retry path already sleeps a jittered backoff (>= 0.25s) that
+                # dwarfs a handshake, (b) cleanup_response closes the connection
+                # (not release-to-pool) so reuse would need deeper changes to help
+                # at all, and (c) a new connection lets a load balancer re-route
+                # away from the struggling upstream node that caused the retry.
+                # So each attempt fully owns and tears down its own session.
                 session = aiohttp.ClientSession(
                     trust_env=True,
                     timeout=aiohttp.ClientTimeout(
@@ -1097,7 +1108,7 @@ async def generate_chat_completion(
                     await cleanup_response(r, session)
                     r = None
                     session = None
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    await asyncio.sleep(_llm_retry_backoff_seconds(attempt))
                     continue
 
                 try:
@@ -1131,7 +1142,7 @@ async def generate_chat_completion(
                 r = None
                 session = None
                 if attempt + 1 < max_attempts and time.monotonic() < retry_deadline:
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    await asyncio.sleep(_llm_retry_backoff_seconds(attempt))
                     continue
                 raise
 
