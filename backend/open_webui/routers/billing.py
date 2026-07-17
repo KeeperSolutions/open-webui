@@ -959,6 +959,7 @@ class TeamStatusResponse(BaseModel):
     members: list[TeamMemberResponse]
     pending_invites: list[TeamInviteResponse]
     team_month_cost_eur: float = 0.0
+    credits_remaining: int = 0
 
 
 # ---------- Team endpoints ----------
@@ -1069,7 +1070,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             record.stripe_subscription_id,
             params={
                 "items": [{"id": item_id, "price": team_price_id}],
-                "proration_behavior": "create_prorations",
+                "proration_behavior": "always_invoice",
                 "metadata": {"user_id": user.id, "price_id": team_price_id},
             },
         )
@@ -1078,6 +1079,20 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         raise HTTPException(status_code=502, detail="Failed to update subscription to team plan.")
 
     log.info("[billing] Team subscription update initiated: user=%s seats=%d", user.id, seat_count)
+
+    # Reset personal credits so owner uses only team pool
+    from open_webui.models.credit_balances import CreditBalances
+    CreditBalances.reset_all("user", user.email)
+
+    # Give the team balance a fresh period_start so usage window starts now
+    team = Teams.get_by_owner_user_id(user.id)
+    if team:
+        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+        existing = CreditBalances.get("team", team.id)
+        credits = existing.subscription_credits if existing else 0
+        rate = existing.credits_per_eur_cent if existing else CREDITS_PER_EUR_CENT
+        CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
+
     return CheckoutResponse(url=f"{webui_url}/billing?checkout=success")
 
 
@@ -1141,6 +1156,11 @@ async def get_team_status(user=Depends(get_verified_user)):
         if inv.status == "pending"
     ]
 
+    # Include live team credit balance so frontend can show correct remaining/used
+    from open_webui.models.credit_balances import CreditBalances
+    team_bal = CreditBalances.get("team", team.id)
+    credits_rem = max(0, (team_bal.subscription_credits + team_bal.topup_credits) if team_bal else 0)
+
     return TeamStatusResponse(
         team_id=team.id,
         name=team.name,
@@ -1150,6 +1170,7 @@ async def get_team_status(user=Depends(get_verified_user)):
         members=members_out,
         pending_invites=invites_out,
         team_month_cost_eur=round(team_month_cost, 4),
+        credits_remaining=credits_rem,
     )
 
 
@@ -2324,12 +2345,17 @@ async def get_my_usage(user=Depends(get_verified_user)):
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
         team = Teams.get_by_id(record.team_id)
         rate = CREDITS_PER_EUR_CENT
+        period_start = None
         if team:
             bal = CreditBalances.get("team", team.id)
             if bal:
                 rate = bal.credits_per_eur_cent
+                period_start = bal.period_start
         credits_per_eur_cent = rate
-        credits_used = eur_to_credits(cost_eur, rate)
+        credits_used = eur_to_credits(
+            UsageLedgerDB.get_cost_eur_for_user_since(user.email, period_start) if period_start else cost_eur,
+            rate,
+        )
     elif record and record.plan_tier == PLAN_TIER_TEAM_MEMBER and record.team_id:
         # Team members: resolve the conversion rate from the team's credit balance
         from open_webui.models.credit_balances import CreditBalances
@@ -2337,7 +2363,11 @@ async def get_my_usage(user=Depends(get_verified_user)):
         bal = CreditBalances.get("team", record.team_id)
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
         credits_per_eur_cent = rate
-        credits_used = eur_to_credits(cost_eur, rate)
+        period_start = bal.period_start if bal else None
+        credits_used = eur_to_credits(
+            UsageLedgerDB.get_cost_eur_for_user_since(user.email, period_start) if period_start else cost_eur,
+            rate,
+        )
 
     return MyUsageResponse(
         month=now.month,

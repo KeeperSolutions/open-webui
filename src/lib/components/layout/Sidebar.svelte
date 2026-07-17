@@ -433,10 +433,13 @@
 		localStorage.setItem('sidebarWidth', String(newSidebarWidth));
 	};
 
-	onMount(() => {
+	onMount(async () => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
 		loadMyUsage({ retryIfEmpty: true });
-		usagePollingInterval = setInterval(loadMyUsage, 5 * 60 * 1000);
+		// Use configured poll interval from backend (default 2 minutes), converted to milliseconds
+		const pollIntervalMs = ($billingStatus?.usage_poll_interval_seconds ?? 120) * 1000;
+		usagePollingInterval = setInterval(loadMyUsage, pollIntervalMs);
+		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
 		try {
 			const width = Number(localStorage.getItem('sidebarWidth'));
