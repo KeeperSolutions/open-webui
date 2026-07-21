@@ -1,7 +1,7 @@
 """Add model_class table
 
 Revision ID: a7b8c9d0e1f2
-Revises: b2c3d4e5f6a7
+Revises: b600fea935e1
 Create Date: 2026-06-22 00:00:00.000000
 
 Add order column for explicit sorting.
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7b8c9d0e1f2"
-down_revision: Union[str, None] = "b2c3d4e5f6a7"
+down_revision: Union[str, None] = "b600fea935e1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

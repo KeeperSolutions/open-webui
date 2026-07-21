@@ -1,7 +1,7 @@
 import json
 import time
 import uuid
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 from open_webui.internal.db import Base, get_db_context
@@ -58,17 +58,8 @@ class ChatMessage(Base):
     role = Column(Text, nullable=False)  # user, assistant, system
     parent_id = Column(Text, nullable=True)
 
-    # Content
-    content = Column(JSON, nullable=True)  # Can be str or list of blocks
-    output = Column(JSON, nullable=True)
-
     # Model (for assistant messages)
     model_id = Column(Text, nullable=True, index=True)
-
-    # Attachments
-    files = Column(JSON, nullable=True)
-    sources = Column(JSON, nullable=True)
-    embeds = Column(JSON, nullable=True)
 
     # Status
     done = Column(Boolean, default=True)
@@ -81,6 +72,13 @@ class ChatMessage(Base):
     # Timestamps
     created_at = Column(BigInteger, index=True)
     updated_at = Column(BigInteger)
+
+    # Note: message content/output/files/sources/embeds are deliberately NOT
+    # stored here. This table exists for cross-user analytics aggregation
+    # (message counts, token usage) which only ever reads role/model_id/
+    # usage/timestamps — duplicating message text into an unencrypted table
+    # would undermine chat.chat's EncryptedJSONField encryption (TRAU-434).
+    # The full message content lives only in the encrypted chat.chat blob.
 
     __table_args__ = (
         Index('chat_message_chat_parent_idx', 'chat_id', 'parent_id'),
@@ -102,12 +100,7 @@ class ChatMessageModel(BaseModel):
     user_id: str
     role: str
     parent_id: Optional[str] = None
-    content: Optional[Any] = None  # str or list of blocks
-    output: Optional[list] = None
     model_id: Optional[str] = None
-    files: Optional[list] = None
-    sources: Optional[list] = None
-    embeds: Optional[list] = None
     done: bool = True
     status_history: Optional[list] = None
     error: Optional[dict | str] = None
@@ -145,18 +138,8 @@ class ChatMessageTable:
                     existing.role = data['role']
                 if 'parent_id' in data:
                     existing.parent_id = data.get('parent_id') or data.get('parentId')
-                if 'content' in data:
-                    existing.content = data.get('content')
-                if 'output' in data:
-                    existing.output = data.get('output')
                 if 'model_id' in data or 'model' in data:
                     existing.model_id = data.get('model_id') or data.get('model')
-                if 'files' in data:
-                    existing.files = data.get('files')
-                if 'sources' in data:
-                    existing.sources = data.get('sources')
-                if 'embeds' in data:
-                    existing.embeds = data.get('embeds')
                 if 'done' in data:
                     existing.done = data.get('done', True)
                 if 'status_history' in data or 'statusHistory' in data:
@@ -187,12 +170,7 @@ class ChatMessageTable:
                     user_id=user_id,
                     role=data.get('role', 'user'),
                     parent_id=data.get('parent_id') or data.get('parentId'),
-                    content=data.get('content'),
-                    output=data.get('output'),
                     model_id=data.get('model_id') or data.get('model'),
-                    files=data.get('files'),
-                    sources=data.get('sources'),
-                    embeds=data.get('embeds'),
                     done=data.get('done', True),
                     status_history=data.get('status_history') or data.get('statusHistory'),
                     error=data.get('error'),

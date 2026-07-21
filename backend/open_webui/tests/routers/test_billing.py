@@ -30,7 +30,7 @@ class TestGetUserByEmail:
         @contextmanager
         def _get_db(db=None):
             session = MagicMock()
-            session.query.return_value.filter_by.return_value.first.return_value = None
+            session.query.return_value.filter.return_value.first.return_value = None
             yield session
 
         with patch("open_webui.models.users.get_db_context", _get_db):

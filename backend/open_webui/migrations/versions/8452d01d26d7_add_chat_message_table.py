@@ -7,12 +7,12 @@ Create Date: 2026-02-01 04:00:00.000000
 """
 
 import time
-import json
 import logging
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
@@ -64,12 +64,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Text(), index=True),
         sa.Column('role', sa.Text(), nullable=False),
         sa.Column('parent_id', sa.Text(), nullable=True),
-        sa.Column('content', sa.JSON(), nullable=True),
-        sa.Column('output', sa.JSON(), nullable=True),
         sa.Column('model_id', sa.Text(), nullable=True, index=True),
-        sa.Column('files', sa.JSON(), nullable=True),
-        sa.Column('sources', sa.JSON(), nullable=True),
-        sa.Column('embeds', sa.JSON(), nullable=True),
         sa.Column('done', sa.Boolean(), default=True),
         sa.Column('status_history', sa.JSON(), nullable=True),
         sa.Column('error', sa.JSON(), nullable=True),
@@ -84,15 +79,27 @@ def upgrade() -> None:
     op.create_index('chat_message_model_created_idx', 'chat_message', ['model_id', 'created_at'])
     op.create_index('chat_message_user_created_idx', 'chat_message', ['user_id', 'created_at'])
 
-    # Step 2: Backfill from existing chats
-    conn = op.get_bind()
+    # Step 2: Backfill from existing chats.
+    #
+    # This reads chat.chat through the ORM `Chat` model (not a raw Core
+    # `sa.table()`/`select()`), because chat.chat is an `EncryptedJSONField`
+    # (see internal/db.py) — a TypeDecorator that transparently
+    # decrypts/deserializes on read, but ONLY when SQLAlchemy knows the
+    # column's declared type. A bare Core column (`sa.column('chat', sa.JSON())`)
+    # bypasses that entirely and would read raw ciphertext for encrypted
+    # chats, silently skipping/corrupting their message history. Binding a
+    # plain Session to Alembic's connection and querying the real `Chat`
+    # class gets correct decryption for free.
+    #
+    # chat_message itself only stores metadata (role/model_id/usage/status/
+    # timestamps) — message content/output/files/sources/embeds are
+    # deliberately NOT backfilled here, since nothing reads them back out of
+    # this table (see models/chat_messages.py) and duplicating message text
+    # into an unencrypted table would undermine chat.chat's own encryption.
+    from open_webui.models.chats import Chat
 
-    chat_table = sa.table(
-        'chat',
-        sa.column('id', sa.Text()),
-        sa.column('user_id', sa.Text()),
-        sa.column('chat', sa.JSON()),
-    )
+    conn = op.get_bind()
+    session = Session(bind=conn)
 
     chat_message_table = sa.table(
         'chat_message',
@@ -101,12 +108,7 @@ def upgrade() -> None:
         sa.column('user_id', sa.Text()),
         sa.column('role', sa.Text()),
         sa.column('parent_id', sa.Text()),
-        sa.column('content', sa.JSON()),
-        sa.column('output', sa.JSON()),
         sa.column('model_id', sa.Text()),
-        sa.column('files', sa.JSON()),
-        sa.column('sources', sa.JSON()),
-        sa.column('embeds', sa.JSON()),
         sa.column('done', sa.Boolean()),
         sa.column('status_history', sa.JSON()),
         sa.column('error', sa.JSON()),
@@ -115,30 +117,27 @@ def upgrade() -> None:
         sa.column('updated_at', sa.BigInteger()),
     )
 
-    # Stream rows instead of loading all into memory:
-    # - yield_per: fetches rows in chunks via cursor.fetchmany() (all backends)
-    # - stream_results: enables server-side cursors on PostgreSQL (no-op on SQLite)
-    result = conn.execute(
-        sa.select(chat_table.c.id, chat_table.c.user_id, chat_table.c.chat)
-        .where(~chat_table.c.user_id.like('shared-%'))
-        .execution_options(yield_per=1000, stream_results=True)
-    )
-
     now = int(time.time())
     messages_batch = []
     total_inserted = 0
     total_failed = 0
 
-    for chat_row in result:
-        chat_id = chat_row[0]
-        user_id = chat_row[1]
-        chat_data = chat_row[2]
+    query = (
+        session.query(Chat.id, Chat.user_id, Chat.chat)
+        .filter(~Chat.user_id.like('shared-%'))
+        .execution_options(yield_per=1000, stream_results=True)
+    )
 
+    for chat_id, user_id, chat_data in query:
         if not chat_data:
             continue
 
-        # Handle both string and dict chat data
+        # EncryptedJSONField.process_result_value already returns a dict
+        # (it json.loads()s internally), but guard against legacy string
+        # rows just in case.
         if isinstance(chat_data, str):
+            import json
+
             try:
                 chat_data = json.loads(chat_data)
             except Exception:
@@ -164,7 +163,7 @@ def upgrade() -> None:
 
             try:
                 timestamp = int(float(timestamp))
-            except Exception as e:
+            except Exception:
                 timestamp = now
 
             # Normalize timestamp: convert ms to seconds, validate range
@@ -174,23 +173,23 @@ def upgrade() -> None:
             if timestamp < 1577836800 or timestamp > now + 86400:
                 timestamp = now
 
+            usage = message.get('usage')
+            if not usage:
+                info = message.get('info') or {}
+                usage = info.get('usage') if isinstance(info, dict) else None
+
             messages_batch.append(
                 {
                     'id': f'{chat_id}-{message_id}',
                     'chat_id': chat_id,
                     'user_id': user_id,
                     'role': role,
-                    'parent_id': message.get('parentId'),
-                    'content': message.get('content'),
-                    'output': message.get('output'),
-                    'model_id': message.get('model'),
-                    'files': message.get('files'),
-                    'sources': message.get('sources'),
-                    'embeds': message.get('embeds'),
+                    'parent_id': message.get('parentId') or message.get('parent_id'),
+                    'model_id': message.get('model') or message.get('model_id'),
                     'done': message.get('done', True),
-                    'status_history': message.get('statusHistory'),
+                    'status_history': message.get('statusHistory') or message.get('status_history'),
                     'error': message.get('error'),
-                    'usage': message.get('usage'),
+                    'usage': usage,
                     'created_at': timestamp,
                     'updated_at': timestamp,
                 }
@@ -210,6 +209,8 @@ def upgrade() -> None:
         inserted, failed = _flush_batch(conn, chat_message_table, messages_batch)
         total_inserted += inserted
         total_failed += failed
+
+    session.close()
 
     log.info(f'Backfilled {total_inserted} messages into chat_message table ({total_failed} failed)')
 

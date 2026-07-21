@@ -1,7 +1,7 @@
 """Add usage_ledger table for precise EUR billing
 
-Revision ID: b2c3d4e5f6a7
-Revises: a1b2c3d4e5f6
+Revision ID: b600fea935e1
+Revises: 6927529b47e2
 Create Date: 2026-06-20 00:00:00.000000
 
 Stores individual Langfuse LLM observations with the ECB EUR/USD rate at the
@@ -14,8 +14,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "b2c3d4e5f6a7"
-down_revision: Union[str, None] = "a1b2c3d4e5f6"
+revision: str = "b600fea935e1"
+down_revision: Union[str, None] = "6927529b47e2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

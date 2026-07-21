@@ -70,6 +70,15 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Load the chat-encryption KMS key so any migration reading chat.chat
+    # through the ORM (EncryptedJSONField) can decrypt encrypted rows.
+    # Normally loaded by main.py at app startup, but migrations run in a
+    # separate process/entrypoint (see start.sh) that never imports main.
+    from open_webui import kms
+
+    if kms.is_enabled():
+        kms.load_key()
+
     # Handle SQLCipher URLs
     if DB_URL and DB_URL.startswith('sqlite+sqlcipher://'):
         if not DATABASE_PASSWORD or DATABASE_PASSWORD.strip() == '':

@@ -312,12 +312,9 @@ class UsersTable:
             return None
 
     def get_user_by_email(self, email: str, db: Optional[Session] = None) -> Optional[UserModel]:
-        try:
-            with get_db_context(db) as db:
-                user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
-                return UserModel.model_validate(user) if user else None
-        except Exception:
-            return None
+        with get_db_context(db) as db:
+            user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
+            return UserModel.model_validate(user) if user else None
 
     def get_user_by_oauth_sub(self, provider: str, sub: str, db: Optional[Session] = None) -> Optional[UserModel]:
         try:

@@ -1,6 +1,6 @@
 """Convert chat.chat column from JSON to TEXT for encryption support
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 6927529b47e2
 Revises: d8d905b57f4e
 Create Date: 2026-05-19 00:00:00.000000
 
@@ -20,7 +20,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
+revision: str = "6927529b47e2"
 down_revision: Union[str, None] = "d8d905b57f4e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
