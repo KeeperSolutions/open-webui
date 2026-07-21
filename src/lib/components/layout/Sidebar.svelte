@@ -419,6 +419,20 @@
 		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
 	};
 
+	const RESIZE_KEY_STEP = 20;
+
+	const resizeKeyHandler = (e: KeyboardEvent) => {
+		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+		e.preventDefault();
+
+		const delta = e.key === 'ArrowRight' ? RESIZE_KEY_STEP : -RESIZE_KEY_STEP;
+		const newSidebarWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ($sidebarWidth ?? 260) + delta));
+
+		sidebarWidth.set(newSidebarWidth);
+		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
+		localStorage.setItem('sidebarWidth', String(newSidebarWidth));
+	};
+
 	onMount(() => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
 		loadMyUsage({ retryIfEmpty: true });
@@ -1461,11 +1475,23 @@
 	</div>
 
 	{#if !$mobile}
+		<!-- A resizable separator is a sanctioned WAI-ARIA pattern (role="separator"
+		     + tabindex + arrow-key resize + aria-value*), but Svelte's linter treats
+		     `separator` as always non-interactive — hence the ignores below. -->
+		<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+		<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
 		<div
 			class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
 			id="sidebar-resizer"
 			on:mousedown={resizeStartHandler}
+			on:keydown={resizeKeyHandler}
 			role="separator"
+			aria-orientation="vertical"
+			aria-valuenow={$sidebarWidth ?? 260}
+			aria-valuemin={MIN_WIDTH}
+			aria-valuemax={MAX_WIDTH}
+			aria-label={$i18n.t('Resize sidebar')}
+			tabindex="0"
 		>
 			<div
 				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"

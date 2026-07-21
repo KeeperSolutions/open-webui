@@ -1141,6 +1141,10 @@
 		{/if}
 
 		<!-- Content -->
+		<!-- Clicking the empty background clears selection; keyboard users have
+		     the Escape shortcut and the "Clear" button in the bulk-actions bar above. -->
+		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y-no-static-element-interactions -->
 		<div
 			class="flex-1 overflow-y-auto min-h-0 min-w-0"
 			on:click={(e) => {

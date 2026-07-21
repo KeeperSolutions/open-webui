@@ -157,8 +157,9 @@ onDestroy(() => {
                     <!-- Fields -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div class="flex flex-col gap-0.5">
-                            <label class="text-xs text-gray-500">{$i18n.t('Provider Name')}</label>
+                            <label for="featured-model-provider-{idx}" class="text-xs text-gray-500">{$i18n.t('Provider Name')}</label>
                             <input
+                                id="featured-model-provider-{idx}"
                                 type="text"
                                 class="text-sm rounded-lg px-2.5 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 w-full"
                                 placeholder={$i18n.t('e.g. OpenAI')}
@@ -166,8 +167,9 @@ onDestroy(() => {
                             />
                         </div>
                         <div class="flex flex-col gap-0.5">
-                            <label class="text-xs text-gray-500">{$i18n.t('Featured Name')}</label>
+                            <label for="featured-model-name-{idx}" class="text-xs text-gray-500">{$i18n.t('Featured Name')}</label>
                             <input
+                                id="featured-model-name-{idx}"
                                 type="text"
                                 class="text-sm rounded-lg px-2.5 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 w-full"
                                 placeholder={$i18n.t('Display name')}
@@ -180,8 +182,9 @@ onDestroy(() => {
                     <div class="grid grid-cols-3 gap-2">
                         {#each [0, 1, 2] as tagIdx}
                             <div class="flex flex-col gap-0.5">
-                                <label class="text-xs text-gray-500">{$i18n.t('Tag {{n}}', { n: tagIdx + 1 })}</label>
+                                <label for="featured-model-tag-{idx}-{tagIdx}" class="text-xs text-gray-500">{$i18n.t('Tag {{n}}', { n: tagIdx + 1 })}</label>
                                 <input
+                                    id="featured-model-tag-{idx}-{tagIdx}"
                                     type="text"
                                     maxlength="20"
                                     class="text-sm rounded-lg px-2.5 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 w-full"

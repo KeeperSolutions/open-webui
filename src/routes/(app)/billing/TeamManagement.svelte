@@ -86,12 +86,16 @@
 		});
 </script>
 
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape') onClose(); }} />
+
 <!-- Modal overlay -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
 <div
 	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
 	on:click|self={onClose}
 	role="dialog"
 	aria-modal="true"
+	tabindex="-1"
 >
 	<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
 		<!-- Header -->

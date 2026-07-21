@@ -322,8 +322,16 @@
 
 							{#each files as file (file.id)}
 								<div
+									role="button"
+									tabindex="0"
 									class="w-full flex justify-between items-center rounded-lg text-sm py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-850 cursor-pointer"
 									on:click={() => openFileViewer(file)}
+									on:keydown={(e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											openFileViewer(file);
+										}
+									}}
 								>
 									<div class="basis-3/5 min-w-0">
 										<div class="text-ellipsis line-clamp-1">{file.filename}</div>

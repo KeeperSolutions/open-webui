@@ -83,7 +83,8 @@
 </script>
 
 <div
-	role="status"
+	role="button"
+	tabindex="0"
 	aria-live="polite"
 	class="group relative flex gap-2.5 text-left min-w-[var(--width)] w-full dark:bg-gray-850 dark:text-white bg-white text-black border border-gray-100 dark:border-gray-800 rounded-3xl px-4 py-3.5 cursor-pointer select-none"
 	on:dragstart|preventDefault
