@@ -1964,6 +1964,7 @@ async def _handle_stripe_event(event_type: str, data):
                             rec = StripeBillings.get_by_customer_id(customer_id)
                             if rec:
                                 was_team = rec.plan_tier == PLAN_TIER_TEAM
+                                plan_changed = rec.plan_tier != pkg.plan_tier
                                 StripeBillings.upsert(
                                     user_id=rec.user_id,
                                     plan_tier=pkg.plan_tier,
@@ -1974,8 +1975,10 @@ async def _handle_stripe_event(event_type: str, data):
                                 if u:
                                     existing_bal = CreditBalances.get("user", u.email)
                                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    # Only set period_start if plan changed (e.g., downgrade from team)
+                                    period_start = int(_time.time()) if plan_changed else None
                                     CreditBalances.set_subscription(
-                                        "user", u.email, pkg.credits, rate, int(_time.time())
+                                        "user", u.email, pkg.credits, rate, period_start
                                     )
                                     log.info(
                                         "[billing] Subscription synced: user=%s plan=%s credits=%d",
@@ -2140,7 +2143,7 @@ async def _handle_stripe_event(event_type: str, data):
                     credits = pkg.credits
                     existing_bal = CreditBalances.get("team", team_ip.id)
                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                    CreditBalances.set_subscription("team", team_ip.id, credits, rate, int(_time.time()))
+                    CreditBalances.set_subscription("team", team_ip.id, credits, rate)
                     Teams.update(team_ip.id, monthly_credits=credits)
                     PurchaseHistory.insert(
                         user_id=team_ip.owner_user_id,
@@ -2166,7 +2169,7 @@ async def _handle_stripe_event(event_type: str, data):
                         credits = pkg.credits if pkg else 0
                         existing_bal = CreditBalances.get("user", u.email)
                         rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                        CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
+                        CreditBalances.set_subscription("user", u.email, credits, rate)
                         PurchaseHistory.insert(
                             user_id=record_ip.user_id,
                             event_type="renewal",
