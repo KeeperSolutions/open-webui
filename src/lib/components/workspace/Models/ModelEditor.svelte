@@ -585,32 +585,18 @@
 							>
 						</div>
 					</div>
-				</div>
 
-				<div class="w-full">
-					<div class="mt-2 my-2 flex flex-col">
-						<div class="flex-1">
-							<div>
-								<input
-									class="text-3xl font-semibold w-full bg-transparent outline-hidden"
-									placeholder={$i18n.t('Model Name')}
-									bind:value={name}
-									required
-								/>
-							</div>
-						</div>
-
-						<div class="flex flex-col w-full flex-1">
-							<div class="flex justify-between items-start my-2">
-								<div class=" flex flex-col w-full">
-									<div class="flex-1 w-full">
-										<input
-											class="text-3xl w-full bg-transparent outline-hidden"
-											placeholder={$i18n.t('Model Name')}
-											bind:value={name}
-											required
-										/>
-									</div>
+					<div class="flex flex-col w-full flex-1">
+						<div class="flex justify-between items-start my-2">
+							<div class=" flex flex-col w-full">
+								<div class="flex-1 w-full">
+									<input
+										class="text-3xl w-full bg-transparent outline-hidden"
+										placeholder={$i18n.t('Model Name')}
+										bind:value={name}
+										required
+									/>
+								</div>
 
 									<div class="flex-1 w-full">
 										<div>
@@ -721,8 +707,9 @@
 							</div>
 						</div>
 					</div>
+				</div>
 
-					<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
+				<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
 
 					<div class="my-2">
 						<div class="flex w-full justify-between">
