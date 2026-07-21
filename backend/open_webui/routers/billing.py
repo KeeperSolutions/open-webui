@@ -1082,6 +1082,24 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
 
     # ── Pro / Premium → update existing subscription in-place ────────────
     # The customer.subscription.updated webhook fires and activates the team.
+    
+    # Initialize team balance with fresh period_start BEFORE the Stripe API call
+    # to avoid race conditions with the webhook handler. This ensures the webhook
+    # sees the already-initialized state and becomes idempotent.
+    from open_webui.models.credit_balances import CreditBalances
+    from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+    
+    # Reset personal credits so owner uses only team pool
+    CreditBalances.reset_all("user", user.email)
+    
+    # Give the team balance a fresh period_start so usage window starts now
+    if team:
+        existing = CreditBalances.get("team", team.id)
+        credits = existing.subscription_credits if existing else 0
+        rate = existing.credits_per_eur_cent if existing else CREDITS_PER_EUR_CENT
+        CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
+    
+    # Now update the Stripe subscription - the webhook will see the initialized state
     try:
         sub = client.v1.subscriptions.retrieve(record.stripe_subscription_id)
         item_id = sub.items.data[0].id
@@ -1098,19 +1116,6 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
         raise HTTPException(status_code=502, detail="Failed to update subscription to team plan.")
 
     log.info("[billing] Team subscription update initiated: user=%s seats=%d", user.id, seat_count)
-
-    # Reset personal credits so owner uses only team pool
-    from open_webui.models.credit_balances import CreditBalances
-    CreditBalances.reset_all("user", user.email)
-
-    # Give the team balance a fresh period_start so usage window starts now
-    team = Teams.get_by_owner_user_id(user.id)
-    if team:
-        from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
-        existing = CreditBalances.get("team", team.id)
-        credits = existing.subscription_credits if existing else 0
-        rate = existing.credits_per_eur_cent if existing else CREDITS_PER_EUR_CENT
-        CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
 
     return CheckoutResponse(url=f"{webui_url}/billing?checkout=success")
 
@@ -1932,8 +1937,10 @@ async def _handle_stripe_event(event_type: str, data):
                                     )
                                     existing_bal = CreditBalances.get("team", team.id)
                                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    # Only set period_start if not already initialized (idempotent with create_team)
+                                    period_start = None if (existing_bal and existing_bal.period_start) else int(_time.time())
                                     CreditBalances.set_subscription(
-                                        "team", team.id, pkg.credits, rate, int(_time.time())
+                                        "team", team.id, pkg.credits, rate, period_start
                                     )
                                     # Zero out the owner's personal credit balance — they are now
                                     # on a team plan and must use team credits exclusively.
