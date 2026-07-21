@@ -361,6 +361,7 @@
 					<button
 						class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 						disabled={currentSlide === 0}
+						aria-label={$i18n.t('Previous')}
 						on:click={() => {
 							resetImageView();
 							currentSlide = Math.max(0, currentSlide - 1);
@@ -383,6 +384,7 @@
 					<button
 						class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 						disabled={currentSlide === fileOfficeSlides.length - 1}
+						aria-label={$i18n.t('Next')}
 						on:click={() => {
 							resetImageView();
 							currentSlide = Math.min(fileOfficeSlides.length - 1, currentSlide + 1);

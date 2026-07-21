@@ -298,6 +298,7 @@
 													<Tooltip content={$i18n.t('Unarchive Chat')}>
 														<button
 															class="self-center w-fit px-1 text-sm rounded-xl"
+															aria-label={$i18n.t('Unarchive Chat')}
 															on:click={async (e) => {
 																e.stopImmediatePropagation();
 																e.stopPropagation();

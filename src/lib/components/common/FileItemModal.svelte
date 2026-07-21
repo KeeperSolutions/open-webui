@@ -613,6 +613,7 @@
 										<button
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === 0}
+											aria-label={$i18n.t('Previous')}
 											on:click={() => (pptxCurrentSlide = Math.max(0, pptxCurrentSlide - 1))}
 										>
 											<svg
@@ -632,6 +633,7 @@
 										<button
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === pptxSlides.length - 1}
+											aria-label={$i18n.t('Next')}
 											on:click={() =>
 												(pptxCurrentSlide = Math.min(pptxSlides.length - 1, pptxCurrentSlide + 1))}
 										>
