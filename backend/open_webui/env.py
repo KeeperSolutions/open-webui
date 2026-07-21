@@ -766,6 +766,82 @@ else:
         _sock_read_source = 'default'
         AIOHTTP_CLIENT_TIMEOUT_SOCK_READ = 60
 
+
+####################################
+# LLM chat-completion transient-error retry (TRAU-520)
+####################################
+# Operational knobs for the retry loop around the upstream chat-completion call
+# in routers/openai.py. Env-driven (like AIOHTTP_CLIENT_TIMEOUT above) so a
+# deployment can tune retry aggressiveness without a code change / PR; each falls
+# back to a safe default on an unset or invalid value.
+
+# Total attempts INCLUDING the first (3 = 1 try + 2 retries). Values < 1 would
+# disable the call entirely, so they are rejected in favour of the default.
+LLM_RETRY_MAX = os.environ.get("LLM_RETRY_MAX", "3")
+try:
+    LLM_RETRY_MAX = int(LLM_RETRY_MAX)
+    if LLM_RETRY_MAX < 1:
+        raise ValueError("must be >= 1")
+except ValueError:
+    log.warning(
+        f"[llm-retry] Invalid LLM_RETRY_MAX '{LLM_RETRY_MAX}', falling back to 3."
+    )
+    LLM_RETRY_MAX = 3
+
+# Wall-clock cap (seconds) across ALL retry attempts. Guards against a run of
+# attempts each hanging on sock_read piling up unbounded (AIOHTTP_CLIENT_TIMEOUT
+# total defaults to None). Values < 1 are rejected in favour of the default.
+LLM_RETRY_MAX_DURATION_SECONDS = os.environ.get("LLM_RETRY_MAX_DURATION_SECONDS", "90")
+try:
+    LLM_RETRY_MAX_DURATION_SECONDS = int(LLM_RETRY_MAX_DURATION_SECONDS)
+    if LLM_RETRY_MAX_DURATION_SECONDS < 1:
+        raise ValueError("must be >= 1")
+except ValueError:
+    log.warning(
+        f"[llm-retry] Invalid LLM_RETRY_MAX_DURATION_SECONDS "
+        f"'{LLM_RETRY_MAX_DURATION_SECONDS}', falling back to 90."
+    )
+    LLM_RETRY_MAX_DURATION_SECONDS = 90
+
+# Upstream HTTP statuses worth retrying, comma-separated (e.g. "429,500,502,503").
+# Covers standard transient 5xx (500/502/503/504), Cloudflare origin errors
+# (520-524) and provider "overloaded" (529); deterministic 5xx (501/505/510/511)
+# are intentionally absent so a real config error surfaces immediately. session
+# .request() does NOT raise on an error status, so retryable-vs-not is decided
+# explicitly against this set. An unset or unparseable value falls back to the
+# full default set.
+_LLM_RETRY_RETRYABLE_STATUS_DEFAULT = {
+    429,  # Too Many Requests (rate limit)
+    # standard transient 5xx
+    500,
+    502,
+    503,
+    504,
+    # Cloudflare origin errors (transient)
+    520,
+    521,
+    522,
+    523,
+    524,
+    529,  # provider "overloaded" (e.g. Anthropic)
+}
+_llm_retry_status_env = os.environ.get("LLM_RETRY_RETRYABLE_STATUS", "")
+if _llm_retry_status_env.strip() == "":
+    LLM_RETRY_RETRYABLE_STATUS = set(_LLM_RETRY_RETRYABLE_STATUS_DEFAULT)
+else:
+    try:
+        LLM_RETRY_RETRYABLE_STATUS = {
+            int(part) for part in _llm_retry_status_env.split(",") if part.strip()
+        }
+        if not LLM_RETRY_RETRYABLE_STATUS:
+            raise ValueError("no valid statuses parsed")
+    except ValueError:
+        log.warning(
+            f"[llm-retry] Invalid LLM_RETRY_RETRYABLE_STATUS "
+            f"'{_llm_retry_status_env}', falling back to the default set."
+        )
+        LLM_RETRY_RETRYABLE_STATUS = set(_LLM_RETRY_RETRYABLE_STATUS_DEFAULT)
+
 # SSE keepalive interval derived from sock_read: sock_read/4, capped at 20s.
 # None (keepalives disabled) when sock_read < 4 — interval would be 0 and busy-loop.
 _sse_keepalive_base = (
