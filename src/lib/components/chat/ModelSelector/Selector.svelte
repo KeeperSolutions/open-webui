@@ -8,6 +8,7 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { flyAndScale } from '$lib/utils/transitions';
+
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
 	import { deleteModel, getOllamaVersion, pullModel, unloadModel } from '$lib/apis/ollama';
@@ -225,8 +226,6 @@
 
 	$: if (selectedTag || selectedConnectionType) {
 		resetView();
-	} else {
-		resetView();
 	}
 
 	const resetView = async () => {
@@ -239,6 +238,16 @@
 			: activeList.findIndex((item) => item.value === value);
 
 		selectedModelIdx = selectedInActive >= 0 ? selectedInActive : 0;
+
+		// Set the virtual scroll position so the selected item is rendered and centered
+		const targetScrollTop = Math.max(0, selectedModelIdx * ITEM_HEIGHT - 128 + ITEM_HEIGHT / 2);
+		listScrollTop = targetScrollTop;
+
+		await tick();
+
+		if (listContainer) {
+			listContainer.scrollTop = targetScrollTop;
+		}
 
 		await tick();
 		const item = document.querySelector(`[data-arrow-selected="true"]`);
@@ -433,25 +442,45 @@
 			);
 		}
 	};
+
+	const ITEM_HEIGHT = 42;
+	const OVERSCAN = 10;
+
+	let listScrollTop = 0;
+	let listContainer;
+
+	$: visibleStart = Math.max(0, Math.floor(listScrollTop / ITEM_HEIGHT) - OVERSCAN);
+	$: visibleEnd = Math.min(
+		filteredItems.length,
+		Math.ceil((listScrollTop + 256) / ITEM_HEIGHT) + OVERSCAN
+	);
 </script>
 
 <DropdownMenu.Root
 	bind:open={show}
 	onOpenChange={async () => {
 		searchValue = '';
+		listScrollTop = 0;
 		const isFeaturedSelected = featuredModels.some((m) => m.model_id === value);
 		selectedConnectionType =
 			isFeaturedSelected || (!value && featuredModels.length > 0) ? 'featured' : '';
 		window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
 		resetView();
 	}}
-	closeFocus={false}
+	onOpenChangeComplete={(open) => {
+		if (!open) {
+			// Replaces the old closeFocus={false} behavior - prevent focus jump back to trigger
+			document.getElementById(`model-selector-${id}-button`)?.blur();
+		}
+	}}
 >
 	<DropdownMenu.Trigger
 		class="relative w-full {($settings?.highContrastMode ?? false)
 			? ''
 			: 'outline-hidden focus:outline-hidden'}"
-		aria-label={placeholder}
+		aria-label={selectedModel
+			? $i18n.t('Selected model: {{modelName}}', { modelName: selectedModel.label })
+			: placeholder}
 		id="model-selector-{id}-button"
 	>
 		<div
@@ -682,29 +711,63 @@
 							{$i18n.t('No featured models available')}
 						</div>
 					{/each}
-				{:else}
-					{#each filteredItems as item, index}
-						<ModelItem
-							{selectedModelIdx}
-							{item}
-							{index}
-							{value}
-							{pinModelHandler}
-							{unloadModelHandler}
-							onClick={() => {
-								value = item.value;
-								selectedModelIdx = index;
-
-								show = false;
-							}}
-						/>
+				{:else if filteredItems.length === 0}
+					{#if items.length === 0 && $user?.role === 'admin'}
+						<div class="flex flex-col items-start justify-center py-6 px-4 text-start">
+							<div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+								{$i18n.t('No models available')}
+							</div>
+							<div class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+								{$i18n.t('Connect to an AI provider to start chatting')}
+							</div>
+							<a
+								href="/admin/settings/connections"
+								class="px-4 py-1.5 rounded-xl text-xs font-medium bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition"
+								on:click={() => {
+									show = false;
+								}}
+							>
+								{$i18n.t('Manage Connections')}
+							</a>
+						</div>
 					{:else}
 						<div class="">
 							<div class="block px-3 py-2 text-sm text-gray-700 dark:text-gray-100">
 								{$i18n.t('No results found')}
 							</div>
 						</div>
-					{/each}
+					{/if}
+				{:else}
+					<!-- svelte-ignore a11y-no-static-element-interactions -->
+					<div
+						class="max-h-64 overflow-y-auto"
+						role="listbox"
+						aria-label={$i18n.t('Available models')}
+						bind:this={listContainer}
+						on:scroll={() => {
+							listScrollTop = listContainer.scrollTop;
+						}}
+					>
+						<div style="height: {visibleStart * ITEM_HEIGHT}px;" />
+						{#each filteredItems.slice(visibleStart, visibleEnd) as item, i (item.value)}
+							{@const index = visibleStart + i}
+							<ModelItem
+								{selectedModelIdx}
+								{item}
+								{index}
+								{value}
+								{pinModelHandler}
+								{unloadModelHandler}
+								onClick={() => {
+									value = item.value;
+									selectedModelIdx = index;
+
+									show = false;
+								}}
+							/>
+						{/each}
+						<div style="height: {(filteredItems.length - visibleEnd) * ITEM_HEIGHT}px;" />
+					</div>
 				{/if}
 
 				{#if !(searchValue.trim() in $MODEL_DOWNLOAD_POOL) && searchValue && ollamaVersion && $user?.role === 'admin'}

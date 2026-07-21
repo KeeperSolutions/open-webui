@@ -38,7 +38,7 @@
 			name: data.name,
 			meta: data.meta,
 			content: data.content,
-			access_control: data.access_control
+			access_grants: data.access_grants
 		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -58,7 +58,7 @@
 
 		if (id) {
 			// First attempt to load tool
-			tool = await getToolById(localStorage.token, id).catch(async (error) => {
+			const res = await getToolById(localStorage.token, id).catch(async (error) => {
 				// If unauthorized, try to refresh session and retry once
 				if (error?.toString().includes('401') || error?.toString().includes('Unauthorized')) {
 					try {
@@ -79,7 +79,16 @@
 				return null;
 			});
 
-			console.log(tool);
+			if (res && !res.write_access) {
+				toast.error($i18n.t('You do not have permission to edit this tool'));
+				goto('/workspace/tools');
+				return;
+			}
+
+			if (res) {
+				tool = res;
+				console.log(tool);
+			}
 		}
 	});
 </script>
@@ -91,7 +100,7 @@
 		name={tool.name}
 		meta={tool.meta}
 		content={tool.content}
-		accessControl={tool.access_control}
+		accessGrants={tool.access_grants ?? []}
 		onSave={(value) => {
 			saveHandler(value);
 		}}

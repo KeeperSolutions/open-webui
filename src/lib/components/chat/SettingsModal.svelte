@@ -18,7 +18,7 @@
 	import Search from '../icons/Search.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import Connections from './Settings/Connections.svelte';
-	import Tools from './Settings/Tools.svelte';
+	import Integrations from './Settings/Integrations.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
 	import LockClosed from '../icons/LockClosed.svelte';
 	import SettingsAlt from '../icons/SettingsAlt.svelte';
@@ -223,14 +223,18 @@
 		},
 		{
 			id: 'tools',
-			title: 'External Tools',
+			title: 'Integrations',
 			keywords: [
 				'addconnection',
 				'add connection',
+				'integrations',
 				'managetools',
 				'manage tools',
 				'manage tool servers',
 				'managetoolservers',
+				'open terminal',
+				'openterminal',
+				'terminal',
 				'settings'
 			]
 		},
@@ -743,7 +747,7 @@
 									<div class=" self-center mr-2">
 										<WrenchAlt strokeWidth="2" />
 									</div>
-									<div class=" self-center">{$i18n.t('External Tools')}</div>
+									<div class=" self-center">{$i18n.t('Integrations')}</div>
 								</button>
 							{/if}
 						{:else if tabId === 'personalization'}
@@ -900,7 +904,8 @@
 				{#if $user?.role === 'admin'}
 					<a
 						href="/admin/settings"
-						class="px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none md:mt-auto flex text-left transition {$settings?.highContrastMode
+						draggable="false"
+						class="px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none md:mt-auto flex select-none text-left transition {$settings?.highContrastMode
 							? 'hover:bg-gray-200 dark:hover:bg-gray-800'
 							: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 						on:click={async (e) => {
@@ -940,7 +945,7 @@
 						}}
 					/>
 				{:else if selectedTab === 'tools'}
-					<Tools
+					<Integrations
 						saveSettings={async (updated) => {
 							await saveSettings(updated);
 							toast.success($i18n.t('Settings saved successfully!'));
