@@ -222,7 +222,10 @@ def _check_team_credits_exhausted(team_id: str, member: bool = False) -> None:
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
-    """Return aggregate current-month EUR cost for all members of a team (from ledger).
+    """Return aggregate EUR cost for all members of a team (from ledger), scoped to
+    the team's current billing period (credit_balances.period_start) rather than the
+    calendar month. This avoids counting a member's individual/trial usage incurred
+    before they joined or before the team subscription started.
 
     Result is cached for _TEAM_COST_CACHE_TTL seconds.
     """
@@ -233,6 +236,7 @@ def _get_team_current_month_cost(team_id: str) -> float:
     try:
         from open_webui.models.usage_ledger import UsageLedgerDB
         from open_webui.models.users import Users as UsersModel
+        from open_webui.models.credit_balances import CreditBalances
 
         members = TeamMembers.get_by_team_id(team_id)
         if not members:
@@ -245,7 +249,13 @@ def _get_team_current_month_cost(team_id: str) -> float:
             if u:
                 emails.append(u.email)
 
-        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(emails)
+        bal = CreditBalances.get("team", team_id)
+        period_start = bal.period_start if bal else None
+
+        if period_start:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(emails, period_start)
+        else:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(emails)
         total = sum(cost_by_email.values())
         _team_cost_cache[team_id] = total
         return total
@@ -543,6 +553,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
         from open_webui.models.users import Users as UsersModel
         from open_webui.models.usage_ledger import UsageLedgerDB
+        from open_webui.models.credit_balances import CreditBalances as _CreditBalancesForCost
 
         members_db = TeamMembers.get_by_team_id(team.id)
         member_emails = []
@@ -554,7 +565,15 @@ async def get_billing_status(user=Depends(get_verified_user)):
             member_emails.append(user.email)
 
         try:
-            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            # Scope to the team's billing period (not calendar month) so usage from
+            # before the team subscription started (e.g. individual trial usage) is
+            # not counted against the team.
+            _team_bal_for_cost = _CreditBalancesForCost.get("team", team.id)
+            _period_start = _team_bal_for_cost.period_start if _team_bal_for_cost else None
+            if _period_start:
+                cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(member_emails, _period_start)
+            else:
+                cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
             team_month_cost = sum(cost_by_email.values())
         except Exception:
             team_month_cost = current_month_cost
@@ -1111,6 +1130,7 @@ async def get_team_status(user=Depends(get_verified_user)):
     pending_invites = TeamInvites.get_by_team_id(team.id)
 
     from open_webui.models.usage_ledger import UsageLedgerDB
+    from open_webui.models.credit_balances import CreditBalances as _CreditBalancesForTeam
 
     user_by_id = {
         m.user_id: u
@@ -1119,8 +1139,17 @@ async def get_team_status(user=Depends(get_verified_user)):
     }
     member_emails = [u.email for u in user_by_id.values()]
     try:
-        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
-        models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
+        # Scope to the team's billing period (not calendar month) so usage from
+        # before the team subscription started (e.g. individual trial usage) is
+        # not counted against the team or shown in a member's breakdown.
+        _team_bal = _CreditBalancesForTeam.get("team", team.id)
+        _period_start = _team_bal.period_start if _team_bal else None
+        if _period_start:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(member_emails, _period_start)
+            models_by_email = UsageLedgerDB.get_models_used_bulk_since(member_emails, _period_start)
+        else:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
     except Exception:
         cost_by_email = {}
         models_by_email = {}

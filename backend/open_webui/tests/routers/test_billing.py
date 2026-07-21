@@ -476,3 +476,91 @@ class TestBulkUpsertUserIdsEmptyString:
         with engine.connect() as conn:
             results = conn.execute(_text("SELECT user_id FROM usage_ledger ORDER BY id")).fetchall()
         assert all(r[0] == "alice@example.com" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Fix 11 — team usage on the billing page must be scoped to the team's billing
+# period (credit_balances.period_start), not the calendar month, so a member's
+# individual/trial usage from before the team subscription started does not
+# get mixed into the team's aggregate cost.
+# ---------------------------------------------------------------------------
+
+class TestGetTeamCurrentMonthCost:
+    def _member(self, user_id="member-uid"):
+        m = MagicMock()
+        m.user_id = user_id
+        return m
+
+    def test_uses_period_start_when_team_balance_exists(self):
+        """When credit_balances has a period_start for the team, usage must be
+        queried with get_cost_eur_for_users_since(emails, period_start) — NOT the
+        calendar-month variant — so pre-upgrade trial usage is excluded."""
+        _billing._team_cost_cache._store.clear()
+
+        member_user = MagicMock()
+        member_user.email = "member@example.com"
+
+        mock_team_members = MagicMock()
+        mock_team_members.get_by_team_id.return_value = [self._member()]
+
+        mock_users = MagicMock()
+        mock_users.get_user_by_id.return_value = member_user
+
+        mock_ledger = MagicMock()
+        mock_ledger.get_cost_eur_for_users_since.return_value = {"member@example.com": 0.42}
+        mock_ledger.get_cost_eur_for_users_current_month.return_value = {"member@example.com": 999.0}
+
+        team_balance = MagicMock()
+        team_balance.period_start = 1_700_000_000
+
+        mock_credit_balances = MagicMock()
+        mock_credit_balances.get.return_value = team_balance
+
+        import open_webui.models.usage_ledger as ledger_mod
+        import open_webui.models.credit_balances as cb_mod
+
+        with patch.object(_billing, "TeamMembers", mock_team_members), \
+             patch("open_webui.models.users.Users", mock_users), \
+             patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
+             patch.object(cb_mod, "CreditBalances", mock_credit_balances):
+            total = _billing._get_team_current_month_cost("team-123")
+
+        mock_ledger.get_cost_eur_for_users_since.assert_called_once_with(
+            ["member@example.com"], 1_700_000_000
+        )
+        mock_ledger.get_cost_eur_for_users_current_month.assert_not_called()
+        assert total == pytest.approx(0.42)
+
+    def test_falls_back_to_calendar_month_when_no_period_start(self):
+        """If the team has no credit_balances row (or no period_start), fall back
+        to the calendar-month aggregate as before."""
+        _billing._team_cost_cache._store.clear()
+
+        member_user = MagicMock()
+        member_user.email = "member2@example.com"
+
+        mock_team_members = MagicMock()
+        mock_team_members.get_by_team_id.return_value = [self._member("member-uid-2")]
+
+        mock_users = MagicMock()
+        mock_users.get_user_by_id.return_value = member_user
+
+        mock_ledger = MagicMock()
+        mock_ledger.get_cost_eur_for_users_current_month.return_value = {"member2@example.com": 1.23}
+
+        mock_credit_balances = MagicMock()
+        mock_credit_balances.get.return_value = None  # no balance row yet
+
+        import open_webui.models.usage_ledger as ledger_mod
+        import open_webui.models.credit_balances as cb_mod
+
+        with patch.object(_billing, "TeamMembers", mock_team_members), \
+             patch("open_webui.models.users.Users", mock_users), \
+             patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
+             patch.object(cb_mod, "CreditBalances", mock_credit_balances):
+            total = _billing._get_team_current_month_cost("team-456")
+
+        mock_ledger.get_cost_eur_for_users_current_month.assert_called_once_with(
+            ["member2@example.com"]
+        )
+        assert total == pytest.approx(1.23)
