@@ -831,7 +831,7 @@
 															autocomplete="off"
 															required
 															rows="5"
-														/>
+														></textarea>
 													</div>
 												{/if}
 											</div>

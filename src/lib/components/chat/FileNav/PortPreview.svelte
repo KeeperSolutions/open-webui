@@ -253,7 +253,7 @@
 	<!-- Loading bar -->
 	{#if isLoading}
 		<div class="h-0.5 bg-gray-100 dark:bg-gray-800 shrink-0 overflow-hidden">
-			<div class="h-full bg-blue-500 animate-loading-bar rounded-full" />
+			<div class="h-full bg-blue-500 animate-loading-bar rounded-full"></div>
 		</div>
 	{/if}
 
@@ -270,7 +270,7 @@
 				class="w-full h-full border-0 bg-white"
 				sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
 				on:load={onIframeLoad}
-			/>
+			></iframe>
 		{/key}
 	</div>
 </div>

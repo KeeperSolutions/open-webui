@@ -229,7 +229,7 @@
 								}
 							}}
 							rows="2"
-						/>
+						></textarea>
 					</div>
 
 					<!-- Actions -->

@@ -154,7 +154,7 @@
 									class="w-full mt-2 rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 outline-hidden resize-none"
 									rows="3"
 									required
-								/>
+								></textarea>
 							{/if}
 						{/if}
 					</div>
@@ -185,4 +185,3 @@
 		</div>
 	</div>
 {/if}
-

@@ -126,7 +126,7 @@
 	});
 </script>
 
-<div bind:this={container} class="file-code-editor" />
+<div bind:this={container} class="file-code-editor"></div>
 
 <style>
 	.file-code-editor {

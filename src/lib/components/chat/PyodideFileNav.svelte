@@ -386,7 +386,7 @@
 	{/if}
 
 	{#if overlay}
-		<div class="absolute inset-0 z-10 pointer-events-none" />
+		<div class="absolute inset-0 z-10 pointer-events-none"></div>
 	{/if}
 
 	<!-- Toolbar (shared with FileNav) -->
