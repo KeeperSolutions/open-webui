@@ -2269,14 +2269,47 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
     return result
 
 
+def _resolve_billing_period_start(user_id: str, email: str) -> Optional[int]:
+    """Return the timestamp the current user's billing period started, so usage
+    predating it (e.g. individual/trial usage before a team upgrade, or before an
+    individual subscription started) can be excluded from month-to-date displays.
+
+    - Individual credits-tier users (trial/pro/premium): their own credit_balances row.
+    - Team owners/members: the team's credit_balances row.
+    - Anyone else (internal/unlimited/no record): None — caller should fall back to
+      the calendar-month behavior since there's no subscription period to scope to.
+    """
+    try:
+        from open_webui.models.credit_balances import CreditBalances
+
+        record = StripeBillings.get_by_user_id(user_id)
+        if not record:
+            return None
+        if record.plan_tier in CREDITS_TIERS:
+            bal = CreditBalances.get("user", email)
+            return bal.period_start if bal else None
+        if record.plan_tier in (PLAN_TIER_TEAM, PLAN_TIER_TEAM_MEMBER) and record.team_id:
+            bal = CreditBalances.get("team", record.team_id)
+            return bal.period_start if bal else None
+    except Exception as e:
+        log.warning("[billing] Could not resolve billing period_start for %s: %s", email, e)
+    return None
+
+
 @router.get("/model-breakdown")
 async def get_model_breakdown(user=Depends(get_verified_user)):
-    """Per-model EUR cost breakdown for the current user this calendar month."""
+    """Per-model EUR cost breakdown for the current user, scoped to their current
+    billing period (team's or individual's period_start) rather than the calendar
+    month, so pre-subscription/pre-team-upgrade usage isn't included."""
     require_billing_enabled()
 
     from open_webui.models.usage_ledger import UsageLedgerDB
 
-    rows = UsageLedgerDB.get_model_breakdown_current_month(user.email)
+    period_start = _resolve_billing_period_start(user.id, user.email)
+    if period_start:
+        rows = UsageLedgerDB.get_model_breakdown_since(user.email, period_start)
+    else:
+        rows = UsageLedgerDB.get_model_breakdown_current_month(user.email)
     total = sum(r["cost_eur"] for r in rows)
     now = datetime.datetime.utcnow()
 

@@ -379,7 +379,18 @@ class UsageLedgerTable:
         return result
 
     def get_model_breakdown_current_month(self, user_id: str) -> List[Dict]:
-        month_start = _month_start_epoch()
+        return self._get_model_breakdown(user_id, _month_start_epoch())
+
+    def get_model_breakdown_since(self, user_id: str, since_ts: int) -> List[Dict]:
+        """Same as get_model_breakdown_current_month but bounded by an explicit
+        `since_ts` (e.g. a user's or team's credit_balances.period_start) instead
+        of the calendar-month start. Used so the Per-Model Cost Breakdown on the
+        billing page doesn't include usage from before the current subscription
+        period began (e.g. individual trial usage before a team upgrade).
+        """
+        return self._get_model_breakdown(user_id, since_ts)
+
+    def _get_model_breakdown(self, user_id: str, since_ts: int) -> List[Dict]:
         with get_db() as db:
             rows = (
                 db.query(
@@ -389,7 +400,7 @@ class UsageLedgerTable:
                 )
                 .filter(
                     UsageLedger.user_id == user_id,
-                    UsageLedger.observed_at >= month_start,
+                    UsageLedger.observed_at >= since_ts,
                 )
                 .group_by(UsageLedger.model)
                 .order_by(func.coalesce(func.sum(UsageLedger.cost_eur), 0.0).desc())
