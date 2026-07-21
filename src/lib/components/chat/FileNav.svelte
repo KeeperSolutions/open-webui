@@ -215,6 +215,23 @@
 		return url ? { url, key } : null;
 	};
 
+	// Discovers server features and the terminal's cwd for a newly-selected
+	// terminal. Defined as a plain function (not inline in the `$:` block
+	// below) so the `savedPath = dir` write — which targets a module-scope
+	// variable, not an instance-reactive one — doesn't happen inside
+	// reactive-statement code, where Svelte warns that dependent `$:`
+	// statements elsewhere would never see it.
+	const onTerminalChanged = async (terminal: { url: string; key: string }) => {
+		const config = await getTerminalConfig(terminal.url, terminal.key);
+		terminalEnabled = config?.features?.terminal !== false;
+
+		const rawCwd = await getCwd(terminal.url, terminal.key);
+		const cwd = rawCwd ? normalizePath(rawCwd) : null;
+		const dir = cwd ? (cwd.endsWith('/') ? cwd : cwd + '/') : '/';
+		savedPath = dir;
+		loadDir(dir);
+	};
+
 	// Detect terminal changes — the explicit store references ensure
 	// Svelte re-runs this block when any of them update.
 	let prevTerminalUrl = '';
@@ -228,17 +245,7 @@
 			loading = true;
 			error = null;
 			entries = [];
-			(async () => {
-				// Discover server features (terminal enabled/disabled)
-				const config = await getTerminalConfig(terminal.url, terminal.key);
-				terminalEnabled = config?.features?.terminal !== false;
-
-				const rawCwd = await getCwd(terminal.url, terminal.key);
-				const cwd = rawCwd ? normalizePath(rawCwd) : null;
-				const dir = cwd ? (cwd.endsWith('/') ? cwd : cwd + '/') : '/';
-				savedPath = dir;
-				loadDir(dir);
-			})();
+			onTerminalChanged(terminal);
 		}
 	}
 
