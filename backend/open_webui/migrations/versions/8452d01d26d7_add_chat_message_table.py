@@ -122,10 +122,16 @@ def upgrade() -> None:
     total_inserted = 0
     total_failed = 0
 
+    # yield_per is intentionally small (not the usual ~1000): chat.chat is
+    # an EncryptedJSONField, so each row is decrypted into a full Python dict
+    # before this loop ever sees it. A handful of chats on staging run
+    # 30-44MB of encrypted JSON each — buffering hundreds of those at once
+    # OOM-killed a 2Gi container. A small prefetch window keeps peak memory
+    # closer to a few large rows at a time instead of hundreds.
     query = (
         session.query(Chat.id, Chat.user_id, Chat.chat)
         .filter(~Chat.user_id.like('shared-%'))
-        .execution_options(yield_per=1000, stream_results=True)
+        .execution_options(yield_per=100, stream_results=True)
     )
 
     for chat_id, user_id, chat_data in query:
