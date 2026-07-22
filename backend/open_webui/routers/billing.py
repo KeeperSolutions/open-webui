@@ -15,6 +15,7 @@ from open_webui.env import (
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
     UNLIMITED_USER_EMAILS,
+    USAGE_POLL_INTERVAL_SECONDS,
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
@@ -422,6 +423,7 @@ async def auto_onboard_user(user, request=None):
 class BillingStatusResponse(BaseModel):
     enabled: bool
     plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member | None
+    usage_poll_interval_seconds: int = Field(default_factory=lambda: USAGE_POLL_INTERVAL_SECONDS)
 
     # Trial fields
     credit_limit_eur: float = 0.0
