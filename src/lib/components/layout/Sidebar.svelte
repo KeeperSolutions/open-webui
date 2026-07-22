@@ -25,9 +25,11 @@
 		models,
 		selectedFolder,
 		WEBUI_NAME,
-		billingStatus
+		billingStatus,
+		sidebarWidth,
+		activeChatIds
 	} from '$lib/stores';
-	import { onMount, getContext, tick, onDestroy } from 'svelte';
+	import { onMount, getContext, tick } from 'svelte';
 
 	const i18n = getContext('i18n');
 
@@ -42,6 +44,8 @@
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
 	import { isInternalUser } from '$lib/billing/planTiers';
+	import { checkActiveChats } from '$lib/apis/tasks';
+	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
@@ -160,18 +164,20 @@
 		}
 	};
 
-	const createFolder = async ({ name, data }) => {
-		if (name === '') {
+	const createFolder = async ({ name, data, parent_id }) => {
+		name = name?.trim();
+		if (!name) {
 			toast.error($i18n.t('Folder name cannot be empty.'));
 			return;
 		}
 
-		const rootFolders = Object.values(folders).filter((folder) => folder.parent_id === null);
-		if (rootFolders.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
+		// Check for duplicate names in the same parent
+		const siblings = Object.values(folders).filter((folder) => folder.parent_id === parent_id);
+		if (siblings.find((folder) => folder.name.toLowerCase() === name.toLowerCase())) {
 			// If a folder with the same name already exists, append a number to the name
 			let i = 1;
 			while (
-				rootFolders.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
+				siblings.find((folder) => folder.name.toLowerCase() === `${name} ${i}`.toLowerCase())
 			) {
 				i++;
 			}
@@ -183,9 +189,10 @@
 		const tempId = uuidv4();
 		folders = {
 			...folders,
-			tempId: {
+			[tempId]: {
 				id: tempId,
 				name: name,
+				parent_id: parent_id,
 				created_at: Date.now(),
 				updated_at: Date.now()
 			}
@@ -193,7 +200,8 @@
 
 		const res = await createNewFolder(localStorage.token, {
 			name,
-			data
+			data,
+			parent_id
 		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -250,7 +258,9 @@
 
 		// once the bottom of the list has been reached (no results) there is no need to continue querying
 		allChatsLoaded = newChatList.length === 0;
-		await chats.set([...($chats ? $chats : []), ...newChatList]);
+		const existingIds = new Set(($chats ?? []).map((c) => c.id));
+		const uniqueNewChats = newChatList.filter((c) => !existingIds.has(c.id));
+		await chats.set([...($chats ? $chats : []), ...uniqueNewChats]);
 
 		chatListLoading = false;
 	};
@@ -375,14 +385,74 @@
 		selectedChatId = null;
 	};
 
-	let unsubscribers = [];
-	onMount(async () => {
+	const MIN_WIDTH = 220;
+	const MAX_WIDTH = 480;
+
+	let isResizing = false;
+
+	let startWidth = 0;
+	let startClientX = 0;
+
+	const resizeStartHandler = (e: MouseEvent) => {
+		if ($mobile) return;
+		isResizing = true;
+
+		startClientX = e.clientX;
+		startWidth = $sidebarWidth ?? 260;
+
+		document.body.style.userSelect = 'none';
+	};
+
+	const resizeEndHandler = () => {
+		if (!isResizing) return;
+		isResizing = false;
+
+		document.body.style.userSelect = '';
+		localStorage.setItem('sidebarWidth', String($sidebarWidth));
+	};
+
+	const resizeSidebarHandler = (endClientX) => {
+		const dx = endClientX - startClientX;
+		const newSidebarWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + dx));
+
+		sidebarWidth.set(newSidebarWidth);
+		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
+	};
+
+	const RESIZE_KEY_STEP = 20;
+
+	const resizeKeyHandler = (e: KeyboardEvent) => {
+		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+		e.preventDefault();
+
+		const delta = e.key === 'ArrowRight' ? RESIZE_KEY_STEP : -RESIZE_KEY_STEP;
+		const newSidebarWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, ($sidebarWidth ?? 260) + delta));
+
+		sidebarWidth.set(newSidebarWidth);
+		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
+		localStorage.setItem('sidebarWidth', String(newSidebarWidth));
+	};
+
+	onMount(() => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
 		loadMyUsage({ retryIfEmpty: true });
 		usagePollingInterval = setInterval(loadMyUsage, 5 * 60 * 1000);
-		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
-		unsubscribers = [
+		try {
+			const width = Number(localStorage.getItem('sidebarWidth'));
+			if (!Number.isNaN(width) && width >= MIN_WIDTH && width <= MAX_WIDTH) {
+				sidebarWidth.set(width);
+			}
+		} catch {}
+
+		document.documentElement.style.setProperty('--sidebar-width', `${$sidebarWidth}px`);
+		sidebarWidth.subscribe((w) => {
+			document.documentElement.style.setProperty('--sidebar-width', `${w}px`);
+		});
+
+		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
+
+		const unsubscribers = [
 			mobile.subscribe((value) => {
 				if ($showSidebar && value) {
 					showSidebar.set(false);
@@ -420,6 +490,17 @@
 				if (value) {
 					await initChannels();
 					await initChatList();
+
+					// Check which chats have active tasks
+					const allChatIds = [...$chats.map((c) => c.id), ...$pinnedChats.map((c) => c.id)];
+					if (allChatIds.length > 0) {
+						try {
+							const res = await checkActiveChats(localStorage.token, allChatIds);
+							activeChatIds.set(new Set(res.active_chat_ids || []));
+						} catch (e) {
+							console.debug('Failed to check active chats:', e);
+						}
+					}
 				}
 			})
 		];
@@ -434,39 +515,59 @@
 		window.addEventListener('blur', onBlur);
 
 		const dropZone = document.getElementById('sidebar');
-
-		dropZone?.addEventListener('dragover', onDragOver);
-		dropZone?.addEventListener('drop', onDrop);
-		dropZone?.addEventListener('dragleave', onDragLeave);
-	});
-
-	onDestroy(() => {
-		if (unsubscribers && unsubscribers.length > 0) {
-			unsubscribers.forEach((unsubscriber) => {
-				if (unsubscriber) {
-					unsubscriber();
-				}
-			});
+		if (dropZone) {
+			dropZone.addEventListener('dragover', onDragOver);
+			dropZone.addEventListener('drop', onDrop);
+			dropZone.addEventListener('dragleave', onDragLeave);
 		}
 
-		window.removeEventListener('keydown', onKeyDown);
-		window.removeEventListener('keyup', onKeyUp);
+		const socketInstance = $socket;
+		socketInstance?.on('events', chatActiveEventHandler);
 
-		window.removeEventListener('touchstart', onTouchStart);
-		window.removeEventListener('touchend', onTouchEnd);
+		return () => {
+			unsubscribers.forEach((unsubscriber) => unsubscriber());
 
-		window.removeEventListener('focus', onFocus);
-		window.removeEventListener('blur', onBlur);
+			window.removeEventListener('keydown', onKeyDown);
+			window.removeEventListener('keyup', onKeyUp);
 
-		const dropZone = document.getElementById('sidebar');
+			window.removeEventListener('touchstart', onTouchStart);
+			window.removeEventListener('touchend', onTouchEnd);
 
-		dropZone?.removeEventListener('dragover', onDragOver);
-		dropZone?.removeEventListener('drop', onDrop);
-		dropZone?.removeEventListener('dragleave', onDragLeave);
+			window.removeEventListener('focus', onFocus);
+			window.removeEventListener('blur', onBlur);
 
-		if (usagePollingInterval) clearInterval(usagePollingInterval);
-		if (usageRetryTimer) clearTimeout(usageRetryTimer);
+			if (dropZone) {
+				dropZone.removeEventListener('dragover', onDragOver);
+				dropZone.removeEventListener('drop', onDrop);
+				dropZone.removeEventListener('dragleave', onDragLeave);
+			}
+
+			if (usagePollingInterval) clearInterval(usagePollingInterval);
+			if (usageRetryTimer) clearTimeout(usageRetryTimer);
+
+			socketInstance?.off('events', chatActiveEventHandler);
+		};
 	});
+
+	// Handler for chat:active events (defined outside onMount for proper cleanup)
+	const chatActiveEventHandler = (event: {
+		chat_id: string;
+		message_id: string;
+		data: { type: string; data: any };
+	}) => {
+		if (event.data?.type === 'chat:active') {
+			const { active } = event.data.data;
+			activeChatIds.update((ids) => {
+				const newSet = new Set(ids);
+				if (active) {
+					newSet.add(event.chat_id);
+				} else {
+					newSet.delete(event.chat_id);
+				}
+				return newSet;
+			});
+		}
+	};
 
 	const newChatHandler = async () => {
 		selectedChatId = null;
@@ -506,14 +607,38 @@
 	onUpdate={async () => {
 		await initChatList();
 	}}
+	onDelete={(id) => {
+		if ($chatId === id) {
+			goto('/');
+			chatId.set('');
+		}
+	}}
 />
 
 <ChannelModal
 	bind:show={showCreateChannel}
-	onSubmit={async ({ name, access_control }) => {
+	onSubmit={async (payload: any) => {
+		let { type, name, is_private, access_grants, group_ids, user_ids } = payload ?? {};
+		name = name?.trim();
+
+		if (type === 'dm') {
+			if (!user_ids || user_ids.length === 0) {
+				toast.error($i18n.t('Please select at least one user for Direct Message channel.'));
+				return;
+			}
+		} else {
+			if (!name) {
+				toast.error($i18n.t('Channel name cannot be empty.'));
+				return;
+			}
+		}
+
 		const res = await createNewChannel(localStorage.token, {
 			name: name,
-			access_control: access_control
+			is_private: is_private,
+			access_grants: access_grants,
+			group_ids: group_ids,
+			user_ids: user_ids
 		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -566,6 +691,16 @@
 		newChatHandler();
 	}}
 ></button>
+
+<svelte:window
+	on:mousemove={(e) => {
+		if (!isResizing) return;
+		resizeSidebarHandler(e.clientX);
+	}}
+	on:mouseup={() => {
+		resizeEndHandler();
+	}}
+/>
 
 {#if !$mobile && !$showSidebar}
 	<div
@@ -715,6 +850,8 @@
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
 							role={$user?.role}
+							profile={$config?.features?.enable_user_status ?? true}
+							showActiveUsers={false}
 							on:show={(e) => {
 								if (e.detail === 'archived-chat') {
 									showArchivedChats.set(true);
@@ -724,13 +861,25 @@
 							<div
 								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 							>
-								<div class=" self-center flex items-center justify-center size-9">
+								<div class="self-center flex items-center justify-center size-9 relative">
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
+
+									{#if $config?.features?.enable_user_status}
+										<div class="absolute -bottom-0.5 -right-0.5">
+											<span class="relative flex size-2.5">
+												<span
+													class="relative inline-flex size-2.5 rounded-full {true
+														? 'bg-green-500'
+														: 'bg-gray-300 dark:bg-gray-700'} border-2 border-white dark:border-gray-900"
+												></span>
+											</span>
+										</div>
+									{/if}
 								</div>
 							</div>
 						</UserMenu>
@@ -755,7 +904,7 @@
 		data-state={$showSidebar}
 	>
 		<div
-			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[260px] overflow-x-hidden scrollbar-hidden z-50 {$showSidebar
+			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 {$showSidebar
 				? ''
 				: 'invisible'}"
 		>
@@ -1125,6 +1274,7 @@
 											className=""
 											id={chat.id}
 											title={chat.title}
+											createdAt={chat.created_at}
 											{shiftKey}
 											selected={selectedChatId === chat.id}
 											on:select={() => {
@@ -1184,6 +1334,7 @@
 										className=""
 										id={chat.id}
 										title={chat.title}
+										createdAt={chat.created_at}
 										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
@@ -1239,6 +1390,9 @@
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
 							role={$user?.role}
+							profile={$config?.features?.enable_user_status ?? true}
+							showActiveUsers={false}
+							className="w-[calc(var(--sidebar-width)-1rem)]"
 							on:show={(e) => {
 								if (e.detail === 'archived-chat') {
 									showArchivedChats.set(true);
@@ -1248,13 +1402,25 @@
 							<div
 								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
 							>
-								<div class=" self-center mr-3">
+								<div class="self-center mr-3 relative">
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
+
+									{#if $config?.features?.enable_user_status}
+										<div class="absolute -bottom-0.5 -right-0.5">
+											<span class="relative flex size-2.5">
+												<span
+													class="relative inline-flex size-2.5 rounded-full {true
+														? 'bg-green-500'
+														: 'bg-gray-300 dark:bg-gray-700'} border-2 border-white dark:border-gray-900"
+												></span>
+											</span>
+										</div>
+									{/if}
 								</div>
 								<div class="flex flex-col flex-1 min-w-0">
 									<div class="flex font-medium truncate">{$user?.name}</div>
@@ -1307,4 +1473,29 @@
 			</div>
 		</div>
 	</div>
+
+	{#if !$mobile}
+		<!-- A resizable separator is a sanctioned WAI-ARIA pattern (role="separator"
+		     + tabindex + arrow-key resize + aria-value*), but Svelte's linter treats
+		     `separator` as always non-interactive — hence the ignores below. -->
+		<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+		<!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+		<div
+			class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
+			id="sidebar-resizer"
+			on:mousedown={resizeStartHandler}
+			on:keydown={resizeKeyHandler}
+			role="separator"
+			aria-orientation="vertical"
+			aria-valuenow={$sidebarWidth ?? 260}
+			aria-valuemin={MIN_WIDTH}
+			aria-valuemax={MAX_WIDTH}
+			aria-label={$i18n.t('Resize sidebar')}
+			tabindex="0"
+		>
+			<div
+				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
+			></div>
+		</div>
+	{/if}
 {/if}

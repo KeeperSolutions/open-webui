@@ -19,8 +19,11 @@ vi.mock('$lib/stores', () => ({
 	showCallOverlay: writable(false),
 	tools: writable([]),
 	toolServers: writable([]),
+	terminalServers: writable([]),
+	selectedTerminalId: writable(null),
 	user: writable({ role: 'user', permissions: {} }),
 	showControls: writable(false),
+	showSettings: writable(false),
 	TTSWorker: writable(null),
 	temporaryChatEnabled: writable(false),
 	theme: writable('light')

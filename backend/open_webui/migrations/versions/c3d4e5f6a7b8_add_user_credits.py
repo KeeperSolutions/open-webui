@@ -1,7 +1,7 @@
 """Add user_credits table for credits-based billing
 
 Revision ID: c3d4e5f6a7b8
-Revises: b2c3d4e5f6a7
+Revises: b600fea935e1
 Create Date: 2026-06-24 00:00:00.000000
 
 Stores per-user credit balance and the conversion rate locked at plan assignment.
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c3d4e5f6a7b8"
-down_revision: Union[str, None] = "b2c3d4e5f6a7"
+down_revision: Union[str, None] = "b600fea935e1"
 branch_labels = None
 depends_on = None
 
