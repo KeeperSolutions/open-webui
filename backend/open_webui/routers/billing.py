@@ -1190,10 +1190,18 @@ async def get_team_status(user=Depends(get_verified_user)):
         if inv.status == "pending"
     ]
 
-    # Include live team credit balance so frontend can show correct remaining/used
+    # Calculate remaining credits: total - used (mirrors /status endpoint)
     from open_webui.models.credit_balances import CreditBalances
+    from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
+    
     team_bal = CreditBalances.get("team", team.id)
-    credits_rem = max(0, (team_bal.subscription_credits + team_bal.topup_credits) if team_bal else 0)
+    if team_bal:
+        total_credits = team_bal.subscription_credits + team_bal.topup_credits
+        rate = team_bal.credits_per_eur_cent
+        credits_used = eur_to_credits(team_month_cost, rate)
+        credits_rem = max(0, total_credits - credits_used)
+    else:
+        credits_rem = 0
 
     return TeamStatusResponse(
         team_id=team.id,
