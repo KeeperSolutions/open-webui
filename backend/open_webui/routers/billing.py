@@ -2160,7 +2160,8 @@ async def _handle_stripe_event(event_type: str, data):
                     credits = pkg.credits
                     existing_bal = CreditBalances.get("team", team_ip.id)
                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                    CreditBalances.set_subscription("team", team_ip.id, credits, rate)
+                    # Reset credits AND advance period_start to mark the new billing cycle
+                    CreditBalances.set_subscription("team", team_ip.id, credits, rate, int(_time.time()))
                     Teams.update(team_ip.id, monthly_credits=credits)
                     PurchaseHistory.insert(
                         user_id=team_ip.owner_user_id,
@@ -2186,7 +2187,8 @@ async def _handle_stripe_event(event_type: str, data):
                         credits = pkg.credits if pkg else 0
                         existing_bal = CreditBalances.get("user", u.email)
                         rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
-                        CreditBalances.set_subscription("user", u.email, credits, rate)
+                        # Reset credits AND advance period_start to mark the new billing cycle
+                        CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
                         PurchaseHistory.insert(
                             user_id=record_ip.user_id,
                             event_type="renewal",
