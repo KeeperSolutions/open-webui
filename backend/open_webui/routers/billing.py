@@ -1091,17 +1091,14 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
     from open_webui.models.credit_balances import CreditBalances
     from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
     
-    # Reset personal credits so owner uses only team pool
-    CreditBalances.reset_all("user", user.email)
-    
-    # Give the team balance a fresh period_start so usage window starts now
+    # Initialize team period_start BEFORE Stripe call (for webhook idempotency)
     if team:
         existing = CreditBalances.get("team", team.id)
         credits = existing.subscription_credits if existing else 0
         rate = existing.credits_per_eur_cent if existing else CREDITS_PER_EUR_CENT
         CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
     
-    # Now update the Stripe subscription - the webhook will see the initialized state
+    # Update Stripe subscription - may fail, so do this BEFORE resetting personal credits
     try:
         sub = client.v1.subscriptions.retrieve(record.stripe_subscription_id)
         item_id = sub.items.data[0].id
@@ -1116,6 +1113,9 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
     except stripe.StripeError as e:
         log.error(f"[billing] Team subscription update error: {e}")
         raise HTTPException(status_code=502, detail="Failed to update subscription to team plan.")
+    
+    # Only AFTER successful Stripe update, reset personal credits so owner uses team pool
+    CreditBalances.reset_all("user", user.email)
 
     log.info("[billing] Team subscription update initiated: user=%s seats=%d", user.id, seat_count)
 
