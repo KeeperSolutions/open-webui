@@ -23,7 +23,13 @@ _TTL_FAILURE = 15 * 60    # 15 minutes before retrying after a failed fetch
 # Based on historical EUR/USD average (1 EUR ≈ 1.10 USD)
 # This prevents NULL cost_eur rows that would show as 0 credits used in billing
 # Can be overridden via ECB_FALLBACK_RATE environment variable
-_FALLBACK_RATE = float(os.environ.get("ECB_FALLBACK_RATE", "1.10"))
+try:
+    _FALLBACK_RATE = float(os.environ.get("ECB_FALLBACK_RATE", "1.10"))
+    if _FALLBACK_RATE <= 0:
+        raise ValueError("ECB_FALLBACK_RATE must be positive")
+except (ValueError, TypeError) as e:
+    log.warning("Invalid ECB_FALLBACK_RATE, using default 1.10: %s", e)
+    _FALLBACK_RATE = 1.10
 
 _lock = threading.Lock()
 _cached_rate: Optional[float] = None   # current cached value (None = failure cached)
