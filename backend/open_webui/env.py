@@ -1060,6 +1060,7 @@ STRIPE_FREE_TIER_CENTS = int(
     os.environ.get('STRIPE_FREE_TIER_CENTS', '200')
 )  # €2.00 trial credit
 BILLING_GRACE_PERIOD_DAYS = int(os.environ.get('BILLING_GRACE_PERIOD_DAYS', '3'))
+USAGE_POLL_INTERVAL_SECONDS = int(os.environ.get('USAGE_POLL_INTERVAL_SECONDS', '120'))  # Default 2 minutes
 
 # Comma-separated list of email domains considered internal (e.g. "keepersolutions.com")
 INTERNAL_EMAIL_DOMAINS = [

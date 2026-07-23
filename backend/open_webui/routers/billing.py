@@ -15,6 +15,7 @@ from open_webui.env import (
     STRIPE_WEBHOOK_SECRET,
     TRIAL_CREDIT_EUR,
     UNLIMITED_USER_EMAILS,
+    USAGE_POLL_INTERVAL_SECONDS,
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
@@ -222,7 +223,10 @@ def _check_team_credits_exhausted(team_id: str, member: bool = False) -> None:
 
 
 def _get_team_current_month_cost(team_id: str) -> float:
-    """Return aggregate current-month EUR cost for all members of a team (from ledger).
+    """Return aggregate EUR cost for all members of a team (from ledger), scoped to
+    the team's current billing period (credit_balances.period_start) rather than the
+    calendar month. This avoids counting a member's individual/trial usage incurred
+    before they joined or before the team subscription started.
 
     Result is cached for _TEAM_COST_CACHE_TTL seconds.
     """
@@ -233,6 +237,7 @@ def _get_team_current_month_cost(team_id: str) -> float:
     try:
         from open_webui.models.usage_ledger import UsageLedgerDB
         from open_webui.models.users import Users as UsersModel
+        from open_webui.models.credit_balances import CreditBalances
 
         members = TeamMembers.get_by_team_id(team_id)
         if not members:
@@ -245,7 +250,13 @@ def _get_team_current_month_cost(team_id: str) -> float:
             if u:
                 emails.append(u.email)
 
-        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(emails)
+        bal = CreditBalances.get("team", team_id)
+        period_start = bal.period_start if bal else None
+
+        if period_start:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(emails, period_start)
+        else:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(emails)
         total = sum(cost_by_email.values())
         _team_cost_cache[team_id] = total
         return total
@@ -412,6 +423,7 @@ async def auto_onboard_user(user, request=None):
 class BillingStatusResponse(BaseModel):
     enabled: bool
     plan_tier: Optional[str] = None  # internal | trial | paid | team | team_member | None
+    usage_poll_interval_seconds: int = Field(default_factory=lambda: USAGE_POLL_INTERVAL_SECONDS)
 
     # Trial fields
     credit_limit_eur: float = 0.0
@@ -543,6 +555,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
 
         from open_webui.models.users import Users as UsersModel
         from open_webui.models.usage_ledger import UsageLedgerDB
+        from open_webui.models.credit_balances import CreditBalances as _CreditBalancesForCost
 
         members_db = TeamMembers.get_by_team_id(team.id)
         member_emails = []
@@ -554,7 +567,15 @@ async def get_billing_status(user=Depends(get_verified_user)):
             member_emails.append(user.email)
 
         try:
-            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            # Scope to the team's billing period (not calendar month) so usage from
+            # before the team subscription started (e.g. individual trial usage) is
+            # not counted against the team.
+            _team_bal_for_cost = _CreditBalancesForCost.get("team", team.id)
+            _period_start = _team_bal_for_cost.period_start if _team_bal_for_cost else None
+            if _period_start:
+                cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(member_emails, _period_start)
+            else:
+                cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
             team_month_cost = sum(cost_by_email.values())
         except Exception:
             team_month_cost = current_month_cost
@@ -959,6 +980,7 @@ class TeamStatusResponse(BaseModel):
     members: list[TeamMemberResponse]
     pending_invites: list[TeamInviteResponse]
     team_month_cost_eur: float = 0.0
+    credits_remaining: int = 0
 
 
 # ---------- Team endpoints ----------
@@ -1062,6 +1084,21 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
 
     # ── Pro / Premium → update existing subscription in-place ────────────
     # The customer.subscription.updated webhook fires and activates the team.
+    
+    # Initialize team balance with fresh period_start BEFORE the Stripe API call
+    # to avoid race conditions with the webhook handler. This ensures the webhook
+    # sees the already-initialized state and becomes idempotent.
+    from open_webui.models.credit_balances import CreditBalances
+    from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
+    
+    # Initialize team period_start BEFORE Stripe call (for webhook idempotency)
+    if team:
+        existing = CreditBalances.get("team", team.id)
+        credits = existing.subscription_credits if existing else 0
+        rate = existing.credits_per_eur_cent if existing else CREDITS_PER_EUR_CENT
+        CreditBalances.set_subscription("team", team.id, credits, rate, int(_time.time()))
+    
+    # Update Stripe subscription - may fail, so do this BEFORE resetting personal credits
     try:
         sub = client.v1.subscriptions.retrieve(record.stripe_subscription_id)
         item_id = sub.items.data[0].id
@@ -1069,15 +1106,19 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             record.stripe_subscription_id,
             params={
                 "items": [{"id": item_id, "price": team_price_id}],
-                "proration_behavior": "create_prorations",
+                "proration_behavior": "always_invoice",
                 "metadata": {"user_id": user.id, "price_id": team_price_id},
             },
         )
     except stripe.StripeError as e:
         log.error(f"[billing] Team subscription update error: {e}")
         raise HTTPException(status_code=502, detail="Failed to update subscription to team plan.")
+    
+    # Only AFTER successful Stripe update, reset personal credits so owner uses team pool
+    CreditBalances.reset_all("user", user.email)
 
     log.info("[billing] Team subscription update initiated: user=%s seats=%d", user.id, seat_count)
+
     return CheckoutResponse(url=f"{webui_url}/billing?checkout=success")
 
 
@@ -1096,6 +1137,7 @@ async def get_team_status(user=Depends(get_verified_user)):
     pending_invites = TeamInvites.get_by_team_id(team.id)
 
     from open_webui.models.usage_ledger import UsageLedgerDB
+    from open_webui.models.credit_balances import CreditBalances as _CreditBalancesForTeam
 
     user_by_id = {
         m.user_id: u
@@ -1104,8 +1146,17 @@ async def get_team_status(user=Depends(get_verified_user)):
     }
     member_emails = [u.email for u in user_by_id.values()]
     try:
-        cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
-        models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
+        # Scope to the team's billing period (not calendar month) so usage from
+        # before the team subscription started (e.g. individual trial usage) is
+        # not counted against the team or shown in a member's breakdown.
+        _team_bal = _CreditBalancesForTeam.get("team", team.id)
+        _period_start = _team_bal.period_start if _team_bal else None
+        if _period_start:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_since(member_emails, _period_start)
+            models_by_email = UsageLedgerDB.get_models_used_bulk_since(member_emails, _period_start)
+        else:
+            cost_by_email = UsageLedgerDB.get_cost_eur_for_users_current_month(member_emails)
+            models_by_email = UsageLedgerDB.get_models_used_bulk_current_month(member_emails)
     except Exception:
         cost_by_email = {}
         models_by_email = {}
@@ -1141,6 +1192,19 @@ async def get_team_status(user=Depends(get_verified_user)):
         if inv.status == "pending"
     ]
 
+    # Calculate remaining credits: total - used (mirrors /status endpoint)
+    from open_webui.models.credit_balances import CreditBalances
+    from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
+    
+    team_bal = CreditBalances.get("team", team.id)
+    if team_bal:
+        total_credits = team_bal.subscription_credits + team_bal.topup_credits
+        rate = team_bal.credits_per_eur_cent
+        credits_used = eur_to_credits(team_month_cost, rate)
+        credits_rem = max(0, total_credits - credits_used)
+    else:
+        credits_rem = 0
+
     return TeamStatusResponse(
         team_id=team.id,
         name=team.name,
@@ -1150,6 +1214,7 @@ async def get_team_status(user=Depends(get_verified_user)):
         members=members_out,
         pending_invites=invites_out,
         team_month_cost_eur=round(team_month_cost, 4),
+        credits_remaining=credits_rem,
     )
 
 
@@ -1882,8 +1947,10 @@ async def _handle_stripe_event(event_type: str, data):
                                     )
                                     existing_bal = CreditBalances.get("team", team.id)
                                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    # Only set period_start if not already initialized (idempotent with create_team)
+                                    period_start = None if (existing_bal and existing_bal.period_start) else int(_time.time())
                                     CreditBalances.set_subscription(
-                                        "team", team.id, pkg.credits, rate, int(_time.time())
+                                        "team", team.id, pkg.credits, rate, period_start
                                     )
                                     # Zero out the owner's personal credit balance — they are now
                                     # on a team plan and must use team credits exclusively.
@@ -1914,6 +1981,7 @@ async def _handle_stripe_event(event_type: str, data):
                             rec = StripeBillings.get_by_customer_id(customer_id)
                             if rec:
                                 was_team = rec.plan_tier == PLAN_TIER_TEAM
+                                plan_changed = rec.plan_tier != pkg.plan_tier
                                 StripeBillings.upsert(
                                     user_id=rec.user_id,
                                     plan_tier=pkg.plan_tier,
@@ -1924,8 +1992,10 @@ async def _handle_stripe_event(event_type: str, data):
                                 if u:
                                     existing_bal = CreditBalances.get("user", u.email)
                                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                                    # Only set period_start if plan changed (e.g., downgrade from team)
+                                    period_start = int(_time.time()) if plan_changed else None
                                     CreditBalances.set_subscription(
-                                        "user", u.email, pkg.credits, rate, int(_time.time())
+                                        "user", u.email, pkg.credits, rate, period_start
                                     )
                                     log.info(
                                         "[billing] Subscription synced: user=%s plan=%s credits=%d",
@@ -2090,6 +2160,7 @@ async def _handle_stripe_event(event_type: str, data):
                     credits = pkg.credits
                     existing_bal = CreditBalances.get("team", team_ip.id)
                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                    # Reset credits AND advance period_start to mark the new billing cycle
                     CreditBalances.set_subscription("team", team_ip.id, credits, rate, int(_time.time()))
                     Teams.update(team_ip.id, monthly_credits=credits)
                     PurchaseHistory.insert(
@@ -2116,6 +2187,7 @@ async def _handle_stripe_event(event_type: str, data):
                         credits = pkg.credits if pkg else 0
                         existing_bal = CreditBalances.get("user", u.email)
                         rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
+                        # Reset credits AND advance period_start to mark the new billing cycle
                         CreditBalances.set_subscription("user", u.email, credits, rate, int(_time.time()))
                         PurchaseHistory.insert(
                             user_id=record_ip.user_id,
@@ -2219,14 +2291,47 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
     return result
 
 
+def _resolve_billing_period_start(user_id: str, email: str) -> Optional[int]:
+    """Return the timestamp the current user's billing period started, so usage
+    predating it (e.g. individual/trial usage before a team upgrade, or before an
+    individual subscription started) can be excluded from month-to-date displays.
+
+    - Individual credits-tier users (trial/pro/premium): their own credit_balances row.
+    - Team owners/members: the team's credit_balances row.
+    - Anyone else (internal/unlimited/no record): None — caller should fall back to
+      the calendar-month behavior since there's no subscription period to scope to.
+    """
+    try:
+        from open_webui.models.credit_balances import CreditBalances
+
+        record = StripeBillings.get_by_user_id(user_id)
+        if not record:
+            return None
+        if record.plan_tier in CREDITS_TIERS:
+            bal = CreditBalances.get("user", email)
+            return bal.period_start if bal else None
+        if record.plan_tier in (PLAN_TIER_TEAM, PLAN_TIER_TEAM_MEMBER) and record.team_id:
+            bal = CreditBalances.get("team", record.team_id)
+            return bal.period_start if bal else None
+    except Exception as e:
+        log.warning("[billing] Could not resolve billing period_start for %s: %s", email, e)
+    return None
+
+
 @router.get("/model-breakdown")
 async def get_model_breakdown(user=Depends(get_verified_user)):
-    """Per-model EUR cost breakdown for the current user this calendar month."""
+    """Per-model EUR cost breakdown for the current user, scoped to their current
+    billing period (team's or individual's period_start) rather than the calendar
+    month, so pre-subscription/pre-team-upgrade usage isn't included."""
     require_billing_enabled()
 
     from open_webui.models.usage_ledger import UsageLedgerDB
 
-    rows = UsageLedgerDB.get_model_breakdown_current_month(user.email)
+    period_start = _resolve_billing_period_start(user.id, user.email)
+    if period_start:
+        rows = UsageLedgerDB.get_model_breakdown_since(user.email, period_start)
+    else:
+        rows = UsageLedgerDB.get_model_breakdown_current_month(user.email)
     total = sum(r["cost_eur"] for r in rows)
     now = datetime.datetime.utcnow()
 
@@ -2324,12 +2429,17 @@ async def get_my_usage(user=Depends(get_verified_user)):
         from open_webui.models.user_credits import CREDITS_PER_EUR_CENT
         team = Teams.get_by_id(record.team_id)
         rate = CREDITS_PER_EUR_CENT
+        period_start = None
         if team:
             bal = CreditBalances.get("team", team.id)
             if bal:
                 rate = bal.credits_per_eur_cent
+                period_start = bal.period_start
         credits_per_eur_cent = rate
-        credits_used = eur_to_credits(cost_eur, rate)
+        credits_used = eur_to_credits(
+            UsageLedgerDB.get_cost_eur_for_user_since(user.email, period_start) if period_start else cost_eur,
+            rate,
+        )
     elif record and record.plan_tier == PLAN_TIER_TEAM_MEMBER and record.team_id:
         # Team members: resolve the conversion rate from the team's credit balance
         from open_webui.models.credit_balances import CreditBalances
@@ -2337,7 +2447,11 @@ async def get_my_usage(user=Depends(get_verified_user)):
         bal = CreditBalances.get("team", record.team_id)
         rate = bal.credits_per_eur_cent if bal else CREDITS_PER_EUR_CENT
         credits_per_eur_cent = rate
-        credits_used = eur_to_credits(cost_eur, rate)
+        period_start = bal.period_start if bal else None
+        credits_used = eur_to_credits(
+            UsageLedgerDB.get_cost_eur_for_user_since(user.email, period_start) if period_start else cost_eur,
+            rate,
+        )
 
     return MyUsageResponse(
         month=now.month,
