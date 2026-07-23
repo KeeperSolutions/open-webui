@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import threading
 import time
@@ -17,6 +18,12 @@ _NS = {"generic": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generi
 
 _TTL_SUCCESS = 4 * 3600   # 4 hours when ECB responds
 _TTL_FAILURE = 15 * 60    # 15 minutes before retrying after a failed fetch
+
+# Fallback rate when ECB is unreachable and no historical rate exists
+# Based on historical EUR/USD average (1 EUR ≈ 1.10 USD)
+# This prevents NULL cost_eur rows that would show as 0 credits used in billing
+# Can be overridden via ECB_FALLBACK_RATE environment variable
+_FALLBACK_RATE = float(os.environ.get("ECB_FALLBACK_RATE", "1.10"))
 
 _lock = threading.Lock()
 _cached_rate: Optional[float] = None   # current cached value (None = failure cached)
@@ -44,13 +51,17 @@ def _fetch_rate() -> Optional[float]:
         return None
 
 
-def get_eur_usd_rate() -> Optional[float]:
+def get_eur_usd_rate() -> float:
     """Return USD-per-EUR exchange rate from ECB (e.g. 1.1467 means 1 EUR = 1.1467 USD).
 
     Use as: cost_eur = cost_usd / rate
 
-    Returns None only when ECB has never responded since process start.
-    Falls back to last known good rate when ECB is temporarily unreachable.
+    Returns:
+        - Live ECB rate if available
+        - Last known good rate if ECB temporarily unreachable
+        - Fallback rate (1.10) if ECB has never responded since process start
+    
+    Never returns None to prevent NULL cost_eur rows that show as 0 credits in billing.
     """
     global _cached_rate, _cache_expires_at, _last_known_rate
 
@@ -58,7 +69,7 @@ def get_eur_usd_rate() -> Optional[float]:
         now = time.monotonic()
         if now < _cache_expires_at:
             # Cache still valid — return last known rate if cached value is None
-            return _cached_rate if _cached_rate is not None else _last_known_rate
+            return _cached_rate if _cached_rate is not None else _last_known_rate or _FALLBACK_RATE
 
         rate = _fetch_rate()
         if rate is not None:
@@ -74,7 +85,8 @@ def get_eur_usd_rate() -> Optional[float]:
                     "ECB unreachable — using last known rate %.6f", _last_known_rate
                 )
                 return _last_known_rate
-            log.error(
-                "ECB unreachable and no last known rate available — cost_eur will be NULL"
+            log.warning(
+                "ECB unreachable and no last known rate available — using fallback rate %.2f",
+                _FALLBACK_RATE
             )
-            return None
+            return _FALLBACK_RATE
