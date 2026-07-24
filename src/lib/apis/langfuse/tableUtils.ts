@@ -35,9 +35,10 @@ export function totalCost(rows: MetricRow[]): number {
 	return rows.reduce((s, r) => s + r.cost, 0);
 }
 
-export function formatCost(c: number): string {
+export function formatCost(c: number, decimals?: number): string {
 	const abs = Math.abs(c);
-	const formatted = '$' + (abs === 0 ? abs.toFixed(2) : abs.toFixed(4));
+	const dp = decimals ?? (abs === 0 ? 2 : 4);
+	const formatted = '$' + abs.toFixed(dp);
 	return c < 0 ? '-' + formatted : formatted;
 }
 

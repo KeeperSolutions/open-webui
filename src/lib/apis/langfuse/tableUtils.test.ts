@@ -245,6 +245,18 @@ describe('formatCost', () => {
 	});
 });
 
+describe('formatCost precision', () => {
+	it('defaults to legacy behaviour', () => {
+		expect(formatCost(1.29)).toBe('$1.2900');
+		expect(formatCost(0)).toBe('$0.00');
+	});
+	it('honours an explicit decimal count', () => {
+		expect(formatCost(3.456, 2)).toBe('$3.46');
+		expect(formatCost(1.29, 3)).toBe('$1.290');
+		expect(formatCost(-0.5, 2)).toBe('-$0.50');
+	});
+});
+
 // ─── buildCsvLines ───────────────────────────────────────────────────────────
 
 describe('buildCsvLines', () => {
