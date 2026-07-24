@@ -23,6 +23,7 @@ class MetricRow(BaseModel):
     model: str
     tokens: int
     cost: float
+    observations: int = 0
 
 
 class MyUsage(BaseModel):

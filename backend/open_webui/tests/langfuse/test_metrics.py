@@ -356,3 +356,25 @@ def test_load_env_custom_host(clean_langfuse_env, monkeypatch):
     monkeypatch.setenv("LANGFUSE_HOST", "https://my-langfuse.internal")
     _, _, host = load_env()
     assert host == "https://my-langfuse.internal"
+
+
+# ---------- observation count ----------
+
+def test_parse_rows_includes_observation_count():
+    from open_webui.langfuse.metrics import parse_rows
+    raw = [
+        {"userId": "u1", "providedModelName": "gpt-4",
+         "sum_totalTokens": 100, "sum_totalCost": 0.5, "count_count": 7},
+    ]
+    out = parse_rows(raw)
+    assert out == [
+        {"user": "u1", "model": "gpt-4", "tokens": 100, "cost": 0.5, "observations": 7},
+    ]
+
+
+def test_build_metrics_query_requests_count():
+    from open_webui.langfuse.metrics import build_metrics_query
+    q = build_metrics_query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+    measures = {(m["measure"], m["aggregation"]) for m in q["metrics"]}
+    assert ("count", "count") in measures
+    assert ("totalCost", "sum") in measures  # existing measures preserved

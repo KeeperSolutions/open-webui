@@ -5,6 +5,8 @@ export type MetricRow = {
 	model: string;
 	tokens: number;
 	cost: number;
+	observations: number;
+	traces: number;
 };
 
 export type MyUsage = {

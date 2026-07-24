@@ -90,6 +90,7 @@ def build_metrics_query(from_ts: str, to_ts: str) -> Dict[str, Any]:
         "metrics": [
             {"measure": "totalTokens", "aggregation": "sum"},
             {"measure": "totalCost", "aggregation": "sum"},
+            {"measure": "count", "aggregation": "count"},
         ],
         "dimensions": [
             {"field": "userId"},
@@ -132,6 +133,7 @@ def parse_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "model": row.get("providedModelName") or "Unknown Model",
                 "tokens": tokens,
                 "cost": cost,
+                "observations": int(row.get("count_count", 0) or 0),
             }
         )
     return out
