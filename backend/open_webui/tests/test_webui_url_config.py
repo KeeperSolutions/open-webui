@@ -99,6 +99,8 @@ def _make_form_data(webui_url="https://ignored.example.com", **overrides):
         ENABLE_NOTES=True,
         ENABLE_USER_WEBHOOKS=False,
         ENABLE_USER_STATUS=True,
+        ENABLE_AUTOMATIONS=True,
+        ENABLE_CALENDAR=True,
     )
     return AdminConfig(**{**defaults, **overrides})
 

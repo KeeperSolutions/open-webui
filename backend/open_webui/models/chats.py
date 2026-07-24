@@ -1209,7 +1209,7 @@ class ChatTable:
 
             # Title-only search — message body is encrypted and unsearchable
             if search_text:
-                query = query.filter(Chat.title.ilike(f"%{search_text}%"))
+                stmt = stmt.filter(Chat.title.ilike(f"%{search_text}%"))
 
             # Check if the database dialect is either 'sqlite' or 'postgresql'
             bind = await session.connection()

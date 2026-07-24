@@ -141,7 +141,7 @@ def _run(request, model, outcomes, form_data=None):
     with _SessionPatch(outcomes) as sess, \
         patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
         patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
-        patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)), \
+        patch.object(openai_router.Models, "get_model_by_id", AsyncMock(return_value=None)), \
         patch.object(openai_router.asyncio, "sleep", AsyncMock()):
         coro = generate_chat_completion(
             request, form_data, user=_make_user(), bypass_filter=True
@@ -171,7 +171,7 @@ def test_retryable_backoff_sleeps_between_attempts():
         with _SessionPatch([_resp(503), _resp(200)]), \
             patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
             patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
-            patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)):
+            patch.object(openai_router.Models, "get_model_by_id", AsyncMock(return_value=None)):
             asyncio.run(generate_chat_completion(request, fd, user=_make_user(), bypass_filter=True))
         assert sleep_mock.await_count == 1  # backoff before the single retry
 
@@ -223,7 +223,7 @@ def test_non_retryable_does_not_sleep():
     with _SessionPatch([_resp(401, body={"error": "bad key"})]), \
         patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
         patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
-        patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)), \
+        patch.object(openai_router.Models, "get_model_by_id", AsyncMock(return_value=None)), \
         patch.object(openai_router.asyncio, "sleep", AsyncMock()) as sleep_mock:
         result = asyncio.run(
             generate_chat_completion(request, fd, user=_make_user(), bypass_filter=True)
@@ -276,7 +276,7 @@ def test_non_network_exception_not_retried():
     with _SessionPatch([ValueError("bug"), _resp(200)]) as sess, \
         patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
         patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
-        patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)), \
+        patch.object(openai_router.Models, "get_model_by_id", AsyncMock(return_value=None)), \
         patch.object(openai_router.asyncio, "sleep", AsyncMock()), \
         patch.object(openai_router, "time", _fake_clock([0.0])):
         with pytest.raises(HTTPException):
@@ -325,7 +325,7 @@ def test_budget_exhaustion_stops_before_next_attempt():
     with _SessionPatch([_resp(503), _resp(503), _resp(503)]) as sess, \
         patch.object(openai_router, "get_all_models", AsyncMock(return_value={})), \
         patch.object(openai_router, "get_headers_and_cookies", AsyncMock(return_value=({}, {}))), \
-        patch.object(openai_router.Models, "get_model_by_id", MagicMock(return_value=None)), \
+        patch.object(openai_router.Models, "get_model_by_id", AsyncMock(return_value=None)), \
         patch.object(openai_router.asyncio, "sleep", AsyncMock()), \
         patch.object(openai_router, "time", _fake_clock([0.0, 1.0, 100.0])):
         with pytest.raises(HTTPException) as ei:

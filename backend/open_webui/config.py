@@ -167,8 +167,13 @@ try:
 except Exception as e:
     pass
 
+# Hubgate rebrand: favicon.ico is deliberately not part of this fork's
+# branding (see commit 132ab4c9a) — skip it so it doesn't reappear on disk
+# every time the frontend build's static/ dir gets mirrored in here.
+_STATIC_SYNC_EXCLUDE_NAMES = {'favicon.ico'}
+
 for file_path in (FRONTEND_BUILD_DIR / 'static').glob('**/*'):
-    if file_path.is_file():
+    if file_path.is_file() and file_path.name not in _STATIC_SYNC_EXCLUDE_NAMES:
         target_path = STATIC_DIR / file_path.relative_to((FRONTEND_BUILD_DIR / 'static'))
         target_path.parent.mkdir(parents=True, exist_ok=True)
         try:

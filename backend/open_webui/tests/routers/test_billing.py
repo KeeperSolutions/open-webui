@@ -14,8 +14,8 @@
 import asyncio
 import datetime
 import os
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -26,28 +26,32 @@ from sqlalchemy import create_engine, text
 # ---------------------------------------------------------------------------
 
 class TestGetUserByEmail:
-    def test_returns_none_for_missing_user(self):
-        @contextmanager
-        def _get_db(db=None):
-            session = MagicMock()
-            session.query.return_value.filter.return_value.first.return_value = None
+    @pytest.mark.asyncio
+    async def test_returns_none_for_missing_user(self):
+        @asynccontextmanager
+        async def _get_db(db=None):
+            session = AsyncMock()
+            result = MagicMock()
+            result.scalars.return_value.first.return_value = None
+            session.execute.return_value = result
             yield session
 
-        with patch("open_webui.models.users.get_db_context", _get_db):
+        with patch("open_webui.models.users.get_async_db_context", _get_db):
             from open_webui.models.users import UsersTable
-            assert UsersTable().get_user_by_email("nobody@example.com") is None
+            assert await UsersTable().get_user_by_email("nobody@example.com") is None
 
-    def test_propagates_db_error(self):
-        @contextmanager
-        def _get_db(db=None):
-            session = MagicMock()
-            session.query.side_effect = Exception("DB connection lost")
+    @pytest.mark.asyncio
+    async def test_propagates_db_error(self):
+        @asynccontextmanager
+        async def _get_db(db=None):
+            session = AsyncMock()
+            session.execute.side_effect = Exception("DB connection lost")
             yield session
 
-        with patch("open_webui.models.users.get_db_context", _get_db):
+        with patch("open_webui.models.users.get_async_db_context", _get_db):
             from open_webui.models.users import UsersTable
             with pytest.raises(Exception, match="DB connection lost"):
-                UsersTable().get_user_by_email("user@example.com")
+                await UsersTable().get_user_by_email("user@example.com")
 
 
 # ---------------------------------------------------------------------------
