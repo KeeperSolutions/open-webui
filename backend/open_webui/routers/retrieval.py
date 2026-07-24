@@ -108,6 +108,7 @@ from open_webui.retrieval.web.yacy import search_yacy
 from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
 from open_webui.retrieval.web.linkup import search_linkup
+from open_webui.routers.billing import check_billing_access
 from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
@@ -1568,7 +1569,7 @@ class ProcessFileForm(BaseModel):
 async def process_file(
     request: Request,
     form_data: ProcessFileForm,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
     db: AsyncSession = Depends(get_async_session),
 ):
     """
@@ -1795,7 +1796,7 @@ class ProcessTextForm(BaseModel):
 async def process_text(
     request: Request,
     form_data: ProcessTextForm,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     collection_name = form_data.collection_name
     if collection_name is None:
@@ -1833,7 +1834,7 @@ async def process_web(
     form_data: ProcessUrlForm,
     process: bool = Query(True, description='Whether to process and save the content'),
     overwrite: bool = Query(True, description='Whether to overwrite existing collection'),
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     try:
         content, docs = await run_in_threadpool(get_content_from_url, request, form_data.url)
@@ -2391,7 +2392,7 @@ class QueryDocForm(BaseModel):
 async def query_doc_handler(
     request: Request,
     form_data: QueryDocForm,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     await _validate_collection_access([form_data.collection_name], user)
 
@@ -2459,7 +2460,7 @@ class QueryCollectionsForm(BaseModel):
 async def query_collection_handler(
     request: Request,
     form_data: QueryCollectionsForm,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     await _validate_collection_access(form_data.collection_names, user)
 
@@ -2629,7 +2630,7 @@ class BatchProcessFilesResponse(BaseModel):
 async def process_files_batch(
     request: Request,
     form_data: BatchProcessFilesForm,
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
     db=None,
 ) -> BatchProcessFilesResponse:
     """
