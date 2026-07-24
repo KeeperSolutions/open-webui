@@ -58,8 +58,11 @@
 	});
 </script>
 
+<!-- not-prose: this list renders inside a `.markdown-prose` message (via the PII
+	popover, which is NOT portalled), so prose heading/list styles would otherwise
+	leak in and blow up the <h3> section titles. Opt the whole subtree out. -->
 <div
-	class="flex flex-col w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(70vh,28rem)] font-hg-body text-hg-text-primary dark:text-gray-100"
+	class="not-prose flex flex-col w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(70vh,28rem)] font-hg-body text-hg-text-primary dark:text-gray-100"
 >
 	{#if dense}
 		<div class="shrink-0 p-2 border-b border-hg-border dark:border-gray-800">

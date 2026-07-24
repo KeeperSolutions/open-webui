@@ -2302,7 +2302,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     variables = form_data.pop('variables', None)
 
-    # Process the form_data through the pipeline
+    # Process the form_data through the pipeline. The fail-closed PII guard
+    # (refuse when masking is requested but no PII filter can be applied) lives
+    # INSIDE process_pipeline_inlet_filter so it covers every inlet caller —
+    # this main-chat path AND all task generators — from a single chokepoint.
     try:
         form_data = await process_pipeline_inlet_filter(request, form_data, user, models)
     except Exception as e:

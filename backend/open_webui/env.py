@@ -597,6 +597,23 @@ else:
     except Exception:
         MODELS_CACHE_TTL = 1
 
+# Filter (pipeline) IDs that perform PII masking. These filters are treated as
+# FAIL-CLOSED: when PII masking is requested for a chat (features.pii_masking=True)
+# but such a filter cannot be reached (connection error) or is not present in the
+# resolved model registry (pruned because its /models fetch failed while the
+# pipeline was down), the request is REFUSED rather than sent to the LLM unmasked.
+# Only these ids are mandatory — every other filter (e.g. telemetry) stays
+# best-effort, so a non-PII outage never blocks chat. Set PII_FILTER_IDS="" to
+# disable fail-closed enforcement entirely (masking then reverts to best-effort).
+# Mirrors the frontend PII_FILTER_IDS (src/lib/utils/pii.ts).
+PII_FILTER_IDS = {
+    fid.strip()
+    for fid in os.environ.get(
+        "PII_FILTER_IDS", "pii_filter,pii_filter_pipeline"
+    ).split(",")
+    if fid.strip()
+}
+
 
 ####################################
 # CHAT
