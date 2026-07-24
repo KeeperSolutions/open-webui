@@ -1,7 +1,7 @@
 """add last_read_at to chat
 
 Revision ID: b7c8d9e0f1a2
-Revises: d4e5f6a7b8c9
+Revises: b32f7e50ffd5
 Create Date: 2026-04-01 04:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'b7c8d9e0f1a2'
-down_revision = 'd4e5f6a7b8c9'
+down_revision = 'b32f7e50ffd5'
 branch_labels = None
 depends_on = None
 

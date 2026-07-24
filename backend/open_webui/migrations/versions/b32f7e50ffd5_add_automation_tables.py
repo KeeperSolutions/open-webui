@@ -1,7 +1,7 @@
 """add automation tables
 
-Revision ID: d4e5f6a7b8c9
-Revises: f1e2d3c4b5a6
+Revision ID: b32f7e50ffd5
+Revises: a3dd5bedd151
 Create Date: 2026-03-30
 """
 
@@ -10,7 +10,7 @@ from typing import Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = 'd4e5f6a7b8c9'
+revision: str = 'b32f7e50ffd5'
 down_revision: Union[str, None] = 'a3dd5bedd151'
 branch_labels = None
 depends_on = None
