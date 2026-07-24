@@ -15,6 +15,27 @@
 	--color-gray-850: oklch(0.27 0 0);
 	--color-gray-900: oklch(0.2 0 0);
 	--color-gray-950: oklch(0.16 0 0);
+	/* PII Admin Dashboard palette (Figma collection hubgate/color, light-only) */
+	--color-pii-bg: #ffffff;
+	--color-pii-side: #f7f7f8;
+	--color-pii-ink: #1f2430;
+	--color-pii-muted: #6b7280;
+	--color-pii-line: #e8eaee;
+	--color-pii-blue: #2563eb;
+	--color-pii-blue-soft: #eaf1fe;
+	--color-pii-blue-ink: #1e40af;
+	--color-pii-green: #16a34a;
+	--color-pii-green-soft: #e9f7ee;
+	--color-pii-amber: #b45309;
+	--color-pii-amber-soft: #fdf3e3;
+	--color-pii-amber-mid: #f59e0b;
+	--color-pii-red: #dc2626;
+	--color-pii-red-soft: #fdeeee;
+	--color-pii-nav-active: #e9edf6;
+	--color-pii-track: #f0f1f4;
+	--color-pii-mono-bg: #f4f5f7;
+	--color-pii-control-off: #cbd2dc;
+	--color-pii-white: #ffffff;
 }
 
 /*
