@@ -16,7 +16,9 @@ const row = (user: string, model: string, tokens: number, cost: number): MetricR
 	user,
 	model,
 	tokens,
-	cost
+	cost,
+	observations: 0,
+	traces: 0
 });
 
 const ROWS = [
