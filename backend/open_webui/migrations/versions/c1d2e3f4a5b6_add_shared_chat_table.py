@@ -198,17 +198,31 @@ def downgrade():
 
     session = Session(bind=conn)
 
-    query = session.query(SharedChat).execution_options(yield_per=100, stream_results=True)
+    # Select individual columns, not the SharedChat entity — an ORM entity
+    # select triggers SQLAlchemy 2.0's automatic result .unique() dedup,
+    # which raises InvalidRequestError when combined with yield_per. See
+    # upgrade()'s equivalent column-select for the same reason.
+    query = (
+        session.query(
+            SharedChat.id,
+            SharedChat.chat_id,
+            SharedChat.title,
+            SharedChat.chat,
+            SharedChat.created_at,
+            SharedChat.updated_at,
+        )
+        .execution_options(yield_per=100, stream_results=True)
+    )
 
     total_restored = 0
-    for shared_chat in query:
+    for shared_chat_id, chat_id, title, chat_data, created_at, updated_at in query:
         phantom_chat = Chat(
-            id=shared_chat.id,
-            user_id=f'shared-{shared_chat.chat_id}',
-            title=shared_chat.title,
-            chat=shared_chat.chat,
-            created_at=shared_chat.created_at,
-            updated_at=shared_chat.updated_at,
+            id=shared_chat_id,
+            user_id=f'shared-{chat_id}',
+            title=title,
+            chat=chat_data,
+            created_at=created_at,
+            updated_at=updated_at,
             archived=False,
             meta={},
         )
