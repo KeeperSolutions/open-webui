@@ -52,6 +52,7 @@ from open_webui.env import (
     ENABLE_FORWARD_USER_INFO_HEADERS,
     ENV,
 )
+from open_webui.routers.billing import check_billing_access
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import include_user_info_headers
@@ -577,7 +578,7 @@ _TTS_ENGINES = {
 
 
 @router.post('/speech')
-async def speech(request: Request, user=Depends(get_verified_user)):
+async def speech(request: Request, user=Depends(check_billing_access)):
     engine = request.app.state.config.TTS_ENGINE
     if engine == '':
         raise HTTPException(
@@ -1151,7 +1152,7 @@ async def transcription(
     request: Request,
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
-    user=Depends(get_verified_user),
+    user=Depends(check_billing_access),
 ):
     if user.role != 'admin' and not await has_permission(
         user.id, 'chat.stt', request.app.state.config.USER_PERMISSIONS

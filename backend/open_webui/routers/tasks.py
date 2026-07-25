@@ -17,6 +17,7 @@ from open_webui.config import (
     DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
 )
 from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.routers.billing import check_billing_access
 from open_webui.routers.pipelines import process_pipeline_inlet_filter, process_pipeline_outlet_filter
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat import generate_chat_completion
@@ -293,7 +294,7 @@ async def update_task_config(request: Request, form_data: TaskConfigForm, user=D
 
 
 @router.post('/title/completions')
-async def generate_title(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_title(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_TITLE_GENERATION:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -383,7 +384,7 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @router.post('/follow_up/completions')
-async def generate_follow_ups(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_follow_ups(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_FOLLOW_UP_GENERATION:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -459,7 +460,7 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
 
 @router.post('/tags/completions')
-async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_chat_tags(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_TAGS_GENERATION:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -535,7 +536,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 
 
 @router.post('/image_prompt/completions')
-async def generate_image_prompt(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_image_prompt(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,
@@ -602,7 +603,7 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
 
 
 @router.post('/queries/completions')
-async def generate_queries(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_queries(request: Request, form_data: dict, user=Depends(check_billing_access)):
     type = form_data.get('type')
     if type == 'web_search':
         if not request.app.state.config.ENABLE_SEARCH_QUERY_GENERATION:
@@ -688,7 +689,7 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
 
 
 @router.post('/auto/completions')
-async def generate_autocompletion(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_autocompletion(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_AUTOCOMPLETE_GENERATION:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -774,7 +775,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 
 
 @router.post('/emoji/completions')
-async def generate_emoji(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_emoji(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,
@@ -847,7 +848,7 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @router.post('/moa/completions')
-async def generate_moa_response(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_moa_response(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,
