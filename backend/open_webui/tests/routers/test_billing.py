@@ -68,34 +68,34 @@ class TestCheckCreditsExhausted:
     def test_no_user_table_lookup_performed(self):
         """Users.get_user_by_email must never be called — user_id is passed directly."""
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
         mock_users = MagicMock()
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch("open_webui.models.users.Users", mock_users):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             mock_users.get_user_by_email.assert_not_called()
 
     def test_stripe_lookup_uses_user_id_arg(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
 
         with patch.dict(os.environ, {"CREDITS_PER_EUR_CENT": "1.82"}), \
              patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             mock_billings.get_by_user_id.assert_called_once_with("user-uuid-123")
 
     def test_skips_non_credits_plan(self):
         record = MagicMock()
         record.plan_tier = "internal"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
 
     def test_raises_402_when_credits_exhausted(self):
         from fastapi import HTTPException
@@ -110,7 +110,7 @@ class TestCheckCreditsExhausted:
         balance.credits_per_eur_cent = 1.82
 
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
         mock_balances = MagicMock()
         mock_balances.get.return_value = balance
 
@@ -124,7 +124,7 @@ class TestCheckCreditsExhausted:
                  patch.object(cb_mod, "CreditBalances", mock_balances), \
                  patch.object(uc_mod, "eur_to_credits", return_value=200), \
                  pytest.raises(HTTPException) as exc_info:
-                _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+                asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             assert exc_info.value.status_code == 402
             assert exc_info.value.detail == "credits_exhausted"
 
@@ -272,7 +272,8 @@ class TestAutoOnboardUserTierConstants:
 
     def test_internal_user_upserted_with_constant(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None  # not yet onboarded
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)  # not yet onboarded
+        mock_billings.upsert = AsyncMock()
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
              patch.object(_billing, "has_unlimited_access", return_value=True):
@@ -287,7 +288,8 @@ class TestAutoOnboardUserTierConstants:
 
     def test_external_trial_user_upserted_with_constant(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None  # not yet onboarded
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)  # not yet onboarded
+        mock_billings.upsert = AsyncMock()
         mock_stripe = MagicMock()
         mock_customer = MagicMock()
         mock_customer.id = "cus_test"
@@ -330,7 +332,7 @@ class TestNoPaidTierBlock:
         record.subscription_status = None
 
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
