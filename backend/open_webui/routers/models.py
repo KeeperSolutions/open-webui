@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
-from open_webui.internal.db import get_async_session, get_session
+from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
@@ -42,7 +42,6 @@ from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
@@ -786,13 +785,13 @@ async def get_model_profile_image(
 
 
 @router.get("/model/profile/image/preview")
-def get_model_profile_image_preview(
+async def get_model_profile_image_preview(
     request: Request,
     id: str,
     theme: Optional[str] = "light",
     profile_image_url: Optional[str] = None,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Preview what the profile image would be with a given profile_image_url override.
@@ -800,7 +799,7 @@ def get_model_profile_image_preview(
     """
     from open_webui.models.providers import Providers
 
-    model = Models.get_model_by_id(id, db=db)
+    model = await Models.get_model_by_id(id, db=db)
     if not model:
         return FileResponse(f"{STATIC_DIR}/favicon.png")
 
@@ -862,8 +861,10 @@ def get_model_profile_image_preview(
             if base_runtime_model and "owned_by" in base_runtime_model:
                 owned_by = base_runtime_model.get("owned_by", "openai")
 
+    # Providers is still a sync model — let it open its own sync session
+    # rather than passing this endpoint's AsyncSession through.
     provider_result = Providers.detect_provider_logo_with_metadata(
-        model.id, owned_by, theme or "light", db=db
+        model.id, owned_by, theme or "light"
     )
 
     if provider_result:

@@ -389,7 +389,7 @@ class TestTaskGeneratorFailClosed:
 
         llm_spy = AsyncMock()
         with patch("open_webui.routers.tasks.get_task_model_id", MagicMock(return_value="gpt-4")), \
-             patch("open_webui.routers.tasks.title_generation_template", MagicMock(return_value="prompt")), \
+             patch("open_webui.routers.tasks.title_generation_template", AsyncMock(return_value="prompt")), \
              patch("open_webui.routers.tasks.generate_chat_completion", llm_spy):
             with pytest.raises(PiiMaskingUnavailableError):
                 _run(generate_title(request, form_data, _make_user()))

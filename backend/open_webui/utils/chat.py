@@ -336,7 +336,7 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
         _chat_id = data.get("chat_id")
         _db_msg_id = _last_asst.get("id")
         if _chat_id and _db_msg_id:
-                _db_msg = _Chats.get_message_by_id_and_message_id(_chat_id, _db_msg_id)
+                _db_msg = await _Chats.get_message_by_id_and_message_id(_chat_id, _db_msg_id)
                 _db_usage = (_db_msg or {}).get("usage")
                 if _db_usage:
                     _last_asst["usage"] = _db_usage

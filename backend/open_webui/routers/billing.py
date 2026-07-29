@@ -246,7 +246,7 @@ async def _get_team_current_month_cost(team_id: str) -> float:
 
         emails = []
         for m in members:
-            u = UsersModel.get_user_by_id(m.user_id)
+            u = await UsersModel.get_user_by_id(m.user_id)
             if u:
                 emails.append(u.email)
 
@@ -560,7 +560,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         members_db = await TeamMembers.get_by_team_id(team.id)
         member_emails = []
         for m in members_db:
-            u = UsersModel.get_user_by_id(m.user_id)
+            u = await UsersModel.get_user_by_id(m.user_id)
             if u:
                 member_emails.append(u.email)
         if user.email not in member_emails:
@@ -645,7 +645,7 @@ async def get_billing_status(user=Depends(get_verified_user)):
         from open_webui.models.credit_balances import CreditBalances
         from open_webui.models.user_credits import eur_to_credits, CREDITS_PER_EUR_CENT
 
-        owner = UsersModel.get_user_by_id(team.owner_user_id)
+        owner = await UsersModel.get_user_by_id(team.owner_user_id)
         team_month_cost = await _get_team_current_month_cost(team.id)
         bal = CreditBalances.get("team", team.id)
         sub_credits = bal.subscription_credits if bal else 0
@@ -1142,7 +1142,7 @@ async def get_team_status(user=Depends(get_verified_user)):
     user_by_id = {
         m.user_id: u
         for m in members_db
-        if (u := UsersModel.get_user_by_id(m.user_id))
+        if (u := await UsersModel.get_user_by_id(m.user_id))
     }
     member_emails = [u.email for u in user_by_id.values()]
     try:
@@ -1265,7 +1265,7 @@ async def invite_team_member(body: TeamInviteRequest, user=Depends(get_verified_
     # Check if already a member
     from open_webui.models.users import Users as UsersModel
 
-    existing_user = UsersModel.get_user_by_email(email)
+    existing_user = await UsersModel.get_user_by_email(email)
     if existing_user:
         existing_member = await TeamMembers.get_by_user_id(existing_user.id)
         if existing_member and existing_member.team_id == team.id:
@@ -1512,7 +1512,7 @@ async def get_invite_info(token: str, user=Depends(get_verified_user)):
 
     from open_webui.models.users import Users as UsersModel
 
-    owner = UsersModel.get_user_by_id(team.owner_user_id)
+    owner = await UsersModel.get_user_by_id(team.owner_user_id)
     return {
         "team_id": team.id,
         "team_name": team.name,
@@ -1686,7 +1686,7 @@ async def _handle_stripe_event(event_type: str, data):
                     log.info("[billing] Team topup: team_id=%s credits=%d", team_id, credits)
                 elif user_id:
                     from open_webui.models.users import Users as _Users
-                    u = _Users.get_user_by_id(user_id)
+                    u = await _Users.get_user_by_id(user_id)
                     owner_id = u.email if u else user_id
                     CreditBalances.add_topup("user", owner_id, credits)
                     PurchaseHistory.insert(
@@ -1791,7 +1791,7 @@ async def _handle_stripe_event(event_type: str, data):
                 # Zero out the owner's personal credit balance — they are now
                 # on a team plan and must use team credits exclusively.
                 from open_webui.models.users import Users as _CscUsers
-                _csc_owner = _CscUsers.get_user_by_id(owner_user_id)
+                _csc_owner = await _CscUsers.get_user_by_id(owner_user_id)
                 if _csc_owner:
                     CreditBalances.reset_all("user", _csc_owner.email)
                 PurchaseHistory.insert(
@@ -1835,7 +1835,7 @@ async def _handle_stripe_event(event_type: str, data):
                     free_tier_credit_applied=record.free_tier_credit_applied,
                 )
 
-                u = _Users.get_user_by_id(record.user_id)
+                u = await _Users.get_user_by_id(record.user_id)
                 owner_id = u.email if u else record.user_id
                 existing_bal = CreditBalances.get("user", owner_id)
                 rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
@@ -1912,7 +1912,7 @@ async def _handle_stripe_event(event_type: str, data):
                                     # No team record — user upgraded via the Stripe billing portal
                                     # without going through the in-app create_team API. Create the
                                     # team record now so this webhook can activate it.
-                                    _portal_owner = _Users.get_user_by_id(rec.user_id)
+                                    _portal_owner = await _Users.get_user_by_id(rec.user_id)
                                     _portal_name = (
                                         f"{_portal_owner.name}'s Team"
                                         if _portal_owner and _portal_owner.name
@@ -1954,7 +1954,7 @@ async def _handle_stripe_event(event_type: str, data):
                                     )
                                     # Zero out the owner's personal credit balance — they are now
                                     # on a team plan and must use team credits exclusively.
-                                    _owner_u = _Users.get_user_by_id(rec.user_id)
+                                    _owner_u = await _Users.get_user_by_id(rec.user_id)
                                     if _owner_u:
                                         CreditBalances.reset_all("user", _owner_u.email)
                                     from open_webui.models.purchase_history import PurchaseHistory
@@ -1988,7 +1988,7 @@ async def _handle_stripe_event(event_type: str, data):
                                     subscription_status="active",
                                     free_tier_credit_applied=rec.free_tier_credit_applied,
                                 )
-                                u = _Users.get_user_by_id(rec.user_id)
+                                u = await _Users.get_user_by_id(rec.user_id)
                                 if u:
                                     existing_bal = CreditBalances.get("user", u.email)
                                     rate = existing_bal.credits_per_eur_cent if existing_bal else CREDITS_PER_EUR_CENT
@@ -2061,7 +2061,7 @@ async def _handle_stripe_event(event_type: str, data):
                         stripe_subscription_id=sub_id_evt,
                     )
                 elif record_del:
-                    u_del = _Users.get_user_by_id(record_del.user_id)
+                    u_del = await _Users.get_user_by_id(record_del.user_id)
                     owner_id_del = u_del.email if u_del else record_del.user_id
                     CreditBalances.reset_all("user", owner_id_del)
                     PurchaseHistory.insert(
@@ -2181,7 +2181,7 @@ async def _handle_stripe_event(event_type: str, data):
                     await StripeBillings.update_subscription_status(customer_id, "active")
                     log.info("[billing] Payment recovered: customer=%s", customer_id)
                 if record_ip.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM) or (pkg and pkg.plan_tier in (PLAN_TIER_PRO, PLAN_TIER_PREMIUM)):
-                    u = _Users.get_user_by_id(record_ip.user_id)
+                    u = await _Users.get_user_by_id(record_ip.user_id)
                     if u:
                         effective_plan_tier = pkg.plan_tier if pkg else record_ip.plan_tier
                         credits = pkg.credits if pkg else 0
@@ -2255,7 +2255,7 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
 
     result = []
     for record in all_records:
-        u = Users.get_user_by_id(record.user_id)
+        u = await Users.get_user_by_id(record.user_id)
         if not u:
             continue
         result.append(
@@ -2272,7 +2272,7 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
         )
 
     all_user_ids_with_billing = {r.user_id for r in all_records}
-    for u in Users.get_users()["users"]:
+    for u in (await Users.get_users())["users"]:
         if u.id not in all_user_ids_with_billing:
             result.append(
                 {
@@ -2291,7 +2291,7 @@ async def admin_billing_summary(user=Depends(get_admin_user)):
     return result
 
 
-def _resolve_billing_period_start(user_id: str, email: str) -> Optional[int]:
+async def _resolve_billing_period_start(user_id: str, email: str) -> Optional[int]:
     """Return the timestamp the current user's billing period started, so usage
     predating it (e.g. individual/trial usage before a team upgrade, or before an
     individual subscription started) can be excluded from month-to-date displays.
@@ -2304,7 +2304,7 @@ def _resolve_billing_period_start(user_id: str, email: str) -> Optional[int]:
     try:
         from open_webui.models.credit_balances import CreditBalances
 
-        record = StripeBillings.get_by_user_id(user_id)
+        record = await StripeBillings.get_by_user_id(user_id)
         if not record:
             return None
         if record.plan_tier in CREDITS_TIERS:
@@ -2327,7 +2327,7 @@ async def get_model_breakdown(user=Depends(get_verified_user)):
 
     from open_webui.models.usage_ledger import UsageLedgerDB
 
-    period_start = _resolve_billing_period_start(user.id, user.email)
+    period_start = await _resolve_billing_period_start(user.id, user.email)
     if period_start:
         rows = UsageLedgerDB.get_model_breakdown_since(user.email, period_start)
     else:

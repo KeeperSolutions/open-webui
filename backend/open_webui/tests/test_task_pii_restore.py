@@ -306,7 +306,7 @@ def _patch_title_pipeline(outlet):
         patch.object(tasks, "process_pipeline_inlet_filter", AsyncMock(side_effect=_inlet)),
         patch.object(tasks, "generate_chat_completion", AsyncMock(side_effect=_gen)),
         patch.object(tasks, "get_task_model_id", MagicMock(return_value="gpt-4")),
-        patch.object(tasks, "title_generation_template", MagicMock(return_value="prompt")),
+        patch.object(tasks, "title_generation_template", AsyncMock(return_value="prompt")),
         patch.object(tasks, "process_pipeline_outlet_filter", outlet),
     ]
 

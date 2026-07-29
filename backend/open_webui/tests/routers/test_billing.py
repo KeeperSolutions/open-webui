@@ -507,10 +507,10 @@ class TestGetTeamCurrentMonthCost:
         member_user.email = "member@example.com"
 
         mock_team_members = MagicMock()
-        mock_team_members.get_by_team_id.return_value = [self._member()]
+        mock_team_members.get_by_team_id = AsyncMock(return_value=[self._member()])
 
         mock_users = MagicMock()
-        mock_users.get_user_by_id.return_value = member_user
+        mock_users.get_user_by_id = AsyncMock(return_value=member_user)
 
         mock_ledger = MagicMock()
         mock_ledger.get_cost_eur_for_users_since.return_value = {"member@example.com": 0.42}
@@ -529,7 +529,7 @@ class TestGetTeamCurrentMonthCost:
              patch("open_webui.models.users.Users", mock_users), \
              patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            total = _billing._get_team_current_month_cost("team-123")
+            total = asyncio.run(_billing._get_team_current_month_cost("team-123"))
 
         mock_ledger.get_cost_eur_for_users_since.assert_called_once_with(
             ["member@example.com"], 1_700_000_000
@@ -546,10 +546,10 @@ class TestGetTeamCurrentMonthCost:
         member_user.email = "member2@example.com"
 
         mock_team_members = MagicMock()
-        mock_team_members.get_by_team_id.return_value = [self._member("member-uid-2")]
+        mock_team_members.get_by_team_id = AsyncMock(return_value=[self._member("member-uid-2")])
 
         mock_users = MagicMock()
-        mock_users.get_user_by_id.return_value = member_user
+        mock_users.get_user_by_id = AsyncMock(return_value=member_user)
 
         mock_ledger = MagicMock()
         mock_ledger.get_cost_eur_for_users_current_month.return_value = {"member2@example.com": 1.23}
@@ -564,7 +564,7 @@ class TestGetTeamCurrentMonthCost:
              patch("open_webui.models.users.Users", mock_users), \
              patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            total = _billing._get_team_current_month_cost("team-456")
+            total = asyncio.run(_billing._get_team_current_month_cost("team-456"))
 
         mock_ledger.get_cost_eur_for_users_current_month.assert_called_once_with(
             ["member2@example.com"]
@@ -583,7 +583,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = "trial"
         record.team_id = None
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         user_balance = MagicMock()
         user_balance.period_start = 1_600_000_000
@@ -595,7 +595,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("uid-1", "trial@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid-1", "trial@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("user", "trial@example.com")
         assert result == 1_600_000_000
@@ -605,7 +605,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = _billing.PLAN_TIER_TEAM
         record.team_id = "team-abc"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         team_balance = MagicMock()
         team_balance.period_start = 1_650_000_000
@@ -617,7 +617,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("owner-uid", "owner@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("owner-uid", "owner@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("team", "team-abc")
         assert result == 1_650_000_000
@@ -627,7 +627,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = _billing.PLAN_TIER_TEAM_MEMBER
         record.team_id = "team-xyz"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         team_balance = MagicMock()
         team_balance.period_start = 1_660_000_000
@@ -639,17 +639,17 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("member-uid", "member@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("member-uid", "member@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("team", "team-xyz")
         assert result == 1_660_000_000
 
     def test_returns_none_for_internal_or_no_record(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
 
         with patch.object(_billing, "StripeBillings", mock_billings):
-            result = _billing._resolve_billing_period_start("uid", "internal@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid", "internal@example.com"))
 
         assert result is None
 
@@ -657,7 +657,7 @@ class TestResolveBillingPeriodStart:
         record = MagicMock()
         record.plan_tier = "trial"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         mock_credit_balances = MagicMock()
         mock_credit_balances.get.return_value = None
@@ -667,7 +667,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("uid", "trial@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid", "trial@example.com"))
 
         assert result is None
 

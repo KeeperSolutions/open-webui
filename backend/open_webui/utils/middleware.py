@@ -3113,7 +3113,7 @@ async def background_tasks_handler(ctx):
             }
         )
         if not metadata.get("chat_id", "").startswith("local:"):
-            Chats.upsert_message_to_chat_by_id_and_message_id(
+            await Chats.upsert_message_to_chat_by_id_and_message_id(
                 metadata["chat_id"],
                 metadata["message_id"],
                 {"piiDetections": pii_detections},
@@ -4140,7 +4140,7 @@ async def streaming_chat_response_handler(response, ctx):
                                             }
                                         )
                                         try:
-                                            Chats.upsert_message_to_chat_by_id_and_message_id(
+                                            await Chats.upsert_message_to_chat_by_id_and_message_id(
                                                 metadata["chat_id"],
                                                 metadata["message_id"],
                                                 {"usage": usage},
@@ -4589,7 +4589,7 @@ async def streaming_chat_response_handler(response, ctx):
                             f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
                             f"chat_id={metadata.get('chat_id')} model={model_id}"
                         )
-                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata["chat_id"],
                             metadata["message_id"],
                             {"error": {"content": _timeout_error}},

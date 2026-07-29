@@ -75,10 +75,12 @@ class TestGetEurUsdRate:
 
         assert rate == pytest.approx(1.1467)
 
-    def test_returns_none_when_ecb_down_and_no_prior_rate(self):
+    def test_returns_fallback_rate_when_ecb_down_and_no_prior_rate(self):
+        """ECB never returns None anymore — falls back to _FALLBACK_RATE so
+        cost_eur is never NULL (which would show as 0 credits used in billing)."""
         with patch("open_webui.langfuse.ecb_rates.requests.get", side_effect=Exception("timeout")):
             rate = ecb.get_eur_usd_rate()
-        assert rate is None
+        assert rate == ecb._FALLBACK_RATE
 
     def test_failure_cached_for_fifteen_minutes_not_four_hours(self):
         with patch("open_webui.langfuse.ecb_rates.requests.get", side_effect=Exception("timeout")) as mock_get:
