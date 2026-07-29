@@ -530,43 +530,59 @@ class ChatTable:
         except Exception as e:
             log.warning('Failed to reconcile chat_message rows for chat %s: %s', chat_id, e)
 
+    # Fields that only ever live in the encrypted JSON blob — chat_message
+    # deliberately excludes them (see ChatMessage's column comment), so the
+    # normalized table can never be treated as sufficient on its own.
+    CONTENT_ONLY_FIELDS = ('content', 'output', 'files', 'sources', 'embeds')
+
     async def get_messages_map_by_chat_id(self, id: str) -> dict | None:
         """Message map for walking history (see ``get_message_list``).
 
-        Prefer ``chat_message`` rows to avoid loading the large embedded
-        history; fall back to the legacy JSON when no rows exist.
-        When rows exist but the parent-link graph has gaps (e.g. migration
-        failures), missing messages are merged from the legacy history
-        and backfilled so future requests self-heal.
+        ``chat_message`` rows are used to avoid loading the large embedded
+        history just to walk the parent-link graph, but that table never
+        stores content/output/files/sources/embeds (encryption-sensitive —
+        see ChatMessage's column comment). Those fields are always merged in
+        from the legacy JSON blob, which remains the sole source of truth
+        for them. When the parent-link graph itself has gaps (e.g. migration
+        failures), whole messages are merged from the legacy history and
+        backfilled so future requests self-heal.
         """
-        # Fast path: build from normalized chat_message rows.
+        # Fast path: build the graph shape from normalized chat_message rows.
         messages_map = await ChatMessages.get_messages_map_by_chat_id(id)
 
         if messages_map is not None:
             unresolved_ids = self.get_unresolved_parent_ids(messages_map)
-            if not unresolved_ids:
-                return messages_map
+            if unresolved_ids:
+                log.info(
+                    'Chat %s: %d unresolved parent reference(s) in chat_message — enriching from legacy history',
+                    id,
+                    len(unresolved_ids),
+                )
 
-            # Graph has gaps — enrich from the legacy embedded history.
-            log.info(
-                'Chat %s: %d unresolved parent reference(s) in chat_message — enriching from legacy history',
-                id,
-                len(unresolved_ids),
-            )
             chat = await self.get_chat_by_id(id)
             if chat:
                 history_messages = chat.chat.get('history', {}).get('messages', {}) or {}
-                missing_messages = {
-                    message_id: history_messages[message_id]
-                    for message_id in unresolved_ids
-                    if message_id in history_messages
-                }
 
-                if missing_messages:
-                    messages_map.update(missing_messages)
+                if unresolved_ids:
+                    missing_messages = {
+                        message_id: history_messages[message_id]
+                        for message_id in unresolved_ids
+                        if message_id in history_messages
+                    }
+                    if missing_messages:
+                        messages_map.update(missing_messages)
+                        # Backfill so future requests use the fast path.
+                        await self.backfill_messages_by_chat_id(id, chat.user_id, missing_messages)
 
-                    # Backfill so future requests use the fast path.
-                    await self.backfill_messages_by_chat_id(id, chat.user_id, missing_messages)
+                # Overlay content-only fields onto every message the fast
+                # path already has — chat_message never carries them, so
+                # without this every message here would read as blank.
+                for message_id, msg in messages_map.items():
+                    legacy_msg = history_messages.get(message_id)
+                    if legacy_msg:
+                        for field in self.CONTENT_ONLY_FIELDS:
+                            if field in legacy_msg:
+                                msg[field] = legacy_msg[field]
 
             return messages_map
 
