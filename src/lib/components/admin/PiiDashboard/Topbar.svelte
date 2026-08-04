@@ -3,12 +3,16 @@
 	import PeriodPill from './parts/PeriodPill.svelte';
 	import Toggle from './parts/Toggle.svelte';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
-	import { PERIOD_KEYS, periodLabel, type PeriodKey } from './periods';
+	import { PERIOD_KEYS, periodLabel, formatWindow, type PeriodKey } from './periods';
 
 	const i18n = getContext('i18n');
 
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
+	export let windowFrom = '';
+	export let windowTo = '';
+
+	$: windowRange = formatWindow(windowFrom, windowTo);
 </script>
 
 <div class="flex flex-wrap items-center justify-between gap-3 font-['Inter']">
@@ -17,6 +21,13 @@
 	</div>
 
 	<div class="flex items-center gap-2">
+		<!-- The window the backend actually queried, not a restatement of the pill. -->
+		{#if windowRange}
+			<span class="mr-1 text-[12px] leading-[1.55] whitespace-nowrap text-pii-muted">
+				{windowRange}
+			</span>
+		{/if}
+
 		<div class="flex items-center gap-2">
 			{#each PERIOD_KEYS as key}
 				<PeriodPill active={period === key} on:click={() => (period = key)}>

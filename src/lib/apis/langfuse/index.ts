@@ -16,12 +16,19 @@ export type MyUsage = {
 	total_cost: number;
 };
 
+/** Rows plus the exact UTC window the backend queried for them. */
+export type MetricsResponse = {
+	from: string;
+	to: string;
+	rows: MetricRow[];
+};
+
 export const getLangfuseMetrics = async (
 	token: string,
 	period: string = 'week',
 	days?: number,
 	signal?: AbortSignal
-): Promise<MetricRow[]> => {
+): Promise<MetricsResponse> => {
 	let error = null;
 
 	const params = new URLSearchParams({ period });

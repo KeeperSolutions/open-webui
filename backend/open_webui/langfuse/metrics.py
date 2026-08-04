@@ -142,46 +142,41 @@ def parse_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ---------- period helpers ----------
 
 
-def get_today_so_far() -> List[Dict[str, Any]]:
+#: The window a getter actually queried, alongside its rows. Callers must be
+#: able to report the exact boundaries used instead of re-deriving them, which
+#: is how a UI label ends up disagreeing with the data it describes.
+PeriodResult = Tuple[str, str, List[Dict[str, Any]]]
+
+
+def _fetch_window(from_ts: str, to_ts: str) -> PeriodResult:
     pk, sk, host = load_env()
     headers = auth_header(pk, sk)
-    from_ts, to_ts = today_utc_window_now()
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+    rows = parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+    return from_ts, to_ts, rows
 
 
-def get_last_day() -> List[Dict[str, Any]]:
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts, to_ts = last_day_fixed_window()
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+def get_today_so_far() -> PeriodResult:
+    return _fetch_window(*today_utc_window_now())
 
 
-def get_last_week() -> List[Dict[str, Any]]:
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts, to_ts = last_week_fixed_window()
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+def get_last_day() -> PeriodResult:
+    return _fetch_window(*last_day_fixed_window())
 
 
-def get_last_month() -> List[Dict[str, Any]]:
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts, to_ts = last_month_fixed_window()
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+def get_last_week() -> PeriodResult:
+    return _fetch_window(*last_week_fixed_window())
 
 
-def get_custom_days(days: int) -> List[Dict[str, Any]]:
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts, to_ts = custom_days_fixed_window(days)
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+def get_last_month() -> PeriodResult:
+    return _fetch_window(*last_month_fixed_window())
 
 
-def get_current_month() -> List[Dict[str, Any]]:
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts, to_ts = current_month_window()
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
+def get_custom_days(days: int) -> PeriodResult:
+    return _fetch_window(*custom_days_fixed_window(days))
+
+
+def get_current_month() -> PeriodResult:
+    return _fetch_window(*current_month_window())
 
 
 def get_alltime_since(since: dt.datetime) -> List[Dict[str, Any]]:

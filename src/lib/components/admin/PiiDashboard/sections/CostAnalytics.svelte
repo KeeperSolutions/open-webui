@@ -9,7 +9,7 @@
 	import { formatCost } from '$lib/apis/langfuse/tableUtils';
 	import { getAllUsers } from '$lib/apis/users';
 	import { formatNumber } from '$lib/utils';
-	import { toLangfuseParams, windowLabel, type PeriodKey } from '../periods';
+	import { toLangfuseParams, type PeriodKey } from '../periods';
 	import {
 		aggregateByModel,
 		aggregateByUser,
@@ -23,6 +23,10 @@
 
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
+	/** Reported upward so the topbar can name the window next to the control
+	 *  that selects it. Bound, not derived — only the backend knows the window. */
+	export let windowFrom = '';
+	export let windowTo = '';
 
 	let loading = true;
 	let loadError: string | null = null;
@@ -41,10 +45,12 @@
 		loadError = null;
 		try {
 			const { period: p, days } = toLangfuseParams(period, customDays);
-			const nextRows = await getLangfuseMetrics(localStorage.token, p, days, controller.signal);
+			const res = await getLangfuseMetrics(localStorage.token, p, days, controller.signal);
 			const usersRes = await getAllUsers(localStorage.token);
 			if (controller.signal.aborted) return;
-			rows = nextRows;
+			rows = res.rows;
+			windowFrom = res.from;
+			windowTo = res.to;
 			allUsers = usersRes?.users ?? [];
 		} catch (e) {
 			if (controller.signal.aborted) return;
@@ -96,7 +102,7 @@
 			<div class="flex gap-4">
 				<KpiCard
 					type="numeric"
-					label={`${$i18n.t('Total cost')} (${windowLabel(period, customDays)})`}
+					label={$i18n.t('Total cost')}
 					value={formatCost(t.cost, 2)}
 					delta={observationsDelta}
 				/>

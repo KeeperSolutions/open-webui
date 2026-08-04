@@ -2,7 +2,7 @@ import datetime
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.langfuse.metrics import (
@@ -26,6 +26,16 @@ class MetricRow(BaseModel):
     observations: int = 0
 
 
+class MetricsResponse(BaseModel):
+    # `from` is a Python keyword, so the field is named `from_` and aliased.
+    # FastAPI serialises by alias, so the JSON key is `from`.
+    from_: str = Field(..., alias="from")
+    to: str
+    rows: List[MetricRow]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MyUsage(BaseModel):
     month: int
     year: int
@@ -33,42 +43,42 @@ class MyUsage(BaseModel):
     total_cost: float
 
 
-@router.get("/metrics", response_model=List[MetricRow])
+@router.get("/metrics", response_model=MetricsResponse)
 async def get_langfuse_metrics(
     period: str = "week",
     days: Optional[int] = None,
     user=Depends(get_admin_user),
 ):
     """
-    Fetch Langfuse token/cost metrics per user.
+    Fetch Langfuse token/cost metrics per user, plus the exact UTC window used.
 
     period: today | day | week | month | current_month | custom
     days: required when period=custom
     """
     try:
         if period == "today":
-            rows = get_today_so_far()
+            from_ts, to_ts, rows = get_today_so_far()
         elif period == "day":
-            rows = get_last_day()
+            from_ts, to_ts, rows = get_last_day()
         elif period == "week":
-            rows = get_last_week()
+            from_ts, to_ts, rows = get_last_week()
         elif period == "month":
-            rows = get_last_month()
+            from_ts, to_ts, rows = get_last_month()
         elif period == "current_month":
-            rows = get_current_month()
+            from_ts, to_ts, rows = get_current_month()
         elif period == "custom":
             if not days or days <= 0:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="days parameter is required and must be positive when period=custom",
                 )
-            rows = get_custom_days(days)
+            from_ts, to_ts, rows = get_custom_days(days)
         else:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unknown period '{period}'. Use: today, day, week, month, current_month, custom",
             )
-        return rows
+        return MetricsResponse(**{"from": from_ts, "to": to_ts, "rows": rows})
     except HTTPException:
         raise
     except Exception as e:
@@ -88,7 +98,7 @@ async def get_my_langfuse_usage(
     Matches Langfuse userId against the user's email.
     """
     try:
-        rows = get_current_month()
+        _, _, rows = get_current_month()
     except Exception as e:
         log.error(f"Langfuse my-usage error: {e}")
         raise HTTPException(
