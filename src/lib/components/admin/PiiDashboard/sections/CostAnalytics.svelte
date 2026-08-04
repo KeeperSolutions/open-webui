@@ -28,20 +28,31 @@
 	let loadError: string | null = null;
 	let rows: MetricRow[] = [];
 	let allUsers: { id: string; email: string }[] = [];
+	let inFlight: AbortController | null = null;
 
 	const load = async () => {
+		// A newer period selection supersedes whatever is still in flight: abort it
+		// so its (possibly slower) response cannot overwrite the fresher state.
+		inFlight?.abort();
+		const controller = new AbortController();
+		inFlight = controller;
+
 		loading = true;
 		loadError = null;
 		try {
 			const { period: p, days } = toLangfuseParams(period, customDays);
-			rows = await getLangfuseMetrics(localStorage.token, p, days);
+			const nextRows = await getLangfuseMetrics(localStorage.token, p, days, controller.signal);
 			const usersRes = await getAllUsers(localStorage.token);
+			if (controller.signal.aborted) return;
+			rows = nextRows;
 			allUsers = usersRes?.users ?? [];
 		} catch (e) {
+			if (controller.signal.aborted) return;
 			loadError = String((e as any)?.detail ?? e ?? 'Failed to load');
 			rows = [];
 		} finally {
-			loading = false;
+			// Superseded loads leave `loading` alone — the newer one owns it.
+			if (!controller.signal.aborted) loading = false;
 		}
 	};
 

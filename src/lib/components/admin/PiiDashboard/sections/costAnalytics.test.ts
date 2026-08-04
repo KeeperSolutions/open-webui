@@ -39,6 +39,13 @@ describe('aggregateByUser', () => {
 			{ name: 'a@x', tokens: 11, cost: 0.75 }
 		]);
 	});
+	it('groups case/whitespace variants of one user into a single bar', () => {
+		const out = aggregateByUser([row('A@x.com', 'm', 10, 0.5), row(' a@x.com ', 'm', 5, 0.25)]);
+		expect(out).toEqual([{ name: 'A@x.com', tokens: 15, cost: 0.75 }]);
+	});
+	it('labels the bar with the original casing of the first row, not the key', () => {
+		expect(aggregateByUser([row('Fiona@X.com', 'm', 1, 0.1)])[0].name).toBe('Fiona@X.com');
+	});
 });
 
 describe('toBars', () => {
