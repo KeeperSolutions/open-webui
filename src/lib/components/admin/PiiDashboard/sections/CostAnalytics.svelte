@@ -61,6 +61,10 @@
 			if (controller.signal.aborted) return;
 			loadError = String((e as any)?.detail ?? e ?? 'Failed to load');
 			rows = [];
+			// Drop the window too: it belongs to the previous period, and the topbar
+			// renders it at full opacity — i.e. as authoritative — once loading ends.
+			windowFrom = '';
+			windowTo = '';
 		} finally {
 			// Superseded loads leave `loading` alone — the newer one owns it.
 			if (!controller.signal.aborted) loading = false;
