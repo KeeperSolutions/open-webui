@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import PeriodPill from './parts/PeriodPill.svelte';
 	import Toggle from './parts/Toggle.svelte';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import { PERIOD_KEYS, periodLabel, formatWindow, type PeriodKey } from './periods';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<i18nType> = getContext('i18n');
 
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
@@ -63,7 +65,7 @@
 		>
 			<HgIconShield class="size-4 text-pii-ink" />
 			<span class="text-[13px] font-medium text-pii-ink">{$i18n.t('PII Masking')}</span>
-			<Toggle on disabled />
+			<Toggle on disabled ariaLabel={$i18n.t('PII Masking')} />
 		</div>
 	</div>
 </div>
