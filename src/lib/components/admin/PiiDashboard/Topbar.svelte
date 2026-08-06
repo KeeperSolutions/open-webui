@@ -11,6 +11,8 @@
 	export let customDays = 7;
 	export let windowFrom = '';
 	export let windowTo = '';
+	/** The shown window belongs to the previous fetch; a newer one is in flight. */
+	export let windowStale = false;
 
 	$: windowRange = formatWindow(windowFrom, windowTo);
 </script>
@@ -21,9 +23,16 @@
 	</div>
 
 	<div class="flex items-center gap-2">
-		<!-- The window the backend actually queried, not a restatement of the pill. -->
+		<!-- The window the backend actually queried, not a restatement of the pill.
+		     Dimmed rather than hidden while refetching: it sits inline with the
+		     pills, so removing it would shift them on every period change. -->
 		{#if windowRange}
-			<span class="mr-1 text-[12px] leading-[1.55] whitespace-nowrap text-pii-muted">
+			<span
+				aria-busy={windowStale}
+				class="mr-1 text-[12px] leading-[1.55] whitespace-nowrap text-pii-muted transition-opacity {windowStale
+					? 'opacity-40'
+					: 'opacity-100'}"
+			>
 				{windowRange}
 			</span>
 		{/if}

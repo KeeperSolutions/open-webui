@@ -28,7 +28,10 @@
 	export let windowFrom = '';
 	export let windowTo = '';
 
-	let loading = true;
+	/** Bound upward so the topbar can mark the window it shows as out of date
+	 *  while a newer one is being fetched. */
+	export let loading = true;
+
 	let loadError: string | null = null;
 	let rows: MetricRow[] = [];
 	let allUsers: { id: string; email: string }[] = [];
