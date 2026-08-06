@@ -7,6 +7,7 @@ import {
 	totalTokens,
 	totalCost,
 	formatCost,
+	formatCostDisplay,
 	buildCsvLines,
 	rowNumber,
 	effectivePageSize
@@ -240,7 +241,7 @@ describe('formatCost', () => {
 	});
 
 	it('handles negative cost (refund)', () => {
-		expect(formatCost(-0.0050)).toBe('-$0.0050');
+		expect(formatCost(-0.005)).toBe('-$0.0050');
 	});
 });
 
@@ -253,6 +254,34 @@ describe('formatCost precision', () => {
 		expect(formatCost(3.456, 2)).toBe('$3.46');
 		expect(formatCost(1.29, 3)).toBe('$1.290');
 		expect(formatCost(-0.5, 2)).toBe('-$0.50');
+	});
+});
+
+// ─── formatCostDisplay ───────────────────────────────────────────────────────
+
+describe('formatCostDisplay', () => {
+	it('renders two decimals whatever the magnitude', () => {
+		expect(formatCostDisplay(82.3612)).toBe('$82.36');
+		expect(formatCostDisplay(16.5137)).toBe('$16.51');
+		expect(formatCostDisplay(2.724058)).toBe('$2.72');
+		expect(formatCostDisplay(0.5902)).toBe('$0.59');
+	});
+
+	it('pads to two decimals rather than trimming', () => {
+		expect(formatCostDisplay(0)).toBe('$0.00');
+		expect(formatCostDisplay(1.2)).toBe('$1.20');
+		expect(formatCostDisplay(5)).toBe('$5.00');
+	});
+
+	it('collapses sub-half-cent usage to $0.00, by design', () => {
+		expect(formatCostDisplay(0.0001)).toBe('$0.00');
+		expect(formatCostDisplay(0.004)).toBe('$0.00');
+		expect(formatCostDisplay(0.006)).toBe('$0.01');
+	});
+
+	it('keeps the sign on a refund', () => {
+		expect(formatCostDisplay(-12.3456)).toBe('-$12.35');
+		expect(formatCostDisplay(-0.5)).toBe('-$0.50');
 	});
 });
 

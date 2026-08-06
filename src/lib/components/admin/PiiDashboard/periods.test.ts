@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import { toLangfuseParams, formatWindow, periodLabel, PERIOD_KEYS } from './periods';
+
+dayjs.extend(utc);
 
 describe('toLangfuseParams', () => {
 	it('maps Day to the backend `today` window, not `day` (which is yesterday)', () => {
@@ -9,8 +13,23 @@ describe('toLangfuseParams', () => {
 		expect(toLangfuseParams('week', 7)).toEqual({ period: 'week' });
 		expect(toLangfuseParams('month', 7)).toEqual({ period: 'month' });
 	});
-	it('maps year to custom 365', () => {
-		expect(toLangfuseParams('year', 7)).toEqual({ period: 'custom', days: 365 });
+	it('maps year to the calendar year ending yesterday', () => {
+		expect(toLangfuseParams('year', 7, dayjs.utc('2026-08-06T09:00:00Z'))).toEqual({
+			period: 'custom',
+			days: 365
+		});
+	});
+	it('stretches the year to 366 days when it contains a 29 February', () => {
+		// 2024-03-01 back one year is 2023-03-01, a span that includes 29 Feb 2024.
+		expect(toLangfuseParams('year', 7, dayjs.utc('2024-03-01T09:00:00Z'))).toEqual({
+			period: 'custom',
+			days: 366
+		});
+	});
+	it('defaults to the current clock when no instant is given', () => {
+		const { period, days } = toLangfuseParams('year', 7);
+		expect(period).toBe('custom');
+		expect([365, 366]).toContain(days);
 	});
 	it('passes custom days through', () => {
 		expect(toLangfuseParams('custom', 14)).toEqual({ period: 'custom', days: 14 });

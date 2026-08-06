@@ -42,6 +42,25 @@ export function formatCost(c: number, decimals?: number): string {
 	return c < 0 ? '-' + formatted : formatted;
 }
 
+/**
+ * Cost display for the admin dashboard: plain currency, two decimals, for every
+ * figure on the page. Lives in one place rather than as a decimal count passed
+ * at each call site — which is how the same cost ended up rendered two ways.
+ *
+ * Two decimals means usage below half a cent reads as $0.00 next to a drawn bar.
+ * That is accepted: the dashboard answers "what is this costing us", a question
+ * whose unit is the dollar, and the alternative — widening precision only for
+ * small values — puts a six-decimal row beside a two-decimal one in the same
+ * right-aligned column.
+ */
+export function formatCostDisplay(c: number): string {
+	return new Intl.NumberFormat('en-US', {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2
+	}).format(c);
+}
 
 export function buildCsvLines(rows: MetricRow[]): string[] {
 	const escapeCell = (v: string | number): string => {

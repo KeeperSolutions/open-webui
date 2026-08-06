@@ -8,17 +8,19 @@
 	import Button from '../parts/Button.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { getLangfuseMetrics, type MetricRow } from '$lib/apis/langfuse';
-	import { formatCost } from '$lib/apis/langfuse/tableUtils';
+	import { formatCostDisplay } from '$lib/apis/langfuse/tableUtils';
 	import { getAllUsers } from '$lib/apis/users';
 	import { formatNumber } from '$lib/utils';
 	import { toLangfuseParams, type PeriodKey } from '../periods';
 	import {
 		aggregateByModel,
 		aggregateByUser,
+		describeLoadError,
 		toBars,
 		topModel,
 		totals,
-		inactiveUsers
+		inactiveUsers,
+		type DirectoryUser
 	} from './costAnalytics';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
@@ -34,12 +36,15 @@
 	 *  while a newer one is being fetched. */
 	export let loading = true;
 
-	let loadError: string | null = null;
+	let loadFailed = false;
+	/** What went wrong, when the failure said — shown under the generic message
+	 *  rather than swallowed, since only an admin ever sees this screen. */
+	let loadErrorDetail: string | null = null;
 	let rows: MetricRow[] = [];
-	let allUsers: { id: string; email: string }[] = [];
+	let allUsers: DirectoryUser[] = [];
 	let inFlight: AbortController | null = null;
 
-	const load = async () => {
+	const loadCostMetrics = async () => {
 		// A newer period selection supersedes whatever is still in flight: abort it
 		// so its (possibly slower) response cannot overwrite the fresher state.
 		inFlight?.abort();
@@ -47,7 +52,8 @@
 		inFlight = controller;
 
 		loading = true;
-		loadError = null;
+		loadFailed = false;
+		loadErrorDetail = null;
 		try {
 			const { period: p, days } = toLangfuseParams(period, customDays);
 			const res = await getLangfuseMetrics(localStorage.token, p, days, controller.signal);
@@ -57,9 +63,10 @@
 			windowFrom = res.from;
 			windowTo = res.to;
 			allUsers = usersRes?.users ?? [];
-		} catch (e) {
+		} catch (e: unknown) {
 			if (controller.signal.aborted) return;
-			loadError = String((e as any)?.detail ?? e ?? 'Failed to load');
+			loadFailed = true;
+			loadErrorDetail = describeLoadError(e);
 			rows = [];
 			// Drop the window too: it belongs to the previous period, and the topbar
 			// renders it at full opacity — i.e. as authoritative — once loading ends.
@@ -72,13 +79,13 @@
 	};
 
 	// Reload whenever the period selection changes.
-	$: period, customDays, load();
+	$: (period, customDays, loadCostMetrics());
 
 	$: t = totals(rows);
 	$: tm = topModel(rows);
 	$: inactive = inactiveUsers(rows, allUsers);
 	$: modelBars = toBars(aggregateByModel(rows), 5);
-	$: userBars = toBars(aggregateByUser(rows), 5);
+	$: userBars = toBars(aggregateByUser(rows, allUsers), 5);
 	$: observationsDelta =
 		t.observations > 0
 			? `${formatNumber(t.observations)} ${$i18n.t('observations')}`
@@ -96,10 +103,15 @@
 		<div class="flex min-h-[300px] items-center justify-center">
 			<Spinner className="size-5" />
 		</div>
-	{:else if loadError}
-		<div class="flex min-h-[300px] flex-col items-center justify-center gap-3 text-pii-muted">
+	{:else if loadFailed}
+		<div class="flex min-h-[300px] flex-col items-center justify-center gap-3 px-4 text-pii-muted">
 			<span class="text-[13px]">{$i18n.t('Failed to load cost analytics.')}</span>
-			<Button variant="primary" on:click={load}>{$i18n.t('Retry')}</Button>
+			{#if loadErrorDetail}
+				<span class="max-w-[520px] text-center text-[12px] break-words text-pii-muted opacity-80">
+					{loadErrorDetail}
+				</span>
+			{/if}
+			<Button variant="primary" on:click={loadCostMetrics}>{$i18n.t('Retry')}</Button>
 		</div>
 	{:else if rows.length === 0}
 		<div class="flex min-h-[300px] items-center justify-center text-[13px] text-pii-muted">
@@ -107,19 +119,23 @@
 		</div>
 	{:else}
 		<div class="flex flex-col gap-4">
-			<!-- g3: KPI cards -->
-			<div class="flex gap-4">
+			<!-- g3: KPI cards. Three abreast only once the viewport can hold them
+			     with the admin sidebar open; below that they stack rather than
+			     squeeze their labels out of the card. -->
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
 				<KpiCard
 					type="numeric"
 					label={$i18n.t('Total cost')}
-					value={formatCost(t.cost, 2)}
+					value={formatCostDisplay(t.cost)}
 					delta={observationsDelta}
 				/>
 				<KpiCard
 					type="text"
 					label={$i18n.t('Top model by cost')}
 					value={tm ? tm.name : $i18n.t('—')}
-					delta={tm ? `${formatCost(tm.cost, 2)} · ${formatNumber(tm.tokens)} ${$i18n.t('tokens')}` : ''}
+					delta={tm
+						? `${formatCostDisplay(tm.cost)} · ${formatNumber(tm.tokens)} ${$i18n.t('tokens')}`
+						: ''}
 				/>
 				<KpiCard
 					type="numeric"
@@ -130,21 +146,42 @@
 				/>
 			</div>
 
-			<!-- g2: bar cards -->
-			<div class="flex gap-4">
-				<div class="flex flex-1 flex-col gap-3.5 rounded-2xl border border-pii-line bg-pii-white p-5">
-					<span class="text-[13.5px] font-bold leading-[1.55] text-pii-ink">{$i18n.t('Cost by model')}</span>
+			<!-- g2: bar cards. `min-w-0` so an over-long label truncates inside its
+			     card instead of widening the grid track past the viewport. -->
+			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+				<div
+					class="flex min-w-0 flex-col gap-3.5 rounded-2xl border border-pii-line bg-pii-white p-5"
+				>
+					<span class="text-[13.5px] font-bold leading-[1.55] text-pii-ink"
+						>{$i18n.t('Cost by model')}</span
+					>
 					<div class="flex flex-col gap-2">
 						{#each modelBars as b}
-							<BarRow color="blue" name={b.name} value={formatCost(b.cost, 3)} percent={b.percent} />
+							<BarRow
+								color="blue"
+								name={b.name}
+								detail={b.detail}
+								value={formatCostDisplay(b.cost)}
+								percent={b.percent}
+							/>
 						{/each}
 					</div>
 				</div>
-				<div class="flex flex-1 flex-col gap-3.5 rounded-2xl border border-pii-line bg-pii-white p-5">
-					<span class="text-[13.5px] font-bold leading-[1.55] text-pii-ink">{$i18n.t('Top users by cost')}</span>
+				<div
+					class="flex min-w-0 flex-col gap-3.5 rounded-2xl border border-pii-line bg-pii-white p-5"
+				>
+					<span class="text-[13.5px] font-bold leading-[1.55] text-pii-ink"
+						>{$i18n.t('Top users by cost')}</span
+					>
 					<div class="flex flex-col gap-2">
 						{#each userBars as b}
-							<BarRow color="green" name={b.name} value={formatCost(b.cost, 3)} percent={b.percent} />
+							<BarRow
+								color="green"
+								name={b.name}
+								detail={b.detail}
+								value={formatCostDisplay(b.cost)}
+								percent={b.percent}
+							/>
 						{/each}
 					</div>
 				</div>

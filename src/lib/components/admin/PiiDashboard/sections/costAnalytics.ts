@@ -1,7 +1,10 @@
 import type { MetricRow } from '$lib/apis/langfuse';
 
-export type Agg = { name: string; tokens: number; cost: number };
+export type Agg = { name: string; tokens: number; cost: number; detail?: string };
 export type BarDatum = Agg & { percent: number };
+
+/** The subset of an OWUI user this module needs to label a Langfuse row. */
+export type DirectoryUser = { id: string; email: string; name?: string };
 
 /**
  * Identity key for a Langfuse `user` value. Langfuse and OWUI can disagree on
@@ -18,7 +21,8 @@ export function normalizeUserKey(user: string): string {
 function aggregateBy(
 	rows: MetricRow[],
 	key: (r: MetricRow) => string,
-	label: (r: MetricRow) => string = key
+	label: (r: MetricRow) => string = key,
+	detail: (r: MetricRow) => string | undefined = () => undefined
 ): Agg[] {
 	const map = new Map<string, Agg>();
 	for (const r of rows) {
@@ -28,7 +32,7 @@ function aggregateBy(
 			existing.tokens += r.tokens;
 			existing.cost += r.cost;
 		} else {
-			map.set(k, { name: label(r), tokens: r.tokens, cost: r.cost });
+			map.set(k, { name: label(r), tokens: r.tokens, cost: r.cost, detail: detail(r) });
 		}
 	}
 	return [...map.values()].sort((a, b) => b.cost - a.cost);
@@ -38,12 +42,59 @@ export function aggregateByModel(rows: MetricRow[]): Agg[] {
 	return aggregateBy(rows, (r) => r.model);
 }
 
-export function aggregateByUser(rows: MetricRow[]): Agg[] {
+/**
+ * Display name for a Langfuse `user` value, keyed by both the email and the id
+ * an OWUI user can be traced under. A row whose user matches nobody in the
+ * directory keeps its raw value — better an unresolved email than a blank row.
+ */
+export function userDisplayNames(users: DirectoryUser[]): Map<string, string> {
+	const byKey = new Map<string, string>();
+	for (const u of users) {
+		const name = u.name?.trim();
+		if (!name) continue;
+		for (const traced of [u.email, u.id]) {
+			const k = normalizeUserKey(traced ?? '');
+			if (k) byKey.set(k, name);
+		}
+	}
+	return byKey;
+}
+
+/**
+ * Labels each user with their display name, keeping the raw Langfuse value as
+ * `detail` so the UI can still show which account a name stands for.
+ */
+export function aggregateByUser(rows: MetricRow[], users: DirectoryUser[] = []): Agg[] {
+	const names = userDisplayNames(users);
+	const nameOf = (r: MetricRow) => names.get(normalizeUserKey(r.user));
 	return aggregateBy(
 		rows,
 		(r) => normalizeUserKey(r.user),
-		(r) => r.user
+		(r) => nameOf(r) ?? r.user,
+		// Only when it adds something the label does not already say.
+		(r) => (nameOf(r) ? r.user : undefined)
 	);
+}
+
+/**
+ * Message behind a failed load, or null when the failure carries none.
+ *
+ * The Langfuse client rethrows the API's `detail` value, which is a string for
+ * our own HTTPExceptions but an Error (or anything else) when the request dies
+ * before reaching a handler — so the shape is narrowed, never asserted.
+ */
+export function describeLoadError(e: unknown): string | null {
+	const text =
+		typeof e === 'string'
+			? e
+			: e instanceof Error
+				? e.message
+				: typeof e === 'object' &&
+					  e !== null &&
+					  typeof (e as { detail?: unknown }).detail === 'string'
+					? (e as { detail: string }).detail
+					: '';
+	return text.trim() || null;
 }
 
 export function toBars(aggs: Agg[], limit: number): BarDatum[] {
@@ -72,10 +123,10 @@ export function totals(rows: MetricRow[]): { cost: number; tokens: number; obser
 
 export function inactiveUsers(
 	rows: MetricRow[],
-	allUsers: { id: string; email: string }[]
+	allUsers: DirectoryUser[]
 ): { inactive: number; total: number } {
 	const active = new Set(rows.map((r) => normalizeUserKey(r.user)));
-	const isActive = (u: { id: string; email: string }) =>
+	const isActive = (u: DirectoryUser) =>
 		active.has(normalizeUserKey(u.email)) || active.has(normalizeUserKey(u.id));
 	const inactive = allUsers.filter((u) => !isActive(u)).length;
 	return { inactive, total: allUsers.length };

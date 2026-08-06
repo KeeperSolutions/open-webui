@@ -24,25 +24,11 @@
 		{$i18n.t('PII Protection — Admin Dashboard')}
 	</div>
 
-	<div class="flex items-center gap-2">
-		<!-- The window the backend actually queried, not a restatement of the pill.
-		     Dimmed rather than hidden while refetching: it sits inline with the
-		     pills, so removing it would shift them on every period change. -->
-		{#if windowRange}
-			<span
-				aria-busy={windowStale}
-				class="mr-1 text-[12px] leading-[1.55] whitespace-nowrap text-pii-muted transition-opacity {windowStale
-					? 'opacity-40'
-					: 'opacity-100'}"
-			>
-				{windowRange}
-			</span>
-		{/if}
-
-		<div class="flex items-center gap-2">
+	<div class="flex flex-wrap items-center justify-end gap-2">
+		<div class="flex flex-wrap items-center gap-2">
 			{#each PERIOD_KEYS as key}
 				<PeriodPill active={period === key} on:click={() => (period = key)}>
-					{$i18n.t(periodLabel(key))}{key === 'custom' ? ' ▾' : ''}
+					{$i18n.t(periodLabel(key))}
 				</PeriodPill>
 			{/each}
 
@@ -54,6 +40,22 @@
 					class="w-16 rounded-full border border-pii-line bg-pii-white px-3 py-[6px] text-[13px] text-pii-ink"
 					aria-label={$i18n.t('Custom days')}
 				/>
+			{/if}
+
+			<!-- The window the backend actually queried, not a restatement of the
+			     pill — so it sits next to the controls that chose it, where a
+			     custom day count can be read against the dates it resolved to.
+			     Dimmed rather than hidden while refetching: removing it would
+			     shift the pills on every period change. -->
+			{#if windowRange}
+				<span
+					aria-busy={windowStale}
+					class="ml-1 text-[12px] leading-[1.55] whitespace-nowrap text-pii-muted transition-opacity {windowStale
+						? 'opacity-40'
+						: 'opacity-100'}"
+				>
+					{windowRange}
+				</span>
 			{/if}
 		</div>
 

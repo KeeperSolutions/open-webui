@@ -42,7 +42,24 @@ export function formatWindow(from: string, to: string): string {
 	return `${a.format('D MMM YYYY')} – ${b.format('D MMM YYYY')}`;
 }
 
-export function toLangfuseParams(key: PeriodKey, customDays: number): { period: string; days?: number } {
+/**
+ * Length of the calendar year ending at `today`, in days.
+ *
+ * The backend has no `year` period, only `custom` + a day count, and a fixed
+ * 365 is a day short whenever the trailing year contains a 29 February — the
+ * Year pill would then quietly drop the oldest day. Derived from the calendar
+ * instead, so it is 366 in exactly those windows.
+ */
+function daysInTrailingYear(today: dayjs.Dayjs): number {
+	return today.diff(today.subtract(1, 'year'), 'day');
+}
+
+export function toLangfuseParams(
+	key: PeriodKey,
+	customDays: number,
+	// Injectable so the leap-year mapping is testable without faking the clock.
+	now: dayjs.Dayjs = dayjs.utc()
+): { period: string; days?: number } {
 	switch (key) {
 		// Backend `day` means *yesterday*; the Day pill is meant to show live
 		// activity, so it maps to `today` (the current day so far).
@@ -51,8 +68,10 @@ export function toLangfuseParams(key: PeriodKey, customDays: number): { period: 
 		case 'week':
 		case 'month':
 			return { period: key };
+		// The backend counts `days` back from the start of today, so this is the
+		// calendar year ending yesterday.
 		case 'year':
-			return { period: 'custom', days: 365 };
+			return { period: 'custom', days: daysInTrailingYear(now.utc().startOf('day')) };
 		case 'custom':
 			return { period: 'custom', days: customDays };
 	}
