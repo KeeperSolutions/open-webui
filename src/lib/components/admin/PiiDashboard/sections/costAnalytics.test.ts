@@ -14,8 +14,7 @@ const row = (user: string, model: string, tokens: number, cost: number, observat
 	model,
 	tokens,
 	cost,
-	observations,
-	traces: 0
+	observations
 });
 
 describe('aggregateByModel', () => {
