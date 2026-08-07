@@ -7,15 +7,12 @@
 	import BarRow from '../parts/BarRow.svelte';
 	import Button from '../parts/Button.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import { getLangfuseMetrics, type MetricRow } from '$lib/apis/langfuse';
+	import type { MetricRow } from '$lib/apis/langfuse';
 	import { formatCostDisplay } from '$lib/apis/langfuse/tableUtils';
-	import { getAllUsers } from '$lib/apis/users';
 	import { formatNumber } from '$lib/utils';
-	import { toLangfuseParams, type PeriodKey } from '../periods';
 	import {
 		aggregateByModel,
 		aggregateByUser,
-		describeLoadError,
 		toBars,
 		topModel,
 		totals,
@@ -25,67 +22,23 @@
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	export let period: PeriodKey = 'week';
-	export let customDays = 7;
-	/** Reported upward so the topbar can name the window next to the control
-	 *  that selects it. Bound, not derived — only the backend knows the window. */
-	export let windowFrom = '';
-	export let windowTo = '';
-
-	/** Bound upward so the topbar can mark the window it shows as out of date
-	 *  while a newer one is being fetched. */
+	/** The metrics for the window the shell selected. Read-only: the shell owns
+	 *  the fetch, so no two sections can disagree about which window is on screen. */
+	export let rows: MetricRow[] = [];
+	/** The OWUI directory, for naming users and counting the inactive ones. */
+	export let users: DirectoryUser[] = [];
 	export let loading = true;
-
-	let loadFailed = false;
+	export let failed = false;
 	/** What went wrong, when the failure said — shown under the generic message
 	 *  rather than swallowed, since only an admin ever sees this screen. */
-	let loadErrorDetail: string | null = null;
-	let rows: MetricRow[] = [];
-	let allUsers: DirectoryUser[] = [];
-	let inFlight: AbortController | null = null;
-
-	const loadCostMetrics = async () => {
-		// A newer period selection supersedes whatever is still in flight: abort it
-		// so its (possibly slower) response cannot overwrite the fresher state.
-		inFlight?.abort();
-		const controller = new AbortController();
-		inFlight = controller;
-
-		loading = true;
-		loadFailed = false;
-		loadErrorDetail = null;
-		try {
-			const { period: p, days } = toLangfuseParams(period, customDays);
-			const res = await getLangfuseMetrics(localStorage.token, p, days, controller.signal);
-			const usersRes = await getAllUsers(localStorage.token);
-			if (controller.signal.aborted) return;
-			rows = res.rows;
-			windowFrom = res.from;
-			windowTo = res.to;
-			allUsers = usersRes?.users ?? [];
-		} catch (e: unknown) {
-			if (controller.signal.aborted) return;
-			loadFailed = true;
-			loadErrorDetail = describeLoadError(e);
-			rows = [];
-			// Drop the window too: it belongs to the previous period, and the topbar
-			// renders it at full opacity — i.e. as authoritative — once loading ends.
-			windowFrom = '';
-			windowTo = '';
-		} finally {
-			// Superseded loads leave `loading` alone — the newer one owns it.
-			if (!controller.signal.aborted) loading = false;
-		}
-	};
-
-	// Reload whenever the period selection changes.
-	$: (period, customDays, loadCostMetrics());
+	export let errorDetail: string | null = null;
+	export let onRetry: () => void;
 
 	$: t = totals(rows);
 	$: tm = topModel(rows);
-	$: inactive = inactiveUsers(rows, allUsers);
+	$: inactive = inactiveUsers(rows, users);
 	$: modelBars = toBars(aggregateByModel(rows), 5);
-	$: userBars = toBars(aggregateByUser(rows, allUsers), 5);
+	$: userBars = toBars(aggregateByUser(rows, users), 5);
 	$: observationsDelta =
 		t.observations > 0
 			? `${formatNumber(t.observations)} ${$i18n.t('observations')}`
@@ -103,15 +56,15 @@
 		<div class="flex min-h-[300px] items-center justify-center">
 			<Spinner className="size-5" />
 		</div>
-	{:else if loadFailed}
+	{:else if failed}
 		<div class="flex min-h-[300px] flex-col items-center justify-center gap-3 px-4 text-pii-muted">
 			<span class="text-[13px]">{$i18n.t('Failed to load cost analytics.')}</span>
-			{#if loadErrorDetail}
+			{#if errorDetail}
 				<span class="max-w-[520px] text-center text-[12px] break-words text-pii-muted opacity-80">
-					{loadErrorDetail}
+					{errorDetail}
 				</span>
 			{/if}
-			<Button variant="primary" on:click={loadCostMetrics}>{$i18n.t('Retry')}</Button>
+			<Button variant="primary" on:click={onRetry}>{$i18n.t('Retry')}</Button>
 		</div>
 	{:else if rows.length === 0}
 		<div class="flex min-h-[300px] items-center justify-center text-[13px] text-pii-muted">

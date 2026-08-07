@@ -216,7 +216,7 @@ export const searchUsers = async (
 	return res;
 };
 
-export const getAllUsers = async (token: string) => {
+export const getAllUsers = async (token: string, signal?: AbortSignal) => {
 	let error = null;
 	let res = null;
 
@@ -225,13 +225,17 @@ export const getAllUsers = async (token: string) => {
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
-		}
+		},
+		signal
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
 		.catch((err) => {
+			// A caller that went away aborted this on purpose and discards the result,
+			// so it must not surface as a console error.
+			if (err?.name === 'AbortError') return null;
 			console.error(err);
 			error = err.detail;
 			return null;
