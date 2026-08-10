@@ -125,6 +125,27 @@ export function buildRows(
 }
 
 /**
+ * Which i18n key renders a granted-model count.
+ *
+ * Returns the key, not the translated string, so `$i18n.t()` stays in the
+ * component — and so the choice between singular and plural is reachable from a
+ * unit test, which the markup around it is not.
+ *
+ * Two keys rather than i18next plurals: the `en-US` catalogue carries empty
+ * values, so `_one`/`_other` resolve back to the base key and a single grant
+ * reads "1 models". This applies to every counted string in the app, not just
+ * this one.
+ *
+ * Zero takes the plural, which English agrees with. The cell renders an em dash
+ * at zero instead of calling this, so that branch is unreachable from the table
+ * — the function stays total anyway rather than leaving a hole for the next
+ * caller to find.
+ */
+export function modelsCountKey(count: number): string {
+	return count === 1 ? '1 model' : '{{count}} models';
+}
+
+/**
  * Spend Langfuse recorded against an identity no account here claims.
  *
  * Exhaustive with `buildRows`: every row lands in exactly one of the two, so

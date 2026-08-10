@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import type { MetricRow } from '$lib/apis/langfuse';
 import { totals } from './costAnalytics';
-import { statusOf, costByUser, buildRows, unattributedCost, type AccessUser } from './usersAccess';
+import {
+	statusOf,
+	costByUser,
+	buildRows,
+	unattributedCost,
+	modelsCountKey,
+	type AccessUser
+} from './usersAccess';
 
 const row = (user: string, cost: number, model = 'gpt-4', tokens = 10): MetricRow => ({
 	user,
@@ -228,6 +235,29 @@ describe('unattributedCost', () => {
 
 	it('handles no rows', () => {
 		expect(unattributedCost([], [user()])).toBe(0);
+	});
+});
+
+describe('modelsCountKey', () => {
+	it('uses the singular key for exactly one model', () => {
+		// The whole reason this function exists: i18next plurals resolve back to
+		// the base key under an empty en-US catalogue, so one grant would read
+		// "1 models" if the choice were left to t().
+		expect(modelsCountKey(1)).toBe('1 model');
+	});
+
+	it('uses the plural key for two models', () => {
+		expect(modelsCountKey(2)).toBe('{{count}} models');
+	});
+
+	it('uses the plural key for a large catalogue', () => {
+		expect(modelsCountKey(1000)).toBe('{{count}} models');
+	});
+
+	it('uses the plural key at zero, which the cell never renders', () => {
+		// English takes the plural at zero. The table shows an em dash instead,
+		// so this answer is never on screen — it keeps the function total.
+		expect(modelsCountKey(0)).toBe('{{count}} models');
 	});
 });
 

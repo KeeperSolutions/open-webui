@@ -15,6 +15,7 @@
 	import {
 		buildRows,
 		unattributedCost,
+		modelsCountKey,
 		type AccessUser,
 		type UserRow,
 		type UserStatus
@@ -147,7 +148,10 @@
 		{ key: 'name', label: 'User' },
 		{ key: 'role', label: 'Role' },
 		{ key: 'status', label: 'Status' },
-		{ key: null, label: 'Models granted' },
+		// Named after the catalogue it measures, not after "models" in general:
+		// /models/list returns Workspace models only, so an unscoped label would
+		// read "no access" for a user who has plenty of it outside the Workspace.
+		{ key: null, label: 'Workspace models' },
 		{ key: 'masking', label: 'Global PII masking' },
 		{ key: 'cost', label: 'Cost' }
 	];
@@ -280,20 +284,23 @@
 										</Pill>
 									{/if}
 								</td>
+								<!-- The empty cell is the one that most needs the tooltip: an em dash
+								     alone reads as "no access at all", which the Workspace catalogue
+								     cannot claim. Every other value lists what it counted. -->
 								<td
 									class="px-2.5 py-2.5 align-middle"
-									title={grantedNames.get(row.id) || undefined}
+									title={grantedNames.get(row.id) ||
+										$i18n.t(
+											'No Workspace model is shared with this user. Access to models outside the Workspace is configured separately and is not counted here.'
+										)}
 								>
 									{#if row.allModels}
 										<span class="text-pii-ink">{$i18n.t('All models')}</span>
 									{:else if row.grantedCount > 0}
-										<!-- Two keys rather than i18next plurals: the en-US catalogue carries
-										     empty values, so `_one`/`_other` resolve back to the base key and
-										     a single grant reads "1 models". -->
 										<span class="text-pii-ink"
-											>{row.grantedCount === 1
-												? $i18n.t('1 model')
-												: $i18n.t('{{count}} models', { count: row.grantedCount })}</span
+											>{$i18n.t(modelsCountKey(row.grantedCount), {
+												count: row.grantedCount
+											})}</span
 										>
 									{:else}
 										<span class="text-pii-muted">—</span>
