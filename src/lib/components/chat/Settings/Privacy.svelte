@@ -3,7 +3,7 @@
 	import { settings, user } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import { getPiiMaskingDefault, isPiiPipelineConfigured, PII_FILTER_IDS } from '$lib/utils/pii';
+	import { getPiiMaskingDefault, isPiiPipelineConfigured, piiFilterIds } from '$lib/utils/pii';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -72,7 +72,11 @@
 		const existingValves = (pipelines.valves ?? {}) as Record<string, any>;
 
 		const valves: Record<string, any> = { ...existingValves };
-		for (const id of PII_FILTER_IDS) {
+		// The same list the reader uses. If the writer stayed on the built-in
+		// constant, an operator who adds an id would leave that filter without a
+		// stored valve — the backend would fall back to its default and the
+		// user's "off" would be silently ignored for it.
+		for (const id of piiFilterIds()) {
 			valves[id] = {
 				...(existingValves[id] ?? {}),
 				pii_masking_enabled: piiMaskingEnabled

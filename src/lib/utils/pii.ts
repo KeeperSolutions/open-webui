@@ -1,17 +1,56 @@
+import { get } from 'svelte/store';
 import { getPipelines, getPipelinesList } from '$lib/apis';
+import { config } from '$lib/stores';
 
 // Known PII filter pipeline IDs across deployed instances:
 //   "pii_filter"           — pii-filter repo (pii_filter.py)
 //   "pii_filter_pipeline"  — pipelines-v4 repo + GCP deployment (pii_filter_pipeline.py)
 // Masking only happens when one of these filter pipelines is wired up on a
 // connected pipeline server (local or cloud).
+//
+// This is the FALLBACK. The authoritative list is the backend's PII_FILTER_IDS,
+// served as `features.pii_filter_ids` — see `piiFilterIds()`.
 export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
 
+/**
+ * The ids the backend treats as mandatory PII filters.
+ *
+ * Read from `/api/config` so the frontend stops keeping a hand-copy of an env
+ * variable an operator can override. Falls back to the constant above when the
+ * field is absent (older backend) or malformed — a wrong list here would make
+ * the masking column assert something untrue, so anything unexpected is ignored
+ * rather than trusted.
+ */
+export function piiFilterIds(): readonly string[] {
+	const fromConfig = get(config)?.features?.pii_filter_ids;
+	if (
+		Array.isArray(fromConfig) &&
+		fromConfig.length > 0 &&
+		fromConfig.every((id) => typeof id === 'string' && id.trim() !== '')
+	) {
+		return fromConfig;
+	}
+	return PII_FILTER_IDS;
+}
+
+/**
+ * A user's masking default, from their stored pipeline valves.
+ *
+ * ⚠️ Reading the `config` store makes this function **impure**: its answer
+ * depends on ambient state its signature does not mention. `buildRows` in the
+ * PII dashboard calls it, so that pure, unit-tested function is now indirectly
+ * store-dependent without saying so.
+ *
+ * The preferred shape is an explicit parameter — `getPiiMaskingDefault(settings, ids)`
+ * — with callers passing the list down. It was not taken here because threading
+ * the ids through `buildRows` means changing that module, which was out of scope
+ * for this change. Take that route when the signature is next touched.
+ */
 export function getPiiMaskingDefault(settings: {
 	pipelines?: { valves?: Record<string, Record<string, unknown>> };
 }): boolean {
 	const valves = settings?.pipelines?.valves ?? {};
-	for (const id of PII_FILTER_IDS) {
+	for (const id of piiFilterIds()) {
 		const v = valves?.[id]?.pii_masking_enabled;
 		if (typeof v === 'boolean') return v;
 	}
@@ -58,7 +97,7 @@ export async function isPiiPipelineConfigured(
 				if (pipeline?.id) ids.add(pipeline.id);
 			}
 		}
-		value = PII_FILTER_IDS.some((id) => ids.has(id));
+		value = piiFilterIds().some((id) => ids.has(id));
 	} catch {
 		value = false;
 	}
