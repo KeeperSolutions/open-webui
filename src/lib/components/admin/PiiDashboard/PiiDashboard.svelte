@@ -2,8 +2,10 @@
 	import { onDestroy, onMount } from 'svelte';
 	import Topbar from './Topbar.svelte';
 	import CostAnalytics from './sections/CostAnalytics.svelte';
+	import UsersAccess from './sections/UsersAccess.svelte';
 	import { createMetricsLoader } from './metricsLoader';
 	import { createDirectoryLoader } from './directoryLoader';
+	import { createUsersAccessLoader } from './usersAccessLoader';
 	import type { PeriodKey } from './periods';
 
 	let period: PeriodKey = 'week';
@@ -11,14 +13,16 @@
 
 	const metrics = createMetricsLoader();
 	const directory = createDirectoryLoader();
+	const usersAccess = createUsersAccessLoader();
 
 	// Reload whenever the period selection changes.
 	$: metrics.load(period, customDays);
 
-	// The directory is deliberately not in that reactive statement: it has no
-	// notion of a window, so it is fetched once and reused by every period.
+	// Neither directory is in that reactive statement: neither has a notion of a
+	// window, so both are fetched once and reused by every period.
 	onMount(() => {
 		directory.load();
+		usersAccess.load();
 	});
 
 	// One section's worth of state, combined from two independent loads so the
@@ -34,6 +38,21 @@
 	$: windowFrom = failed ? '' : $metrics.windowFrom;
 	$: windowTo = failed ? '' : $metrics.windowTo;
 
+	// Section 4 combines differently on purpose. Its subject is the directory —
+	// who exists, what they may reach, whether their masking is on — and all of
+	// that comes from the local DB. Spend is a second, slower source from an
+	// external service, so a Langfuse outage degrades one column instead of
+	// hiding the governance facts the section exists to show.
+	$: usersLoading = $usersAccess.loading;
+	$: usersFailed = $usersAccess.failed;
+	// Once spend has arrived at least once, a later fetch shows the previous
+	// window dimmed rather than blanking it; before that there is nothing true
+	// to dim, so the columns read as unknown.
+	let costEverLoaded = false;
+	$: if (!$metrics.loading && !$metrics.failed) costEverLoaded = true;
+	$: costUnknown = $metrics.failed || !costEverLoaded;
+	$: costStale = $metrics.loading && costEverLoaded;
+
 	const retry = () => {
 		metrics.load(period, customDays);
 		directory.load();
@@ -42,6 +61,7 @@
 	onDestroy(() => {
 		metrics.destroy();
 		directory.destroy();
+		usersAccess.destroy();
 	});
 </script>
 
@@ -56,6 +76,19 @@
 			{failed}
 			{errorDetail}
 			onRetry={retry}
+		/>
+		<UsersAccess
+			users={$usersAccess.users}
+			metricRows={$metrics.rows}
+			truncated={$usersAccess.truncatedUsers}
+			models={$usersAccess.models}
+			truncatedModels={$usersAccess.truncatedModels}
+			loading={usersLoading}
+			failed={usersFailed}
+			errorDetail={$usersAccess.errorDetail}
+			{costUnknown}
+			{costStale}
+			onRetry={() => usersAccess.load()}
 		/>
 	</div>
 </div>
