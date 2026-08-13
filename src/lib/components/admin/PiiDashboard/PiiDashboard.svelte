@@ -7,6 +7,8 @@
 	import { createDirectoryLoader } from './directoryLoader';
 	import { createUsersAccessLoader } from './usersAccessLoader';
 	import type { PeriodKey } from './periods';
+	import { settings } from '$lib/stores';
+	import { getStoredPiiMasking, type StoredPiiMasking } from '$lib/utils/pii';
 
 	let period: PeriodKey = 'week';
 	let customDays = 7;
@@ -23,7 +25,44 @@
 	onMount(() => {
 		directory.load();
 		usersAccess.load();
+		// Seeded here, not at init: `$settings` may still be empty while the
+		// component is constructing, and seeding from that would read as a change
+		// the moment it arrives — a second load right behind the first.
+		lastStoredMasking = getStoredPiiMasking($settings ?? {});
+		armed = true;
 	});
+
+	/**
+	 * Re-read section 4 when the admin changes their OWN masking preference.
+	 *
+	 * Settings is a layout-level modal, so this route stays mounted while it is
+	 * open: nothing here unmounts, and the section would keep showing the value
+	 * `GET /users/` returned on arrival until a reload. That is the whole bug —
+	 * the table said `Off — flagged` for someone who had just turned masking on.
+	 *
+	 * ⚠️ Re-read rather than patch the row from the store. The store holds only
+	 * the STORED preference; the cell shows the effective state, which is that
+	 * preference merged with the policy server-side. Patching would compute a
+	 * second answer next to the one the backend already gives, and the two would
+	 * disagree on exactly the rows that matter — the enforced ones.
+	 *
+	 * Only this admin's own row can go stale this way. Another admin's change
+	 * still needs a reload, which is inherent without a push channel and is not
+	 * worth inventing one for.
+	 */
+	let armed = false;
+	let lastStoredMasking: StoredPiiMasking | undefined;
+
+	$: storedMasking = getStoredPiiMasking($settings ?? {});
+	$: reloadOnMaskingChange(storedMasking);
+
+	// A function, so the statement above depends on `storedMasking` alone. Reading
+	// the two guards inline would make the statement depend on what it assigns.
+	function reloadOnMaskingChange(current: StoredPiiMasking) {
+		if (!armed || current === lastStoredMasking) return;
+		lastStoredMasking = current;
+		usersAccess.load();
+	}
 
 	// One section's worth of state, combined from two independent loads so the
 	// screen behaves as it did when a single try block covered both calls.

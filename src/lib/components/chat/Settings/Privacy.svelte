@@ -128,8 +128,13 @@
 		// blocks on /api/models and stalls the toast when a provider (e.g. Ollama)
 		// is unreachable.
 		const next = { ...s, pipelines: { ...pipelines, valves } };
-		await settings.set(next);
+		// ⚠️ Server first, store second. The switch is driven by local state, so
+		// nothing on screen waits for this — but anything watching `$settings` as a
+		// signal to re-read the server (the PII dashboard does) would otherwise
+		// fire against the OLD value and cache it. Store-then-persist looks
+		// optimistic; here it is just a race with no upside.
 		await updateUserSettings(localStorage.token, { ui: next });
+		await settings.set(next);
 		dispatch('save');
 	}}
 >
