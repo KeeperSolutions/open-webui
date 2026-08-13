@@ -1428,6 +1428,25 @@ USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED = (
     os.environ.get('USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED', 'False').lower() == 'true'
 )
 
+# TRAU-536 policy engine. The key is deliberately named as a RESTRICTION
+# ("masking is mandatory"), never as a freedom ("user may switch it off").
+# Multi-group permissions merge with `permissions[key] or value` — most
+# permissive wins (utils/access_control/__init__.py). With a restriction the
+# same OR yields "strictest wins": if ANY of the user's groups enforces, the
+# user is enforced. Flip the naming and that identical line silently becomes
+# "loosest wins" — fail-open. See PII-POLICY-ENGINE-SPEC.md §6.1.
+# Default False: an instance that configures nothing behaves exactly as before.
+USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED = (
+    os.environ.get('USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED', 'False').lower() == 'true'
+)
+
+# The dotted lookup path for the same key, for `has_permission` callers. Lives
+# here, beside the default above, rather than in whichever router happened to
+# need it first: enforcement (routers/pipelines.py) and the admin user list
+# (routers/users.py) both read it, and a router importing another router to get
+# a constant is an import cycle waiting for its third caller.
+PII_MASKING_ENFORCED_PERMISSION = 'chat.pii_masking_enforced'
+
 
 USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS = (
     os.environ.get('USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS', 'False').lower() == 'true'
@@ -1509,6 +1528,7 @@ DEFAULT_USER_PERMISSIONS = {
         'multiple_models': USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
         'temporary': USER_PERMISSIONS_CHAT_TEMPORARY,
         'temporary_enforced': USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED,
+        'pii_masking_enforced': USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED,
     },
     'features': {
         # General features
