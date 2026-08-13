@@ -2,6 +2,7 @@
 	import { createEventDispatcher, getContext, onMount } from 'svelte';
 	import { settings, user } from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
+	import { getSessionUser } from '$lib/apis/auths';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import { getPiiMaskingDefault, isPiiPipelineConfigured, piiFilterIds } from '$lib/utils/pii';
 
@@ -30,7 +31,7 @@
 		},
 		{
 			label: 'Financial',
-			items: [ 'EU IBANs', 'IE IBAN', 'GB IBAN',  'HR IBAN', 'RO IBAN', 'Credit cards']
+			items: ['EU IBANs', 'IE IBAN', 'GB IBAN', 'HR IBAN', 'RO IBAN', 'Credit cards']
 		},
 		{
 			label: 'Contact & Location',
@@ -42,7 +43,27 @@
 		}
 	];
 
+	/**
+	 * The user's OWN stored preference — and the only value this form ever
+	 * persists.
+	 *
+	 * ⚠️ Z-1. The team policy must never reach this variable. It is assigned in
+	 * exactly two places: from the stored settings on mount, and by the user's
+	 * own toggle — which is bound only in the unlocked branch of the markup
+	 * below. The locked branch renders a display-only Switch with no binding at
+	 * all, so there is no code path by which the policy can turn a stored `false`
+	 * into a persisted `true`.
+	 *
+	 * That is the structural half of Z-1. The `submit` handler additionally
+	 * skips the masking valves entirely while locked (the spec's literal "must
+	 * not touch"), but the invariant does not depend on that guard surviving:
+	 * delete it and Save merely writes the stored value back unchanged.
+	 */
 	let piiMaskingEnabled = true;
+
+	// Team policy (TRAU-536). Read-only overlay: it decides what is DISPLAYED and
+	// whether the control is locked; it never decides what is STORED.
+	$: policyEnforced = $user?.permissions?.chat?.pii_masking_enforced ?? false;
 
 	// Admin-only sanity check: is a PII filter pipeline actually wired up anywhere
 	// (local or cloud)? If masking is on but none is connected, nothing gets masked.
@@ -51,10 +72,23 @@
 	let piiCheckDone = false;
 
 	$: showPiiPipelineWarning =
-		isAdmin && piiCheckDone && piiMaskingEnabled && !piiPipelineConfigured;
+		isAdmin && piiCheckDone && (policyEnforced || piiMaskingEnabled) && !piiPipelineConfigured;
 
 	onMount(async () => {
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
+
+		// D-11. `$user.permissions` is only refilled on a full page load, so a tab
+		// left open carries a stale policy for hours. Refresh it here — but ONLY
+		// while the control is unlocked. The asymmetry is deliberate: showing an
+		// unlocked toggle that the backend already overrides is a security-facing
+		// lie, while showing a locked one a little too long is an inconvenience.
+		// If it is already locked there is nothing stale to correct, so no call.
+		if (!policyEnforced) {
+			const sessionUser = await getSessionUser(localStorage.token).catch(() => null);
+			if (sessionUser) {
+				await user.set(sessionUser);
+			}
+		}
 
 		if (isAdmin) {
 			piiPipelineConfigured = await isPiiPipelineConfigured(localStorage.token);
@@ -72,15 +106,22 @@
 		const existingValves = (pipelines.valves ?? {}) as Record<string, any>;
 
 		const valves: Record<string, any> = { ...existingValves };
-		// The same list the reader uses. If the writer stayed on the built-in
-		// constant, an operator who adds an id would leave that filter without a
-		// stored valve — the backend would fall back to its default and the
-		// user's "off" would be silently ignored for it.
-		for (const id of piiFilterIds()) {
-			valves[id] = {
-				...(existingValves[id] ?? {}),
-				pii_masking_enabled: piiMaskingEnabled
-			};
+		// ⚠️ Z-1. While the policy locks the control, Save must not touch a single
+		// masking valve. Otherwise a user whose stored value is `false`, shown a
+		// locked `ON` switch, would destroy their own preference by pressing Save
+		// — and the policy would have written into user.settings by proxy, which
+		// is exactly what the spec's central invariant forbids.
+		if (!policyEnforced) {
+			// The same list the reader uses. If the writer stayed on the built-in
+			// constant, an operator who adds an id would leave that filter without a
+			// stored valve — the backend would fall back to its default and the
+			// user's "off" would be silently ignored for it.
+			for (const id of piiFilterIds()) {
+				valves[id] = {
+					...(existingValves[id] ?? {}),
+					pii_masking_enabled: piiMaskingEnabled
+				};
+			}
 		}
 
 		// Persist directly to avoid the shared saveSettings model refresh, which
@@ -100,7 +141,26 @@
 				</div>
 
 				<div class="">
-					<Switch ariaLabelledbyId="pii-masking-label" bind:state={piiMaskingEnabled} />
+					{#if policyEnforced}
+						<!--
+							Locked by team policy. `inert` blocks pointer AND keyboard and
+							removes the control from the accessibility tree, which is what a
+							`disabled` prop would have done — without editing the upstream
+							Switch atom, whose styling then keeps tracking upstream.
+							The Switch is rendered WITHOUT `bind:` on purpose: see Z-1 above.
+						-->
+						<div
+							inert
+							aria-disabled="true"
+							aria-describedby="pii-masking-policy-reason"
+							data-testid="pii-masking-lock"
+							class="opacity-60 cursor-not-allowed"
+						>
+							<Switch ariaLabelledbyId="pii-masking-label" state={true} />
+						</div>
+					{:else}
+						<Switch ariaLabelledbyId="pii-masking-label" bind:state={piiMaskingEnabled} />
+					{/if}
 				</div>
 			</div>
 
@@ -109,6 +169,39 @@
 					'When ON, personal data (names, IBANs, emails, etc.) is automatically replaced with placeholders before being sent to the AI model.'
 				)}
 			</div>
+
+			{#if policyEnforced}
+				<!--
+					A locked control needs a reason. The `temporary_enforced` precedent
+					HIDES its control instead; that is not copied here, because a toggle
+					that was visible yesterday and gone today reads as a bug, not a policy.
+					Shape reused from the pipeline warning below; neutral colours, because
+					a policy is not a malfunction.
+				-->
+				<div
+					id="pii-masking-policy-reason"
+					class="mt-2 flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:bg-gray-850 dark:text-gray-300"
+					role="note"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						class="size-4 shrink-0 mt-0.5"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z"
+							clip-rule="evenodd"
+						/>
+					</svg>
+					<span>
+						{$i18n.t(
+							'PII masking is enforced by your organisation’s policy and cannot be turned off. Contact your administrator if this needs to change.'
+						)}
+					</span>
+				</div>
+			{/if}
 
 			{#if showPiiPipelineWarning}
 				<div

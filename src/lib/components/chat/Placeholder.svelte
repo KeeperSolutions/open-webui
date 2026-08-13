@@ -58,6 +58,10 @@
 	export let codeInterpreterEnabled = false;
 	export let webSearchEnabled = false;
 	export let piiMaskingEnabled = true;
+	// TRAU-536: team policy lock, forwarded to MessageInput. Declared explicitly
+	// because an undeclared prop is dropped silently — the new-chat screen would
+	// then show an unlocked toggle while the backend enforces masking.
+	export let piiMaskingLocked = false;
 
 	export let onUpload: Function = (e) => {};
 	export let onSelect = (e) => {};
@@ -221,6 +225,7 @@
 					bind:codeInterpreterEnabled
 					bind:webSearchEnabled
 					bind:piiMaskingEnabled
+					{piiMaskingLocked}
 					bind:atSelectedModel
 					bind:showCommands
 					bind:dragged
@@ -237,7 +242,6 @@
 				/>
 			</div>
 		</div>
-
 	</div>
 
 	<div class="flex justify-center mt-4 mb-6 w-full">

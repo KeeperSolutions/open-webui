@@ -57,6 +57,61 @@ export function getPiiMaskingDefault(settings: {
 	return true;
 }
 
+/** A user's stored masking preference, with "never chose" kept distinct. */
+export type StoredPiiMasking = boolean | 'unset';
+
+/**
+ * What the user actually stored — `true`, `false`, or `'unset'` when they have
+ * never touched the setting.
+ *
+ * ⚠️ Deliberately NOT a variant of `getPiiMaskingDefault`, which collapses
+ * `'unset'` into `true`. That collapse is correct for the enforcement path,
+ * which only needs the effective value; it is wrong for a governance report,
+ * which must tell "chose protection" apart from "never chose". Two questions,
+ * two functions — `getPiiMaskingDefault` stays untouched.
+ *
+ * ⚠️ `'unset'` does NOT mean unprotected. With no stored valve the backend sends
+ * no key and the pipeline defaults to masking ON, so these users ARE masked.
+ * Anything rendering this must treat `'unset'` as an on-state, never as a risk.
+ *
+ * Same id traversal as `getPiiMaskingDefault`: the first configured filter id
+ * carrying a boolean wins, so both functions agree on which value is "the"
+ * stored one.
+ */
+export function getStoredPiiMasking(settings: {
+	pipelines?: { valves?: Record<string, Record<string, unknown>> };
+}): StoredPiiMasking {
+	const valves = settings?.pipelines?.valves ?? {};
+	for (const id of piiFilterIds()) {
+		const v = valves?.[id]?.pii_masking_enabled;
+		if (typeof v === 'boolean') return v;
+	}
+	return 'unset';
+}
+
+/**
+ * The value a chat request should carry in `features.pii_masking` (TRAU-536).
+ *
+ * ⚠️ This is the value SENT TO THE SERVER, not what the control displays and not
+ * what gets stored. Named `...ForRequest` so the three never get conflated: the
+ * displayed state lives in the components, the stored preference lives in
+ * `user.settings`, and the policy is layered over both without ever writing to
+ * either.
+ *
+ * Team policy wins over the per-conversation toggle (D-2), so the resolution is
+ * `P > B`. The backend enforces this independently — but relying on that would
+ * leave this branch untested and dependent on the other side never regressing,
+ * so the rule is stated once, here, and covered by tests.
+ *
+ * Pure on purpose: both inputs are explicit, unlike `getPiiMaskingDefault` above.
+ *
+ * @param policyEnforced team policy makes masking mandatory for this user
+ * @param userChoice     the user's own per-conversation toggle
+ */
+export function piiMaskingForRequest(policyEnforced: boolean, userChoice: boolean): boolean {
+	return policyEnforced || userChoice;
+}
+
 // The pipeline list is an admin-only remote call. The settings banner and the
 // chat-entry toast both consult it, often within seconds of each other, so we
 // memoize the result briefly to avoid duplicate round-trips.

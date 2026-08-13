@@ -12,6 +12,8 @@ import {
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
 	piiFilterIds,
+	getStoredPiiMasking,
+	piiMaskingForRequest,
 	PII_FILTER_IDS
 } from './pii';
 
@@ -277,5 +279,80 @@ describe('isPiiPipelineConfigured', () => {
 		// force re-queries.
 		await isPiiPipelineConfigured('tok', { force: true });
 		expect(mockList).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('piiMaskingForRequest', () => {
+	// The value SENT to the server. Team policy wins over the per-conversation
+	// toggle (D-2), so the resolution is P > B. The backend enforces the same
+	// rule independently; this keeps the frontend from quietly disagreeing.
+
+	it('policy ON overrides a user who switched masking off', () => {
+		expect(piiMaskingForRequest(true, false)).toBe(true);
+	});
+
+	it('policy OFF lets the user switch masking off', () => {
+		expect(piiMaskingForRequest(false, false)).toBe(false);
+	});
+
+	it('policy OFF lets the user keep masking on', () => {
+		expect(piiMaskingForRequest(false, true)).toBe(true);
+	});
+
+	it('policy ON with the user already on stays on', () => {
+		expect(piiMaskingForRequest(true, true)).toBe(true);
+	});
+
+	it('never returns false while the policy is enforced', () => {
+		for (const userChoice of [true, false]) {
+			expect(piiMaskingForRequest(true, userChoice)).toBe(true);
+		}
+	});
+});
+
+describe('getStoredPiiMasking', () => {
+	beforeEach(() => setConfig(undefined));
+
+	it("reports 'unset' when the user never stored anything", () => {
+		expect(getStoredPiiMasking({})).toBe('unset');
+		expect(getStoredPiiMasking({ pipelines: { valves: {} } })).toBe('unset');
+	});
+
+	it('reports a stored false as false, not as unset', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } } })
+		).toBe(false);
+	});
+
+	it('reports a stored true as true', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } })
+		).toBe(true);
+	});
+
+	it('ignores non-boolean values, treating them as never stored', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: 'yes' } } } })
+		).toBe('unset');
+	});
+
+	it('falls through to the second configured filter id', () => {
+		expect(
+			getStoredPiiMasking({
+				pipelines: { valves: { pii_filter_pipeline: { pii_masking_enabled: false } } }
+			})
+		).toBe(false);
+	});
+
+	it('ignores a valve for an id outside the configured list', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { other: { pii_masking_enabled: false } } } })
+		).toBe('unset');
+	});
+
+	it('leaves getPiiMaskingDefault untouched: it still collapses unset to true', () => {
+		// The two answer different questions and must not converge.
+		expect(getPiiMaskingDefault({})).toBe(true);
+		expect(getStoredPiiMasking({})).toBe('unset');
 	});
 });
