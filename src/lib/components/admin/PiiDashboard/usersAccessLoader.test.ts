@@ -2,17 +2,23 @@ import { describe, it, expect, vi } from 'vitest';
 import { get } from 'svelte/store';
 import type { AccessUser } from './sections/usersAccess';
 import {
-	createUsersAccessLoader,
-	MODELS_MAX,
+	createUsersAccessLoader as createLoaderWithFetchers,
 	USERS_MAX,
 	USERS_PAGE_SIZE,
-	type ModelsFetcher,
+	type GroupsFetcher,
 	type UsersFetcher,
 	type UsersPage
 } from './usersAccessLoader';
 
-/** The catalogue is not what these tests are about; keep it empty and quiet. */
-const noModels: ModelsFetcher = async () => ({ items: [], total: 0 });
+/** Likewise the group list — the tests that are about it pass their own. */
+const noGroups: GroupsFetcher = async () => [];
+
+/**
+ * Defaults the group fetcher so the existing cases stay about what they were
+ * about. The group list has its own describe block below, where it is explicit.
+ */
+const createUsersAccessLoader = (users: UsersFetcher, groups: GroupsFetcher = noGroups) =>
+	createLoaderWithFetchers(users, groups);
 
 const mkUser = (n: number): AccessUser => ({
 	id: `id-${n}`,
@@ -49,12 +55,11 @@ function deferred<T>() {
 
 describe('createUsersAccessLoader', () => {
 	it('starts in the loading state with an empty directory', () => {
-		const loader = createUsersAccessLoader(vi.fn(), noModels);
+		const loader = createUsersAccessLoader(vi.fn());
 		expect(get(loader)).toEqual({
 			users: [],
 			truncatedUsers: null,
-			models: [],
-			truncatedModels: null,
+			policyGroups: [],
 			loading: true,
 			failed: false,
 			errorDetail: null
@@ -63,10 +68,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('fetches a single page exactly once', async () => {
 		const pages: number[] = [];
-		const loader = createUsersAccessLoader(
-			pagedDirectory(12, (p) => pages.push(p)),
-			noModels
-		);
+		const loader = createUsersAccessLoader(pagedDirectory(12, (p) => pages.push(p)));
 
 		await loader.load();
 
@@ -80,10 +82,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('walks every page and joins them in order', async () => {
 		const pages: number[] = [];
-		const loader = createUsersAccessLoader(
-			pagedDirectory(75, (p) => pages.push(p)),
-			noModels
-		);
+		const loader = createUsersAccessLoader(pagedDirectory(75, (p) => pages.push(p)));
 
 		await loader.load();
 
@@ -96,10 +95,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('stops without truncating when the directory lands exactly on the ceiling', async () => {
 		const pages: number[] = [];
-		const loader = createUsersAccessLoader(
-			pagedDirectory(USERS_MAX, (p) => pages.push(p)),
-			noModels
-		);
+		const loader = createUsersAccessLoader(pagedDirectory(USERS_MAX, (p) => pages.push(p)));
 
 		await loader.load();
 
@@ -112,10 +108,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('cuts inside the page that crosses the ceiling and says so', async () => {
 		const pages: number[] = [];
-		const loader = createUsersAccessLoader(
-			pagedDirectory(812, (p) => pages.push(p)),
-			noModels
-		);
+		const loader = createUsersAccessLoader(pagedDirectory(812, (p) => pages.push(p)));
 
 		await loader.load();
 
@@ -143,7 +136,7 @@ describe('createUsersAccessLoader', () => {
 				total: 500
 			};
 		};
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 
@@ -156,7 +149,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('reports a failure on the first page', async () => {
 		const fetcher: UsersFetcher = vi.fn().mockRejectedValue({ detail: 'Unauthorized' });
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 
@@ -172,7 +165,7 @@ describe('createUsersAccessLoader', () => {
 			if (page === 3) throw { detail: 'Upstream returned 502' };
 			return { users: Array.from({ length: USERS_PAGE_SIZE }, (_, i) => mkUser(i)), total: 150 };
 		});
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 
@@ -189,7 +182,7 @@ describe('createUsersAccessLoader', () => {
 			.fn()
 			.mockResolvedValueOnce({ users: [mkUser(1), mkUser(2)], total: 2 })
 			.mockRejectedValueOnce({ detail: 'Unauthorized' });
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 		expect(get(loader).users).toHaveLength(2);
@@ -215,7 +208,7 @@ describe('createUsersAccessLoader', () => {
 				total: 300
 			});
 		});
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		const inFlight = loader.load();
 		// Wait until the sequence is actually parked on page 3, rather than
@@ -243,7 +236,7 @@ describe('createUsersAccessLoader', () => {
 			if (call === 1) return gate.promise;
 			return Promise.resolve({ users: [mkUser(page + 500)], total: 1 });
 		});
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		const stale = loader.load();
 		await loader.load();
@@ -260,7 +253,7 @@ describe('createUsersAccessLoader', () => {
 	});
 
 	it('treats an empty directory as data, not as a failure', async () => {
-		const loader = createUsersAccessLoader(pagedDirectory(0), noModels);
+		const loader = createUsersAccessLoader(pagedDirectory(0));
 
 		await loader.load();
 
@@ -279,7 +272,7 @@ describe('createUsersAccessLoader', () => {
 				? { users: [mkUser(1)], total: 999 }
 				: { users: [] as AccessUser[], total: 999 };
 		});
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 
@@ -291,7 +284,7 @@ describe('createUsersAccessLoader', () => {
 
 	it('absorbs a null page instead of publishing it as users', async () => {
 		const fetcher: UsersFetcher = vi.fn().mockResolvedValue(null);
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 
@@ -308,7 +301,7 @@ describe('createUsersAccessLoader', () => {
 			.fn()
 			.mockRejectedValueOnce({ detail: 'Unauthorized' })
 			.mockResolvedValueOnce({ users: [mkUser(1)], total: 1 });
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		await loader.load();
 		expect(get(loader).failed).toBe(true);
@@ -324,7 +317,7 @@ describe('createUsersAccessLoader', () => {
 	it('does not report a failure that lands after it was destroyed', async () => {
 		const gate = deferred<UsersPage>();
 		const fetcher: UsersFetcher = vi.fn().mockImplementation(() => gate.promise);
-		const loader = createUsersAccessLoader(fetcher, noModels);
+		const loader = createUsersAccessLoader(fetcher);
 
 		const inFlight = loader.load();
 		loader.destroy();
@@ -337,114 +330,60 @@ describe('createUsersAccessLoader', () => {
 	});
 });
 
-describe('createUsersAccessLoader — model catalogue', () => {
-	const mkModel = (n: number) => ({ id: `m-${n}`, user_id: 'owner', access_grants: [] });
-
+describe('createUsersAccessLoader — policy groups', () => {
 	const oneUser: UsersFetcher = async () => ({ users: [mkUser(1)], total: 1 });
 
-	/** A catalogue of `total` models, served in pages of `USERS_PAGE_SIZE`. */
-	const pagedCatalogue =
-		(total: number, onPage?: (page: number) => void): ModelsFetcher =>
-		async (page) => {
-			onPage?.(page);
-			const start = (page - 1) * USERS_PAGE_SIZE;
-			return {
-				items: Array.from(
-					{ length: Math.max(0, Math.min(USERS_PAGE_SIZE, total - start)) },
-					(_, i) => mkModel(start + i + 1)
-				),
-				total
-			};
-		};
-
-	it('walks every catalogue page and joins them in order', async () => {
-		const pages: number[] = [];
-		const loader = createUsersAccessLoader(
-			oneUser,
-			pagedCatalogue(75, (p) => pages.push(p))
-		);
+	it('publishes only the groups that carry the policy', async () => {
+		const groups: GroupsFetcher = async () => [
+			{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } },
+			{ id: 'g2', name: 'Everyone', permissions: { chat: { pii_masking_enforced: false } } },
+			{ id: 'g3', name: 'No permissions', permissions: null }
+		];
+		const loader = createUsersAccessLoader(oneUser, groups);
 
 		await loader.load();
 
-		expect(pages).toEqual([1, 2, 3]);
-		const models = get(loader).models;
-		expect(models).toHaveLength(75);
-		expect(models[0].id).toBe('m-1');
-		expect(models[74].id).toBe('m-75');
-		expect(get(loader).truncatedModels).toBeNull();
+		expect(get(loader).policyGroups).toEqual([{ id: 'g1', name: 'Policy' }]);
 	});
 
-	it('cuts the catalogue at its own ceiling and says so', async () => {
-		const loader = createUsersAccessLoader(oneUser, pagedCatalogue(1000));
-
-		await loader.load();
-
-		const state = get(loader);
-		expect(state.models).toHaveLength(MODELS_MAX);
-		expect(state.truncatedModels).toEqual({ shown: MODELS_MAX, total: 1000 });
-		// The directory is unaffected by the catalogue being cut.
-		expect(state.truncatedUsers).toBeNull();
-		expect(state.failed).toBe(false);
-	});
-
-	it('fails the whole load when the catalogue fails, without half a section', async () => {
-		const loader = createUsersAccessLoader(
-			oneUser,
-			vi.fn().mockRejectedValue({ detail: 'Models unavailable' })
-		);
+	it('fails the section when the group list cannot be read', async () => {
+		// Not optional data: without it an enforced row cannot tell one source
+		// from several, and the action would offer a removal that changes nothing.
+		const loader = createUsersAccessLoader(oneUser, async () => null);
 
 		await loader.load();
 
 		const state = get(loader);
 		expect(state.failed).toBe(true);
-		expect(state.errorDetail).toBe('Models unavailable');
-		// The users arrived, but a table that cannot state access is not shown.
 		expect(state.users).toEqual([]);
-		expect(state.models).toEqual([]);
-	});
-
-	it('absorbs a null catalogue page instead of publishing it', async () => {
-		const loader = createUsersAccessLoader(oneUser, vi.fn().mockResolvedValue(null));
-
-		await loader.load();
-
-		const state = get(loader);
-		expect(state.models).toEqual([]);
-		expect(state.failed).toBe(true);
+		expect(state.policyGroups).toEqual([]);
+		// Refused deliberately, not by falling over: without the guard the null
+		// reaches `policyGroupsOf`, and the section still fails — but with a raw
+		// TypeError shown to the admin instead of the same quiet "could not load"
+		// the other two fetchers give. Same outcome, different thing on screen.
 		expect(state.errorDetail).toBeNull();
 	});
 
-	it('treats an empty catalogue as data, not as a failure', async () => {
-		const loader = createUsersAccessLoader(oneUser, pagedCatalogue(0));
-
-		await loader.load();
-
-		expect(get(loader).models).toEqual([]);
-		expect(get(loader).failed).toBe(false);
-		expect(get(loader).users).toHaveLength(1);
-	});
-
-	it('does not request the catalogue after the directory was superseded', async () => {
+	it('publishes nothing when the run was superseded before the group list', async () => {
 		const gate = deferred<UsersPage>();
-		const modelPages: number[] = [];
 		let call = 0;
 		const users: UsersFetcher = () => {
 			call++;
 			return call === 1 ? gate.promise : Promise.resolve({ users: [mkUser(9)], total: 1 });
 		};
-		const models: ModelsFetcher = async (page) => {
-			modelPages.push(page);
-			return { items: [], total: 0 };
+		const groupCalls: number[] = [];
+		const groups: GroupsFetcher = async () => {
+			groupCalls.push(1);
+			return [{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } }];
 		};
-		const loader = createUsersAccessLoader(users, models);
+		const loader = createUsersAccessLoader(users, groups);
 
 		const stale = loader.load();
 		await loader.load();
 		gate.resolve({ users: [mkUser(1)], total: 1 });
 		await stale;
 
-		// Exactly one catalogue fetch: the superseded run stopped before its own.
-		expect(modelPages).toEqual([1]);
+		expect(groupCalls).toHaveLength(1);
 		expect(get(loader).users).toEqual([mkUser(9)]);
 	});
 });

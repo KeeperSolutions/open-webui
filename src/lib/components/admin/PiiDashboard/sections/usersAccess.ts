@@ -1,5 +1,5 @@
 import type { MetricRow } from '$lib/apis/langfuse';
-import { getPiiMaskingDefault } from '$lib/utils/pii';
+import { getStoredPiiMasking, type StoredPiiMasking } from '$lib/utils/pii';
 import { grantedModelIds, type ModelRecord } from '../modelAccess';
 import { normalizeUserKey } from './costAnalytics';
 
@@ -13,7 +13,50 @@ export type AccessUser = {
 	role: string;
 	group_ids?: string[];
 	settings?: { ui?: Record<string, unknown> } | null;
+	/** Team policy, resolved server-side. Report-only; nothing writes it here. */
+	pii_masking_enforced?: boolean;
+	/**
+	 * Which of this user's groups carry the policy — server-side, same source.
+	 *
+	 * ⚠️ Empty while `pii_masking_enforced` is true is meaningful, not missing
+	 * data: the instance-wide default is the source, and no membership change
+	 * can undo it.
+	 */
+	pii_policy_group_ids?: string[];
 };
+
+/** A group that carries `chat.pii_masking_enforced`. */
+export type PolicyGroup = { id: string; name: string };
+
+/** The shape of a group as `GET /groups/` returns it, narrowed to what is read. */
+export type GroupRecord = {
+	id: string;
+	name?: string;
+	permissions?: { chat?: { pii_masking_enforced?: boolean } } | null;
+};
+
+/**
+ * The groups an admin can enforce THROUGH.
+ *
+ * Derived, never stored: "the policy group" is not a configured thing, it is
+ * whichever groups happen to carry the key right now. Deriving it means the
+ * answer cannot go stale, and means no governance object gets created behind
+ * anyone's back (E-2).
+ */
+export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
+	return groups
+		.filter((g) => g?.permissions?.chat?.pii_masking_enforced === true)
+		.map((g) => ({ id: g.id, name: g.name || g.id }));
+}
+
+/**
+ * What the masking column states about one user.
+ *
+ * ⚠️ Only `off` is a risk. `default` means the user never chose — and with no
+ * stored valve the pipeline masks anyway, so those users ARE protected. Anything
+ * rendering these must not colour `default` as a warning.
+ */
+export type MaskingState = 'enforced' | 'default' | 'on' | 'off';
 
 export type UserRow = {
 	id: string;
@@ -21,11 +64,63 @@ export type UserRow = {
 	email: string;
 	role: string;
 	status: UserStatus;
-	maskingEnabled: boolean;
+	enforced: boolean;
+	/** Ids of this user's groups that carry the policy. See `AccessUser`. */
+	policyGroupIds: string[];
+	masking: MaskingState;
 	cost: number;
 	grantedCount: number;
 	allModels: boolean;
 };
+
+/**
+ * What, if anything, the row may do about this user's policy.
+ *
+ * `enforce.targets` carries E-2 in the data rather than in the component: one
+ * target acts straight away, several ask which, none disables the action. The
+ * component never picks a destination of its own, and nothing is remembered
+ * between calls.
+ *
+ * `none.via` is the E-1 middle case — the one that matters. An empty `via`
+ * means the instance-wide default, not "unknown".
+ */
+export type RowAction =
+	| { kind: 'enforce'; targets: PolicyGroup[] }
+	| { kind: 'remove'; group: PolicyGroup }
+	| { kind: 'none'; via: PolicyGroup[] };
+
+/**
+ * The action offered on one row (D-14, §8.8).
+ *
+ * ⚠️ The rule is "never offer what would not do what it says". Because groups
+ * merge with "any group wins", removing someone from one enforcing group leaves
+ * them enforced if another one also does — so `Remove` is offered ONLY when
+ * exactly one group is the source. Every other enforced case offers nothing and
+ * names where the policy comes from instead.
+ *
+ * The mirror case is covered by the same shape: an enforced user never reaches
+ * the `enforce` branch, so the action can never produce an audit row for a
+ * change that changed nothing.
+ *
+ * Membership is the only thing this touches — the value of the policy still
+ * lives on the group and is edited only in `Permissions.svelte` (§8.7).
+ */
+export function rowActionFor(
+	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,
+	policyGroups: PolicyGroup[]
+): RowAction {
+	if (!row.enforced) return { kind: 'enforce', targets: policyGroups };
+
+	const byId = new Map(policyGroups.map((g) => [g.id, g]));
+	// Falling back to the id keeps this total: a group the directory knows about
+	// but the group list does not must still be named, not silently dropped —
+	// dropping it would turn a two-source user into a one-source user and put
+	// a `Remove` button on a row where removal would not unlock anything.
+	const via = row.policyGroupIds.map((id) => byId.get(id) ?? { id, name: id });
+
+	if (via.length === 1) return { kind: 'remove', group: via[0] };
+	return { kind: 'none', via };
+}
 
 /**
  * The registered catalogue this section measures access against.
@@ -116,12 +211,44 @@ export function buildRows(
 			email: u.email,
 			role: u.role,
 			status: statusOf(u, seen[index]),
-			maskingEnabled: getPiiMaskingDefault(u.settings?.ui ?? {}),
+			enforced: u.pii_masking_enforced === true,
+			policyGroupIds: u.pii_policy_group_ids ?? [],
+			masking: maskingStateOf(
+				u.pii_masking_enforced === true,
+				getStoredPiiMasking(u.settings?.ui ?? {})
+			),
 			cost: cost[index],
 			grantedCount,
 			allModels: !catalogue.truncated && total > 0 && grantedCount === total
 		};
 	});
+}
+
+/**
+ * The masking state shown for one user.
+ *
+ * ⚠️ Policy is checked FIRST and unconditionally. Under an enforced policy the
+ * effective value is ON no matter what the user stored, so `off` must be
+ * unreachable — otherwise the governance table reports a risk that does not
+ * exist, which is exactly the contradiction this column was rebuilt to remove.
+ *
+ * `unset` maps to `default`, not to `off`: an absent valve means the backend
+ * sends no key and the pipeline masks by default.
+ */
+export function maskingStateOf(enforced: boolean, stored: StoredPiiMasking): MaskingState {
+	if (enforced) return 'enforced';
+	if (stored === 'unset') return 'default';
+	return stored ? 'on' : 'off';
+}
+
+/**
+ * Sort rank for the masking column: risk first.
+ *
+ * Ascending puts `off` at the top, which is the only state that needs an admin
+ * to look. Mirrors the previous boolean ordering, where `false` sorted first.
+ */
+export function maskingRank(state: MaskingState): number {
+	return { off: 0, default: 1, on: 2, enforced: 3 }[state];
 }
 
 /**

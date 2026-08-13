@@ -68,17 +68,21 @@ def get_permissions(
     return permissions
 
 
-def has_permission(
-    user_id: str,
+def has_permission_for_groups(
+    user_groups: list,
     permission_key: str,
     default_permissions: dict[str, Any] = {},
-    db: Session | None = None,
 ) -> bool:
     """
-    Check if a user has a specific permission by checking the group permissions
-    and fall back to default permissions if not found in any group.
+    Resolve a permission against an ALREADY-FETCHED list of groups.
 
-    Permission keys can be hierarchical and separated by dots ('.').
+    Same rule as `has_permission`, minus the lookup: any group granting the key
+    wins, otherwise the default applies. Split out so callers that have already
+    batched the groups — e.g. the paginated user list, which fetches them once
+    for every user on the page — can answer the same question without an extra
+    query per user, and without a second copy of the merge rule that could drift
+    from this one. `has_permission` delegates here, so there is exactly one
+    implementation.
     """
 
     def get_permission(permissions: dict[str, Any], keys: list[str]) -> bool:
@@ -92,9 +96,6 @@ def has_permission(
 
     permission_hierarchy = permission_key.split('.')
 
-    # Retrieve user group permissions
-    user_groups = Groups.get_groups_by_member_id(user_id, db=db)
-
     for group in user_groups:
         if get_permission(group.permissions or {}, permission_hierarchy):
             return True
@@ -102,6 +103,22 @@ def has_permission(
     # Check default permissions afterward if the group permissions don't allow it
     default_permissions = fill_missing_permissions(default_permissions, DEFAULT_USER_PERMISSIONS)
     return get_permission(default_permissions, permission_hierarchy)
+
+
+def has_permission(
+    user_id: str,
+    permission_key: str,
+    default_permissions: dict[str, Any] = {},
+    db: Session | None = None,
+) -> bool:
+    """
+    Check if a user has a specific permission by checking the group permissions
+    and fall back to default permissions if not found in any group.
+
+    Permission keys can be hierarchical and separated by dots ('.').
+    """
+    user_groups = Groups.get_groups_by_member_id(user_id, db=db)
+    return has_permission_for_groups(user_groups, permission_key, default_permissions)
 
 
 def has_access(

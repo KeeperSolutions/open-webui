@@ -7,7 +7,12 @@ import {
 	buildRows,
 	unattributedCost,
 	modelsCountKey,
-	type AccessUser
+	maskingStateOf,
+	maskingRank,
+	policyGroupsOf,
+	rowActionFor,
+	type AccessUser,
+	type PolicyGroup
 } from './usersAccess';
 
 const row = (user: string, cost: number, model = 'gpt-4', tokens = 10): MetricRow => ({
@@ -132,18 +137,48 @@ describe('buildRows', () => {
 		expect(rows[0].status).toBe('pending');
 	});
 
-	it('reads masking as On when the user never touched the setting', () => {
-		// Absent key means enabled, both in the backend and in getPiiMaskingDefault.
-		expect(buildRows([user()], [])[0].maskingEnabled).toBe(true);
-		expect(buildRows([user({ settings: null })], [])[0].maskingEnabled).toBe(true);
-		expect(buildRows([user({ settings: { ui: {} } })], [])[0].maskingEnabled).toBe(true);
+	const storedOff = {
+		ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } } }
+	};
+	const storedOn = {
+		ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } }
+	};
+
+	it("reads masking as 'default' when the user never touched the setting", () => {
+		// Absent key means the pipeline masks anyway — protected, not at risk.
+		expect(buildRows([user()], [])[0].masking).toBe('default');
+		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default');
+		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default');
 	});
 
-	it('reads masking as Off only when the setting says so', () => {
-		const off = user({
-			settings: { ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } } } }
-		});
-		expect(buildRows([off], [])[0].maskingEnabled).toBe(false);
+	it("reads masking as 'on' when the user chose it", () => {
+		expect(buildRows([user({ settings: storedOn })], [])[0].masking).toBe('on');
+	});
+
+	it("reads masking as 'off' only when the setting says so and no policy applies", () => {
+		expect(buildRows([user({ settings: storedOff })], [])[0].masking).toBe('off');
+	});
+
+	it('⚠️ never reports off while the policy is enforced', () => {
+		// The contradiction this column was rebuilt to remove: a governance table
+		// reporting a risk that does not exist, because masking IS on.
+		const enforcedButStoredOff = user({ settings: storedOff, pii_masking_enforced: true });
+		const r = buildRows([enforcedButStoredOff], [])[0];
+		expect(r.masking).toBe('enforced');
+		expect(r.masking).not.toBe('off');
+		expect(r.enforced).toBe(true);
+	});
+
+	it('policy outranks every stored value', () => {
+		for (const settings of [undefined, storedOn, storedOff, { ui: {} }]) {
+			const r = buildRows([user({ settings, pii_masking_enforced: true })], [])[0];
+			expect(r.masking).toBe('enforced');
+		}
+	});
+
+	it('reports enforced=false when the server did not flag the user', () => {
+		expect(buildRows([user()], [])[0].enforced).toBe(false);
+		expect(buildRows([user({ pii_masking_enforced: false })], [])[0].enforced).toBe(false);
 	});
 
 	it('leaves the model fields neutral when no catalogue is supplied', () => {
@@ -311,5 +346,153 @@ describe('reconciliation with section 3', () => {
 
 	it('matches totals().cost on empty input', () => {
 		expect(reconciles([], [])).toBe(totals([]).cost);
+	});
+});
+
+describe('maskingStateOf', () => {
+	it('policy wins over anything stored', () => {
+		expect(maskingStateOf(true, false)).toBe('enforced');
+		expect(maskingStateOf(true, true)).toBe('enforced');
+		expect(maskingStateOf(true, 'unset')).toBe('enforced');
+	});
+
+	it("maps 'unset' to default, never to off", () => {
+		expect(maskingStateOf(false, 'unset')).toBe('default');
+		expect(maskingStateOf(false, 'unset')).not.toBe('off');
+	});
+
+	it('maps stored booleans straight through when unenforced', () => {
+		expect(maskingStateOf(false, true)).toBe('on');
+		expect(maskingStateOf(false, false)).toBe('off');
+	});
+
+	it('produces off in exactly one combination', () => {
+		const combos: [boolean, boolean | 'unset'][] = [
+			[true, true],
+			[true, false],
+			[true, 'unset'],
+			[false, true],
+			[false, false],
+			[false, 'unset']
+		];
+		const offs = combos.filter(([e, s]) => maskingStateOf(e, s) === 'off');
+		expect(offs).toEqual([[false, false]]);
+	});
+});
+
+describe('maskingRank', () => {
+	it('sorts risk first, so ascending surfaces off', () => {
+		const order = (['enforced', 'on', 'default', 'off'] as const)
+			.slice()
+			.sort((a, b) => maskingRank(a) - maskingRank(b));
+		expect(order).toEqual(['off', 'default', 'on', 'enforced']);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// D-14 — the row action
+// ---------------------------------------------------------------------------
+
+const POLICY: PolicyGroup = { id: 'g1', name: 'Policy' };
+const OTHER: PolicyGroup = { id: 'g2', name: 'Legal' };
+
+const actionRow = (enforced: boolean, policyGroupIds: string[] = []) => ({
+	enforced,
+	policyGroupIds
+});
+
+describe('policyGroupsOf', () => {
+	it('keeps only groups that carry the key', () => {
+		expect(
+			policyGroupsOf([
+				{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } },
+				{ id: 'g2', name: 'Legal', permissions: { chat: { pii_masking_enforced: false } } },
+				{ id: 'g3', name: 'Bare', permissions: {} },
+				{ id: 'g4', name: 'Null', permissions: null }
+			])
+		).toEqual([{ id: 'g1', name: 'Policy' }]);
+	});
+
+	it('falls back to the id when a group has no name', () => {
+		expect(
+			policyGroupsOf([{ id: 'g1', permissions: { chat: { pii_masking_enforced: true } } }])
+		).toEqual([{ id: 'g1', name: 'g1' }]);
+	});
+});
+
+describe('rowActionFor — E-1', () => {
+	it('offers Enforce when the user is not under policy', () => {
+		expect(rowActionFor(actionRow(false), [POLICY])).toEqual({
+			kind: 'enforce',
+			targets: [POLICY]
+		});
+	});
+
+	it('offers Remove when exactly one group is the source', () => {
+		expect(rowActionFor(actionRow(true, ['g1']), [POLICY, OTHER])).toEqual({
+			kind: 'remove',
+			group: POLICY
+		});
+	});
+
+	it('offers NOTHING when the policy also comes from another group', () => {
+		// The middle case, and the only one that can lie: `Remove` here would take
+		// the user out of one group and leave them enforced by the other, while the
+		// label promised an unlock.
+		expect(rowActionFor(actionRow(true, ['g1', 'g2']), [POLICY, OTHER])).toEqual({
+			kind: 'none',
+			via: [POLICY, OTHER]
+		});
+	});
+
+	it('names an unknown source group by id rather than dropping it', () => {
+		// Dropping it would turn a two-source user into a one-source user, and put
+		// a Remove button on a row where removal unlocks nothing.
+		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), [POLICY])).toEqual({
+			kind: 'none',
+			via: [POLICY, { id: 'ghost', name: 'ghost' }]
+		});
+	});
+
+	it('offers nothing, and blames no group, under an instance-wide default', () => {
+		expect(rowActionFor(actionRow(true, []), [POLICY])).toEqual({ kind: 'none', via: [] });
+	});
+
+	it('never offers Enforce to someone already enforced — the mirror case', () => {
+		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
+			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER]).kind).not.toBe('enforce');
+		}
+	});
+});
+
+describe('rowActionFor — E-2', () => {
+	it('carries the single destination when exactly one group has the policy', () => {
+		const action = rowActionFor(actionRow(false), [POLICY]);
+		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });
+	});
+
+	it('carries every candidate when several groups have the policy', () => {
+		// The choice is made per call, from these; nothing here remembers one.
+		const action = rowActionFor(actionRow(false), [POLICY, OTHER]);
+		expect(action.kind === 'enforce' && action.targets).toEqual([POLICY, OTHER]);
+	});
+
+	it('carries no destination when no group has the policy', () => {
+		// The component disables the action on this; it must never invent a group.
+		expect(rowActionFor(actionRow(false), [])).toEqual({ kind: 'enforce', targets: [] });
+	});
+});
+
+describe('buildRows — policy sources', () => {
+	it('carries the enforcing group ids onto the row', () => {
+		const r = buildRows(
+			[user({ pii_masking_enforced: true, pii_policy_group_ids: ['g1'] })],
+			[]
+		)[0];
+		expect(r.policyGroupIds).toEqual(['g1']);
+	});
+
+	it('defaults to none when the backend does not send the field', () => {
+		expect(buildRows([user({ pii_masking_enforced: true })], [])[0].policyGroupIds).toEqual([]);
 	});
 });

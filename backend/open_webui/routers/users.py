@@ -39,7 +39,13 @@ from open_webui.utils.auth import (
     get_verified_user,
     validate_password,
 )
-from open_webui.utils.access_control import get_permissions, has_permission
+from open_webui.utils.access_control import (
+    get_permissions,
+    has_permission,
+    has_permission_for_groups,
+)
+from open_webui.config import PII_MASKING_ENFORCED_PERMISSION
+from open_webui.utils.pii_policy import group_enforces_pii_masking
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +64,7 @@ PAGE_ITEM_COUNT = 30
 
 @router.get('/', response_model=UserGroupIdsListResponse)
 async def get_users(
+    request: Request,
     query: Optional[str] = None,
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
@@ -89,12 +96,32 @@ async def get_users(
     user_ids = [user.id for user in users]
     user_groups = Groups.get_groups_by_member_ids(user_ids, db=db)
 
+    # TRAU-536: the team PII policy, resolved from the groups ALREADY fetched
+    # above — zero additional queries. `has_permission_for_groups` is the same
+    # function `has_permission` delegates to, so this cannot drift from the
+    # enforcement path.
+    default_permissions = request.app.state.config.USER_PERMISSIONS
+
     return {
         'users': [
             UserGroupIdsModel(
                 **{
                     **user.model_dump(),
                     'group_ids': [group.id for group in user_groups.get(user.id, [])],
+                    'pii_masking_enforced': has_permission_for_groups(
+                        user_groups.get(user.id, []),
+                        PII_MASKING_ENFORCED_PERMISSION,
+                        default_permissions,
+                    ),
+                    # Same already-fetched groups, still zero extra queries. This
+                    # asks a different question from the flag above — "which
+                    # groups say yes" rather than "is this user enforced" — so it
+                    # deliberately does NOT consult the instance defaults.
+                    'pii_policy_group_ids': [
+                        group.id
+                        for group in user_groups.get(user.id, [])
+                        if group_enforces_pii_masking(group.permissions)
+                    ],
                 }
             )
             for user in users
@@ -219,6 +246,9 @@ class ChatPermissions(BaseModel):
     multiple_models: bool = True
     temporary: bool = True
     temporary_enforced: bool = False
+    # TRAU-536: named as a restriction so the multi-group OR merge means
+    # "strictest wins". See config.py and PII-POLICY-ENGINE-SPEC.md §6.1.
+    pii_masking_enforced: bool = False
 
 
 class FeaturesPermissions(BaseModel):

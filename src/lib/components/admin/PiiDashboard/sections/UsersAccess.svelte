@@ -5,22 +5,25 @@
 	import { goto } from '$app/navigation';
 	import SectionHeader from '../parts/SectionHeader.svelte';
 	import Pill from '../parts/Pill.svelte';
-	import Toggle from '../parts/Toggle.svelte';
 	import Button from '../parts/Button.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import type { MetricRow } from '$lib/apis/langfuse';
 	import { formatCostDisplay } from '$lib/apis/langfuse/tableUtils';
+	import { toast } from 'svelte-sonner';
+	import { addUserToGroup, removeUserFromGroup } from '$lib/apis/groups';
 	import {
 		buildRows,
 		unattributedCost,
-		modelsCountKey,
+		maskingRank,
+		rowActionFor,
+		type MaskingState,
 		type AccessUser,
+		type PolicyGroup,
 		type UserRow,
 		type UserStatus
 	} from './usersAccess';
-	import { grantedModelIds, type ModelRecord } from '../modelAccess';
 	import type { Truncation } from '../usersAccessLoader';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
@@ -30,9 +33,6 @@
 	/** Spend for the selected window. A second, slower source — see `costUnknown`. */
 	export let metricRows: MetricRow[] = [];
 	export let truncated: Truncation | null = null;
-	/** The registered catalogue this section measures access against. */
-	export let models: ModelRecord[] = [];
-	export let truncatedModels: Truncation | null = null;
 	export let loading = true;
 	export let failed = false;
 	export let errorDetail: string | null = null;
@@ -41,6 +41,75 @@
 	export let costUnknown = false;
 	/** Spend on screen belongs to the previous window; a newer one is in flight. */
 	export let costStale = false;
+	/** Groups that carry the policy — the only destinations an action may use. */
+	export let policyGroups: PolicyGroup[] = [];
+	/** Reload the section after a membership change. */
+	export let onPolicyChanged: () => void = () => {};
+
+	/**
+	 * The row currently being acted on, if any.
+	 *
+	 * ⚠️ Holds the chosen destination for exactly as long as one action takes,
+	 * and is cleared afterwards. Nothing about the choice survives the call — not
+	 * in component state between calls, not in `localStorage`. A remembered
+	 * destination would be per-admin, so the same action would land in different
+	 * groups depending on who clicked it, with nothing recording why (E-2).
+	 */
+	let pending: {
+		row: UserRow;
+		mode: 'enforce' | 'remove';
+		targets: PolicyGroup[];
+		groupId: string;
+		reason: string;
+	} | null = null;
+	let submitting = false;
+
+	const openEnforce = (row: UserRow, targets: PolicyGroup[]) => {
+		pending = {
+			row,
+			mode: 'enforce',
+			targets,
+			// Pre-selected only when there is exactly one; with several the admin
+			// must say which, every time.
+			groupId: targets.length === 1 ? targets[0].id : '',
+			reason: ''
+		};
+	};
+
+	const openRemove = (row: UserRow, group: PolicyGroup) => {
+		pending = { row, mode: 'remove', targets: [group], groupId: group.id, reason: '' };
+	};
+
+	const submitAction = async () => {
+		if (!pending || !pending.groupId) return;
+		// The route enforces this too; here it only saves a round trip (D-6).
+		if (pending.mode === 'remove' && !pending.reason.trim()) return;
+
+		submitting = true;
+		const { row, mode, groupId, reason } = pending;
+		const call =
+			mode === 'enforce'
+				? addUserToGroup(localStorage.token, groupId, [row.id])
+				: removeUserFromGroup(localStorage.token, groupId, [row.id], reason.trim());
+
+		const res = await call.catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		submitting = false;
+
+		if (res) {
+			toast.success(
+				mode === 'enforce'
+					? $i18n.t('PII masking is now enforced for this user.')
+					: $i18n.t('PII masking is no longer enforced for this user.')
+			);
+			pending = null;
+			// Re-read rather than patch the row: the effective policy is a server-side
+			// merge over every group, so the only honest new value comes from the server.
+			onPolicyChanged();
+		}
+	};
 
 	type SortKey = 'name' | 'role' | 'status' | 'masking' | 'cost';
 
@@ -100,7 +169,7 @@
 					primary = STATUS_RANK[a.status] - STATUS_RANK[b.status];
 					break;
 				case 'masking':
-					primary = Number(a.maskingEnabled) - Number(b.maskingEnabled);
+					primary = maskingRank(a.masking) - maskingRank(b.masking);
 					break;
 				case 'cost':
 					primary = a.cost - b.cost;
@@ -111,15 +180,12 @@
 		});
 	};
 
-	$: rows = buildRows(users, metricRows, { models, truncated: !!truncatedModels });
+	// No catalogue is passed: the models column is gone (Gate 6d) and its fetch
+	// with it (6e). `buildRows` keeps the parameter and its default, so
+	// `grantedCount`/`allModels` stay computed-from-nothing rather than deleted —
+	// the next thing to report model access resolves them the same way.
+	$: rows = buildRows(users, metricRows);
 
-	/**
-	 * The full granted list per user, for the cell's `title`. Kept out of UserRow
-	 * because only the hover text needs it.
-	 */
-	$: grantedNames = new Map(
-		users.map((u) => [u.id, [...grantedModelIds(u, models)].sort().join(', ')])
-	);
 	$: sorted = sortRows(rows, orderBy, direction);
 
 	/**
@@ -141,17 +207,27 @@
 		? 'The list is cut off, so this also covers users who exist but are not shown, alongside identities with no account here. The column still reconciles with Total cost above.'
 		: 'Langfuse recorded this spend against an identity with no matching account here — a deleted user, another environment, or a trace with no user id. It is included so this column reconciles with Total cost above.';
 
-	// `key: null` marks a column that is not sortable: the value shown is a
-	// derived label, and ordering by the number behind it while the label reads
-	// "All models" would look arbitrary.
+	// `key: null` marks a column that is not sortable. Nothing uses it right now —
+	// every remaining column sorts — but the header loop still handles it, so a
+	// derived-label column can be added back without touching the markup.
 	const COLUMNS: { key: SortKey | null; label: string }[] = [
 		{ key: 'name', label: 'User' },
 		{ key: 'role', label: 'Role' },
 		{ key: 'status', label: 'Status' },
-		// Named after the catalogue it measures, not after "models" in general:
-		// /models/list returns Workspace models only, so an unscoped label would
-		// read "no access" for a user who has plenty of it outside the Workspace.
-		{ key: null, label: 'Workspace models' },
+		// There is deliberately no models column. `Workspace models` used to sit
+		// here and was removed (Gate 6d): it measured /models/list, which is the
+		// Workspace-derived subset, while the question a reader actually asks is
+		// "which of the models in this system may this person use". No
+		// configuration can answer that today — with BYPASS_MODEL_ACCESS_CONTROL
+		// on, grants are ignored and nothing can be restricted; with it off, the
+		// polarity inverts and an ungranted model is invisible. The column
+		// returns when `denied_model_ids` exists to report against: display
+		// follows the mechanism, never precedes it.
+		// There is deliberately no `Policy` column. It said `Enforced` for exactly
+		// the rows where this one says `On — enforced` — the same boolean twice —
+		// and the action cell already names the source. In a compliance table a
+		// restatement is not free: the reader assumes two columns measure two
+		// things and goes looking for a difference that does not exist.
 		{ key: 'masking', label: 'Global PII masking' },
 		{ key: 'cost', label: 'Cost' }
 	];
@@ -194,17 +270,6 @@
 						shown: truncated.shown,
 						total: truncated.total
 					})}
-				</div>
-			{/if}
-
-			{#if truncatedModels}
-				<div
-					class="rounded-xl border border-pii-line bg-pii-side px-3.5 py-2.5 text-[12px] text-pii-muted"
-				>
-					{$i18n.t(
-						'Model catalogue truncated at {{shown}} of {{total}} — "All models" is not shown while the list is incomplete.',
-						{ shown: truncatedModels.shown, total: truncatedModels.total }
-					)}
 				</div>
 			{/if}
 
@@ -252,11 +317,17 @@
 									</th>
 								{/if}
 							{/each}
+							<!-- Two unlabelled columns: the policy action, then Manage. Both
+							     are controls, and neither sorts. -->
+							<th scope="col" class="px-2.5 py-2"></th>
 							<th scope="col" class="px-2.5 py-2"></th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each sorted as row (row.id)}
+							<!-- Declared here rather than in the cell that uses it: {@const} must
+							     be the immediate child of a block. -->
+							{@const action = rowActionFor(row, policyGroups)}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -284,41 +355,21 @@
 										</Pill>
 									{/if}
 								</td>
-								<!-- The empty cell is the one that most needs the tooltip: an em dash
-								     alone reads as "no access at all", which the Workspace catalogue
-								     cannot claim. Every other value lists what it counted. -->
-								<td
-									class="px-2.5 py-2.5 align-middle"
-									title={grantedNames.get(row.id) ||
-										$i18n.t(
-											'No Workspace model is shared with this user. Access to models outside the Workspace is configured separately and is not counted here.'
-										)}
-								>
-									{#if row.allModels}
-										<span class="text-pii-ink">{$i18n.t('All models')}</span>
-									{:else if row.grantedCount > 0}
-										<span class="text-pii-ink"
-											>{$i18n.t(modelsCountKey(row.grantedCount), {
-												count: row.grantedCount
-											})}</span
-										>
-									{:else}
-										<span class="text-pii-muted">—</span>
-									{/if}
-								</td>
 								<td class="px-2.5 py-2.5 align-middle">
-									<div class="flex items-center gap-2">
-										<Toggle
-											on={row.maskingEnabled}
-											disabled
-											ariaLabel={$i18n.t('PII masking for {{name}}', { name: row.name })}
-										/>
-										{#if row.maskingEnabled}
-											<span class="text-pii-ink">{$i18n.t('On')}</span>
-										{:else}
-											<Pill kind="warn">{$i18n.t('Off — flagged')}</Pill>
-										{/if}
-									</div>
+									<!--
+										No Toggle here (D-13): a switch shape is an affordance for
+										changing, and this column is a read-only report. The Pill
+										carries the whole statement in all four states.
+									-->
+									{#if row.masking === 'enforced'}
+										<Pill kind="ok">🔒 {$i18n.t('On — enforced')}</Pill>
+									{:else if row.masking === 'default'}
+										<Pill kind="ok">{$i18n.t('On — default')}</Pill>
+									{:else if row.masking === 'on'}
+										<Pill kind="ok">{$i18n.t('On')}</Pill>
+									{:else}
+										<Pill kind="warn">{$i18n.t('Off — flagged')}</Pill>
+									{/if}
 								</td>
 								<td
 									class="px-2.5 py-2.5 align-middle text-pii-ink transition-opacity {costStale
@@ -330,6 +381,51 @@
 										<span class="text-pii-muted">—</span>
 									{:else}
 										{formatCostDisplay(row.cost)}
+									{/if}
+								</td>
+								<td class="px-2.5 py-2.5 align-middle">
+									<!--
+										Membership, never the policy value itself (§8.7). And never an
+										action that would not do what its label says: when the policy
+										reaches this user through more than one group, or through the
+										instance default, removing them from any one of them leaves
+										them enforced — so nothing is offered and the source is named
+										instead (E-1).
+									-->
+									{#if action.kind === 'remove'}
+										<Button on:click={() => openRemove(row, action.group)}>
+											{$i18n.t('Remove')}
+										</Button>
+									{:else if action.kind === 'enforce'}
+										{#if action.targets.length === 0}
+											<span
+												class="text-[12px] text-pii-muted"
+												title={$i18n.t(
+													'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.'
+												)}
+											>
+												{$i18n.t('No policy group')}
+											</span>
+										{:else}
+											<Button on:click={() => openEnforce(row, action.targets)}>
+												{$i18n.t('Enforce')}
+											</Button>
+										{/if}
+									{:else if action.via.length === 0}
+										<span class="text-[12px] text-pii-muted">
+											{$i18n.t('Enforced instance-wide')}
+										</span>
+									{:else}
+										<span
+											class="text-[12px] text-pii-muted"
+											title={$i18n.t(
+												'Removing this user from any one of these groups would leave the policy in force through the others, so no action is offered here.'
+											)}
+										>
+											{$i18n.t('Enforced via {{groups}}', {
+												groups: action.via.map((g) => g.name).join(', ')
+											})}
+										</span>
 									{/if}
 								</td>
 								<td class="px-2.5 py-2.5 text-right align-middle">
@@ -356,17 +452,112 @@
 								</td>
 								<td class="px-2.5 py-2.5 align-middle text-pii-muted">—</td>
 								<td class="px-2.5 py-2.5 align-middle text-pii-muted">—</td>
-								<td class="px-2.5 py-2.5 align-middle text-pii-muted">—</td>
+								<!-- Masking: no account, so no stored preference and no policy. -->
 								<td class="px-2.5 py-2.5 align-middle text-pii-muted">—</td>
 								<td class="px-2.5 py-2.5 align-middle font-bold text-pii-ink">
 									{formatCostDisplay(unattributed)}
 								</td>
-								<!-- No Manage button: there is no account to manage. -->
+								<!-- No policy action and no Manage button: there is no account
+								     here to put in a group, let alone to manage. -->
+								<td class="px-2.5 py-2.5"></td>
 								<td class="px-2.5 py-2.5"></td>
 							</tr>
 						</tfoot>
 					{/if}
 				</table>
+			</div>
+		</div>
+	{/if}
+
+	{#if pending}
+		<!--
+			Deliberately not a bare confirm: the action changes GROUP MEMBERSHIP,
+			so the group is named. Losing that group's other permissions is a real
+			consequence of the mechanism, and the admin should read it before
+			agreeing to it.
+		-->
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+			role="presentation"
+			on:click|self={() => (pending = null)}
+		>
+			<div
+				class="w-full max-w-[420px] rounded-2xl border border-pii-line bg-pii-white p-5 font-['Inter']"
+				role="dialog"
+				aria-modal="true"
+				aria-label={pending.mode === 'enforce'
+					? $i18n.t('Enforce PII masking')
+					: $i18n.t('Stop enforcing PII masking')}
+			>
+				<div class="text-[15px] font-bold text-pii-ink">
+					{pending.mode === 'enforce'
+						? $i18n.t('Enforce PII masking')
+						: $i18n.t('Stop enforcing PII masking')}
+				</div>
+
+				<p class="mt-1.5 text-[12.5px] leading-[1.55] text-pii-muted">
+					{pending.mode === 'enforce'
+						? $i18n.t(
+								'{{name}} will be added to the group and will no longer be able to turn PII masking off.',
+								{ name: pending.row.name }
+							)
+						: $i18n.t(
+								'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
+								{ name: pending.row.name }
+							)}
+				</p>
+
+				{#if pending.mode === 'enforce' && pending.targets.length > 1}
+					<!-- More than one group carries the policy, so the destination is
+					     asked for on every call and remembered on none (E-2). -->
+					<label class="mt-3 block text-[12px] text-pii-muted" for="pii-policy-group">
+						{$i18n.t('Which group?')}
+					</label>
+					<select
+						id="pii-policy-group"
+						class="mt-1 w-full rounded-xl border border-pii-line bg-pii-white px-2.5 py-1.5 text-[13px] text-pii-ink"
+						bind:value={pending.groupId}
+					>
+						<option value="">{$i18n.t('Select a group')}</option>
+						{#each pending.targets as group (group.id)}
+							<option value={group.id}>{group.name}</option>
+						{/each}
+					</select>
+				{:else}
+					<div class="mt-3 text-[12px] text-pii-muted">
+						{$i18n.t('Group')}:
+						<span class="text-pii-ink">{pending.targets[0]?.name ?? pending.groupId}</span>
+					</div>
+				{/if}
+
+				{#if pending.mode === 'remove'}
+					<label class="mt-3 block text-[12px] text-pii-muted" for="pii-policy-reason">
+						{$i18n.t('Reason')}
+					</label>
+					<input
+						id="pii-policy-reason"
+						class="mt-1 w-full rounded-xl border border-pii-line bg-pii-white px-2.5 py-1.5 text-[13px] text-pii-ink"
+						type="text"
+						bind:value={pending.reason}
+						placeholder={$i18n.t('Reason for removing enforcement (required)')}
+					/>
+				{/if}
+
+				<div class="mt-4 flex justify-end gap-2">
+					<Button on:click={() => (pending = null)}>{$i18n.t('Cancel')}</Button>
+					<span
+						class:pointer-events-none={submitting ||
+							!pending.groupId ||
+							(pending.mode === 'remove' && !pending.reason.trim())}
+						class:opacity-40={submitting ||
+							!pending.groupId ||
+							(pending.mode === 'remove' && !pending.reason.trim())}
+					>
+						<Button variant="primary" on:click={submitAction}>
+							{pending.mode === 'enforce' ? $i18n.t('Enforce') : $i18n.t('Remove')}
+						</Button>
+					</span>
+				</div>
 			</div>
 		</div>
 	{/if}

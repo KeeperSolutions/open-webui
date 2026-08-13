@@ -1,9 +1,13 @@
 import { writable, type Readable } from 'svelte/store';
 import { getUsers } from '$lib/apis/users';
-import { getModelItems } from '$lib/apis/models';
+import { getGroups } from '$lib/apis/groups';
 import { describeLoadError } from './sections/costAnalytics';
-import type { AccessUser } from './sections/usersAccess';
-import type { ModelRecord } from './modelAccess';
+import {
+	policyGroupsOf,
+	type AccessUser,
+	type GroupRecord,
+	type PolicyGroup
+} from './sections/usersAccess';
 
 /**
  * Hard ceiling on the directory this section will render.
@@ -16,14 +20,7 @@ import type { ModelRecord } from './modelAccess';
  */
 export const USERS_MAX = 200;
 
-/**
- * Ceiling on the model catalogue. An order of magnitude smaller and far more
- * stable than the directory, so this guards a pathological case rather than an
- * expected regime.
- */
-export const MODELS_MAX = 300;
-
-/** Mirrors `PAGE_ITEM_COUNT` in backend/open_webui/routers/{users,models}.py. */
+/** Mirrors `PAGE_ITEM_COUNT` in backend/open_webui/routers/users.py. */
 export const USERS_PAGE_SIZE = 30;
 
 /** How much of a list is on screen, when it is not all of it. */
@@ -31,23 +28,29 @@ export type Truncation = { shown: number; total: number };
 
 export type UsersAccessState = {
 	users: AccessUser[];
-	models: ModelRecord[];
+	/**
+	 * The groups that carry the policy, for the row action's destination (E-2).
+	 *
+	 * Derived from the group list on every load, never remembered: a destination
+	 * held in component state or localStorage would be per-admin, so the same
+	 * action would land in different groups with nothing recording why.
+	 */
+	policyGroups: PolicyGroup[];
 	truncatedUsers: Truncation | null;
-	truncatedModels: Truncation | null;
 	loading: boolean;
 	failed: boolean;
 	errorDetail: string | null;
 };
 
 export type UsersPage = { users: AccessUser[]; total: number };
-export type ModelsPage = { items: ModelRecord[]; total: number };
 
 /**
  * One page each. Injectable so pagination, truncation and abort can be driven
  * from tests without a network.
  */
 export type UsersFetcher = (page: number, signal: AbortSignal) => Promise<UsersPage | null>;
-export type ModelsFetcher = (page: number, signal: AbortSignal) => Promise<ModelsPage | null>;
+/** Not paginated: `GET /groups/` returns the lot, and groups are few. */
+export type GroupsFetcher = (signal: AbortSignal) => Promise<GroupRecord[] | null>;
 
 export type UsersAccessLoader = Readable<UsersAccessState> & {
 	load: () => Promise<void>;
@@ -56,9 +59,8 @@ export type UsersAccessLoader = Readable<UsersAccessState> & {
 
 const INITIAL: UsersAccessState = {
 	users: [],
-	models: [],
+	policyGroups: [],
 	truncatedUsers: null,
-	truncatedModels: null,
 	loading: true,
 	failed: false,
 	errorDetail: null
@@ -67,17 +69,7 @@ const INITIAL: UsersAccessState = {
 const defaultUsersFetcher: UsersFetcher = (page, signal) =>
 	getUsers(localStorage.token, undefined, undefined, undefined, page, signal);
 
-const defaultModelsFetcher: ModelsFetcher = (page, signal) =>
-	getModelItems(
-		localStorage.token,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		page,
-		signal
-	);
+const defaultGroupsFetcher: GroupsFetcher = () => getGroups(localStorage.token);
 
 /** Sentinel for "the sequence was superseded or destroyed; publish nothing". */
 const ABORTED = Symbol('aborted');
@@ -86,7 +78,7 @@ type Collected<T> = { items: T[]; truncated: Truncation | null };
 
 export function createUsersAccessLoader(
 	usersFetcher: UsersFetcher = defaultUsersFetcher,
-	modelsFetcher: ModelsFetcher = defaultModelsFetcher
+	groupsFetcher: GroupsFetcher = defaultGroupsFetcher
 ): UsersAccessLoader {
 	const { subscribe, update } = writable<UsersAccessState>({ ...INITIAL });
 
@@ -100,9 +92,8 @@ export function createUsersAccessLoader(
 			// A list this section cannot vouch for in full is not shown in part: a
 			// compliance table silently listing 3 of 7 pages asserts something untrue.
 			users: [],
-			models: [],
-			truncatedUsers: null,
-			truncatedModels: null
+			policyGroups: [],
+			truncatedUsers: null
 		}));
 
 	/**
@@ -166,18 +157,13 @@ export function createUsersAccessLoader(
 				return;
 			}
 
-			// The catalogue has no notion of a window either, so it rides along with
-			// the directory rather than earning a loader of its own.
-			const modelsResult = await collect<ModelRecord>(
-				async (page, signal) => {
-					const res = await modelsFetcher(page, signal);
-					return res ? { items: res.items, total: res.total } : null;
-				},
-				MODELS_MAX,
-				controller
-			);
-			if (modelsResult === ABORTED) return;
-			if (!modelsResult) {
+			// The row action needs to know which groups carry the policy. Treated
+			// as load-bearing rather than optional: without it every enforced row
+			// would look like it has a single source, and `Remove` would appear on
+			// rows where removal changes nothing — the one thing E-1 forbids.
+			const groups = await groupsFetcher(controller.signal);
+			if (controller.signal.aborted) return;
+			if (!groups) {
 				fail(null);
 				return;
 			}
@@ -185,9 +171,8 @@ export function createUsersAccessLoader(
 			update((s) => ({
 				...s,
 				users: usersResult.items,
-				models: modelsResult.items,
+				policyGroups: policyGroupsOf(groups),
 				truncatedUsers: usersResult.truncated,
-				truncatedModels: modelsResult.truncated,
 				failed: false,
 				errorDetail: null
 			}));

@@ -81,14 +81,14 @@
 			users={$usersAccess.users}
 			metricRows={$metrics.rows}
 			truncated={$usersAccess.truncatedUsers}
-			models={$usersAccess.models}
-			truncatedModels={$usersAccess.truncatedModels}
+			policyGroups={$usersAccess.policyGroups}
 			loading={usersLoading}
 			failed={usersFailed}
 			errorDetail={$usersAccess.errorDetail}
 			{costUnknown}
 			{costStale}
 			onRetry={() => usersAccess.load()}
+			onPolicyChanged={() => usersAccess.load()}
 		/>
 	</div>
 </div>
