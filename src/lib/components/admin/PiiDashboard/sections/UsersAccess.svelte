@@ -317,10 +317,30 @@
 									</th>
 								{/if}
 							{/each}
-							<!-- Two unlabelled columns: the policy action, then Manage. Both
-							     are controls, and neither sorts. -->
-							<th scope="col" class="px-2.5 py-2"></th>
-							<th scope="col" class="px-2.5 py-2"></th>
+							<!-- Two control columns; neither sorts. Named after what the cell
+							     is ABOUT, not after the button in it: "Policy group" holds both
+							     the buttons and the read-only lines that name the source
+							     ("Enforced via …", "No policy group"), so a header of "Action"
+							     would mislabel half its own column.
+
+							     Policy group follows Status and Global PII masking, the table's
+							     existing pill columns: header flush left with the cell, pill flush
+							     left under it, no inset for the pill's own padding. Measured, not
+							     assumed — in both of those columns the header's left edge and the
+							     pill's left edge share the same x.
+
+							     Account is the trailing column, so it is right-aligned instead —
+							     header and button both end on the cell's right edge. Same rule,
+							     mirrored. -->
+							<th scope="col" class="px-2.5 py-2 text-[11px] font-semibold text-pii-muted">
+								{$i18n.t('Policy group')}
+							</th>
+							<th
+								scope="col"
+								class="px-2.5 py-2 text-right text-[11px] font-semibold text-pii-muted"
+							>
+								{$i18n.t('Account')}
+							</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -366,7 +386,11 @@
 									{:else if row.masking === 'default'}
 										<Pill kind="ok">{$i18n.t('On — default')}</Pill>
 									{:else if row.masking === 'on'}
-										<Pill kind="ok">{$i18n.t('On')}</Pill>
+										<!-- Qualified like the other three: a bare "On" was the only
+										     state that did not say where it came from, which made it
+										     read as "the normal one" rather than as one of four
+										     distinct answers. -->
+										<Pill kind="ok">{$i18n.t('On — by user')}</Pill>
 									{:else}
 										<Pill kind="warn">{$i18n.t('Off — flagged')}</Pill>
 									{/if}
