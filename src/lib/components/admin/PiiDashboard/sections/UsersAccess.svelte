@@ -569,18 +569,21 @@
 
 				<div class="mt-4 flex justify-end gap-2">
 					<Button on:click={() => (pending = null)}>{$i18n.t('Cancel')}</Button>
-					<span
-						class:pointer-events-none={submitting ||
+					<!-- The real `disabled` attribute, not a wrapper that only stops the
+					     pointer: this button commits a governance mutation, and a
+					     keyboard reaching it while the required reason is empty is a
+					     dead keypress that assistive tech announced as live. The same
+					     condition still guards `submitAction`, which is what the route
+					     ultimately relies on. -->
+					<Button
+						variant="primary"
+						disabled={submitting ||
 							!pending.groupId ||
 							(pending.mode === 'remove' && !pending.reason.trim())}
-						class:opacity-40={submitting ||
-							!pending.groupId ||
-							(pending.mode === 'remove' && !pending.reason.trim())}
+						on:click={submitAction}
 					>
-						<Button variant="primary" on:click={submitAction}>
-							{pending.mode === 'enforce' ? $i18n.t('Enforce') : $i18n.t('Remove')}
-						</Button>
-					</span>
+						{pending.mode === 'enforce' ? $i18n.t('Enforce') : $i18n.t('Remove')}
+					</Button>
 				</div>
 			</div>
 		</div>
