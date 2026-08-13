@@ -453,6 +453,14 @@
 									{/if}
 								</td>
 								<td class="px-2.5 py-2.5 text-right align-middle">
+									<!--
+										The full users tab, not a deep link to this row. There is no
+										per-user admin route — editing happens in a modal held in
+										`UserList`'s local state — and handing that page a pre-filled
+										search would drop the admin into a filtered list they did not
+										ask for. This column is a way out of the dashboard, not a
+										selection.
+									-->
 									<Button on:click={() => goto('/admin/users')}>{$i18n.t('Manage')}</Button>
 								</td>
 							</tr>

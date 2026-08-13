@@ -108,6 +108,34 @@ describe('createDirectoryLoader', () => {
 		expect(state.loading).toBe(true);
 	});
 
+	it('does not let a superseded load overwrite the one that replaced it', async () => {
+		// The retry race: the first attempt is still in flight when the admin presses
+		// Retry, and it rejects AFTER the second one has already succeeded. Without
+		// supersede handling the late rejection blanks the table and reports an error
+		// that no longer applies.
+		const first = deferred<{ users: typeof USERS }>();
+		const second = deferred<{ users: typeof USERS }>();
+		const calls = [first, second];
+		let index = 0;
+		const fetcher: DirectoryFetcher = vi.fn().mockImplementation(() => calls[index++].promise);
+		const loader = createDirectoryLoader(fetcher);
+
+		const stale = loader.load();
+		const fresh = loader.load();
+
+		second.resolve({ users: USERS });
+		await fresh;
+
+		first.reject({ detail: 'the attempt that was superseded' });
+		await stale;
+
+		const state = get(loader);
+		expect(state.users).toEqual(USERS);
+		expect(state.failed).toBe(false);
+		expect(state.errorDetail).toBeNull();
+		expect(state.loading).toBe(false);
+	});
+
 	it('does not report a failure that lands after it was destroyed', async () => {
 		const pending = deferred<{ users: typeof USERS }>();
 		const fetcher: DirectoryFetcher = vi.fn().mockImplementation(() => pending.promise);

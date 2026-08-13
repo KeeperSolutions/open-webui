@@ -38,8 +38,14 @@ export function createDirectoryLoader(fetcher: DirectoryFetcher = defaultFetcher
 	let inFlight: AbortController | null = null;
 
 	const load = async () => {
-		// No supersede handling: this request takes no parameters, so two concurrent
-		// loads cannot disagree about the answer. The controller exists for destroy().
+		// ⚠️ Supersede, like the other two loaders. The earlier reasoning here — "the
+		// request takes no parameters, so two concurrent loads cannot disagree" — was
+		// wrong: they cannot disagree about `users`, but they can disagree about
+		// `failed`. Retry fires while the first load is still in flight (the button
+		// appears as soon as EITHER metrics or the directory fails), and a slow
+		// first attempt rejecting after a fast second one succeeded would blank the
+		// table and show an error that no longer applies.
+		inFlight?.abort();
 		const controller = new AbortController();
 		inFlight = controller;
 
