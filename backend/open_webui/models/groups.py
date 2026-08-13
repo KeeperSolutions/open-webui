@@ -123,8 +123,32 @@ class UserIdsForm(BaseModel):
     user_ids: Optional[list[str]] = None
 
 
+class GroupMembershipForm(UserIdsForm):
+    """`UserIdsForm` plus the audit reason for membership of a POLICY group.
+
+    Optional, and ignored entirely for groups that do not enforce PII masking —
+    the membership routes keep their existing shape for every other caller.
+    Required only when removing someone from a group that does enforce, which is
+    a removal from protection (D-6). TRAU-536 §9.4.
+    """
+
+    reason: Optional[str] = None
+
+
 class GroupUpdateForm(GroupForm):
     pass
+
+
+class GroupPolicyUpdateForm(GroupUpdateForm):
+    """`GroupUpdateForm` plus the audit reason for the PII masking policy.
+
+    Separate type rather than a field on `GroupUpdateForm` because `reason` is
+    not a column: `update_group_by_id` feeds the form straight into an UPDATE
+    statement, so a stray key there would be an invalid column. The route strips
+    it before calling the model — see routers/groups.py. TRAU-536 §9.2.
+    """
+
+    reason: Optional[str] = None
 
 
 class GroupListResponse(BaseModel):

@@ -39,6 +39,12 @@
 
 	export let permissions = DEFAULT_PERMISSIONS;
 
+	// TRAU-536. Captured from the SAVED group, not from the live `permissions`
+	// object, so the Reason field is driven by what the change is being made
+	// against rather than by the switch's current position.
+	let piiEnforcedInitially = false;
+	let reason = '';
+
 	const submitHandler = async () => {
 		loading = true;
 
@@ -46,7 +52,10 @@
 			name,
 			description,
 			data,
-			permissions
+			permissions,
+			// Only sent when enforcement is actually being removed. The route
+			// records it in the audit log and rejects the change without it.
+			...(piiEnforcedInitially && !permissions?.chat?.pii_masking_enforced ? { reason } : {})
 		};
 
 		await onSubmit(group);
@@ -72,6 +81,9 @@
 			data = group?.data ?? {};
 
 			userCount = group?.member_count ?? 0;
+
+			piiEnforcedInitially = loadedPermissions?.chat?.pii_masking_enforced === true;
+			reason = '';
 		}
 	};
 
@@ -210,9 +222,21 @@
 										}}
 									/>
 								{:else if selectedTab == 'permissions'}
-									<Permissions bind:permissions {defaultPermissions} />
+									<Permissions
+										bind:permissions
+										bind:reason
+										{piiEnforcedInitially}
+										groupId={group?.id}
+										{defaultPermissions}
+									/>
 								{:else if selectedTab == 'users'}
-									<Users bind:userCount groupId={group?.id} />
+									<!-- Live switch position, not the saved one: the reason prompt
+									     must follow what the admin is about to save. -->
+									<Users
+										bind:userCount
+										groupId={group?.id}
+										piiEnforced={!!permissions?.chat?.pii_masking_enforced}
+									/>
 								{/if}
 							</div>
 
