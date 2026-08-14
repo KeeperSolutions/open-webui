@@ -7,6 +7,7 @@
 	import Pill from '../parts/Pill.svelte';
 	import Button from '../parts/Button.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import type { MetricRow } from '$lib/apis/langfuse';
@@ -17,6 +18,8 @@
 		buildRows,
 		unattributedCost,
 		maskingRank,
+		pageOf,
+		ROWS_PER_PAGE,
 		rowActionFor,
 		type MaskingState,
 		type AccessUser,
@@ -189,6 +192,19 @@
 	$: sorted = sortRows(rows, orderBy, direction);
 
 	/**
+	 * Which page of the sorted list is on screen.
+	 *
+	 * Reset whenever the list is re-ordered or replaced: page 3 of a re-sorted
+	 * table is a different set of people, and after a policy action reloads the
+	 * section it may not exist at all. `pageOf` clamps as a second line of
+	 * defence, so a stale number renders the last page rather than nothing.
+	 */
+	let page = 1;
+	$: if (orderBy || direction || rows) page = 1;
+
+	$: paged = pageOf(sorted, page);
+
+	/**
 	 * Spend the rows above do not account for.
 	 *
 	 * Kept exhaustive with the column on purpose: every metric row lands either
@@ -203,9 +219,12 @@
 		? 'Cost not matched to a user above, including the users not listed'
 		: 'Cost from activity that matches no user in this directory';
 
+	// ⚠️ "across every page" is load-bearing now the table paginates: this figure
+	// is computed from ALL users, so it balances against the whole table and not
+	// against the rows currently on screen.
 	$: unattributedTitle = truncated
-		? 'The list is cut off, so this also covers users who exist but are not shown, alongside identities with no account here. The column still reconciles with Total cost above.'
-		: 'Langfuse recorded this spend against an identity with no matching account here — a deleted user, another environment, or a trace with no user id. It is included so this column reconciles with Total cost above.';
+		? 'The list is cut off, so this also covers users who exist but are not shown, alongside identities with no account here. The column still reconciles with Total cost above, summed across every page.'
+		: 'Langfuse recorded this spend against an identity with no matching account here — a deleted user, another environment, or a trace with no user id. It is included so this column reconciles with Total cost above, summed across every page.';
 
 	// `key: null` marks a column that is not sortable. Nothing uses it right now —
 	// every remaining column sorts — but the header loop still handles it, so a
@@ -285,23 +304,9 @@
 
 			<!-- Horizontal scroll is the safety net for narrow screens; cells wrap
 			     rather than force it, so the table matches the mock at width. -->
-			<!--
-				The table scrolls inside its own box rather than growing the page.
-
-				⚠️ Scroll, not pagination. Every row stays in the DOM, so the
-				browser's own find-in-page reaches all of them — and this section has
-				no search field of its own, which makes that the only way to look one
-				person up. Paging would also add state that can outlive the list it
-				indexed: sorting re-orders it, and a policy action reloads it.
-
-				The cap is in `rem` rather than a row count because a row is two lines
-				(name over email) and its height is not a constant this file owns.
-			-->
-			<div class="max-h-[34rem] w-full overflow-x-auto overflow-y-auto">
+			<div class="w-full overflow-x-auto">
 				<table class="w-full text-left text-[13px]">
-					<!-- Carries the surface colour as well as `sticky`: without a
-					     background the rows show through the header as they pass under it. -->
-					<thead class="sticky top-0 z-10 bg-pii-white">
+					<thead>
 						<tr class="border-b border-pii-line">
 							{#each COLUMNS as col}
 								{#if col.key === null}
@@ -358,7 +363,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each sorted as row (row.id)}
+						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
 							{@const action = rowActionFor(row, policyGroups)}
@@ -493,14 +498,8 @@
 					</tbody>
 
 					{#if !costUnknown && unattributed !== 0}
-						<!-- Outside <tbody>, so it is structurally exempt from sorting.
-
-						     Pinned to the bottom of the scroll box rather than left to
-						     scroll off: this row is what makes the Cost column reconcile
-						     with section 3, and a total that has to be scrolled to is a
-						     total most readers never see. Kept inside the table so the
-						     columns stay aligned with the rows above. -->
-						<tfoot class="sticky bottom-0 z-10 bg-pii-side">
+						<!-- Outside <tbody>, so it is structurally exempt from sorting. -->
+						<tfoot>
 							<tr
 								class="border-t border-pii-line bg-pii-side transition-opacity {costStale
 									? 'opacity-40'
@@ -529,6 +528,21 @@
 					{/if}
 				</table>
 			</div>
+
+			{#if sorted.length > ROWS_PER_PAGE}
+				<!--
+					Paging is presentation only — it slices `sorted`, which is the whole
+					fetched set, so sorting still orders every row and the footer above
+					still reconciles across the table. The ceiling notice, when there is
+					one, is about the FETCH and stays independent of this.
+
+					⚠️ Wrapped so this section can hold the shared Pagination to its own
+					palette — see the note on `.pii-pagination` below.
+				-->
+				<div class="pii-pagination">
+					<Pagination bind:page count={sorted.length} perPage={ROWS_PER_PAGE} />
+				</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -628,3 +642,50 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	/*
+	 * Hold the shared Pagination to this dashboard's palette.
+	 *
+	 * ⚠️ This section is light-locked: the shell paints `bg-pii-bg` / `text-pii-ink`
+	 * and real dark mode is out of scope. `common/Pagination.svelte` does not know
+	 * that — it carries `dark:` utilities, which key off `html.dark` and therefore
+	 * still fire inside a panel that is deliberately light. In dark mode that gave
+	 * `dark:hover:bg-gray-850` (near-black) under text that the light lock keeps at
+	 * `--color-pii-ink` (near-black): the page number disappeared on hover.
+	 *
+	 * Overridden here rather than in the component itself, which is upstream and
+	 * shared by eleven other screens where its dark variants are correct. Scoped to
+	 * this wrapper, so nothing outside section 4 changes.
+	 */
+	.pii-pagination :global(button) {
+		color: var(--color-pii-ink);
+	}
+
+	.pii-pagination :global(button:hover:not([data-selected])) {
+		background-color: var(--color-pii-side);
+	}
+
+	/*
+	 * The current page reads as a chip, not as an inverted button.
+	 *
+	 * A touch deeper than `--color-pii-blue-soft`, which on its own barely
+	 * separated from the white panel. Mixed from the two existing tokens rather
+	 * than added as a new hex: the palette comes from Figma and gaining an
+	 * undocumented colour here is how a palette starts to drift.
+	 */
+	.pii-pagination :global(button[data-selected]),
+	.pii-pagination :global(button[data-selected]:hover) {
+		background-color: color-mix(in oklab, var(--color-pii-blue) 12%, var(--color-pii-blue-soft));
+		color: var(--color-pii-blue-ink);
+	}
+
+	/* Prev/next arrows are strokes, not text, so they need the colour too. */
+	.pii-pagination :global(button svg) {
+		color: var(--color-pii-ink);
+	}
+
+	.pii-pagination :global(button:disabled svg) {
+		color: var(--color-pii-muted);
+	}
+</style>

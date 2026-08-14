@@ -251,6 +251,32 @@ export function maskingRank(state: MaskingState): number {
 	return { off: 0, default: 1, on: 2, enforced: 3 }[state];
 }
 
+/** How many rows one page of the table shows. */
+export const ROWS_PER_PAGE = 10;
+
+/**
+ * The page an already-sorted list should show.
+ *
+ * ⚠️ Paging is applied AFTER sorting, over the whole fetched set — never by
+ * asking the server for a page. Three of the five sort keys are not database
+ * columns (`status` and `masking` are computed, `cost` comes from Langfuse), so
+ * a server-side page would sort only the rows that happen to be on screen. This
+ * is presentation, and nothing about the section's arithmetic depends on it:
+ * `unattributedCost` still reads every user, so the reconciliation with section
+ * 3 holds across the table rather than per page.
+ *
+ * Clamps rather than trusting the caller. A page number can outlive the list it
+ * indexed — sorting changes, and a policy action reloads the section — and an
+ * out-of-range page would render an empty table that looks like "no users".
+ */
+export function pageOf<T>(list: T[], page: number, perPage: number = ROWS_PER_PAGE): T[] {
+	if (perPage <= 0) return list;
+	const lastPage = Math.max(1, Math.ceil(list.length / perPage));
+	const safe = Math.min(Math.max(1, Math.floor(page) || 1), lastPage);
+	const start = (safe - 1) * perPage;
+	return list.slice(start, start + perPage);
+}
+
 /**
  * Which i18n key renders a granted-model count.
  *

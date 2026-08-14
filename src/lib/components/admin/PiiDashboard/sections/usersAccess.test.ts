@@ -9,6 +9,8 @@ import {
 	modelsCountKey,
 	maskingStateOf,
 	maskingRank,
+	pageOf,
+	ROWS_PER_PAGE,
 	policyGroupsOf,
 	rowActionFor,
 	type AccessUser,
@@ -494,5 +496,53 @@ describe('buildRows — policy sources', () => {
 
 	it('defaults to none when the backend does not send the field', () => {
 		expect(buildRows([user({ pii_masking_enforced: true })], [])[0].policyGroupIds).toEqual([]);
+	});
+});
+
+describe('pageOf', () => {
+	const list = Array.from({ length: 63 }, (_, i) => i);
+
+	it('returns the first page by default', () => {
+		expect(pageOf(list, 1, 25)).toEqual(list.slice(0, 25));
+	});
+
+	it('returns the middle page', () => {
+		expect(pageOf(list, 2, 25)).toEqual(list.slice(25, 50));
+	});
+
+	it('returns a short last page rather than padding it', () => {
+		expect(pageOf(list, 3, 25)).toEqual(list.slice(50, 63));
+	});
+
+	it('never drops or duplicates a row across the pages', () => {
+		const pages = [1, 2, 3].flatMap((p) => pageOf(list, p, 25));
+		expect(pages).toEqual(list);
+	});
+
+	it('clamps a page past the end to the last one', () => {
+		// A page number outlives the list it indexed: sorting changes, and a policy
+		// action reloads the section. Rendering nothing would read as "no users".
+		expect(pageOf(list, 99, 25)).toEqual(list.slice(50, 63));
+	});
+
+	it('clamps a page below one', () => {
+		expect(pageOf(list, 0, 25)).toEqual(list.slice(0, 25));
+		expect(pageOf(list, -3, 25)).toEqual(list.slice(0, 25));
+	});
+
+	it('leaves a list shorter than a page whole', () => {
+		expect(pageOf([1, 2, 3], 1, 25)).toEqual([1, 2, 3]);
+	});
+
+	it('returns nothing for an empty list instead of throwing', () => {
+		expect(pageOf([], 1, 25)).toEqual([]);
+	});
+
+	it('falls back to the whole list when the page size is not positive', () => {
+		expect(pageOf(list, 2, 0)).toEqual(list);
+	});
+
+	it('defaults to the page size the table uses', () => {
+		expect(pageOf(list, 1)).toEqual(list.slice(0, ROWS_PER_PAGE));
 	});
 });
