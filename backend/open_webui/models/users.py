@@ -369,7 +369,19 @@ class UsersTable:
         skip: Optional[int] = None,
         limit: Optional[int] = None,
         db: Optional[Session] = None,
+        locate: Optional[str] = None,
     ) -> dict:
+        """List one page of users, and optionally say where a given user sits.
+
+        `locate` adds `position` to the result: the zero-based index of that user
+        in the FULL filtered, ordered list — not in the page being returned.
+
+        ⚠️ It is a parameter here rather than a function of its own so the
+        position is measured against the very same `filter` and `order_by` the
+        page is built from. A separate implementation could drift from this one,
+        and a position measured under a different order is not a position, it is
+        a wrong answer that looks right.
+        """
         with get_db_context(db) as db:
             # Join GroupMember so we can order by group_id when requested
             query = db.query(User).options(defer(User.profile_image_url))
@@ -489,6 +501,14 @@ class UsersTable:
             # Count BEFORE pagination
             total = query.count()
 
+            # Also before pagination, and reading ids only: the position is an
+            # index into the whole list, so it cannot be taken from the page.
+            position = None
+            if locate:
+                ids = [row[0] for row in query.with_entities(User.id).all()]
+                if locate in ids:
+                    position = ids.index(locate)
+
             # correct pagination logic
             if skip is not None:
                 query = query.offset(skip)
@@ -499,6 +519,7 @@ class UsersTable:
             return {
                 'users': [UserModel.model_validate(user) for user in users],
                 'total': total,
+                'position': position,
             }
 
     def get_users_by_group_id(self, group_id: str, db: Optional[Session] = None) -> list[UserModel]:

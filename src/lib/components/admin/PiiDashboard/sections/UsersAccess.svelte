@@ -285,9 +285,23 @@
 
 			<!-- Horizontal scroll is the safety net for narrow screens; cells wrap
 			     rather than force it, so the table matches the mock at width. -->
-			<div class="w-full overflow-x-auto">
+			<!--
+				The table scrolls inside its own box rather than growing the page.
+
+				⚠️ Scroll, not pagination. Every row stays in the DOM, so the
+				browser's own find-in-page reaches all of them — and this section has
+				no search field of its own, which makes that the only way to look one
+				person up. Paging would also add state that can outlive the list it
+				indexed: sorting re-orders it, and a policy action reloads it.
+
+				The cap is in `rem` rather than a row count because a row is two lines
+				(name over email) and its height is not a constant this file owns.
+			-->
+			<div class="max-h-[34rem] w-full overflow-x-auto overflow-y-auto">
 				<table class="w-full text-left text-[13px]">
-					<thead>
+					<!-- Carries the surface colour as well as `sticky`: without a
+					     background the rows show through the header as they pass under it. -->
+					<thead class="sticky top-0 z-10 bg-pii-white">
 						<tr class="border-b border-pii-line">
 							{#each COLUMNS as col}
 								{#if col.key === null}
@@ -460,16 +474,33 @@
 										search would drop the admin into a filtered list they did not
 										ask for. This column is a way out of the dashboard, not a
 										selection.
+
+										⚠️ `/admin/users/overview`, not `/admin/users`. The latter is a
+										redirect stub that pushes rather than replaces, so going through
+										it left TWO history entries for one click — and Back landed on
+										the stub, which redirected forward again. The dashboard became
+										unreachable by Back. Same destination, one entry.
 									-->
-									<Button on:click={() => goto('/admin/users')}>{$i18n.t('Manage')}</Button>
+									<Button
+										on:click={() =>
+											goto(`/admin/users/overview?highlight=${encodeURIComponent(row.id)}`)}
+									>
+										{$i18n.t('Manage')}
+									</Button>
 								</td>
 							</tr>
 						{/each}
 					</tbody>
 
 					{#if !costUnknown && unattributed !== 0}
-						<!-- Outside <tbody>, so it is structurally exempt from sorting. -->
-						<tfoot>
+						<!-- Outside <tbody>, so it is structurally exempt from sorting.
+
+						     Pinned to the bottom of the scroll box rather than left to
+						     scroll off: this row is what makes the Cost column reconcile
+						     with section 3, and a total that has to be scrolled to is a
+						     total most readers never see. Kept inside the table so the
+						     columns stay aligned with the rows above. -->
+						<tfoot class="sticky bottom-0 z-10 bg-pii-side">
 							<tr
 								class="border-t border-pii-line bg-pii-side transition-opacity {costStale
 									? 'opacity-40'

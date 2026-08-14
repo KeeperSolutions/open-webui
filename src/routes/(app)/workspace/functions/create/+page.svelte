@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 
 	onMount(() => {
-		goto('/admin/functions/create');
+		// A redirect, not a destination — see the note in /admin/+page.svelte.
+		goto('/admin/functions/create', { replaceState: true });
 	});
 </script>
