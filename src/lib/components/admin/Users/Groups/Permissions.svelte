@@ -3,12 +3,27 @@
 	const i18n = getContext('i18n');
 
 	import Switch from '$lib/components/common/Switch.svelte';
+	import PiiAudit from './PiiAudit.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
 
 	export let permissions = {};
 	export let defaultPermissions = {};
+
+	// The reason travels with the save and lands in the audit log; it is required
+	// only when enforcement is being turned OFF — a removal from protection has to
+	// say why. The route enforces the same rule, so this
+	// field is a convenience, never the control.
+	export let reason = '';
+	// Whether the group had enforcement on when the modal opened. Held by the
+	// parent, which sees the saved group: deriving it here would reset every
+	// time this tab is remounted, and the field would vanish mid-edit.
+	export let piiEnforcedInitially = false;
+	/** Absent in the default-permissions modal; the panel renders nothing then. */
+	export let groupId: string | undefined = undefined;
+
+	$: piiEnforcementBeingRemoved = piiEnforcedInitially && !permissions?.chat?.pii_masking_enforced;
 
 	// Reactive statement to ensure all fields are present in `permissions`
 	$: {
@@ -744,6 +759,40 @@
 				{/if}
 			</div>
 		{/if}
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Enforce PII Masking')}
+				</div>
+				<Switch bind:state={permissions.chat.pii_masking_enforced} />
+			</div>
+			{#if defaultPermissions?.chat?.pii_masking_enforced && !permissions.chat.pii_masking_enforced}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+
+			{#if piiEnforcementBeingRemoved}
+				<div class="mt-1.5">
+					<div class="text-xs text-gray-500 mb-1">
+						{$i18n.t('Members of this group will be able to turn PII masking off again.')}
+					</div>
+					<input
+						class="w-full text-xs py-1.5 px-2.5 rounded-xl bg-gray-50 dark:bg-gray-850 placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-hidden"
+						type="text"
+						bind:value={reason}
+						placeholder={$i18n.t('Reason for removing enforcement (required)')}
+						required
+					/>
+				</div>
+			{/if}
+
+			<!-- The record of what was done to this switch, next to the switch. -->
+			<PiiAudit {groupId} />
+		</div>
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />

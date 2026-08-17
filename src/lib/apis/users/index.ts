@@ -121,7 +121,8 @@ export const getUsers = async (
 	query?: string,
 	orderBy?: string,
 	direction?: string,
-	page = 1
+	page = 1,
+	signal?: AbortSignal
 ) => {
 	let error = null;
 	let res = null;
@@ -147,13 +148,17 @@ export const getUsers = async (
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
-		}
+		},
+		signal
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
 		.catch((err) => {
+			// A caller that went away aborted this on purpose and discards the result,
+			// so it must not surface as a console error.
+			if (err?.name === 'AbortError') return null;
 			console.error(err);
 			error = err.detail;
 			return null;
@@ -164,6 +169,39 @@ export const getUsers = async (
 	}
 
 	return res;
+};
+
+/**
+ * Which page of `getUsers` a given user falls on.
+ *
+ * ⚠️ Pass the SAME `orderBy`/`direction` the list is rendered with. The page a
+ * user sits on is a function of the ordering, so a position asked for under one
+ * sort and applied to another points at the wrong person.
+ *
+ * Returns null when the user is not in the directory (404) or the call fails —
+ * callers treat that as "cannot jump", never as page 1.
+ */
+export const locateUser = async (
+	token: string,
+	userId: string,
+	orderBy?: string,
+	direction?: string
+): Promise<number | null> => {
+	const searchParams = new URLSearchParams({ user_id: userId });
+	if (orderBy) searchParams.set('order_by', orderBy);
+	if (direction) searchParams.set('direction', direction);
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/locate?${searchParams.toString()}`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (r) => (r.ok ? await r.json() : null))
+		.catch(() => null);
+
+	return typeof res?.page === 'number' ? res.page : null;
 };
 
 export const searchUsers = async (
@@ -216,7 +254,7 @@ export const searchUsers = async (
 	return res;
 };
 
-export const getAllUsers = async (token: string) => {
+export const getAllUsers = async (token: string, signal?: AbortSignal) => {
 	let error = null;
 	let res = null;
 
@@ -225,13 +263,17 @@ export const getAllUsers = async (token: string) => {
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
-		}
+		},
+		signal
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
 		.catch((err) => {
+			// A caller that went away aborted this on purpose and discards the result,
+			// so it must not surface as a console error.
+			if (err?.name === 'AbortError') return null;
 			console.error(err);
 			error = err.detail;
 			return null;

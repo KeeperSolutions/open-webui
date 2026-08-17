@@ -4,7 +4,8 @@ export type Agg = { name: string; tokens: number; cost: number; detail?: string 
 export type BarDatum = Agg & { percent: number };
 
 /** The subset of an OWUI user this module needs to label a Langfuse row. */
-export type DirectoryUser = { id: string; email: string; name?: string };
+/** `role` is optional because only `inactiveUsers` reads it; see its note. */
+export type DirectoryUser = { id: string; email: string; name?: string; role?: string };
 
 /**
  * Identity key for a Langfuse `user` value. Langfuse and OWUI can disagree on
@@ -121,6 +122,16 @@ export function totals(rows: MetricRow[]): { cost: number; tokens: number; obser
 	);
 }
 
+/**
+ * Accounts that could spend but did not, over accounts that could spend.
+ *
+ * `pending` is excluded from both sides. Such an account is locked out at
+ * `get_verified_user`, so its zero usage is **structural, not behavioural** —
+ * counting it as an idle licence overstates what an admin could actually
+ * reclaim, and the more unapproved registrations an instance carries, the more
+ * it overstates. A missing `role` counts as licensed: the field is optional on
+ * the type, and treating unknown as pending would silently shrink the figure.
+ */
 export function inactiveUsers(
 	rows: MetricRow[],
 	allUsers: DirectoryUser[]
@@ -128,6 +139,7 @@ export function inactiveUsers(
 	const active = new Set(rows.map((r) => normalizeUserKey(r.user)));
 	const isActive = (u: DirectoryUser) =>
 		active.has(normalizeUserKey(u.email)) || active.has(normalizeUserKey(u.id));
-	const inactive = allUsers.filter((u) => !isActive(u)).length;
-	return { inactive, total: allUsers.length };
+	const licensed = allUsers.filter((u) => u.role !== 'pending');
+	const inactive = licensed.filter((u) => !isActive(u)).length;
+	return { inactive, total: licensed.length };
 }

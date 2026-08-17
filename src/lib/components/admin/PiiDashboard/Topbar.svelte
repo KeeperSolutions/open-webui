@@ -3,8 +3,6 @@
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import PeriodPill from './parts/PeriodPill.svelte';
-	import Toggle from './parts/Toggle.svelte';
-	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import { PERIOD_KEYS, periodLabel, formatWindow, type PeriodKey } from './periods';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
@@ -59,15 +57,14 @@
 			{/if}
 		</div>
 
-		<!-- TODO(TRAU-533 §D13): global PII masking toggle is a mutation with no
-		     agreed backend; rendered disabled until that decision lands. -->
-		<div
-			class="flex items-center gap-2 rounded-full border border-pii-line bg-pii-white px-3.5 py-2"
-			title={$i18n.t('Global PII masking control is not yet available')}
-		>
-			<HgIconShield class="size-4 text-pii-ink" />
-			<span class="text-[13px] font-medium text-pii-ink">{$i18n.t('PII Masking')}</span>
-			<Toggle on disabled ariaLabel={$i18n.t('PII Masking')} />
-		</div>
+		<!--
+			The disabled "PII Masking" toggle that used to sit here is gone.
+			It claimed the decision had not been made, and it had:
+			masking is enforced per group, its value is edited in the group's
+			Permissions tab, and who falls under it is changed row by row in
+			section 4. A dead control next to live ones reads as a broken feature,
+			and an instance-wide switch would have contradicted the per-group model
+			the policy actually uses.
+		-->
 	</div>
 </div>

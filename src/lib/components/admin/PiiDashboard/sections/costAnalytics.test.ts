@@ -201,4 +201,49 @@ describe('inactiveUsers', () => {
 	it('handles no users', () => {
 		expect(inactiveUsers([row('a@x', 'm', 1, 0.1)], [])).toEqual({ inactive: 0, total: 0 });
 	});
+
+	it('leaves pending accounts out of both the numerator and the denominator', () => {
+		// A pending account is locked out at get_verified_user: its zero usage is
+		// structural, so counting it as an idle licence overstates the opportunity.
+		const out = inactiveUsers(
+			[row('a@x.com', 'm', 1, 0.1)],
+			[
+				...users,
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' },
+				{ id: 'id-5', email: 'e@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 2, total: 3 });
+	});
+
+	it('excludes a pending account even if it somehow has usage', () => {
+		// Structurally impossible, but the function stays total rather than
+		// letting impossible data decide the figure.
+		const out = inactiveUsers(
+			[row('d@x.com', 'm', 1, 0.1)],
+			[
+				{ id: 'id-1', email: 'a@x.com' },
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 1, total: 1 });
+	});
+
+	it('returns 0 / 0 for a directory of nothing but pending accounts', () => {
+		const out = inactiveUsers(
+			[row('a@x.com', 'm', 1, 0.1)],
+			[
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' },
+				{ id: 'id-5', email: 'e@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 0, total: 0 });
+	});
+
+	it('counts a user with no role as licensed, not as pending', () => {
+		// `role` is optional on DirectoryUser; treating unknown as pending would
+		// silently shrink the denominator.
+		const out = inactiveUsers([], [{ id: 'id-1', email: 'a@x.com' }]);
+		expect(out).toEqual({ inactive: 1, total: 1 });
+	});
 });

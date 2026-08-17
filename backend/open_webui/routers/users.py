@@ -39,7 +39,13 @@ from open_webui.utils.auth import (
     get_verified_user,
     validate_password,
 )
-from open_webui.utils.access_control import get_permissions, has_permission
+from open_webui.utils.access_control import (
+    get_permissions,
+    has_permission,
+    has_permission_for_groups,
+)
+from open_webui.config import PII_MASKING_ENFORCED_PERMISSION
+from open_webui.utils.pii_policy import group_enforces_pii_masking
 
 log = logging.getLogger(__name__)
 
@@ -56,8 +62,37 @@ router = APIRouter()
 PAGE_ITEM_COUNT = 30
 
 
+def _list_filter(
+    query: Optional[str] = None,
+    order_by: Optional[str] = None,
+    direction: Optional[str] = None,
+) -> dict:
+    """The filter dict `GET /users/` builds, in one place.
+
+    Shared with `/locate` so a position can never be measured under a different
+    ordering than the page it is meant to index into.
+
+    ⚠️ The final unconditional `direction` assignment is pre-existing behaviour
+    and is kept deliberately: it makes the dict non-empty even when nothing was
+    requested, which is what stops `get_users` from falling into its
+    `created_at DESC` default. Removing it would silently re-order every
+    unsorted listing in the app.
+    """
+    filter: dict = {}
+    if query:
+        filter['query'] = query
+    if order_by:
+        filter['order_by'] = order_by
+    if direction:
+        filter['direction'] = direction
+
+    filter['direction'] = direction
+    return filter
+
+
 @router.get('/', response_model=UserGroupIdsListResponse)
 async def get_users(
+    request: Request,
     query: Optional[str] = None,
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
@@ -70,15 +105,7 @@ async def get_users(
     page = max(1, page)
     skip = (page - 1) * limit
 
-    filter = {}
-    if query:
-        filter['query'] = query
-    if order_by:
-        filter['order_by'] = order_by
-    if direction:
-        filter['direction'] = direction
-
-    filter['direction'] = direction
+    filter = _list_filter(query=query, order_by=order_by, direction=direction)
 
     result = Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
@@ -89,18 +116,74 @@ async def get_users(
     user_ids = [user.id for user in users]
     user_groups = Groups.get_groups_by_member_ids(user_ids, db=db)
 
+    # The team PII policy, resolved from the groups ALREADY fetched above — zero
+    # additional queries. `has_permission_for_groups` is the same
+    # function `has_permission` delegates to, so this cannot drift from the
+    # enforcement path.
+    default_permissions = request.app.state.config.USER_PERMISSIONS
+
     return {
         'users': [
             UserGroupIdsModel(
                 **{
                     **user.model_dump(),
                     'group_ids': [group.id for group in user_groups.get(user.id, [])],
+                    'pii_masking_enforced': has_permission_for_groups(
+                        user_groups.get(user.id, []),
+                        PII_MASKING_ENFORCED_PERMISSION,
+                        default_permissions,
+                    ),
+                    # Same already-fetched groups, still zero extra queries. This
+                    # asks a different question from the flag above — "which
+                    # groups say yes" rather than "is this user enforced" — so it
+                    # deliberately does NOT consult the instance defaults.
+                    'pii_policy_group_ids': [
+                        group.id
+                        for group in user_groups.get(user.id, [])
+                        if group_enforces_pii_masking(group.permissions)
+                    ],
                 }
             )
             for user in users
         ],
         'total': total,
     }
+
+
+class UserPageResponse(BaseModel):
+    page: int
+
+
+# ⚠️ Declared before `/{user_id}`, or FastAPI matches "locate" as a user id.
+@router.get('/locate', response_model=UserPageResponse)
+async def locate_user(
+    user_id: str,
+    order_by: Optional[str] = None,
+    direction: Optional[str] = None,
+    user=Depends(get_admin_user),
+    db: Session = Depends(get_session),
+):
+    """Which page of `GET /users/` a given user falls on.
+
+    Exists because the list is paginated server-side while its order is a
+    caller's choice, so no client can work out the page for itself without
+    re-implementing the ordering. Callers that want to send an admin straight to
+    one person — the PII dashboard's `Manage` button — pass the SAME `order_by`
+    and `direction` they render with, and get back a page they can jump to.
+    """
+    filter = _list_filter(query=None, order_by=order_by, direction=direction)
+
+    # limit=1: the page itself is thrown away, only `position` is read.
+    result = Users.get_users(filter=filter, skip=0, limit=1, db=db, locate=user_id)
+
+    position = result.get('position')
+    if position is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+
+    return UserPageResponse(page=position // PAGE_ITEM_COUNT + 1)
 
 
 @router.get('/all', response_model=UserInfoListResponse)
@@ -219,6 +302,9 @@ class ChatPermissions(BaseModel):
     multiple_models: bool = True
     temporary: bool = True
     temporary_enforced: bool = False
+    # Named as a restriction so the multi-group OR merge means "strictest wins".
+    # See config.py.
+    pii_masking_enforced: bool = False
 
 
 class FeaturesPermissions(BaseModel):

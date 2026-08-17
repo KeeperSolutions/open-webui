@@ -472,6 +472,7 @@ from open_webui.config import (
     reset_config,
 )
 from open_webui.env import (
+    PII_FILTER_IDS,
     BILLING_ENABLED,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     LICENSE_KEY,
@@ -2123,6 +2124,13 @@ async def get_app_config(request: Request):
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
                     'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
+                    # The ids the pipeline layer treats as mandatory PII filters.
+                    # Exposed because the frontend reads the same list to decide a
+                    # user's masking default; without it the two are hand-kept copies
+                    # and an operator override splits them silently. Sorted, not the
+                    # raw set: the frontend picks the first id it finds a valve for,
+                    # so the order must not depend on set hashing.
+                    'pii_filter_ids': sorted(PII_FILTER_IDS),
                     'enable_trustminder_feedback': ENABLE_TRUSTMINDER_FEEDBACK,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
