@@ -1,16 +1,14 @@
 """Audit log for administrative mutations of the team PII masking policy.
 
-TRAU-536, PII-POLICY-ENGINE-SPEC.md §9.
-
-⚠️ This is deliberately NOT the TRAU-521 PII audit trail (D-5). That one records
-PII *events* (what was masked, when, in which chat) and lives with the pipeline;
-this one records *administrative mutations* (who turned enforcement on, for which
+⚠️ This is deliberately NOT the PII *detection* audit trail. That one records PII
+events (what was masked, when, in which chat) and lives with the pipeline; this
+one records *administrative mutations* (who turned enforcement on, for which
 group, why). Different readers, different retention, different lifetime — and
 binding a governance mutation to the availability of the pipeline would mean the
 policy cannot be changed exactly when it matters most.
 
-⚠️ Writes here are BLOCKING, not best-effort. TRAU-521's PII events are
-best-effort on purpose: an audit outage must never block a chat. The opposite
+⚠️ Writes here are BLOCKING, not best-effort. The detection trail's PII events
+are best-effort on purpose: an audit outage must never block a chat. The opposite
 rule applies to this table — a mutation in a compliance system with no record of
 it is not acceptable, so `insert_event` lets its exceptions propagate and the
 calling route rejects the mutation. Do not "align" the two by wrapping this in a
@@ -34,9 +32,9 @@ log = logging.getLogger(__name__)
 # Event types
 ####################
 
-# The transition lives in the type, not in a pair of before/after booleans
-# (§9.2). `policy_enabled`/`policy_disabled` carry the direction themselves, so
-# the only type-dependent nullable column left is `user_id`.
+# The transition lives in the type, not in a pair of before/after booleans.
+# `policy_enabled`/`policy_disabled` carry the direction themselves, so the only
+# type-dependent nullable column left is `user_id`.
 EVENT_POLICY_ENABLED = 'policy_enabled'
 EVENT_POLICY_DISABLED = 'policy_disabled'
 EVENT_MEMBER_ADDED = 'member_added'
@@ -48,8 +46,8 @@ POLICY_EVENT_TYPES = frozenset({EVENT_POLICY_ENABLED, EVENT_POLICY_DISABLED})
 MEMBER_EVENT_TYPES = frozenset({EVENT_MEMBER_ADDED, EVENT_MEMBER_REMOVED})
 EVENT_TYPES = POLICY_EVENT_TYPES | MEMBER_EVENT_TYPES
 
-# Both are removals from protection, so both must say why — same rule and same
-# reason as D-6. Turning protection ON exposes nobody, so there `reason` is free.
+# Both are removals from protection, so both must say why. Turning protection ON
+# exposes nobody, so there `reason` is free.
 REASON_REQUIRED_EVENT_TYPES = frozenset({EVENT_POLICY_DISABLED, EVENT_MEMBER_REMOVED})
 
 
@@ -69,7 +67,7 @@ class PiiPolicyAudit(Base):
     # NULL for policy_*, required for member_* — enforced by insert_event, not
     # by the DDL: a partial constraint is not portable across the databases this
     # runs on, so the invariant is guarded at the single writer and covered by
-    # tests (T-22b).
+    # tests.
     user_id = Column(Text, nullable=True)
 
     actor_user_id = Column(Text, nullable=False)
@@ -122,8 +120,8 @@ class PiiPolicyAuditTable:
         mutation", which it can only honour if a failed write is visible to it.
 
         Validation lives here rather than only in the route so the invariants
-        hold for every future caller — the membership events (Gate 6b) go
-        through this same door.
+        hold for every future caller — the membership events go through this same
+        door.
         """
         if event_type not in EVENT_TYPES:
             raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
@@ -170,7 +168,7 @@ class PiiPolicyAuditTable:
         newest_first: bool = False,
         db: Optional[Session] = None,
     ) -> list[PiiPolicyAuditModel]:
-        """One group's chronology — the read this table was shaped for (§9.2).
+        """One group's chronology — the read this table was shaped for.
 
         Oldest first by default, which is how the story reads. The panel asks for
         `newest_first` with a limit, because a cut has to drop the old tail and

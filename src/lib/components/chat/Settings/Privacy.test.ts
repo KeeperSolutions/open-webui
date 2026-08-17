@@ -126,9 +126,9 @@ describe('Privacy — policy enforced', () => {
 		h.state.user = { role: 'user', permissions: { chat: { pii_masking_enforced: true } } };
 	});
 
-	// --- Z-1: the invariant the whole spec rests on -------------------------
+	// --- The invariant the whole feature rests on: the policy never writes ---
 
-	it('Z-1: Save does not touch any masking valve while locked', async () => {
+	it('Save does not touch any masking valve while locked', async () => {
 		h.state.settings = STORED_OFF;
 		renderPrivacy();
 		await tick();
@@ -143,10 +143,10 @@ describe('Privacy — policy enforced', () => {
 		}
 	});
 
-	it('Z-1 (literal): the stored valve object is not rewritten at all while locked', async () => {
+	it('literal: the stored valve object is not rewritten at all while locked', async () => {
 		// The value-level assertion above cannot see the guard being removed: with
 		// the structural separation in place, rewriting the valves would write the
-		// SAME value back. This checks the spec's literal "must not touch" instead,
+		// SAME value back. This checks the literal "must not touch" instead,
 		// by reference identity — an untouched valve is still the very object that
 		// came out of settings, while any rewrite produces a fresh one.
 		h.state.settings = STORED_OFF;
@@ -159,7 +159,7 @@ describe('Privacy — policy enforced', () => {
 		expect(persistedValves()?.pii_filter).toBe(originalValve);
 	});
 
-	it('Z-1 (structural): the locked Switch carries no binding back to the stored value', async () => {
+	it('structural: the locked Switch carries no binding back to the stored value', async () => {
 		h.state.settings = STORED_OFF;
 		const { container } = renderPrivacy();
 		await tick();
@@ -212,7 +212,7 @@ describe('Privacy — policy enforced', () => {
 	});
 });
 
-describe('Privacy — D-11 session refresh', () => {
+describe('Privacy — stale-policy session refresh', () => {
 	it('refreshes the session while unlocked', async () => {
 		renderPrivacy();
 		await waitFor(() => expect(getSessionUser).toHaveBeenCalledTimes(1));

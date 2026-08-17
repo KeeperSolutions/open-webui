@@ -393,7 +393,7 @@ describe('maskingRank', () => {
 });
 
 // ---------------------------------------------------------------------------
-// D-14 — the row action
+// The row action
 // ---------------------------------------------------------------------------
 
 const POLICY: PolicyGroup = { id: 'g1', name: 'Policy' };
@@ -423,7 +423,7 @@ describe('policyGroupsOf', () => {
 	});
 });
 
-describe('rowActionFor — E-1', () => {
+describe('rowActionFor — more than one source', () => {
 	it('offers Enforce when the user is not under policy', () => {
 		expect(rowActionFor(actionRow(false), [POLICY])).toEqual({
 			kind: 'enforce',
@@ -468,7 +468,7 @@ describe('rowActionFor — E-1', () => {
 	});
 });
 
-describe('rowActionFor — E-2', () => {
+describe('rowActionFor — destinations', () => {
 	it('carries the single destination when exactly one group has the policy', () => {
 		const action = rowActionFor(actionRow(false), [POLICY]);
 		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });

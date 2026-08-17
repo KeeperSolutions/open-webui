@@ -116,8 +116,8 @@ async def get_users(
     user_ids = [user.id for user in users]
     user_groups = Groups.get_groups_by_member_ids(user_ids, db=db)
 
-    # TRAU-536: the team PII policy, resolved from the groups ALREADY fetched
-    # above — zero additional queries. `has_permission_for_groups` is the same
+    # The team PII policy, resolved from the groups ALREADY fetched above — zero
+    # additional queries. `has_permission_for_groups` is the same
     # function `has_permission` delegates to, so this cannot drift from the
     # enforcement path.
     default_permissions = request.app.state.config.USER_PERMISSIONS
@@ -302,8 +302,8 @@ class ChatPermissions(BaseModel):
     multiple_models: bool = True
     temporary: bool = True
     temporary_enforced: bool = False
-    # TRAU-536: named as a restriction so the multi-group OR merge means
-    # "strictest wins". See config.py and PII-POLICY-ENGINE-SPEC.md §6.1.
+    # Named as a restriction so the multi-group OR merge means "strictest wins".
+    # See config.py.
     pii_masking_enforced: bool = False
 
 

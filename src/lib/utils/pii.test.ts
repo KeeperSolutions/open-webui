@@ -284,8 +284,8 @@ describe('isPiiPipelineConfigured', () => {
 
 describe('piiMaskingForRequest', () => {
 	// The value SENT to the server. Team policy wins over the per-conversation
-	// toggle (D-2), so the resolution is P > B. The backend enforces the same
-	// rule independently; this keeps the frontend from quietly disagreeing.
+	// toggle. The backend enforces the same rule independently; this keeps the
+	// frontend from quietly disagreeing.
 
 	it('policy ON overrides a user who switched masking off', () => {
 		expect(piiMaskingForRequest(true, false)).toBe(true);

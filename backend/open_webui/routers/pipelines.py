@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 
 ##################################
 #
-# Team PII masking policy (TRAU-536, Feature 7 — mandatory masking)
+# Team PII masking policy — mandatory masking
 #
 ##################################
 
@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 # mandatory for this user", never "user may switch it off". Multi-group
 # permissions merge with `permissions[key] or value`, so a restriction yields
 # "strictest wins" while a freedom would yield "loosest wins" — the same line of
-# code, the opposite security outcome. See PII-POLICY-ENGINE-SPEC.md §6.1.
+# code, the opposite security outcome.
 
 # Attribute holding the per-request memo. Keyed by user id rather than stored
 # as a bare bool so a single request can never hand one user another user's
@@ -69,7 +69,7 @@ def resolve_pii_masking_enforced(request, user) -> bool:
     HTTP request, so this resolves to one lookup per request rather than one
     per inlet call.
 
-    NOTE (D-8): there is deliberately NO `user.role == 'admin'` bypass here,
+    NOTE: there is deliberately NO `user.role == 'admin'` bypass here,
     unlike the sibling `temporary_enforced` permission. That one governs UX;
     this one governs whether unmasked PII leaves the infrastructure. An admin
     who needs the policy lifted lifts it on the group — visibly, and with an
@@ -157,12 +157,12 @@ def assert_pii_masking_available(payload, model_id, models, policy_enforced=Fals
     loop would silently skip masking and PII would reach the LLM. Refuse the
     request instead.
 
-    "Required" means REQUESTED **or** MANDATED (TRAU-536). `policy_enforced`
-    carries the team policy. Reading only the payload here would leave a silent
-    hole: under an enforcing policy a user who switches the in-chat toggle off
-    sends features.pii_masking=False, this guard would no-op, and if the pipeline
-    is down the loop below has nothing to iterate — so the message would go out
-    unmasked with no error at all. See PII-POLICY-ENGINE-SPEC.md §5.1/§5.2.
+    "Required" means REQUESTED **or** MANDATED. `policy_enforced` carries the team
+    policy. Reading only the payload here would leave a silent hole: under an
+    enforcing policy a user who switches the in-chat toggle off sends
+    features.pii_masking=False, this guard would no-op, and if the pipeline is
+    down the loop below has nothing to iterate — so the message would go out
+    unmasked with no error at all.
 
     No-ops (does NOT block) when:
       * enforcement is disabled (`PII_FILTER_IDS` empty), or
@@ -236,9 +236,9 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     model_id = payload["model"]
     sorted_filters = get_sorted_filters(model_id, models)
 
-    # Team policy (TRAU-536), resolved ONCE per inlet call and memoized per
-    # request, so the eight task-generator endpoints cost one lookup each rather
-    # than one per filter. Fail-closed: if the policy cannot be determined at all,
+    # Team policy, resolved ONCE per inlet call and memoized per request, so the
+    # eight task-generator endpoints cost one lookup each rather than one per
+    # filter. Fail-closed: if the policy cannot be determined at all,
     # the resolver returns True. Read-only — never written back to user.settings.
     policy_enforced = resolve_pii_masking_enforced(request, user)
 
@@ -250,7 +250,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     # would silently skip masking and PII would reach the LLM. Refuse first.
     # `policy_enforced` is passed so "required" covers MANDATED, not just
     # requested — without it an enforced user who toggled masking off in chat
-    # would slip through this guard entirely (spec §5.1).
+    # would slip through this guard entirely.
     # No-op when masking is neither requested nor mandated, or no PII filter is
     # configured.
     assert_pii_masking_available(payload, model_id, models, policy_enforced)
@@ -293,10 +293,10 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
 
-            # Team policy (TRAU-536) wins over both the stored valve and the
-            # per-request override, so it is applied LAST. Reversing these two
-            # blocks hands the user's False the final word over the policy —
-            # the same lines of code, the opposite outcome (spec §5.3).
+            # Team policy wins over both the stored valve and the per-request
+            # override, so it is applied LAST. Reversing these two blocks hands
+            # the user's False the final word over the policy — the same lines of
+            # code, the opposite outcome.
             if policy_enforced and filter_id in PII_FILTER_IDS:
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": True}
 

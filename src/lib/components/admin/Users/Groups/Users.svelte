@@ -26,7 +26,7 @@
 	export let groupId: string;
 	export let userCount = 0;
 	/**
-	 * Whether this group carries `chat.pii_masking_enforced` (TRAU-536).
+	 * Whether this group carries `chat.pii_masking_enforced`.
 	 *
 	 * ⚠️ Not cosmetic. Removing someone from a group that enforces PII masking is
 	 * a compliance mutation, so the route requires a reason and records it —
@@ -323,7 +323,7 @@
 
 {#if pendingRemoval}
 	<!-- This group enforces PII masking, so taking someone out of it is a
-	     compliance mutation and has to say why (TRAU-536 D-6). The route refuses
+	     compliance mutation and has to say why. The route refuses
 	     it without a reason; this only asks before the round trip. -->
 	<div
 		class="fixed inset-0 z-9999 flex items-center justify-center bg-black/50 p-4"

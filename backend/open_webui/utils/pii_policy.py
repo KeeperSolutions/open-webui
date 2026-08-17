@@ -1,4 +1,4 @@
-"""Helpers for the team PII masking policy (TRAU-536).
+"""Helpers for the team PII masking policy.
 
 Deliberately NOT in `utils/access_control/` — that module is upstream
 (`tim@openwebui.com`), and every line we add there is a line the next upstream
@@ -22,7 +22,7 @@ def group_enforces_pii_masking(permissions: Optional[dict]) -> bool:
     "Is this user enforced" is the other question, and it keeps its single
     implementation in `has_permission_for_groups`.
 
-    A missing key is False, not unknown (spec §6.4). Fail-closed governs
+    A missing key is False, not unknown. Fail-closed governs
     exceptions while resolving a user's effective policy, never a plain negative
     answer about a group's stored permissions.
     """

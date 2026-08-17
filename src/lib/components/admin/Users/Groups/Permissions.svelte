@@ -11,9 +11,9 @@
 	export let permissions = {};
 	export let defaultPermissions = {};
 
-	// TRAU-536. The reason travels with the save and lands in the audit log; it
-	// is required only when enforcement is being turned OFF (D-6 — a removal
-	// from protection has to say why). The route enforces the same rule, so this
+	// The reason travels with the save and lands in the audit log; it is required
+	// only when enforcement is being turned OFF — a removal from protection has to
+	// say why. The route enforces the same rule, so this
 	// field is a convenience, never the control.
 	export let reason = '';
 	// Whether the group had enforcement on when the modal opened. Held by the

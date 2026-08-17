@@ -183,7 +183,7 @@ async def update_group_by_id(
     user=Depends(get_admin_user),
     db: Session = Depends(get_session),
 ):
-    # --- PII masking policy audit (TRAU-536 §9.3) ------------------------------
+    # --- PII masking policy audit ----------------------------------------------
     # Read the previous value BEFORE the write; it is not reconstructable after.
     # A missing group is left alone so the route keeps its existing 400 below,
     # rather than gaining a 404 it never had.
@@ -205,8 +205,8 @@ async def update_group_by_id(
 
     if event_type == EVENT_POLICY_DISABLED and not (form_data.reason or '').strip():
         # Enforced on the route, not just in the UI: frontend validation is a
-        # convenience, not a control. D-6 — turning protection off exposes
-        # people, so it must say why.
+        # convenience, not a control. Turning protection off exposes people, so
+        # it must say why.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.DEFAULT('A reason is required to stop enforcing PII masking.'),
@@ -218,8 +218,8 @@ async def update_group_by_id(
         # session, so there is no shared transaction to roll back afterwards —
         # the only ordering that keeps "no record → no mutation" true is this one.
         #
-        # ⚠️ The opposite of TRAU-521, where PII events are best-effort because
-        # they must never block a chat. Do not align the two.
+        # ⚠️ The opposite of the PII detection audit trail, where events are
+        # best-effort because they must never block a chat. Do not align the two.
         try:
             PiiPolicyAudits.insert_event(
                 event_type=event_type,
@@ -302,10 +302,11 @@ class PiiPolicyAuditResponse(BaseModel):
 def _may_read_pii_audit(user, group_id: str, db: Session) -> bool:
     """Who may read one group's policy audit.
 
-    Admin-only today. Phase B adds the team leader (`team_members.role == 'owner'`
+    Admin-only today. A later phase adds the team leader (`team_members.role == 'owner'`
     for the team this group belongs to) as a SECOND condition here — deliberately
     one function rather than a second route, so widening the audience is an `or`
-    on this line and not a rewrite of the guard. Blocked on D1; see spec §10.2.
+    on this line and not a rewrite of the guard. Blocked on the team-leader role
+    not existing yet.
     """
     return user.role == 'admin'
 
@@ -359,10 +360,10 @@ def _audit_membership_change(
     Membership of an ordinary group has nothing to do with PII, and a table that
     logged every group change would stop being readable as a PII record.
 
-    Same ordering and the same blocking contract as the policy events (§9.3):
-    written before the mutation, exceptions propagate. `changing_user_ids` must
-    already be filtered to those whose membership actually changes — see D-14 /
-    §9.3 on recording transitions rather than requests.
+    Same ordering and the same blocking contract as the policy events: written
+    before the mutation, exceptions propagate. `changing_user_ids` must already be
+    filtered to those whose membership actually changes — this table records
+    transitions, not requests.
     """
     if not changing_user_ids:
         return
@@ -372,8 +373,8 @@ def _audit_membership_change(
         return
 
     if event_type == EVENT_MEMBER_REMOVED and not (reason or '').strip():
-        # D-6, same rule as turning the policy off: taking someone out from
-        # under protection exposes them, so it must say why. On the route, not
+        # Same rule as turning the policy off: taking someone out from under
+        # protection exposes them, so it must say why. On the route, not
         # only in the UI — every caller of this endpoint is bound by it.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

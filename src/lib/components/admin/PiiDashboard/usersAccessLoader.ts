@@ -29,7 +29,7 @@ export type Truncation = { shown: number; total: number };
 export type UsersAccessState = {
 	users: AccessUser[];
 	/**
-	 * The groups that carry the policy, for the row action's destination (E-2).
+	 * The groups that carry the policy, for the row action's destination.
 	 *
 	 * Derived from the group list on every load, never remembered: a destination
 	 * held in component state or localStorage would be per-admin, so the same
@@ -160,7 +160,7 @@ export function createUsersAccessLoader(
 			// The row action needs to know which groups carry the policy. Treated
 			// as load-bearing rather than optional: without it every enforced row
 			// would look like it has a single source, and `Remove` would appear on
-			// rows where removal changes nothing — the one thing E-1 forbids.
+			// rows where removal changes nothing, which the row action must never offer.
 			const groups = await groupsFetcher(controller.signal);
 			if (controller.signal.aborted) return;
 			if (!groups) {

@@ -57,7 +57,7 @@
 	 * and is cleared afterwards. Nothing about the choice survives the call — not
 	 * in component state between calls, not in `localStorage`. A remembered
 	 * destination would be per-admin, so the same action would land in different
-	 * groups depending on who clicked it, with nothing recording why (E-2).
+	 * groups depending on who clicked it, with nothing recording why.
 	 */
 	let pending: {
 		row: UserRow;
@@ -86,7 +86,7 @@
 
 	const submitAction = async () => {
 		if (!pending || !pending.groupId) return;
-		// The route enforces this too; here it only saves a round trip (D-6).
+		// The route enforces this too; here it only saves a round trip.
 		if (pending.mode === 'remove' && !pending.reason.trim()) return;
 
 		submitting = true;
@@ -184,8 +184,8 @@
 		});
 	};
 
-	// No catalogue is passed: the models column is gone (Gate 6d) and its fetch
-	// with it (6e). `buildRows` keeps the parameter and its default, so
+	// No catalogue is passed: the models column is gone and its fetch with it.
+	// `buildRows` keeps the parameter and its default, so
 	// `grantedCount`/`allModels` stay computed-from-nothing rather than deleted —
 	// the next thing to report model access resolves them the same way.
 	$: rows = buildRows(users, metricRows);
@@ -239,7 +239,7 @@
 		{ key: 'role', label: 'Role' },
 		{ key: 'status', label: 'Status' },
 		// There is deliberately no models column. `Workspace models` used to sit
-		// here and was removed (Gate 6d): it measured /models/list, which is the
+		// here and was removed: it measured /models/list, which is the
 		// Workspace-derived subset, while the question a reader actually asks is
 		// "which of the models in this system may this person use". No
 		// configuration can answer that today — with BYPASS_MODEL_ACCESS_CONTROL
@@ -401,7 +401,7 @@
 								</td>
 								<td class="px-2.5 py-2.5 align-middle">
 									<!--
-										No Toggle here (D-13): a switch shape is an affordance for
+										No Toggle here: a switch shape is an affordance for
 										changing, and this column is a read-only report. The Pill
 										carries the whole statement in all four states.
 									-->
@@ -433,12 +433,13 @@
 								</td>
 								<td class="px-2.5 py-2.5 align-middle">
 									<!--
-										Membership, never the policy value itself (§8.7). And never an
+										Membership, never the policy value itself, which is edited on
+										the group. And never an
 										action that would not do what its label says: when the policy
 										reaches this user through more than one group, or through the
 										instance default, removing them from any one of them leaves
 										them enforced — so nothing is offered and the source is named
-										instead (E-1).
+										instead.
 									-->
 									{#if action.kind === 'remove'}
 										<Button on:click={() => openRemove(row, action.group)}>
@@ -618,7 +619,7 @@
 
 				{#if pending.mode === 'enforce' && pending.targets.length > 1}
 					<!-- More than one group carries the policy, so the destination is
-					     asked for on every call and remembered on none (E-2). -->
+					     asked for on every call and remembered on none. -->
 					<label class="mt-3 block text-[12px] text-pii-muted" for="pii-policy-group">
 						{$i18n.t('Which group?')}
 					</label>

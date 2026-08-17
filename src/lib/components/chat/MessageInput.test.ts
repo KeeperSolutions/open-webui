@@ -156,7 +156,7 @@ describe('MessageInput — PII masking toggle under team policy', () => {
 	});
 
 	it('⚠️ never writes the policy value back into the user’s own value', async () => {
-		// The Z-1 invariant at its second site. `piiMaskingEnabled` is what the
+		// The policy-never-writes invariant at its second site. `piiMaskingEnabled` is what the
 		// parent binds and what ends up in the draft; the policy must only ever
 		// layer on top of it for display. If the lock were folded INTO that
 		// variable, the component would emit `true` here.

@@ -41,7 +41,7 @@ export type GroupRecord = {
  * Derived, never stored: "the policy group" is not a configured thing, it is
  * whichever groups happen to carry the key right now. Deriving it means the
  * answer cannot go stale, and means no governance object gets created behind
- * anyone's back (E-2).
+ * anyone's back.
  */
 export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 	return groups
@@ -76,13 +76,13 @@ export type UserRow = {
 /**
  * What, if anything, the row may do about this user's policy.
  *
- * `enforce.targets` carries E-2 in the data rather than in the component: one
- * target acts straight away, several ask which, none disables the action. The
- * component never picks a destination of its own, and nothing is remembered
- * between calls.
+ * `enforce.targets` puts the choice of destination in the data rather than in the
+ * component: one target acts straight away, several ask which, none disables the
+ * action. The component never picks a destination of its own, and nothing is
+ * remembered between calls.
  *
- * `none.via` is the E-1 middle case — the one that matters. An empty `via`
- * means the instance-wide default, not "unknown".
+ * `none.via` is the middle case — the one that matters. An empty `via` means the
+ * instance-wide default, not "unknown".
  */
 export type RowAction =
 	| { kind: 'enforce'; targets: PolicyGroup[] }
@@ -90,7 +90,7 @@ export type RowAction =
 	| { kind: 'none'; via: PolicyGroup[] };
 
 /**
- * The action offered on one row (D-14, §8.8).
+ * The action offered on one row.
  *
  * ⚠️ The rule is "never offer what would not do what it says". Because groups
  * merge with "any group wins", removing someone from one enforcing group leaves
@@ -103,7 +103,7 @@ export type RowAction =
  * change that changed nothing.
  *
  * Membership is the only thing this touches — the value of the policy still
- * lives on the group and is edited only in `Permissions.svelte` (§8.7).
+ * lives on the group and is edited only in `Permissions.svelte`.
  */
 export function rowActionFor(
 	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,

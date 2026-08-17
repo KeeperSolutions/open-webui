@@ -47,21 +47,21 @@
 	 * The user's OWN stored preference — and the only value this form ever
 	 * persists.
 	 *
-	 * ⚠️ Z-1. The team policy must never reach this variable. It is assigned in
+	 * ⚠️ The team policy must never reach this variable. It is assigned in
 	 * exactly two places: from the stored settings on mount, and by the user's
 	 * own toggle — which is bound only in the unlocked branch of the markup
 	 * below. The locked branch renders a display-only Switch with no binding at
 	 * all, so there is no code path by which the policy can turn a stored `false`
 	 * into a persisted `true`.
 	 *
-	 * That is the structural half of Z-1. The `submit` handler additionally
-	 * skips the masking valves entirely while locked (the spec's literal "must
-	 * not touch"), but the invariant does not depend on that guard surviving:
-	 * delete it and Save merely writes the stored value back unchanged.
+	 * That is the structural half of the invariant. The `submit` handler additionally
+	 * skips the masking valves entirely while locked, but the invariant does not
+	 * depend on that guard surviving: delete it and Save merely writes the stored
+	 * value back unchanged.
 	 */
 	let piiMaskingEnabled = true;
 
-	// Team policy (TRAU-536). Read-only overlay: it decides what is DISPLAYED and
+	// Team policy. Read-only overlay: it decides what is DISPLAYED and
 	// whether the control is locked; it never decides what is STORED.
 	$: policyEnforced = $user?.permissions?.chat?.pii_masking_enforced ?? false;
 
@@ -77,7 +77,7 @@
 	onMount(async () => {
 		piiMaskingEnabled = getPiiMaskingDefault($settings);
 
-		// D-11. `$user.permissions` is only refilled on a full page load, so a tab
+		// `$user.permissions` is only refilled on a full page load, so a tab
 		// left open carries a stale policy for hours. Refresh it here — but ONLY
 		// while the control is unlocked. The asymmetry is deliberate: showing an
 		// unlocked toggle that the backend already overrides is a security-facing
@@ -106,11 +106,11 @@
 		const existingValves = (pipelines.valves ?? {}) as Record<string, any>;
 
 		const valves: Record<string, any> = { ...existingValves };
-		// ⚠️ Z-1. While the policy locks the control, Save must not touch a single
+		// ⚠️ While the policy locks the control, Save must not touch a single
 		// masking valve. Otherwise a user whose stored value is `false`, shown a
 		// locked `ON` switch, would destroy their own preference by pressing Save
 		// — and the policy would have written into user.settings by proxy, which
-		// is exactly what the spec's central invariant forbids.
+		// is exactly what the policy-never-writes invariant forbids.
 		if (!policyEnforced) {
 			// The same list the reader uses. If the writer stayed on the built-in
 			// constant, an operator who adds an id would leave that filter without a
@@ -152,7 +152,7 @@
 							removes the control from the accessibility tree, which is what a
 							`disabled` prop would have done — without editing the upstream
 							Switch atom, whose styling then keeps tracking upstream.
-							The Switch is rendered WITHOUT `bind:` on purpose: see Z-1 above.
+							The Switch is rendered WITHOUT `bind:` on purpose: see the note above.
 						-->
 						<div
 							inert

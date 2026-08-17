@@ -162,11 +162,11 @@
 	 * ⚠️ The team policy NEVER assigns to this. It is layered on top via
 	 * `piiPolicyEnforced` for both the displayed state and the request payload,
 	 * so a locked control can never launder the policy's `true` back into the
-	 * user's own value — the Z-1 invariant, at its second site.
+	 * user's own value — the policy-never-writes invariant, at its second site.
 	 */
 	let piiMaskingEnabled = getPiiMaskingDefault($settings);
 
-	// Team policy overlay (TRAU-536). Read-only: decides display and payload,
+	// Team policy overlay. Read-only: decides display and payload,
 	// never storage.
 	$: piiPolicyEnforced = $user?.permissions?.chat?.pii_masking_enforced ?? false;
 
@@ -694,7 +694,7 @@
 			});
 		}
 
-		// D-11. `$user.permissions` is only refilled on a full page load, so a tab
+		// `$user.permissions` is only refilled on a full page load, so a tab
 		// left open carries a stale policy for hours. Refresh it once per opened
 		// chat — but ONLY while the toggle is unlocked. The asymmetry is
 		// deliberate: an unlocked toggle the backend already overrules is a
@@ -2063,7 +2063,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 						? webSearchEnabled
 						: false,
-				// Team policy (TRAU-536) wins over the per-conversation toggle (D-2).
+				// Team policy wins over the per-conversation toggle.
 				// The backend enforces this regardless; sending the effective value
 				// keeps the payload consistent with what the UI is showing, instead
 				// of shipping a `false` the server is about to overrule.

@@ -173,15 +173,15 @@ class UpdateProfileForm(BaseModel):
 
 class UserGroupIdsModel(UserModel):
     group_ids: list[str] = []
-    # TRAU-536. Resolved server-side from the groups already batched for this
-    # page, so the governance dashboard can report WHO IS UNDER POLICY without
-    # an extra query per user and without reimplementing the merge rule.
+    # Resolved server-side from the groups already batched for this page, so the
+    # governance dashboard can report WHO IS UNDER POLICY without an extra query
+    # per user and without reimplementing the merge rule.
     # Report-only: nothing writes policy through this endpoint.
     pii_masking_enforced: bool = False
     # WHICH of this user's groups carry the policy, not just whether one does.
     # A row action that offers to unlock someone has to know that removing them
     # from one group actually unlocks them — with the merge being "any group
-    # wins", the boolean alone cannot answer that (D-14 / E-1). Empty while
+    # wins", the boolean alone cannot answer that. Empty while
     # `pii_masking_enforced` is True means the instance-wide default is the
     # source, which no membership change can undo.
     pii_policy_group_ids: list[str] = []

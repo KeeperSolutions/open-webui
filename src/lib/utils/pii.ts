@@ -90,7 +90,7 @@ export function getStoredPiiMasking(settings: {
 }
 
 /**
- * The value a chat request should carry in `features.pii_masking` (TRAU-536).
+ * The value a chat request should carry in `features.pii_masking`.
  *
  * ⚠️ This is the value SENT TO THE SERVER, not what the control displays and not
  * what gets stored. Named `...ForRequest` so the three never get conflated: the
@@ -98,8 +98,8 @@ export function getStoredPiiMasking(settings: {
  * `user.settings`, and the policy is layered over both without ever writing to
  * either.
  *
- * Team policy wins over the per-conversation toggle (D-2), so the resolution is
- * `P > B`. The backend enforces this independently — but relying on that would
+ * Team policy wins over the per-conversation toggle, so policy beats the
+ * per-chat value. The backend enforces this independently — but relying on that would
  * leave this branch untested and dependent on the other side never regressing,
  * so the rule is stated once, here, and covered by tests.
  *

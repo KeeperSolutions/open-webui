@@ -1428,13 +1428,13 @@ USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED = (
     os.environ.get('USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED', 'False').lower() == 'true'
 )
 
-# TRAU-536 policy engine. The key is deliberately named as a RESTRICTION
-# ("masking is mandatory"), never as a freedom ("user may switch it off").
+# The key is deliberately named as a RESTRICTION ("masking is mandatory"),
+# never as a freedom ("user may switch it off").
 # Multi-group permissions merge with `permissions[key] or value` — most
 # permissive wins (utils/access_control/__init__.py). With a restriction the
 # same OR yields "strictest wins": if ANY of the user's groups enforces, the
 # user is enforced. Flip the naming and that identical line silently becomes
-# "loosest wins" — fail-open. See PII-POLICY-ENGINE-SPEC.md §6.1.
+# "loosest wins" — fail-open.
 # Default False: an instance that configures nothing behaves exactly as before.
 USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED = (
     os.environ.get('USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED', 'False').lower() == 'true'

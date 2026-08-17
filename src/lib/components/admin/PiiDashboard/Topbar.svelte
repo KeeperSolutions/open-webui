@@ -58,8 +58,8 @@
 		</div>
 
 		<!--
-			The disabled "PII Masking" toggle that used to sit here is gone
-			(TRAU-536 D-14). It claimed the decision had not been made, and it had:
+			The disabled "PII Masking" toggle that used to sit here is gone.
+			It claimed the decision had not been made, and it had:
 			masking is enforced per group, its value is edited in the group's
 			Permissions tab, and who falls under it is changed row by row in
 			section 4. A dead control next to live ones reads as a broken feature,

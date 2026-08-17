@@ -27,7 +27,7 @@
 	let events: PiiPolicyAuditEvent[] = [];
 	let total = 0;
 
-	// 🎨 No design source for this panel (spec §1.3); the shapes below are the
+	// 🎨 No design source for this panel; the shapes below are the
 	// admin modal's own idiom — xs text, muted greys — not new atoms.
 	const LABELS: Record<PiiPolicyAuditEventType, string> = {
 		policy_enabled: 'Enforcement turned on',

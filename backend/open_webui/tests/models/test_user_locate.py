@@ -1,4 +1,4 @@
-"""Tests for `Users.get_users(locate=...)` — TRAU-536.
+"""Tests for `Users.get_users(locate=...)`.
 
 The property under test is that `position` indexes into the FULL ordered list,
 not into the page being returned. That distinction is the whole reason the

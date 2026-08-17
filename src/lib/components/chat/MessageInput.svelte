@@ -420,12 +420,13 @@
 	export let piiMaskingEnabled = true;
 
 	/**
-	 * Team policy (TRAU-536) makes masking mandatory for this user.
+	 * Team policy makes masking mandatory for this user.
 	 *
 	 * ⚠️ Deliberately a SEPARATE prop, not folded into `piiMaskingEnabled`. The
 	 * policy decides what is DISPLAYED; `piiMaskingEnabled` stays the user's own
-	 * value and is never written by the policy — the same invariant as Z-1 in
-	 * Privacy.svelte, enforced here by there being no assignment path at all.
+	 * value and is never written by the policy — the same policy-never-writes
+	 * invariant as in Privacy.svelte, enforced here by there being no assignment
+	 * path at all.
 	 */
 	export let piiMaskingLocked = false;
 

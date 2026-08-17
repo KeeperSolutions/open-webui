@@ -1,7 +1,7 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 /**
- * The PII policy audit trail for one group (TRAU-536 §9).
+ * The PII policy audit trail for one group.
  *
  * Deliberately its own module rather than another function in `./index.ts`:
  * that file is upstream, and every line we add there is a line the next upstream

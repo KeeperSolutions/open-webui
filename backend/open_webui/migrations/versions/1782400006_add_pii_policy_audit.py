@@ -1,7 +1,6 @@
 """Add pii_policy_audit table
 
-TRAU-536 — audit log for administrative mutations of the team PII masking
-policy (PII-POLICY-ENGINE-SPEC.md §9.2).
+Audit log for administrative mutations of the team PII masking policy.
 
 The four event types exist in the schema from the start even though this
 release only ever emits the two `policy_*` ones. The membership events

@@ -1,15 +1,15 @@
 """Seed the PII masking policy group
 
-TRAU-536. Creates one EMPTY group carrying `chat.pii_masking_enforced`, so an
-admin can enforce masking for someone the moment this ships instead of first
-having to work out that a group with that flag is the prerequisite.
+Creates one EMPTY group carrying `chat.pii_masking_enforced`, so an admin can
+enforce masking for someone the moment this ships instead of first having to work
+out that a group with that flag is the prerequisite.
 
-⚠️ This narrows E-2 in PII-POLICY-ENGINE-SPEC.md, and does so deliberately. E-2
-forbids the DASHBOARD creating a policy group as a side effect of an admin
-action — a governance object appearing because someone clicked Enforce, with
-nothing recording the decision. A migration is the opposite: the decision is
-made once, in code, reviewed, and visible in the migration history of every
-environment it runs in.
+⚠️ This is a deliberate narrowing of a rule the dashboard itself still keeps: the
+DASHBOARD must never create a policy group as a side effect of an admin action —
+a governance object appearing because someone clicked Enforce, with nothing
+recording the decision. A migration is the opposite: the decision is made once,
+in code, reviewed, and visible in the migration history of every environment it
+runs in.
 
 Three properties make it safe to run everywhere, production included:
 

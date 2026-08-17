@@ -50,7 +50,7 @@ export const DEFAULT_PERMISSIONS = {
 		multiple_models: true,
 		temporary: true,
 		temporary_enforced: false,
-		// TRAU-536. Named as a restriction ("masking is mandatory"), never as a
+		// Named as a restriction ("masking is mandatory"), never as a
 		// freedom — the multi-group merge is OR, so a restriction gives
 		// "strictest wins" and a freedom would give "loosest wins".
 		pii_masking_enforced: false

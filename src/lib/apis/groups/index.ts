@@ -199,7 +199,7 @@ export const deleteGroupById = async (token: string, id: string) => {
 };
 
 // `reason` is recorded in the PII policy audit log, and only for groups that
-// enforce PII masking (TRAU-536 §9.4). The route REQUIRES it when removing
+// enforce PII masking. The route REQUIRES it when removing
 // someone from such a group; everywhere else it is ignored.
 export const addUserToGroup = async (
 	token: string,

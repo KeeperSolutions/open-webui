@@ -1,8 +1,9 @@
 """
-Tests for the team PII masking policy resolver (TRAU-536, Gate 1).
+Tests for the team PII masking policy resolver.
 
 Scope: reading the policy out of `group.permissions` and memoizing it per
-request. NO enforcement — wiring the resolved value into the inlet is Gate 2.
+request. NO enforcement — wiring the resolved value into the inlet is covered
+further down, under "Enforcement through process_pipeline_inlet_filter".
 
 These tests deliberately exercise the REAL `has_permission` from
 utils/access_control, mocking only `Groups.get_groups_by_member_id`. Mocking
@@ -228,12 +229,12 @@ def test_memo_does_not_leak_between_requests():
 
 
 # ---------------------------------------------------------------------------
-# D-8 — admins are not exempt
+# Admins are not exempt
 # ---------------------------------------------------------------------------
 
 
 def test_admin_is_not_exempt_from_the_policy():
-    """D-8. The sibling `temporary_enforced` permission exempts admins; this one
+    """The sibling `temporary_enforced` permission exempts admins; this one
     must not. If anyone "aligns" this code with that precedent, this test fails.
     """
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]):
@@ -250,7 +251,7 @@ def test_admin_is_not_exempt_from_the_policy():
 
 
 def test_permission_key_is_named_as_a_restriction():
-    """Guards the naming rule itself (spec §6.1). A key meaning "user may switch
+    """Guards the naming rule itself. A key meaning "user may switch
     masking off" would invert the multi-group merge from strictest- to
     loosest-wins without changing a single line of merge code.
     """
@@ -275,7 +276,7 @@ def test_permission_key_resolves_inside_default_permissions():
 
 
 def test_resolver_never_touches_user_settings():
-    """The policy is an overlay, never a write. Spec invariant."""
+    """The policy is an overlay, never a write."""
     user = _make_user()
     user.settings = {"ui": {"pipelines": {"valves": {"pii_filter": {"pii_masking_enabled": False}}}}}
     before = repr(user.settings)
@@ -287,7 +288,7 @@ def test_resolver_never_touches_user_settings():
 
 
 # ===========================================================================
-# Gate 2 — enforcement through process_pipeline_inlet_filter
+# Enforcement through process_pipeline_inlet_filter
 #
 # These drive the real inlet, not the resolver in isolation, and they patch
 # only the group lookup — so the policy travels the same path it will in
@@ -413,7 +414,7 @@ def _run_inlet(payload, user, models, request=None, groups=None, groups_side_eff
 
 
 def test_enforced_user_with_toggle_off_is_refused_when_pipeline_is_gone():
-    """⚠️ THE silent-hole test (spec §5.1).
+    """⚠️ THE silent-hole test.
 
     Policy ON, the user switched the in-chat toggle OFF, and the PII filter has
     been pruned from the model registry because the pipeline is down. Without
@@ -441,7 +442,7 @@ def test_unenforced_user_with_toggle_off_is_not_refused_when_pipeline_is_gone():
     assert result is payload
 
 
-# --- Policy beats the per-conversation override (point 2, D-2) -------------
+# --- Policy beats the per-conversation override (point 2) ------------------
 
 
 def test_policy_overrides_in_chat_toggle_off():
@@ -472,7 +473,8 @@ def test_policy_leaves_an_already_on_request_untouched():
 
 
 def test_admin_under_policy_is_masked_like_anyone_else():
-    """D-8 at the enforcement layer, not just the resolver."""
+    """Admins are not exempt at the enforcement layer either, not just in the
+    resolver."""
     payload = {"model": "gpt-4", "features": {"pii_masking": False}}
     _, captured = _run_inlet(
         payload,
@@ -483,7 +485,7 @@ def test_admin_under_policy_is_masked_like_anyone_else():
     assert _valves_for(captured)["pii_masking_enabled"] is True
 
 
-# --- Task generators (spec §5.6, PII-TASK-GENERATION-LEAK class) ------------
+# --- Task generators -------------------------------------------------------
 
 
 def test_policy_applies_to_task_generator_payloads():
@@ -643,7 +645,7 @@ def test_inlet_never_writes_to_user_settings():
 
 
 # ===========================================================================
-# Gate 5 — the batched path used by the governance dashboard
+# The batched path used by the governance dashboard
 #
 # `/users/` resolves the policy for a whole page from groups it has already
 # fetched. That must never drift from the enforcement path, so both entry
@@ -670,7 +672,7 @@ BATCH_CASES = [
 
 @pytest.mark.parametrize("groups,env_default,expected", BATCH_CASES)
 def test_batched_resolution_matches_has_permission(groups, env_default, expected):
-    """T-6. One rule, two entry points — they must not diverge.
+    """One rule, two entry points — they must not diverge.
 
     `has_permission` delegates to `has_permission_for_groups`, so this is a
     guard against someone re-introducing a second copy of the merge.

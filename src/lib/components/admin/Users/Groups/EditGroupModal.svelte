@@ -39,7 +39,7 @@
 
 	export let permissions = DEFAULT_PERMISSIONS;
 
-	// TRAU-536. Captured from the SAVED group, not from the live `permissions`
+	// Captured from the SAVED group, not from the live `permissions`
 	// object, so the Reason field is driven by what the change is being made
 	// against rather than by the switch's current position.
 	let piiEnforcedInitially = false;

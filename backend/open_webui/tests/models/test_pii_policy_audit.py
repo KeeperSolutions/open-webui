@@ -1,8 +1,8 @@
-"""Tests for the PII policy audit log (TRAU-536, Gate 6).
+"""Tests for the PII policy audit log.
 
 Two halves:
-  * the writer's invariants, which the DDL cannot express (T-22b)
-  * the route that emits `policy_*` events (T-19, T-20, T-21)
+  * the writer's invariants, which the DDL cannot express
+  * the route that emits `policy_*` events
 
 The route half exercises the real `update_group_by_id` handler against an
 in-memory SQLite database, rather than mocking `Groups`. The property under test
@@ -140,7 +140,7 @@ def _call_route(group_id, form, db_session, audits, groups_bound):
 
 
 # ---------------------------------------------------------------------------
-# T-22b — the invariant the DDL cannot express, in BOTH directions
+# The invariant the DDL cannot express, in BOTH directions
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ class TestActorAndShape:
 
 
 # ---------------------------------------------------------------------------
-# T-19 / T-20 / T-21 — the route
+# The route
 # ---------------------------------------------------------------------------
 
 
@@ -332,7 +332,7 @@ class TestRouteEmitsPolicyEvents:
 
 
 # ---------------------------------------------------------------------------
-# E-3 / §9.4 — membership of a policy group (Gate 6b)
+# Membership of a policy group
 # ---------------------------------------------------------------------------
 
 
@@ -467,7 +467,7 @@ class TestMembershipAudit:
 
 
 # ---------------------------------------------------------------------------
-# Gate 7a — the reader
+# The reader
 # ---------------------------------------------------------------------------
 
 
