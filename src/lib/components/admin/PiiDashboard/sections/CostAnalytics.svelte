@@ -49,7 +49,7 @@
 	<SectionHeader
 		num="3"
 		title={$i18n.t('Cost Analytics & Drill-Down')}
-		subtitle={$i18n.t('PRD Feature 4 — by model, user, activity · period filters')}
+		subtitle={$i18n.t('By model, user, activity · period filters')}
 	/>
 
 	{#if loading}

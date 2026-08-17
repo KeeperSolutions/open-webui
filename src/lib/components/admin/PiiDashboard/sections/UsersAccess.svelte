@@ -258,10 +258,14 @@
 </script>
 
 <div class="flex flex-col gap-3.5 font-['Inter']">
+	<!-- The subtitle names the columns that are actually here. It deliberately does
+	     NOT mention model permissions: that column was removed because it measured
+	     the Workspace subset rather than real access, and a subtitle promising it
+	     sends the reader looking for a column the table does not have. -->
 	<SectionHeader
 		num="4"
 		title={$i18n.t('Users & Access')}
-		subtitle={$i18n.t('PRD Feature 6 — provisioned users, model permissions, masking posture')}
+		subtitle={$i18n.t('Provisioned users, masking posture, spend')}
 	/>
 
 	{#if loading}
