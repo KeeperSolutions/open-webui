@@ -255,6 +255,18 @@ export function maskingRank(state: MaskingState): number {
 export const ROWS_PER_PAGE = 10;
 
 /**
+ * The requested page, brought inside the range the list actually has.
+ *
+ * Shared by `pageOf` and `pageRange` so the rows on screen and the count that
+ * describes them cannot disagree — a summary reading "11 to 20" over the first
+ * ten rows is worse than no summary at all.
+ */
+function clampPage(total: number, page: number, perPage: number): number {
+	const lastPage = Math.max(1, Math.ceil(total / perPage));
+	return Math.min(Math.max(1, Math.floor(page) || 1), lastPage);
+}
+
+/**
  * The page an already-sorted list should show.
  *
  * ⚠️ Paging is applied AFTER sorting, over the whole fetched set — never by
@@ -271,10 +283,32 @@ export const ROWS_PER_PAGE = 10;
  */
 export function pageOf<T>(list: T[], page: number, perPage: number = ROWS_PER_PAGE): T[] {
 	if (perPage <= 0) return list;
-	const lastPage = Math.max(1, Math.ceil(list.length / perPage));
-	const safe = Math.min(Math.max(1, Math.floor(page) || 1), lastPage);
-	const start = (safe - 1) * perPage;
+	const start = (clampPage(list.length, page, perPage) - 1) * perPage;
 	return list.slice(start, start + perPage);
+}
+
+/**
+ * Which rows of the whole list the current page covers, as 1-based positions.
+ *
+ * Feeds the "Showing 1 to 10 of 57 users" line beside the pager. Split out of
+ * the markup because it is the one part of that line that can be wrong: the
+ * numbers have to describe the same slice `pageOf` returns, including when the
+ * page is out of range, and that is worth a test.
+ *
+ * `to` is inclusive, so a short last page reports its real end rather than
+ * `page * perPage`. An empty list gives `1 to 0`, which no caller renders — the
+ * section shows "No data found" long before this — but the function stays total.
+ */
+export function pageRange(
+	total: number,
+	page: number,
+	perPage: number = ROWS_PER_PAGE
+): { from: number; to: number } {
+	// Mirrors `pageOf`: a non-positive page size means "no paging", so the range
+	// is the whole list.
+	if (perPage <= 0) return { from: 1, to: total };
+	const from = (clampPage(total, page, perPage) - 1) * perPage + 1;
+	return { from, to: Math.min(from + perPage - 1, total) };
 }
 
 /**

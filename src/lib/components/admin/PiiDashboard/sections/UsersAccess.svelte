@@ -19,6 +19,7 @@
 		unattributedCost,
 		maskingRank,
 		pageOf,
+		pageRange,
 		ROWS_PER_PAGE,
 		rowActionFor,
 		type MaskingState,
@@ -203,6 +204,10 @@
 	$: if (orderBy || direction || rows) page = 1;
 
 	$: paged = pageOf(sorted, page);
+
+	// Which rows of the whole list are on screen, for the line beside the pager.
+	// Derived from the same clamp `pageOf` uses, so the two cannot disagree.
+	$: range = pageRange(sorted.length, page);
 
 	/**
 	 * Spend the rows above do not account for.
@@ -536,11 +541,38 @@
 					still reconciles across the table. The ceiling notice, when there is
 					one, is about the FETCH and stays independent of this.
 
-					⚠️ Wrapped so this section can hold the shared Pagination to its own
-					palette — see the note on `.pii-pagination` below.
+					Count on the left, pager on the right. The count is the only place the
+					table states how many users there are in total once it stops showing
+					them all at once.
 				-->
-				<div class="pii-pagination">
-					<Pagination bind:page count={sorted.length} perPage={ROWS_PER_PAGE} />
+				<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+					<span class="text-[12px] text-pii-muted">
+						{#if truncated}
+							<!-- ⚠️ `total` here is the LISTED set, not the directory. Saying
+							     "of 200 users" directly under a notice reading "the first 200
+							     of 1000" would have the same table claim two different
+							     totals, so the wording defers to the notice instead. -->
+							{$i18n.t('Showing {{from}} to {{to}} of the {{total}} users listed', {
+								from: range.from,
+								to: range.to,
+								total: sorted.length
+							})}
+						{:else}
+							{$i18n.t('Showing {{from}} to {{to}} of {{total}} users', {
+								from: range.from,
+								to: range.to,
+								total: sorted.length
+							})}
+						{/if}
+					</span>
+
+					<!-- ⚠️ Wrapped so this section can hold the shared Pagination to its
+					     own palette — see the note on `.pii-pagination` below. The shared
+					     component centres itself, which is a no-op here: as a flex item it
+					     is only as wide as its buttons. -->
+					<div class="pii-pagination">
+						<Pagination bind:page count={sorted.length} perPage={ROWS_PER_PAGE} />
+					</div>
 				</div>
 			{/if}
 		</div>

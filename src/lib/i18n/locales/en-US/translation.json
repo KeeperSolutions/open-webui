@@ -1764,6 +1764,8 @@
 	"Show your support!": "",
 	"Showcased creativity": "",
 	"Showing all messages (user + assistant) per user.": "",
+	"Showing {{from}} to {{to}} of the {{total}} users listed": "",
+	"Showing {{from}} to {{to}} of {{total}} users": "",
 	"Showing the first {{shown}} of {{total}} users. The rest are not listed.": "",
 	"Showing the latest {{shown}} of {{total}} events.": "",
 	"Sign Out": "",

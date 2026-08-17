@@ -10,6 +10,7 @@ import {
 	maskingStateOf,
 	maskingRank,
 	pageOf,
+	pageRange,
 	ROWS_PER_PAGE,
 	policyGroupsOf,
 	rowActionFor,
@@ -544,5 +545,57 @@ describe('pageOf', () => {
 
 	it('defaults to the page size the table uses', () => {
 		expect(pageOf(list, 1)).toEqual(list.slice(0, ROWS_PER_PAGE));
+	});
+});
+
+describe('pageRange', () => {
+	it('describes the first page', () => {
+		expect(pageRange(57, 1, 10)).toEqual({ from: 1, to: 10 });
+	});
+
+	it('describes a middle page', () => {
+		expect(pageRange(57, 3, 10)).toEqual({ from: 21, to: 30 });
+	});
+
+	it('ends a short last page where the list ends', () => {
+		// Not `page * perPage`: the summary would claim rows 51-60 of a list that
+		// stops at 57.
+		expect(pageRange(57, 6, 10)).toEqual({ from: 51, to: 57 });
+	});
+
+	it('agrees with the slice pageOf returns, on every page', () => {
+		// The invariant that matters. A summary that disagrees with the rows under
+		// it is worse than no summary, so the two are checked against each other
+		// rather than against hand-written numbers.
+		const rows = Array.from({ length: 63 }, (_, i) => i);
+		for (const page of [1, 2, 3, 4, 99, 0, -1]) {
+			const { from, to } = pageRange(rows.length, page, 25);
+			expect(rows.slice(from - 1, to)).toEqual(pageOf(rows, page, 25));
+		}
+	});
+
+	it('clamps a page past the end to the last one', () => {
+		expect(pageRange(57, 99, 10)).toEqual({ from: 51, to: 57 });
+	});
+
+	it('clamps a page below one', () => {
+		expect(pageRange(57, 0, 10)).toEqual({ from: 1, to: 10 });
+		expect(pageRange(57, -3, 10)).toEqual({ from: 1, to: 10 });
+	});
+
+	it('covers a list shorter than one page whole', () => {
+		expect(pageRange(3, 1, 10)).toEqual({ from: 1, to: 3 });
+	});
+
+	it('reports an empty range for an empty list instead of throwing', () => {
+		expect(pageRange(0, 1, 10)).toEqual({ from: 1, to: 0 });
+	});
+
+	it('covers the whole list when the page size is not positive', () => {
+		expect(pageRange(57, 2, 0)).toEqual({ from: 1, to: 57 });
+	});
+
+	it('defaults to the page size the table uses', () => {
+		expect(pageRange(57, 1)).toEqual({ from: 1, to: ROWS_PER_PAGE });
 	});
 });
