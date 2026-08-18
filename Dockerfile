@@ -28,7 +28,7 @@ ARG GID=0
 FROM node:22-alpine3.20 AS build
 ARG BUILD_HASH
 ARG DEPLOY_ENVIRONMENT=production
-ENV NODE_OPTIONS=--max_old_space_size=4096
+ENV NODE_OPTIONS=--max_old_space_size=8192
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
 # ENV NODE_OPTIONS="--max-old-space-size=4096"
