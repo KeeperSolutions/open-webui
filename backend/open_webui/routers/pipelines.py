@@ -1,4 +1,11 @@
+import logging
+import os
+import shutil
+from typing import Optional
+
+import aiohttp
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
     File,
@@ -7,29 +14,19 @@ from fastapi import (
     Request,
     UploadFile,
     status,
-    APIRouter,
 )
-import aiohttp
-import os
-import logging
-import shutil
-from pydantic import BaseModel
-from starlette.responses import FileResponse
-from typing import Optional
-
+from open_webui.config import CACHE_DIR, PII_MASKING_ENFORCED_PERMISSION
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     PII_FILTER_IDS,
 )
-from open_webui.config import CACHE_DIR, PII_MASKING_ENFORCED_PERMISSION
-from open_webui.constants import ERROR_MESSAGES
-
-
 from open_webui.routers.openai import get_all_models_responses
-
 from open_webui.utils.auth import get_admin_user
 from open_webui.utils.access_control import has_permission
+from pydantic import BaseModel
+from starlette.responses import FileResponse
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +50,7 @@ log = logging.getLogger(__name__)
 _PII_POLICY_MEMO_ATTR = '_pii_masking_enforced_memo'
 
 
-def resolve_pii_masking_enforced(request, user) -> bool:
+async def resolve_pii_masking_enforced(request, user) -> bool:
     """Whether team policy makes PII masking mandatory for this user.
 
     Read-only overlay: this NEVER writes to user.settings. The user's own
@@ -84,7 +81,7 @@ def resolve_pii_masking_enforced(request, user) -> bool:
         return memo[user_id]
 
     try:
-        enforced = has_permission(
+        enforced = await has_permission(
             user_id,
             PII_MASKING_ENFORCED_PERMISSION,
             request.app.state.config.USER_PERMISSIONS,
@@ -240,7 +237,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     # eight task-generator endpoints cost one lookup each rather than one per
     # filter. Fail-closed: if the policy cannot be determined at all,
     # the resolver returns True. Read-only — never written back to user.settings.
-    policy_enforced = resolve_pii_masking_enforced(request, user)
+    policy_enforced = await resolve_pii_masking_enforced(request, user)
 
     # FAIL-CLOSED guard (Mechanism 2), enforced HERE — the single chokepoint every
     # inlet caller flows through (main chat AND all task generators). If PII
@@ -322,9 +319,24 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
                     response.raise_for_status()
                     payload = await response.json()
             except aiohttp.ClientResponseError as e:
-                res = await response.json() if response.content_type == 'application/json' else {}
-                if 'detail' in res:
-                    raise Exception(response.status, res['detail'])
+                try:
+                    res = await response.json() if 'application/json' in response.content_type else {}
+                    if 'detail' in res:
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=res['detail'],
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=e.message,
+                )
+            except HTTPException:
+                raise
             except Exception as e:
                 log.exception(f'Connection error: {e}')
                 # FAIL-CLOSED for PII filters (Mechanism 1): a connection error
@@ -389,9 +401,21 @@ async def process_pipeline_outlet_filter(request, payload, user, models):
                 try:
                     res = await response.json() if 'application/json' in response.content_type else {}
                     if 'detail' in res:
-                        raise Exception(response.status, res)
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=res['detail'],
+                        )
+                except HTTPException:
+                    raise
                 except Exception:
                     pass
+
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=e.message,
+                )
+            except HTTPException:
+                raise
             except Exception as e:
                 log.exception(f'Connection error: {e}')
 

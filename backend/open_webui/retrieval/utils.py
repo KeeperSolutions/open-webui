@@ -1,16 +1,17 @@
-import logging
-import os
-from typing import Awaitable, Optional, Union
+from __future__ import annotations
 
-import requests
-import aiohttp
 import asyncio
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
-import time
+import logging
+import os
 import re
-
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Awaitable, Optional, Union
 from urllib.parse import quote
+
+import aiohttp
+import requests
 from huggingface_hub import snapshot_download
 from langchain_classic.retrievers import (
     ContextualCompressionRetriever,
@@ -18,39 +19,35 @@ from langchain_classic.retrievers import (
 )
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
-
-from open_webui.config import VECTOR_DB
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-
-
-from open_webui.models.users import UserModel
-from open_webui.models.files import Files
-from open_webui.models.knowledge import Knowledges
-
-from open_webui.models.chats import Chats
-from open_webui.models.notes import Notes
-from open_webui.models.access_grants import AccessGrants
-from open_webui.utils.access_control.files import has_access_to_file
-
-from open_webui.retrieval.vector.main import GetResult
-from open_webui.utils.headers import include_user_info_headers
-from open_webui.utils.misc import get_message_list
-
-from open_webui.retrieval.web.utils import get_web_loader
-from open_webui.retrieval.loaders.youtube import YoutubeLoader
-
-
-from open_webui.env import (
-    AIOHTTP_CLIENT_TIMEOUT,
-    OFFLINE_MODE,
-    ENABLE_FORWARD_USER_INFO_HEADERS,
-    AIOHTTP_CLIENT_SESSION_SSL,
-)
 from open_webui.config import (
-    RAG_EMBEDDING_QUERY_PREFIX,
     RAG_EMBEDDING_CONTENT_PREFIX,
     RAG_EMBEDDING_PREFIX_FIELD_NAME,
+    RAG_EMBEDDING_QUERY_PREFIX,
+    VECTOR_DB,
 )
+from open_webui.env import (
+    AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+    AIOHTTP_CLIENT_SESSION_SSL,
+    AIOHTTP_CLIENT_TIMEOUT,
+    BYPASS_RETRIEVAL_ACCESS_CONTROL,
+    ENABLE_FORWARD_USER_INFO_HEADERS,
+    ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS,
+    OFFLINE_MODE,
+)
+from open_webui.models.access_grants import AccessGrants
+from open_webui.models.chats import Chats
+from open_webui.models.files import Files
+from open_webui.models.knowledge import Knowledges
+from open_webui.models.notes import Notes
+from open_webui.models.users import UserModel
+from open_webui.retrieval.loaders.youtube import YoutubeLoader
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.main import GetResult
+from open_webui.retrieval.web.utils import get_web_loader
+from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.misc import get_message_list
 
 log = logging.getLogger(__name__)
 
@@ -82,11 +79,142 @@ def get_loader(request, url: str):
         )
 
 
+def build_loader_from_config(request):
+    """Build a Loader instance with the admin's configured extraction engine settings."""
+    from open_webui.retrieval.loaders.main import Loader
+
+    config = request.app.state.config
+    return Loader(
+        engine=config.CONTENT_EXTRACTION_ENGINE,
+        DATALAB_MARKER_API_KEY=config.DATALAB_MARKER_API_KEY,
+        DATALAB_MARKER_API_BASE_URL=config.DATALAB_MARKER_API_BASE_URL,
+        DATALAB_MARKER_ADDITIONAL_CONFIG=config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+        DATALAB_MARKER_SKIP_CACHE=config.DATALAB_MARKER_SKIP_CACHE,
+        DATALAB_MARKER_FORCE_OCR=config.DATALAB_MARKER_FORCE_OCR,
+        DATALAB_MARKER_PAGINATE=config.DATALAB_MARKER_PAGINATE,
+        DATALAB_MARKER_STRIP_EXISTING_OCR=config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+        DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+        DATALAB_MARKER_FORMAT_LINES=config.DATALAB_MARKER_FORMAT_LINES,
+        DATALAB_MARKER_USE_LLM=config.DATALAB_MARKER_USE_LLM,
+        DATALAB_MARKER_OUTPUT_FORMAT=config.DATALAB_MARKER_OUTPUT_FORMAT,
+        EXTERNAL_DOCUMENT_LOADER_URL=config.EXTERNAL_DOCUMENT_LOADER_URL,
+        EXTERNAL_DOCUMENT_LOADER_API_KEY=config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+        TIKA_SERVER_URL=config.TIKA_SERVER_URL,
+        DOCLING_SERVER_URL=config.DOCLING_SERVER_URL,
+        DOCLING_API_KEY=config.DOCLING_API_KEY,
+        DOCLING_PARAMS=config.DOCLING_PARAMS,
+        PDF_EXTRACT_IMAGES=config.PDF_EXTRACT_IMAGES,
+        PDF_LOADER_MODE=config.PDF_LOADER_MODE,
+        DOCUMENT_INTELLIGENCE_ENDPOINT=config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+        DOCUMENT_INTELLIGENCE_KEY=config.DOCUMENT_INTELLIGENCE_KEY,
+        DOCUMENT_INTELLIGENCE_MODEL=config.DOCUMENT_INTELLIGENCE_MODEL,
+        MISTRAL_OCR_API_BASE_URL=config.MISTRAL_OCR_API_BASE_URL,
+        MISTRAL_OCR_API_KEY=config.MISTRAL_OCR_API_KEY,
+        PADDLEOCR_VL_BASE_URL=config.PADDLEOCR_VL_BASE_URL,
+        PADDLEOCR_VL_TOKEN=config.PADDLEOCR_VL_TOKEN,
+        MINERU_API_MODE=config.MINERU_API_MODE,
+        MINERU_API_URL=config.MINERU_API_URL,
+        MINERU_API_KEY=config.MINERU_API_KEY,
+        MINERU_API_TIMEOUT=config.MINERU_API_TIMEOUT,
+        MINERU_PARAMS=config.MINERU_PARAMS,
+        MINERU_FILE_EXTENSIONS=config.MINERU_FILE_EXTENSIONS,
+    )
+
+
+def _extract_text_from_binary_response(request, response: requests.Response, url: str) -> tuple[str, list]:
+    """Download response body to a temp file and extract text using the Loader pipeline."""
+    import mimetypes
+    import tempfile
+    import urllib.parse
+
+    content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
+
+    # Derive filename from URL path, falling back to Content-Disposition or mime guess
+    url_path = urllib.parse.urlparse(url).path
+    filename = os.path.basename(url_path) if url_path else ''
+
+    if not filename or '.' not in filename:
+        # Try Content-Disposition header
+        cd = response.headers.get('Content-Disposition', '')
+        if 'filename=' in cd:
+            filename = cd.split('filename=')[-1].strip('"\'')
+
+    if not filename or '.' not in filename:
+        ext = mimetypes.guess_extension(content_type) or ''
+        filename = f'download{ext}'
+
+    suffix = '.' + filename.split('.')[-1].lower() if '.' in filename else ''
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(response.content)
+        tmp_path = tmp.name
+
+    try:
+        loader = build_loader_from_config(request)
+        docs = loader.load(filename, content_type, tmp_path)
+        for doc in docs:
+            doc.metadata['source'] = url
+        content = ' '.join([doc.page_content for doc in docs])
+        return content, docs
+    finally:
+        os.remove(tmp_path)
+
+
+def _is_text_content_type(content_type: str) -> bool:
+    """Return True if the content type should be handled by the web loader."""
+    ct = content_type.split(';')[0].strip().lower()
+    if ct.startswith('text/'):
+        return True
+    if any(t in ct for t in ['xml', 'json', 'javascript']):
+        return True
+    return not ct  # empty / missing → assume HTML
+
+
 def get_content_from_url(request, url: str) -> str:
-    loader = get_loader(request, url)
-    docs = loader.load()
-    content = ' '.join([doc.page_content for doc in docs])
-    return content, docs
+    from open_webui.retrieval.web.utils import validate_url
+
+    # Validate URL before making any request (blocks private IPs, non-HTTP, filter list)
+    validate_url(url)
+
+    # YouTube URLs (including youtu.be short links) should go straight to
+    # YoutubeLoader, which uses youtube-transcript-api and never needs the
+    # HTTP response body.  Probing the URL first is harmful for short URLs:
+    # youtu.be returns a 303 redirect with Content-Type: application/binary
+    # when allow_redirects=False, causing the binary-content path to run
+    # and produce empty docs → HTTP 400.
+    if is_youtube_url(url):
+        loader = get_loader(request, url)
+        docs = loader.load()
+        content = ' '.join([doc.page_content for doc in docs])
+        return content, docs
+
+    # Streamed GET to check Content-Type without downloading the body.
+    # allow_redirects=False prevents redirect-based SSRF: validate_url() above is
+    # called on the originally-submitted URL only; following 3xx redirects without
+    # re-validation would let an attacker reach private IPs (RFC1918, loopback,
+    # cloud-metadata 169.254.169.254) via a public host that redirects internally.
+    try:
+        response = requests.get(url, stream=True, timeout=30, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS)
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '')
+    except Exception:
+        content_type = ''
+        response = None
+
+    # Text / HTML / unknown — use the configured web loader
+    if response is None or _is_text_content_type(content_type):
+        if response is not None:
+            response.close()
+        loader = get_loader(request, url)
+        docs = loader.load()
+        content = ' '.join([doc.page_content for doc in docs])
+        return content, docs
+
+    # Binary content (PDF, DOCX, XLSX, PPTX, etc.) — download and extract
+    try:
+        return _extract_text_from_binary_response(request, response, url)
+    finally:
+        response.close()
 
 
 CHUNK_HASH_KEY = '_chunk_hash'
@@ -121,7 +249,7 @@ class VectorSearchRetriever(BaseRetriever):
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
         embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
-        result = VECTOR_DB_CLIENT.search(
+        result = await ASYNC_VECTOR_DB_CLIENT.search(
             collection_name=self.collection_name,
             vectors=[embedding],
             limit=self.top_k,
@@ -451,6 +579,13 @@ async def query_collection(
             log.exception(f'Error when querying the collection: {e}')
             return None, e
 
+    # Sanitize: filter out None/empty queries to prevent embedding crashes
+    # (e.g. when get_last_user_message returns None)
+    queries = [q for q in queries if q]
+    if not queries:
+        log.warning('query_collection: all queries were None or empty, returning empty results')
+        return {'distances': [[]], 'documents': [[]], 'metadatas': [[]]}
+
     # Generate all query embeddings (in one call)
     query_embeddings = await embedding_function(queries, prefix=RAG_EMBEDDING_QUERY_PREFIX)
     log.debug(f'query_collection: processing {len(queries)} queries across {len(collection_names)} collections')
@@ -488,16 +623,24 @@ async def query_collection_with_hybrid_search(
 ) -> dict:
     results = []
     error = False
-    # Fetch collection data once per collection sequentially
-    # Avoid fetching the same data multiple times later
-    collection_results = {}
-    for collection_name in collection_names:
+    # Fetch every collection's contents once up front so the
+    # per-query/per-document loop below can reuse them. Each fetch
+    # offloads to a worker thread, so run them concurrently with
+    # `asyncio.gather` instead of awaiting them serially — otherwise
+    # latency scales linearly with `len(collection_names)`.
+    log.debug(
+        'query_collection_with_hybrid_search: prefetching %d collections',
+        len(collection_names),
+    )
+
+    async def _fetch_collection(name: str):
         try:
-            log.debug(f'query_collection_with_hybrid_search:VECTOR_DB_CLIENT.get:collection {collection_name}')
-            collection_results[collection_name] = VECTOR_DB_CLIENT.get(collection_name=collection_name)
+            return name, await ASYNC_VECTOR_DB_CLIENT.get(collection_name=name)
         except Exception as e:
-            log.exception(f'Failed to fetch collection {collection_name}: {e}')
-            collection_results[collection_name] = None
+            log.exception(f'Failed to fetch collection {name}: {e}')
+            return name, None
+
+    collection_results = dict(await asyncio.gather(*(_fetch_collection(name) for name in collection_names)))
 
     log.info(f'Starting hybrid search for {len(queries)} queries in {len(collection_names)} collections...')
 
@@ -784,6 +927,13 @@ def get_embedding_function(
     concurrent_requests=0,
 ) -> Awaitable:
     if embedding_engine == '':
+        if embedding_function is None:
+            raise ValueError(
+                'No embedding model is loaded. Set RAG_EMBEDDING_MODEL to a valid '
+                'SentenceTransformer model name, or configure an external '
+                'RAG_EMBEDDING_ENGINE (ollama, openai, azure_openai).'
+            )
+
         # Sentence transformers: CPU-bound sync operation
         async def async_embedding_function(query, prefix=None, user=None):
             return await asyncio.to_thread(
@@ -910,7 +1060,7 @@ async def generate_embeddings(
         return embeddings[0] if isinstance(text, str) else embeddings
 
 
-def get_reranking_function(reranking_engine, reranking_model, reranking_function):
+def get_reranking_function(reranking_engine, reranking_model, reranking_function, reranking_batch_size=32):
     if reranking_function is None:
         return None
     if reranking_engine == 'external':
@@ -919,8 +1069,84 @@ def get_reranking_function(reranking_engine, reranking_model, reranking_function
         )
     else:
         return lambda query, documents, user=None: reranking_function.predict(
-            [(query, doc.page_content) for doc in documents]
+            [(query, doc.page_content) for doc in documents], batch_size=int(reranking_batch_size)
         )
+
+
+# UUIDs, SHA-256 digests, and prefixed variants thereof all fit [A-Za-z0-9_-].
+# Anything else cannot be a real Open WebUI collection and could break out of
+# a Milvus expression literal.
+_SAFE_COLLECTION_NAME_RE = re.compile(r'^[A-Za-z0-9_-]{1,255}$')
+
+
+def _is_safe_collection_name(name: str) -> bool:
+    return isinstance(name, str) and bool(_SAFE_COLLECTION_NAME_RE.match(name))
+
+
+async def filter_accessible_collections(
+    collection_names: set[str],
+    user: UserModel,
+    access_type: str = 'read',
+) -> set[str]:
+    """
+    Return only the collection names the user is allowed to access.
+    Admins bypass all checks.  For non-admins the policy is:
+
+      - any name with characters outside [A-Za-z0-9_-] → rejected
+      - file-*          → validated via has_access_to_file
+      - user-memory-*   → must match user's own memory collection
+      - web-search-*    → ephemeral per-query collections, always allowed
+      - knowledge-bases → always denied (system meta-collection)
+      - everything else → if the name matches a knowledge base, validated
+                          via Knowledges.check_access_by_user_id; if no
+                          such KB exists, denied by default.  When
+                          ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS is True,
+                          the name is treated as a legacy/ephemeral
+                          collection and allowed.
+    """
+    # Applied before the admin bypass — malformed names should never reach the vector store.
+    safe_names = {n for n in collection_names if _is_safe_collection_name(n)}
+    rejected = collection_names - safe_names
+    if rejected:
+        log.warning(
+            'filter_accessible_collections: rejected %d collection name(s) with unsafe characters (user_id=%s)',
+            len(rejected),
+            getattr(user, 'id', '<unknown>'),
+        )
+
+    if user.role == 'admin':
+        return safe_names
+
+    validated = set()
+    for name in safe_names:
+        if name == 'knowledge-bases':
+            # System meta-collection — never exposed to non-admins.
+            continue
+        elif name.startswith('file-'):
+            file_id = name[len('file-') :]
+            if await has_access_to_file(file_id=file_id, access_type=access_type, user=user):
+                validated.add(name)
+        elif name.startswith('user-memory-'):
+            if name == f'user-memory-{user.id}':
+                validated.add(name)
+        elif name.startswith('web-search-'):
+            # Ephemeral collections created by process_web_search — safe
+            # to allow because they contain only transient web-search
+            # results scoped to the requesting user's session.
+            validated.add(name)
+        else:
+            # May be a knowledge-base ID or a legacy/ephemeral collection.
+            # If it IS a KB, enforce access control.  If no such KB
+            # exists, the behaviour depends on
+            # ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS:
+            #   False (default) — deny (closes the unscoped namespace)
+            #   True  — allow (preserves legacy behaviour)
+            if await Knowledges.check_access_by_user_id(name, user.id, permission=access_type):
+                validated.add(name)
+            elif ENABLE_RETRIEVAL_UNSCOPED_COLLECTIONS and not await Knowledges.get_knowledge_by_id(name):
+                # Not a KB at all — legacy/ephemeral collection, allow
+                validated.add(name)
+    return validated
 
 
 async def get_sources_from_items(
@@ -935,7 +1161,7 @@ async def get_sources_from_items(
     hybrid_bm25_weight,
     hybrid_search,
     full_context=False,
-    user: Optional[UserModel] = None,
+    user: UserModel | None = None,
 ):
     log.debug(f'items: {items} {queries} {embedding_function} {reranking_function} {full_context}')
 
@@ -978,12 +1204,12 @@ async def get_sources_from_items(
 
         elif item.get('type') == 'note':
             # Note Attached
-            note = Notes.get_note_by_id(item.get('id'))
+            note = await Notes.get_note_by_id(item.get('id'))
 
             if note and (
                 user.role == 'admin'
                 or note.user_id == user.id
-                or AccessGrants.has_access(
+                or await AccessGrants.has_access(
                     user_id=user.id,
                     resource_type='note',
                     resource_id=note.id,
@@ -998,7 +1224,7 @@ async def get_sources_from_items(
 
         elif item.get('type') == 'chat':
             # Chat Attached
-            chat = Chats.get_chat_by_id(item.get('id'))
+            chat = await Chats.get_chat_by_id(item.get('id'))
 
             if chat and (user.role == 'admin' or chat.user_id == user.id):
                 messages_map = chat.chat.get('history', {}).get('messages', {})
@@ -1042,11 +1268,11 @@ async def get_sources_from_items(
                         ],
                     }
                 elif item.get('id'):
-                    file_object = Files.get_file_by_id(item.get('id'))
+                    file_object = await Files.get_file_by_id(item.get('id'))
                     if file_object and (
                         user.role == 'admin'
                         or file_object.user_id == user.id
-                        or has_access_to_file(item.get('id'), 'read', user)
+                        or await has_access_to_file(item.get('id'), 'read', user)
                     ):
                         query_result = {
                             'documents': [[file_object.data.get('content', '')]],
@@ -1061,20 +1287,36 @@ async def get_sources_from_items(
                             ],
                         }
             else:
-                # Fallback to collection names
-                if item.get('legacy'):
-                    collection_names.append(f'{item["id"]}')
-                else:
-                    collection_names.append(f'file-{item["id"]}')
+                # Chunked-retrieval fallback — verify read access before
+                # exposing the file's vector collection (same posture as the
+                # full-context branch above).
+                file_id = item.get('id')
+                if file_id:
+                    if BYPASS_RETRIEVAL_ACCESS_CONTROL:
+                        if item.get('legacy'):
+                            collection_names.append(f'{file_id}')
+                        else:
+                            collection_names.append(f'file-{file_id}')
+                    else:
+                        file_object = await Files.get_file_by_id(file_id)
+                        if file_object and (
+                            user.role == 'admin'
+                            or file_object.user_id == user.id
+                            or await has_access_to_file(file_id, 'read', user)
+                        ):
+                            if item.get('legacy'):
+                                collection_names.append(f'{file_id}')
+                            else:
+                                collection_names.append(f'file-{file_id}')
 
         elif item.get('type') == 'collection':
             # Manual Full Mode Toggle for Collection
-            knowledge_base = Knowledges.get_knowledge_by_id(item.get('id'))
+            knowledge_base = await Knowledges.get_knowledge_by_id(item.get('id'))
 
             if knowledge_base and (
                 user.role == 'admin'
                 or knowledge_base.user_id == user.id
-                or AccessGrants.has_access(
+                or await AccessGrants.has_access(
                     user_id=user.id,
                     resource_type='knowledge',
                     resource_id=knowledge_base.id,
@@ -1085,14 +1327,14 @@ async def get_sources_from_items(
                     if knowledge_base and (
                         user.role == 'admin'
                         or knowledge_base.user_id == user.id
-                        or AccessGrants.has_access(
+                        or await AccessGrants.has_access(
                             user_id=user.id,
                             resource_type='knowledge',
                             resource_id=knowledge_base.id,
                             permission='read',
                         )
                     ):
-                        files = Knowledges.get_files_by_id(knowledge_base.id)
+                        files = await Knowledges.get_files_by_id(knowledge_base.id)
 
                         documents = []
                         metadatas = []
@@ -1111,9 +1353,18 @@ async def get_sources_from_items(
                             'metadatas': [metadatas],
                         }
                 else:
-                    # Fallback to collection names
                     if item.get('legacy'):
-                        collection_names = item.get('collection_names', [])
+                        if BYPASS_RETRIEVAL_ACCESS_CONTROL:
+                            collection_names = item.get('collection_names', [])
+                        else:
+                            # Legacy KB: item.collection_names is client-supplied.
+                            # Validate against the KB's actual files to prevent
+                            # cross-tenant collection name substitution.
+                            files = await Knowledges.get_files_by_id(knowledge_base.id)
+                            owned_names = {f'file-{f.id}' for f in files}
+                            owned_names.add(knowledge_base.id)
+                            valid_names = [n for n in (item.get('collection_names') or []) if n in owned_names]
+                            collection_names = valid_names if valid_names else [knowledge_base.id]
                     else:
                         collection_names.append(item['id'])
 
@@ -1124,11 +1375,20 @@ async def get_sources_from_items(
                 'metadatas': [[doc.get('metadata') for doc in item.get('docs')]],
             }
         elif item.get('collection_name'):
-            # Direct Collection Name
-            collection_names.append(item['collection_name'])
+            if BYPASS_RETRIEVAL_ACCESS_CONTROL:
+                collection_names.append(item['collection_name'])
+            else:
+                log.debug(
+                    "get_sources_from_items: ignoring untrusted direct collection_name '%s' on item without type",
+                    item.get('collection_name'),
+                )
         elif item.get('collection_names'):
-            # Collection Names List
-            collection_names.extend(item['collection_names'])
+            if BYPASS_RETRIEVAL_ACCESS_CONTROL:
+                collection_names.extend(item['collection_names'])
+            else:
+                log.debug(
+                    'get_sources_from_items: ignoring untrusted direct collection_names on item without type',
+                )
 
         # If query_result is None
         # Fallback to collection names and vector search the collections
@@ -1138,9 +1398,18 @@ async def get_sources_from_items(
                 log.debug(f'skipping {item} as it has already been extracted')
                 continue
 
+            # Filter out collections the user cannot read
+            if user:
+                collection_names = await filter_accessible_collections(collection_names, user)
+                if not collection_names:
+                    log.debug(f'access denied for all collections in item {item}')
+                    continue
+
             try:
                 if full_context:
-                    query_result = get_all_items_from_collections(collection_names)
+                    # Sync helper makes blocking VECTOR_DB_CLIENT calls;
+                    # offload so the async caller's event loop stays free.
+                    query_result = await asyncio.to_thread(get_all_items_from_collections, collection_names)
                 else:
                     query_result = await query_collection(
                         request,
@@ -1237,7 +1506,7 @@ class RerankCompressor(BaseDocumentCompressor):
         self,
         documents: Sequence[Document],
         query: str,
-        callbacks: Optional[Callbacks] = None,
+        callbacks: Callbacks | None = None,
     ) -> Sequence[Document]:
         """Compress retrieved documents given the query context.
 
@@ -1256,7 +1525,7 @@ class RerankCompressor(BaseDocumentCompressor):
         self,
         documents: Sequence[Document],
         query: str,
-        callbacks: Optional[Callbacks] = None,
+        callbacks: Callbacks | None = None,
     ) -> Sequence[Document]:
         reranking = self.reranking_function is not None
 
@@ -1264,13 +1533,12 @@ class RerankCompressor(BaseDocumentCompressor):
         if reranking:
             scores = await asyncio.to_thread(self.reranking_function, query, documents)
         else:
-            from sentence_transformers import util
+            from sentence_transformers import util as st_util
 
             query_embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
-            document_embedding = await self.embedding_function(
-                [doc.page_content for doc in documents], RAG_EMBEDDING_CONTENT_PREFIX
-            )
-            scores = util.cos_sim(query_embedding, document_embedding)[0]
+            doc_texts = [doc.page_content for doc in documents]
+            document_embedding = await self.embedding_function(doc_texts, RAG_EMBEDDING_CONTENT_PREFIX)
+            scores = st_util.cos_sim(query_embedding, document_embedding)[0]
 
         if scores is not None:
             docs_with_scores = list(

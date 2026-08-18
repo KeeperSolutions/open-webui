@@ -15,6 +15,8 @@
 				goto('/workspace/prompts', { replaceState: true });
 			} else if ($user?.permissions?.workspace?.tools) {
 				goto('/workspace/tools', { replaceState: true });
+			} else if ($user?.permissions?.workspace?.skills) {
+				goto('/workspace/skills', { replaceState: true });
 			} else {
 				goto('/', { replaceState: true });
 			}

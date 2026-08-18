@@ -1,20 +1,16 @@
+import inspect
 import logging
 import sys
-import inspect
-
 from typing import Any
 
 from fastapi import Request
-
-from open_webui.models.users import UserModel
-from open_webui.models.functions import Functions
-
-from open_webui.socket.main import get_event_call, get_event_emitter
-from open_webui.utils.plugin import get_function_module_from_cache
-from open_webui.utils.models import get_all_models
-from open_webui.utils.middleware import process_tool_result
-
 from open_webui.env import GLOBAL_LOG_LEVEL
+from open_webui.models.functions import Functions
+from open_webui.models.users import UserModel
+from open_webui.socket.main import get_event_call, get_event_emitter
+from open_webui.utils.middleware import process_tool_result
+from open_webui.utils.models import get_all_models
+from open_webui.utils.plugin import get_function_module_from_cache
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -26,7 +22,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
     else:
         sub_action_id = None
 
-    action = Functions.get_function_by_id(action_id)
+    action = await Functions.get_function_by_id(action_id)
     if not action:
         raise Exception(f'Action not found: {action_id}')
 
@@ -47,7 +43,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         raise Exception('Model not found')
     model = models[model_id]
 
-    __event_emitter__ = get_event_emitter(
+    __event_emitter__ = await get_event_emitter(
         {
             'chat_id': data['chat_id'],
             'message_id': data['id'],
@@ -55,7 +51,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
             'user_id': user.id,
         }
     )
-    __event_call__ = get_event_call(
+    __event_call__ = await get_event_call(
         {
             'chat_id': data['chat_id'],
             'message_id': data['id'],
@@ -64,10 +60,10 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         }
     )
 
-    function_module, _, _ = get_function_module_from_cache(request, action_id)
+    function_module, _, _ = await get_function_module_from_cache(request, action_id)
 
     if hasattr(function_module, 'valves') and hasattr(function_module, 'Valves'):
-        valves = Functions.get_function_valves_by_id(action_id)
+        valves = await Functions.get_function_valves_by_id(action_id)
         function_module.valves = function_module.Valves(**(valves if valves else {}))
 
     if hasattr(function_module, 'action'):
@@ -98,7 +94,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
                 try:
                     if hasattr(function_module, 'UserValves'):
                         __user__['valves'] = function_module.UserValves(
-                            **Functions.get_user_valves_by_id_and_user_id(action_id, user.id)
+                            **await Functions.get_user_valves_by_id_and_user_id(action_id, user.id)
                         )
                 except Exception as e:
                     log.exception(f'Failed to get user values: {e}')
@@ -111,7 +107,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
                 data = action(**params)
 
             # Process action result for Rich UI embeds (HTMLResponse, tuple with headers)
-            processed_result, _, action_embeds = process_tool_result(
+            processed_result, _, action_embeds = await process_tool_result(
                 request,
                 action_id,
                 data,

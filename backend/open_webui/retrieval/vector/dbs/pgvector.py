@@ -1,55 +1,54 @@
-from typing import Optional, List, Dict, Any, Tuple
-import logging
 import json
+import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+from open_webui.config import (
+    PGVECTOR_CREATE_EXTENSION,
+    PGVECTOR_DB_URL,
+    PGVECTOR_HNSW_EF_CONSTRUCTION,
+    PGVECTOR_HNSW_M,
+    PGVECTOR_INDEX_METHOD,
+    PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH,
+    PGVECTOR_IVFFLAT_LISTS,
+    PGVECTOR_PGCRYPTO,
+    PGVECTOR_PGCRYPTO_KEY,
+    PGVECTOR_POOL_MAX_OVERFLOW,
+    PGVECTOR_POOL_RECYCLE,
+    PGVECTOR_POOL_SIZE,
+    PGVECTOR_POOL_TIMEOUT,
+    PGVECTOR_USE_HALFVEC,
+)
+from open_webui.retrieval.vector.main import (
+    GetResult,
+    SearchResult,
+    VectorDBBase,
+    VectorItem,
+)
+from open_webui.retrieval.vector.utils import process_metadata
+from open_webui.utils.misc import sanitize_text_for_db
+from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
-    func,
-    literal,
+    Column,
+    Integer,
+    LargeBinary,
+    MetaData,
+    Table,
+    Text,
     cast,
     column,
     create_engine,
-    Column,
-    Integer,
-    MetaData,
-    LargeBinary,
+    func,
+    literal,
     select,
     text,
-    Text,
-    Table,
     values,
 )
-from sqlalchemy.sql import true
-from sqlalchemy.pool import NullPool, QueuePool
-
-from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
 from sqlalchemy.dialects.postgresql import JSONB, array
-from pgvector.sqlalchemy import Vector, HALFVEC
-from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.exc import NoSuchTableError
-
-
-from open_webui.retrieval.vector.utils import process_metadata
-from open_webui.retrieval.vector.main import (
-    VectorDBBase,
-    VectorItem,
-    SearchResult,
-    GetResult,
-)
-from open_webui.config import (
-    PGVECTOR_DB_URL,
-    PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH,
-    PGVECTOR_CREATE_EXTENSION,
-    PGVECTOR_PGCRYPTO,
-    PGVECTOR_PGCRYPTO_KEY,
-    PGVECTOR_POOL_SIZE,
-    PGVECTOR_POOL_MAX_OVERFLOW,
-    PGVECTOR_POOL_TIMEOUT,
-    PGVECTOR_POOL_RECYCLE,
-    PGVECTOR_INDEX_METHOD,
-    PGVECTOR_HNSW_M,
-    PGVECTOR_HNSW_EF_CONSTRUCTION,
-    PGVECTOR_IVFFLAT_LISTS,
-    PGVECTOR_USE_HALFVEC,
-)
+from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker
+from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.sql import true
 
 VECTOR_LENGTH = PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH
 USE_HALFVEC = PGVECTOR_USE_HALFVEC
@@ -289,7 +288,9 @@ class PgvectorClient(VectorDBBase):
                     vector = self.adjust_vector_length(item['vector'])
                     # Use raw SQL for BYTEA/pgcrypto
                     # Ensure metadata is converted to its JSON text representation
-                    json_metadata = json.dumps(item['metadata'])
+                    # Sanitize to strip null bytes / surrogates that PostgreSQL cannot store
+                    json_metadata = sanitize_text_for_db(json.dumps(item['metadata']))
+                    item_text = sanitize_text_for_db(item['text'])
                     self.session.execute(
                         text("""
                             INSERT INTO document_chunk
@@ -305,7 +306,7 @@ class PgvectorClient(VectorDBBase):
                             'id': item['id'],
                             'vector': vector,
                             'collection_name': collection_name,
-                            'text': item['text'],
+                            'text': item_text,
                             'metadata_text': json_metadata,
                             'key': PGVECTOR_PGCRYPTO_KEY,
                         },
@@ -338,7 +339,9 @@ class PgvectorClient(VectorDBBase):
             if PGVECTOR_PGCRYPTO:
                 for item in items:
                     vector = self.adjust_vector_length(item['vector'])
-                    json_metadata = json.dumps(item['metadata'])
+                    # Sanitize to strip null bytes / surrogates that PostgreSQL cannot store
+                    json_metadata = sanitize_text_for_db(json.dumps(item['metadata']))
+                    item_text = sanitize_text_for_db(item['text'])
                     self.session.execute(
                         text("""
                             INSERT INTO document_chunk
@@ -358,7 +361,7 @@ class PgvectorClient(VectorDBBase):
                             'id': item['id'],
                             'vector': vector,
                             'collection_name': collection_name,
-                            'text': item['text'],
+                            'text': item_text,
                             'metadata_text': json_metadata,
                             'key': PGVECTOR_PGCRYPTO_KEY,
                         },

@@ -20,11 +20,11 @@ import time
 import uuid
 from typing import Optional
 
-from open_webui.internal.db import Base, get_db_context
+from open_webui.internal.db import Base, get_async_db_context
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, Index, Text
-from sqlalchemy.orm import Session
+from sqlalchemy import BigInteger, Column, Index, Text, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class PiiPolicyAuditModel(BaseModel):
 
 
 class PiiPolicyAuditTable:
-    def insert_event(
+    async def insert_event(
         self,
         event_type: str,
         group_id: str,
@@ -111,7 +111,7 @@ class PiiPolicyAuditTable:
         actor_email: str,
         user_id: Optional[str] = None,
         reason: Optional[str] = None,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> PiiPolicyAuditModel:
         """Record one administrative mutation. Raises rather than returning None.
 
@@ -155,18 +155,18 @@ class PiiPolicyAuditTable:
             event_ts=int(time.time()),
         )
 
-        with get_db_context(db) as db:
+        async with get_async_db_context(db) as db:
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return PiiPolicyAuditModel.model_validate(row)
 
-    def get_events_by_group_id(
+    async def get_events_by_group_id(
         self,
         group_id: str,
         limit: Optional[int] = None,
         newest_first: bool = False,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[PiiPolicyAuditModel]:
         """One group's chronology — the read this table was shaped for.
 
@@ -176,21 +176,25 @@ class PiiPolicyAuditTable:
         someone opening the panel came to see.
         """
         order = PiiPolicyAudit.event_ts.desc() if newest_first else PiiPolicyAudit.event_ts.asc()
-        with get_db_context(db) as db:
-            query = db.query(PiiPolicyAudit).filter(PiiPolicyAudit.group_id == group_id).order_by(order)
+        async with get_async_db_context(db) as db:
+            stmt = select(PiiPolicyAudit).filter(PiiPolicyAudit.group_id == group_id).order_by(order)
             if limit is not None:
-                query = query.limit(limit)
-            return [PiiPolicyAuditModel.model_validate(row) for row in query.all()]
+                stmt = stmt.limit(limit)
+            result = await db.execute(stmt)
+            return [PiiPolicyAuditModel.model_validate(row) for row in result.scalars().all()]
 
-    def count_events_by_group_id(self, group_id: str, db: Optional[Session] = None) -> int:
+    async def count_events_by_group_id(self, group_id: str, db: Optional[AsyncSession] = None) -> int:
         """Total for this group, so a truncated page can say what it left out.
 
         Separate count rather than "did we hit the limit": the latter can only
         say "at least this many", and a panel that silently shows a slice is the
         thing the rest of this dashboard was built not to do.
         """
-        with get_db_context(db) as db:
-            return db.query(PiiPolicyAudit).filter(PiiPolicyAudit.group_id == group_id).count()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(func.count()).select_from(PiiPolicyAudit).filter(PiiPolicyAudit.group_id == group_id)
+            )
+            return result.scalar()
 
 
 PiiPolicyAudits = PiiPolicyAuditTable()

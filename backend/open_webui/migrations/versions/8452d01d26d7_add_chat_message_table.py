@@ -6,12 +6,13 @@ Create Date: 2026-02-01 04:00:00.000000
 
 """
 
-import time
+import json
 import logging
+import time
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,13 @@ def _flush_batch(conn, table, batch):
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+
+    if 'chat_message' in existing_tables:
+        return  # Already created — skip everything
+
     # Step 1: Create table
     op.create_table(
         'chat_message',

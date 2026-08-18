@@ -1,42 +1,47 @@
-from typing import Optional
-import io
+from __future__ import annotations
+
+import asyncio
 import base64
+import io
+import json
 import logging
 import os
 from pathlib import Path
+import posixpath
+from typing import Optional
+from urllib.parse import unquote
 
-from open_webui.models.groups import Groups
-from open_webui.models.models import (
-    ModelForm,
-    ModelMeta,
-    ModelModel,
-    ModelParams,
-    ModelResponse,
-    ModelListResponse,
-    ModelAccessListResponse,
-    ModelAccessResponse,
-    Models,
-)
-from open_webui.models.access_grants import AccessGrants
-
-from pydantic import BaseModel
-from open_webui.constants import ERROR_MESSAGES
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
     Request,
-    status,
     Response,
+    status,
 )
-from fastapi.responses import FileResponse, StreamingResponse
-
-
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_permission, filter_allowed_access_grants
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
-from open_webui.internal.db import get_session
-from sqlalchemy.orm import Session
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
+from open_webui.internal.db import get_async_session
+from open_webui.models.access_grants import AccessGrants
+from open_webui.models.groups import Groups
+from open_webui.models.models import (
+    ModelAccessListResponse,
+    ModelAccessResponse,
+    ModelForm,
+    ModelListResponse,
+    ModelMeta,
+    ModelModel,
+    ModelParams,
+    ModelResponse,
+    Models,
+)
+from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.utils.auth import get_admin_user, get_verified_user
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -64,8 +69,62 @@ def _safe_static_path(static_dir, url_path: str) -> Optional[Path]:
 router = APIRouter()
 
 
+def _safe_static_redirect_path(url: str) -> str | None:
+    """
+    If url is a same-origin static asset path, return a normalized path safe for
+    RedirectResponse Location. Otherwise None (caller should fall back to default).
+    Rejects traversal (..), encoded dots, query/fragment, and non-/static targets.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    path = url.split('?', 1)[0].split('#', 1)[0].strip()
+    for _ in range(2):
+        decoded = unquote(path)
+        if decoded == path:
+            break
+        path = decoded
+    if '\x00' in path or '\\' in path:
+        return None
+    if not path.startswith('/'):
+        return None
+    normalized = posixpath.normpath(path)
+    if normalized in ('.', '/'):
+        return None
+    if not (normalized == '/static' or normalized.startswith('/static/')):
+        return None
+    if normalized == '/static':
+        return '/static/'
+    return normalized
+
+
 def is_valid_model_id(model_id: str) -> bool:
     return bool(model_id) and len(model_id) <= 256
+
+
+async def _verify_knowledge_file_access(
+    knowledge_items: list | None,
+    user,
+    db: AsyncSession,
+) -> None:
+    """Raise 403 if any knowledge item references a file the caller cannot read."""
+    if not knowledge_items or user.role == 'admin':
+        return
+    for item in knowledge_items:
+        if not isinstance(item, dict) or item.get('type') != 'file':
+            continue
+        file_id = item.get('id')
+        if not file_id:
+            continue
+        if not await has_access_to_file(file_id, 'read', user, db=db):
+            log.warning(
+                'knowledge file access denied: user %s cannot read file %s',
+                user.id,
+                file_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
 
 
 ###########################
@@ -80,14 +139,14 @@ PAGE_ITEM_COUNT = 30
 
 @router.get('/list', response_model=ModelAccessListResponse)  # do NOT use "/" as path, conflicts with main.py
 async def get_models(
-    query: Optional[str] = None,
-    view_option: Optional[str] = None,
-    tag: Optional[str] = None,
-    order_by: Optional[str] = None,
-    direction: Optional[str] = None,
-    page: Optional[int] = 1,
+    query: str | None = None,
+    view_option: str | None = None,
+    tag: str | None = None,
+    order_by: str | None = None,
+    direction: str | None = None,
+    page: int | None = 1,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     limit = PAGE_ITEM_COUNT
 
@@ -107,7 +166,7 @@ async def get_models(
         filter['direction'] = direction
 
     # Pre-fetch user group IDs once - used for both filter and write_access check
-    groups = Groups.get_groups_by_member_id(user.id, db=db)
+    groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
     if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
@@ -116,11 +175,11 @@ async def get_models(
 
         filter['user_id'] = user.id
 
-    result = Models.search_models(user.id, filter=filter, skip=skip, limit=limit, db=db)
+    result = await Models.search_models(user.id, filter=filter, skip=skip, limit=limit, db=db)
 
     # Batch-fetch writable model IDs in a single query instead of N has_access calls
     model_ids = [model.id for model in result.items]
-    writable_model_ids = AccessGrants.get_accessible_resource_ids(
+    writable_model_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
         resource_type='model',
         resource_ids=model_ids,
@@ -129,18 +188,25 @@ async def get_models(
         db=db,
     )
 
-    return ModelAccessListResponse(
-        items=[
+    # Strip profile_image_url from meta — images are served via /model/profile/image.
+    items = []
+    for model in result.items:
+        data = model.model_dump()
+        if data.get('meta'):
+            data['meta'].pop('profile_image_url', None)
+        items.append(
             ModelAccessResponse(
-                **model.model_dump(),
+                **data,
                 write_access=(
                     (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model.user_id
                     or model.id in writable_model_ids
                 ),
             )
-            for model in result.items
-        ],
+        )
+
+    return ModelAccessListResponse(
+        items=items,
         total=result.total,
     )
 
@@ -151,8 +217,8 @@ async def get_models(
 
 
 @router.get('/base', response_model=list[ModelResponse])
-async def get_base_models(user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    return Models.get_base_models(db=db)
+async def get_base_models(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+    return await Models.get_base_models(db=db)
 
 
 ###########################
@@ -161,26 +227,13 @@ async def get_base_models(user=Depends(get_admin_user), db: Session = Depends(ge
 
 
 @router.get('/tags', response_model=list[str])
-async def get_model_tags(user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
-        models = Models.get_models(db=db)
-    else:
-        models = Models.get_models_by_user_id(user.id, db=db)
-
-    tags_set = set()
-    for model in models:
-        if model.meta:
-            meta = model.meta.model_dump()
-            for tag in meta.get('tags', []):
-                try:
-                    name = tag.get('name') if isinstance(tag, dict) else str(tag)
-                    if name:
-                        tags_set.add(name)
-                except Exception:
-                    continue
-
-    tags = sorted(tags_set)
-    return tags
+async def get_model_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    tags = await Models.get_all_tags(
+        user_id=user.id,
+        is_admin=(user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL),
+        db=db,
+    )
+    return sorted(tags)
 
 
 ############################
@@ -188,14 +241,15 @@ async def get_model_tags(user=Depends(get_verified_user), db: Session = Depends(
 ############################
 
 
-@router.post('/create', response_model=Optional[ModelModel])
+@router.post('/create', response_model=ModelModel | None)
 async def create_new_model(
     request: Request,
     form_data: ModelForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not has_permission(
+    """Create a new workspace model entry."""
+    if user.role != 'admin' and not await has_permission(
         user.id, 'workspace.models', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -203,7 +257,7 @@ async def create_new_model(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    model = Models.get_model_by_id(form_data.id, db=db)
+    model = await Models.get_model_by_id(form_data.id, db=db)
     if model:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -217,7 +271,21 @@ async def create_new_model(
         )
 
     else:
-        model = Models.insert_new_model(form_data, user.id, db=db)
+        await _verify_knowledge_file_access(
+            getattr(form_data.meta, 'knowledge', None) if form_data.meta else None,
+            user,
+            db,
+        )
+
+        form_data.access_grants = await filter_allowed_access_grants(
+            request.app.state.config.USER_PERMISSIONS,
+            user.id,
+            user.role,
+            form_data.access_grants,
+            'sharing.public_models',
+        )
+
+        model = await Models.insert_new_model(form_data, user.id, db=db)
         if model:
             return model
         else:
@@ -236,9 +304,9 @@ async def create_new_model(
 async def export_models(
     request: Request,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not has_permission(
+    if user.role != 'admin' and not await has_permission(
         user.id,
         'workspace.models_export',
         request.app.state.config.USER_PERMISSIONS,
@@ -250,9 +318,9 @@ async def export_models(
         )
 
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
-        return Models.get_models(db=db)
+        return await Models.get_models(db=db)
     else:
-        return Models.get_models_by_user_id(user.id, db=db)
+        return await Models.get_models_by_user_id(user.id, db=db)
 
 
 ############################
@@ -269,9 +337,9 @@ async def import_models(
     request: Request,
     user=Depends(get_verified_user),
     form_data: ModelsImportForm = (...),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not has_permission(
+    if user.role != 'admin' and not await has_permission(
         user.id,
         'workspace.models_import',
         request.app.state.config.USER_PERMISSIONS,
@@ -291,28 +359,90 @@ async def import_models(
                 if model_data.get('id') and is_valid_model_id(model_data.get('id'))
             ]
             existing_models = {
-                model.id: model for model in (Models.get_models_by_ids(model_ids, db=db) if model_ids else [])
+                model.id: model for model in (await Models.get_models_by_ids(model_ids, db=db) if model_ids else [])
             }
 
+            # Batch-resolve write permissions in one query instead of
+            # per-model has_access calls (N+1 avoidance).
+            existing_model_ids = list(existing_models.keys())
+            if user.role != 'admin' and existing_model_ids:
+                groups = await Groups.get_groups_by_member_id(user.id, db=db)
+                user_group_ids = {group.id for group in groups}
+                writable_model_ids = await AccessGrants.get_accessible_resource_ids(
+                    user_id=user.id,
+                    resource_type='model',
+                    resource_ids=existing_model_ids,
+                    permission='write',
+                    user_group_ids=user_group_ids,
+                    db=db,
+                )
+            else:
+                writable_model_ids = set(existing_model_ids)
+
             for model_data in data:
-                # Here, you can add logic to validate model_data if needed
                 model_id = model_data.get('id')
 
                 if model_id and is_valid_model_id(model_id):
+                    # Defense-in-depth: skip models referencing inaccessible files
+                    try:
+                        await _verify_knowledge_file_access(
+                            (model_data.get('meta') or {}).get('knowledge'),
+                            user,
+                            db,
+                        )
+                    except HTTPException:
+                        log.warning(
+                            'import_models: user %s skipped model %s (knowledge file access denied)',
+                            user.id,
+                            model_id,
+                        )
+                        continue
+
                     existing_model = existing_models.get(model_id)
                     if existing_model:
+                        # Enforce ownership/write-access before allowing overwrite
+                        if (
+                            user.role != 'admin'
+                            and existing_model.user_id != user.id
+                            and model_id not in writable_model_ids
+                        ):
+                            log.warning(
+                                'import_models: user %s skipped model %s (no write access)',
+                                user.id,
+                                model_id,
+                            )
+                            continue
+
                         # Update existing model
                         model_data['meta'] = model_data.get('meta', {})
                         model_data['params'] = model_data.get('params', {})
 
                         updated_model = ModelForm(**{**existing_model.model_dump(), **model_data})
-                        Models.update_model_by_id(model_id, updated_model, db=db)
+                        # Only filter access_grants when explicitly provided
+                        # in the payload to avoid altering existing ACLs on
+                        # metadata-only imports.
+                        if 'access_grants' in model_data:
+                            updated_model.access_grants = await filter_allowed_access_grants(
+                                request.app.state.config.USER_PERMISSIONS,
+                                user.id,
+                                user.role,
+                                updated_model.access_grants,
+                                'sharing.public_models',
+                            )
+                        await Models.update_model_by_id(model_id, updated_model, db=db)
                     else:
                         # Insert new model
                         model_data['meta'] = model_data.get('meta', {})
                         model_data['params'] = model_data.get('params', {})
                         new_model = ModelForm(**model_data)
-                        Models.insert_new_model(user_id=user.id, form_data=new_model, db=db)
+                        new_model.access_grants = await filter_allowed_access_grants(
+                            request.app.state.config.USER_PERMISSIONS,
+                            user.id,
+                            user.role,
+                            new_model.access_grants,
+                            'sharing.public_models',
+                        )
+                        await Models.insert_new_model(user_id=user.id, form_data=new_model, db=db)
             return True
         else:
             raise HTTPException(status_code=400, detail='Invalid JSON format')
@@ -335,9 +465,9 @@ async def sync_models(
     request: Request,
     form_data: SyncModelsForm,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    return Models.sync_models(user.id, form_data.models, db=db)
+    return await Models.sync_models(user.id, form_data.models, db=db)
 
 
 ###########################
@@ -350,34 +480,41 @@ class ModelIdForm(BaseModel):
 
 
 # Note: We're not using the typical url path param here, but instead using a query parameter to allow '/' in the id
-@router.get('/model', response_model=Optional[ModelAccessResponse])
-async def get_model_by_id(id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    model = Models.get_model_by_id(id, db=db)
+@router.get('/model', response_model=ModelAccessResponse | None)
+async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    model = await Models.get_model_by_id(id, db=db)
     if model:
-        if (
+        write_access = (
             (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
-            or model.user_id == user.id
-            or AccessGrants.has_access(
+            or user.id == model.user_id
+            or await AccessGrants.has_access(
                 user_id=user.id,
                 resource_type='model',
                 resource_id=model.id,
-                permission='read',
+                permission='write',
                 db=db,
             )
+        )
+
+        if write_access or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='model',
+            resource_id=model.id,
+            permission='read',
+            db=db,
         ):
+            model_dict = model.model_dump()
+            # Strip params (system prompt and other admin-curated config)
+            # for read-only callers — matches the params strip already
+            # enforced on /api/models in utils/models.py.  Owners, admins
+            # under BYPASS_ADMIN_ACCESS_CONTROL, and write-grant holders
+            # still receive the full object so the workspace edit UI keeps
+            # working for users who legitimately curate the model.
+            if not write_access:
+                model_dict['params'] = {}
             return ModelAccessResponse(
-                **model.model_dump(),
-                write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
-                    or user.id == model.user_id
-                    or AccessGrants.has_access(
-                        user_id=user.id,
-                        resource_type='model',
-                        resource_id=model.id,
-                        permission='write',
-                        db=db,
-                    )
-                ),
+                **model_dict,
+                write_access=write_access,
             )
         else:
             raise HTTPException(
@@ -397,16 +534,16 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: Session 
 
 
 @router.get("/model/profile/image")
-def get_model_profile_image(
+async def get_model_profile_image(
     request: Request,
     id: str,
     theme: Optional[str] = "light",
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     from open_webui.models.providers import Providers
 
-    model = Models.get_model_by_id(id, db=db)
+    model = await Models.get_model_by_id(id, db=db)
 
     if model:
         # Priority 1: Manual override (custom uploaded image)
@@ -430,20 +567,29 @@ def get_model_profile_image(
                     return Response(status_code=status.HTTP_304_NOT_MODIFIED)
 
                 if image_url.startswith("http"):
-                    return Response(
-                        status_code=status.HTTP_302_FOUND,
-                        headers={"Location": image_url},
-                    )
+                    if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                        return Response(
+                            status_code=status.HTTP_302_FOUND,
+                            headers={"Location": image_url},
+                        )
+                    # When forwarding is disabled, fall through to provider
+                    # detection / the default image to prevent client-side
+                    # IP/UA/Referer leaks via 302 redirect to external origins.
                 elif image_url.startswith("data:image"):
                     try:
                         header, base64_data = image_url.split(",", 1)
                         image_data = base64.b64decode(base64_data)
                         image_buffer = io.BytesIO(image_data)
-                        media_type = header.split(";")[0].lstrip("data:")
+                        media_type = header.split(";")[0].lstrip("data:").lower()
+
+                        # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                        if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                            return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
 
                         headers = {
                             "Content-Disposition": "inline",
                             "Cache-Control": "public, max-age=3600",
+                            "X-Content-Type-Options": "nosniff",
                         }
                         if etag:
                             headers["ETag"] = etag
@@ -478,7 +624,9 @@ def get_model_profile_image(
                 if base_runtime_model and "owned_by" in base_runtime_model:
                     owned_by = base_runtime_model.get("owned_by", "openai")
 
-        provider_result = Providers.detect_provider_logo_with_metadata(model.id, owned_by, theme or "light", db=db)
+        # Providers is still a sync model — let it open its own sync session
+        # rather than passing this endpoint's AsyncSession through.
+        provider_result = Providers.detect_provider_logo_with_metadata(model.id, owned_by, theme or "light")
 
         if provider_result:
             provider_logo = provider_result["logo_url"]
@@ -510,9 +658,13 @@ def get_model_profile_image(
                     header, base64_data = provider_logo.split(",", 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(";")[0].lstrip("data:")
+                    media_type = header.split(";")[0].lstrip("data:").lower()
 
-                    headers = {"Cache-Control": "public, max-age=3600"}
+                    # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
+                    headers = {"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"}
                     if etag:
                         headers["ETag"] = etag
 
@@ -532,6 +684,55 @@ def get_model_profile_image(
                         headers["ETag"] = etag
                     return FileResponse(str(file_path), headers=headers)
 
+    # Priority 2a: arena models are stored in config, not the DB — check them
+    # before falling through to runtime-MODELS provider detection, since an
+    # arena model's profile_image_url (if any) is its only source of a logo.
+    if not model:
+        arena_models = getattr(
+            getattr(request.app.state, "config", None),
+            "EVALUATION_ARENA_MODELS",
+            [],
+        )
+        for arena_model in arena_models:
+            if arena_model.get("id") == id:
+                arena_image_url = arena_model.get("meta", {}).get("profile_image_url")
+                if arena_image_url:
+                    if arena_image_url.startswith("http"):
+                        if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                            return Response(
+                                status_code=status.HTTP_302_FOUND,
+                                headers={"Location": arena_image_url},
+                            )
+                        # When forwarding is disabled, fall through to
+                        # prevent client-side IP/UA/Referer leaks via 302
+                        # redirect to external origins.
+                    elif arena_image_url.startswith("data:image"):
+                        try:
+                            header, base64_data = arena_image_url.split(",", 1)
+                            image_data = base64.b64decode(base64_data)
+                            image_buffer = io.BytesIO(image_data)
+                            media_type = header.split(";")[0].lstrip("data:").lower()
+
+                            # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                            if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                                return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
+                            return StreamingResponse(
+                                image_buffer,
+                                media_type=media_type,
+                                headers={
+                                    "Content-Disposition": "inline",
+                                    "X-Content-Type-Options": "nosniff",
+                                },
+                            )
+                        except Exception as e:
+                            log.warning(f"Error decoding arena model profile image: {e}")
+                    else:
+                        safe_static = _safe_static_redirect_path(arena_image_url)
+                        if safe_static:
+                            return RedirectResponse(url=safe_static, status_code=status.HTTP_302_FOUND)
+                break
+
     # Priority 2b: model has no DB row — detect provider from runtime MODELS state only.
     # (Models with a DB row that fell through Priority 2 have no provider logo configured
     # and won't produce a different result here, so skip the redundant lookup.)
@@ -539,7 +740,7 @@ def get_model_profile_image(
         runtime_model = request.app.state.MODELS.get(id)
         if runtime_model:
             owned_by = runtime_model.get("owned_by", "openai")
-            provider_result = Providers.detect_provider_logo_with_metadata(id, owned_by, theme or "light", db=db)
+            provider_result = Providers.detect_provider_logo_with_metadata(id, owned_by, theme or "light")
             if provider_result:
                 provider_logo = provider_result["logo_url"]
                 provider_updated_at = provider_result["updated_at"]
@@ -557,8 +758,10 @@ def get_model_profile_image(
                         header, base64_data = provider_logo.split(",", 1)
                         image_data = base64.b64decode(base64_data)
                         image_buffer = io.BytesIO(image_data)
-                        media_type = header.split(";")[0].lstrip("data:")
-                        headers = {"Cache-Control": "public, max-age=3600"}
+                        media_type = header.split(";")[0].lstrip("data:").lower()
+                        if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                            return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+                        headers = {"Cache-Control": "public, max-age=3600", "X-Content-Type-Options": "nosniff"}
                         if etag:
                             headers["ETag"] = etag
                         return StreamingResponse(image_buffer, media_type=media_type, headers=headers)
@@ -573,17 +776,22 @@ def get_model_profile_image(
                         return FileResponse(str(file_path), headers=headers)
 
     # Priority 3: Default fallback
-    return FileResponse(f"{STATIC_DIR}/favicon.png")
+    # Canonical URL so browsers cache one asset for all default model avatars
+    # (distinct /profile/image?id=... URLs would otherwise re-download the same bytes).
+    safe_static = _safe_static_redirect_path(model.meta.profile_image_url) if model and model.meta else None
+    if safe_static:
+        return RedirectResponse(url=safe_static, status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
 
 
 @router.get("/model/profile/image/preview")
-def get_model_profile_image_preview(
+async def get_model_profile_image_preview(
     request: Request,
     id: str,
     theme: Optional[str] = "light",
     profile_image_url: Optional[str] = None,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Preview what the profile image would be with a given profile_image_url override.
@@ -591,7 +799,7 @@ def get_model_profile_image_preview(
     """
     from open_webui.models.providers import Providers
 
-    model = Models.get_model_by_id(id, db=db)
+    model = await Models.get_model_by_id(id, db=db)
     if not model:
         return FileResponse(f"{STATIC_DIR}/favicon.png")
 
@@ -608,20 +816,32 @@ def get_model_profile_image_preview(
 
         if not is_default_favicon:
             if preview_url.startswith("http"):
-                return Response(
-                    status_code=status.HTTP_302_FOUND,
-                    headers={"Location": preview_url},
-                )
+                if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                    return Response(
+                        status_code=status.HTTP_302_FOUND,
+                        headers={"Location": preview_url},
+                    )
+                # When forwarding is disabled, fall through to provider
+                # detection to prevent client-side IP/UA/Referer leaks via
+                # 302 redirect to external origins.
             elif preview_url.startswith("data:image"):
                 try:
                     header, base64_data = preview_url.split(",", 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(";")[0].lstrip("data:")
+                    media_type = header.split(";")[0].lstrip("data:").lower()
+
+                    # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
                     return StreamingResponse(
                         image_buffer,
                         media_type=media_type,
-                        headers={"Cache-Control": "no-cache"},
+                        headers={
+                            "Cache-Control": "no-cache",
+                            "X-Content-Type-Options": "nosniff",
+                        },
                     )
                 except Exception as e:
                     log.warning(f"Error decoding preview image: {e}")
@@ -641,8 +861,10 @@ def get_model_profile_image_preview(
             if base_runtime_model and "owned_by" in base_runtime_model:
                 owned_by = base_runtime_model.get("owned_by", "openai")
 
+    # Providers is still a sync model — let it open its own sync session
+    # rather than passing this endpoint's AsyncSession through.
     provider_result = Providers.detect_provider_logo_with_metadata(
-        model.id, owned_by, theme or "light", db=db
+        model.id, owned_by, theme or "light"
     )
 
     if provider_result:
@@ -657,11 +879,19 @@ def get_model_profile_image_preview(
                 header, base64_data = provider_logo.split(",", 1)
                 image_data = base64.b64decode(base64_data)
                 image_buffer = io.BytesIO(image_data)
-                media_type = header.split(";")[0].lstrip("data:")
+                media_type = header.split(";")[0].lstrip("data:").lower()
+
+                # only serve known-safe raster types inline; reject SVG/unknown (can run script on our origin)
+                if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                    return RedirectResponse(url="/static/favicon.png", status_code=status.HTTP_302_FOUND)
+
                 return StreamingResponse(
                     image_buffer,
                     media_type=media_type,
-                    headers={"Cache-Control": "no-cache"},
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "X-Content-Type-Options": "nosniff",
+                    },
                 )
             except Exception as e:
                 log.warning(f"Error decoding provider logo: {e}")
@@ -679,14 +909,14 @@ def get_model_profile_image_preview(
 ############################
 
 
-@router.post('/model/toggle', response_model=Optional[ModelResponse])
-async def toggle_model_by_id(id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    model = Models.get_model_by_id(id, db=db)
+@router.post('/model/toggle', response_model=ModelResponse | None)
+async def toggle_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    model = await Models.get_model_by_id(id, db=db)
     if model:
         if (
             user.role == 'admin'
             or model.user_id == user.id
-            or AccessGrants.has_access(
+            or await AccessGrants.has_access(
                 user_id=user.id,
                 resource_type='model',
                 resource_id=model.id,
@@ -694,7 +924,7 @@ async def toggle_model_by_id(id: str, user=Depends(get_verified_user), db: Sessi
                 db=db,
             )
         ):
-            model = Models.toggle_model_by_id(id, db=db)
+            model = await Models.toggle_model_by_id(id, db=db)
 
             if model:
                 return model
@@ -720,13 +950,15 @@ async def toggle_model_by_id(id: str, user=Depends(get_verified_user), db: Sessi
 ############################
 
 
-@router.post('/model/update', response_model=Optional[ModelModel])
+@router.post('/model/update', response_model=ModelModel | None)
 async def update_model_by_id(
+    request: Request,
     form_data: ModelForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    model = Models.get_model_by_id(form_data.id, db=db)
+    """Update a workspace model's configuration."""
+    model = await Models.get_model_by_id(form_data.id, db=db)
     if not model:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -735,7 +967,7 @@ async def update_model_by_id(
 
     if (
         model.user_id != user.id
-        and not AccessGrants.has_access(
+        and not await AccessGrants.has_access(
             user_id=user.id,
             resource_type='model',
             resource_id=model.id,
@@ -749,7 +981,21 @@ async def update_model_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    model = Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()), db=db)
+    await _verify_knowledge_file_access(
+        getattr(form_data.meta, 'knowledge', None) if form_data.meta else None,
+        user,
+        db,
+    )
+
+    form_data.access_grants = await filter_allowed_access_grants(
+        request.app.state.config.USER_PERMISSIONS,
+        user.id,
+        user.role,
+        form_data.access_grants,
+        'sharing.public_models',
+    )
+
+    model = await Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()), db=db)
     return model
 
 
@@ -760,18 +1006,18 @@ async def update_model_by_id(
 
 class ModelAccessGrantsForm(BaseModel):
     id: str
-    name: Optional[str] = None
+    name: str | None = None
     access_grants: list[dict]
 
 
-@router.post('/model/access/update', response_model=Optional[ModelModel])
+@router.post('/model/access/update', response_model=ModelModel | None)
 async def update_model_access_by_id(
     request: Request,
     form_data: ModelAccessGrantsForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    model = Models.get_model_by_id(form_data.id, db=db)
+    model = await Models.get_model_by_id(form_data.id, db=db)
 
     # Non-preset models (e.g. direct Ollama/OpenAI models) may not have a DB
     # entry yet. Create a minimal one so access grants can be stored.
@@ -781,7 +1027,7 @@ async def update_model_access_by_id(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
-        model = Models.insert_new_model(
+        model = await Models.insert_new_model(
             ModelForm(
                 id=form_data.id,
                 name=form_data.name or form_data.id,
@@ -799,7 +1045,7 @@ async def update_model_access_by_id(
 
     if (
         model.user_id != user.id
-        and not AccessGrants.has_access(
+        and not await AccessGrants.has_access(
             user_id=user.id,
             resource_type='model',
             resource_id=model.id,
@@ -813,7 +1059,7 @@ async def update_model_access_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    form_data.access_grants = filter_allowed_access_grants(
+    form_data.access_grants = await filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
         user.id,
         user.role,
@@ -821,9 +1067,11 @@ async def update_model_access_by_id(
         'sharing.public_models',
     )
 
-    AccessGrants.set_access_grants('model', form_data.id, form_data.access_grants, db=db)
+    await AccessGrants.set_access_grants('model', form_data.id, form_data.access_grants, db=db)
 
-    return Models.get_model_by_id(form_data.id, db=db)
+    await Models.update_model_updated_at_by_id(form_data.id, db=db)
+
+    return await Models.get_model_by_id(form_data.id, db=db)
 
 
 ############################
@@ -835,9 +1083,9 @@ async def update_model_access_by_id(
 async def delete_model_by_id(
     form_data: ModelIdForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    model = Models.get_model_by_id(form_data.id, db=db)
+    model = await Models.get_model_by_id(form_data.id, db=db)
     if not model:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -847,7 +1095,7 @@ async def delete_model_by_id(
     if (
         user.role != 'admin'
         and model.user_id != user.id
-        and not AccessGrants.has_access(
+        and not await AccessGrants.has_access(
             user_id=user.id,
             resource_type='model',
             resource_id=model.id,
@@ -860,11 +1108,11 @@ async def delete_model_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    result = Models.delete_model_by_id(form_data.id, db=db)
+    result = await Models.delete_model_by_id(form_data.id, db=db)
     return result
 
 
 @router.delete('/delete/all', response_model=bool)
-async def delete_all_models(user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    result = Models.delete_all_models(db=db)
+async def delete_all_models(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+    result = await Models.delete_all_models(db=db)
     return result

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 
 
@@ -72,11 +74,11 @@ class ERROR_MESSAGES(str, Enum):
 
     EMPTY_CONTENT = 'The content provided is empty. Please ensure that there is text or data present before proceeding.'
 
-    DB_NOT_SQLITE = 'This feature is only available when running with SQLite databases.'
+    DB_NOT_SQLITE = 'This feature is only available with SQLite databases.'
 
-    INVALID_URL = 'Oops! The URL you provided is invalid. Please double-check and try again.'
+    INVALID_URL = 'The URL you provided is invalid. Please double-check and try again.'
 
-    WEB_SEARCH_ERROR = lambda err='': f'{err if err else "Oops! Something went wrong while searching the web."}'
+    WEB_SEARCH_ERROR = lambda err='': err if err else 'Something went wrong while searching the web.'
 
     OLLAMA_API_DISABLED = 'The Ollama API is disabled. Please enable it to use this feature.'
 
@@ -90,6 +92,17 @@ class ERROR_MESSAGES(str, Enum):
     )
 
     INVALID_PASSWORD = lambda err='': err if err else 'The password does not meet the required validation criteria.'
+
+    AUTOMATION_LIMIT_EXCEEDED = lambda size='': f'Automation limit reached ({size})'
+    AUTOMATION_TOO_FREQUENT = lambda interval='': f'Schedule too frequent. Minimum interval is {interval} seconds.'
+    AUTOMATION_INVALID_RRULE = lambda err='': f'Invalid RRULE: {err}'
+    AUTOMATION_NO_FUTURE_RUNS = 'RRULE has no future occurrences'
+
+    FEATURE_DISABLED = lambda name='': f'{name} is disabled'
+    INPUT_TOO_LONG = lambda size='': f'Input prompt exceeds maximum length of {size}'
+    SERVER_CONNECTION_ERROR = 'Open WebUI: Server Connection Error'
+    REQUIRED_FIELD_EMPTY = lambda name='': f'Required field {name} is empty'
+    OAUTH_NOT_CONFIGURED = lambda name='': f"Provider '{name}' is not configured"
 
 
 class TASKS(str, Enum):

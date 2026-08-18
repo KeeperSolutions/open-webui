@@ -24,6 +24,7 @@ vi.mock('$lib/stores', () => ({
 	showCallOverlay: writable(false),
 	tools: writable([]),
 	toolServers: writable([]),
+	skills: writable([]),
 	terminalServers: writable([]),
 	selectedTerminalId: writable(null),
 	user: writable({ role: 'user', permissions: {} }),
@@ -39,6 +40,7 @@ vi.mock('$lib/apis/files', () => ({ uploadFile: vi.fn() }));
 vi.mock('$lib/apis', () => ({ generateAutoCompletion: vi.fn() }));
 vi.mock('$lib/apis/auths', () => ({ getSessionUser: vi.fn() }));
 vi.mock('$lib/apis/tools', () => ({ getTools: vi.fn(async () => []) }));
+vi.mock('$lib/apis/skills', () => ({ getSkills: vi.fn(async () => []) }));
 
 // ── Mock heavy / browser-only deps ────────────────────────────────────────────
 vi.mock('$lib/utils/google-drive-picker', () => ({

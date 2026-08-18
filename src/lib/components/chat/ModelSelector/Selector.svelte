@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
+	import { marked } from 'marked';
 	import Fuse from 'fuse.js';
 
 	import dayjs from '$lib/dayjs';
@@ -7,11 +8,13 @@
 	dayjs.extend(relativeTime);
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
-	import { deleteModel, getOllamaVersion, pullModel, unloadModel } from '$lib/apis/ollama';
+	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
+	import { unloadModel } from '$lib/apis';
 
 	import { user, MODEL_DOWNLOAD_POOL, models, mobile, settings, config, theme } from '$lib/stores';
 	import type { Model } from '$lib/stores';
@@ -443,6 +446,44 @@
 		}
 	};
 
+	let showDeleteConfirm = false;
+	let deleteModelTarget: any = null;
+
+	const deleteModelHandler = async (model: any) => {
+		deleteModelTarget = model;
+		showDeleteConfirm = true;
+	};
+
+	const confirmDeleteModel = async () => {
+		const model = deleteModelTarget;
+		if (!model) return;
+
+		const res = await deleteModel(localStorage.token, model.id).catch((error) => {
+			toast.error($i18n.t('Error deleting model: {{error}}', { error }));
+		});
+
+		if (res) {
+			// $i18n.t('Model {{modelId}} not found')
+			toast.success(
+				$i18n.t('Model {{modelName}} deleted successfully', { modelName: model.name ?? model.id })
+			);
+
+			// If the deleted model was selected, clear the selection
+			if (value === model.id) {
+				value = '';
+			}
+
+			models.set(
+				await getModels(
+					localStorage.token,
+					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
+				)
+			);
+		}
+
+		deleteModelTarget = null;
+	};
+
 	const ITEM_HEIGHT = 42;
 	const OVERSCAN = 10;
 
@@ -455,6 +496,17 @@
 		Math.ceil((listScrollTop + 256) / ITEM_HEIGHT) + OVERSCAN
 	);
 </script>
+
+<ConfirmDialog
+	bind:show={showDeleteConfirm}
+	title={$i18n.t('Delete Model')}
+	message={$i18n.t('Are you sure you want to delete **{{modelName}}**?', {
+		modelName: deleteModelTarget?.name ?? deleteModelTarget?.id ?? ''
+	})}
+	on:confirm={() => {
+		confirmDeleteModel();
+	}}
+/>
 
 <DropdownMenu.Root
 	bind:open={show}
@@ -481,7 +533,10 @@
 		aria-label={selectedModel
 			? $i18n.t('Selected model: {{modelName}}', { modelName: selectedModel.label })
 			: placeholder}
+		aria-haspopup="listbox"
+		aria-expanded={show}
 		id="model-selector-{id}-button"
+		type="button"
 	>
 		<div
 			class="flex w-full items-center justify-between gap-2 px-3 py-2 rounded-hg-md border border-hg-border-subtle dark:border-gray-800 bg-transparent text-left truncate {triggerClassName}"
@@ -700,6 +755,7 @@
 							{value}
 							{pinModelHandler}
 							{unloadModelHandler}
+							{deleteModelHandler}
 							onClick={() => {
 								value = entry.model_id;
 								selectedModelIdx = index;
@@ -758,6 +814,7 @@
 								{value}
 								{pinModelHandler}
 								{unloadModelHandler}
+								{deleteModelHandler}
 								onClick={() => {
 									value = item.value;
 									selectedModelIdx = index;
@@ -824,7 +881,7 @@
 							<Tooltip content={$i18n.t('Cancel')}>
 								<button
 									class="text-gray-800 dark:text-gray-100"
-									aria-label={$i18n.t('Cancel')}
+									aria-label={$i18n.t('Cancel download of {{model}}', { model: model })}
 									on:click={() => {
 										cancelModelPullHandler(model);
 									}}

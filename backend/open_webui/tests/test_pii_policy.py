@@ -78,7 +78,7 @@ def _enforced(permissions_value):
 
 def test_single_group_enforcing_returns_true():
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 def test_two_groups_one_enforcing_one_without_the_key_returns_true():
@@ -93,23 +93,23 @@ def test_two_groups_one_enforcing_one_without_the_key_returns_true():
     """
     groups = [_group({"chat": {"temporary_enforced": False}}), _enforced(True)]
     with patch(GROUPS_LOOKUP, return_value=groups):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 def test_two_groups_false_and_true_returns_true():
     with patch(GROUPS_LOOKUP, return_value=[_enforced(False), _enforced(True)]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 def test_enforcing_group_first_still_returns_true():
     """Order must not matter; a lax group listed later must not win."""
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True), _enforced(False)]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 def test_all_groups_false_returns_false():
     with patch(GROUPS_LOOKUP, return_value=[_enforced(False), _enforced(False)]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is False
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is False
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ def test_all_groups_false_returns_false():
 def test_user_without_any_group_falls_back_to_env_default_false():
     with patch(GROUPS_LOOKUP, return_value=[]):
         assert (
-            resolve_pii_masking_enforced(_make_request(default_enforced=False), _make_user())
+            asyncio.run(resolve_pii_masking_enforced(_make_request(default_enforced=False), _make_user()))
             is False
         )
 
@@ -129,31 +129,31 @@ def test_user_without_any_group_honours_env_default_true():
     """Operator can enforce instance-wide; users with no group are covered too."""
     with patch(GROUPS_LOOKUP, return_value=[]):
         assert (
-            resolve_pii_masking_enforced(_make_request(default_enforced=True), _make_user())
+            asyncio.run(resolve_pii_masking_enforced(_make_request(default_enforced=True), _make_user()))
             is True
         )
 
 
 def test_group_without_the_key_falls_back_to_default():
     with patch(GROUPS_LOOKUP, return_value=[_group({"chat": {"delete": True}})]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is False
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is False
 
 
 def test_group_with_null_permissions_falls_back_to_default():
     with patch(GROUPS_LOOKUP, return_value=[_group(None)]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is False
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is False
 
 
 def test_group_with_traversable_but_wrong_shape_falls_back_to_default():
     """`chat` is a string: membership test is valid Python and yields False."""
     with patch(GROUPS_LOOKUP, return_value=[_group({"chat": "nonsense"})]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is False
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is False
 
 
 def test_group_with_untraversable_permissions_fails_closed():
     """`chat` is an int: the membership test raises, so we must fail closed."""
     with patch(GROUPS_LOOKUP, return_value=[_group({"chat": 5})]):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 # ---------------------------------------------------------------------------
@@ -163,14 +163,14 @@ def test_group_with_untraversable_permissions_fails_closed():
 
 def test_lookup_exception_fails_closed_to_enforced():
     with patch(GROUPS_LOOKUP, side_effect=RuntimeError("db is down")):
-        assert resolve_pii_masking_enforced(_make_request(), _make_user()) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user())) is True
 
 
 def test_lookup_exception_is_logged_as_warning(caplog):
     """A silent fail-closed would look like every toggle locking for no reason."""
     with caplog.at_level(logging.WARNING, logger="open_webui.routers.pipelines"):
         with patch(GROUPS_LOOKUP, side_effect=RuntimeError("db is down")):
-            resolve_pii_masking_enforced(_make_request(), _make_user())
+            asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user()))
 
     assert any(
         "pii_policy" in r.message and "enforced=True" in r.message for r in caplog.records
@@ -186,8 +186,8 @@ def test_second_call_in_same_request_does_not_hit_the_database():
     request = _make_request()
     user = _make_user()
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]) as lookup:
-        assert resolve_pii_masking_enforced(request, user) is True
-        assert resolve_pii_masking_enforced(request, user) is True
+        assert asyncio.run(resolve_pii_masking_enforced(request, user)) is True
+        assert asyncio.run(resolve_pii_masking_enforced(request, user)) is True
         assert lookup.call_count == 1
 
 
@@ -196,8 +196,8 @@ def test_memoized_false_is_not_recomputed():
     request = _make_request()
     user = _make_user()
     with patch(GROUPS_LOOKUP, return_value=[_enforced(False)]) as lookup:
-        assert resolve_pii_masking_enforced(request, user) is False
-        assert resolve_pii_masking_enforced(request, user) is False
+        assert asyncio.run(resolve_pii_masking_enforced(request, user)) is False
+        assert asyncio.run(resolve_pii_masking_enforced(request, user)) is False
         assert lookup.call_count == 1
 
 
@@ -211,8 +211,8 @@ def test_memo_is_keyed_by_user_within_one_request():
         return [_enforced(True)] if user_id == "enforced-user" else [_enforced(False)]
 
     with patch(GROUPS_LOOKUP, side_effect=by_member):
-        assert resolve_pii_masking_enforced(request, enforced_user) is True
-        assert resolve_pii_masking_enforced(request, free_user) is False
+        assert asyncio.run(resolve_pii_masking_enforced(request, enforced_user)) is True
+        assert asyncio.run(resolve_pii_masking_enforced(request, free_user)) is False
 
 
 def test_memo_does_not_leak_between_requests():
@@ -221,10 +221,10 @@ def test_memo_does_not_leak_between_requests():
     second_request = _make_request()
 
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]):
-        assert resolve_pii_masking_enforced(first_request, _make_user("u1")) is True
+        assert asyncio.run(resolve_pii_masking_enforced(first_request, _make_user("u1"))) is True
 
     with patch(GROUPS_LOOKUP, return_value=[_enforced(False)]) as lookup:
-        assert resolve_pii_masking_enforced(second_request, _make_user("u2")) is False
+        assert asyncio.run(resolve_pii_masking_enforced(second_request, _make_user("u2"))) is False
         assert lookup.call_count == 1
 
 
@@ -238,8 +238,8 @@ def test_admin_is_not_exempt_from_the_policy():
     must not. If anyone "aligns" this code with that precedent, this test fails.
     """
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]):
-        admin = resolve_pii_masking_enforced(_make_request(), _make_user("a1", role="admin"))
-        member = resolve_pii_masking_enforced(_make_request(), _make_user("u1", role="user"))
+        admin = asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user("a1", role="admin")))
+        member = asyncio.run(resolve_pii_masking_enforced(_make_request(), _make_user("u1", role="user")))
 
     assert admin is True
     assert admin == member
@@ -282,7 +282,7 @@ def test_resolver_never_touches_user_settings():
     before = repr(user.settings)
 
     with patch(GROUPS_LOOKUP, return_value=[_enforced(True)]):
-        assert resolve_pii_masking_enforced(_make_request(), user) is True
+        assert asyncio.run(resolve_pii_masking_enforced(_make_request(), user)) is True
 
     assert repr(user.settings) == before
 
@@ -683,8 +683,8 @@ def test_batched_resolution_matches_has_permission(groups, env_default, expected
         groups, PII_MASKING_ENFORCED_PERMISSION, json.loads(json.dumps(defaults))
     )
     with patch(GROUPS_LOOKUP, return_value=groups):
-        single = has_permission(
+        single = asyncio.run(has_permission(
             "u1", PII_MASKING_ENFORCED_PERMISSION, json.loads(json.dumps(defaults))
-        )
+        ))
 
     assert batched == single == expected

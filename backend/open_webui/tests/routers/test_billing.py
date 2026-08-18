@@ -14,8 +14,8 @@
 import asyncio
 import datetime
 import os
-from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -26,28 +26,32 @@ from sqlalchemy import create_engine, text
 # ---------------------------------------------------------------------------
 
 class TestGetUserByEmail:
-    def test_returns_none_for_missing_user(self):
-        @contextmanager
-        def _get_db(db=None):
-            session = MagicMock()
-            session.query.return_value.filter.return_value.first.return_value = None
+    @pytest.mark.asyncio
+    async def test_returns_none_for_missing_user(self):
+        @asynccontextmanager
+        async def _get_db(db=None):
+            session = AsyncMock()
+            result = MagicMock()
+            result.scalars.return_value.first.return_value = None
+            session.execute.return_value = result
             yield session
 
-        with patch("open_webui.models.users.get_db_context", _get_db):
+        with patch("open_webui.models.users.get_async_db_context", _get_db):
             from open_webui.models.users import UsersTable
-            assert UsersTable().get_user_by_email("nobody@example.com") is None
+            assert await UsersTable().get_user_by_email("nobody@example.com") is None
 
-    def test_propagates_db_error(self):
-        @contextmanager
-        def _get_db(db=None):
-            session = MagicMock()
-            session.query.side_effect = Exception("DB connection lost")
+    @pytest.mark.asyncio
+    async def test_propagates_db_error(self):
+        @asynccontextmanager
+        async def _get_db(db=None):
+            session = AsyncMock()
+            session.execute.side_effect = Exception("DB connection lost")
             yield session
 
-        with patch("open_webui.models.users.get_db_context", _get_db):
+        with patch("open_webui.models.users.get_async_db_context", _get_db):
             from open_webui.models.users import UsersTable
             with pytest.raises(Exception, match="DB connection lost"):
-                UsersTable().get_user_by_email("user@example.com")
+                await UsersTable().get_user_by_email("user@example.com")
 
 
 # ---------------------------------------------------------------------------
@@ -64,34 +68,34 @@ class TestCheckCreditsExhausted:
     def test_no_user_table_lookup_performed(self):
         """Users.get_user_by_email must never be called — user_id is passed directly."""
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
         mock_users = MagicMock()
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch("open_webui.models.users.Users", mock_users):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             mock_users.get_user_by_email.assert_not_called()
 
     def test_stripe_lookup_uses_user_id_arg(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
 
         with patch.dict(os.environ, {"CREDITS_PER_EUR_CENT": "1.82"}), \
              patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             mock_billings.get_by_user_id.assert_called_once_with("user-uuid-123")
 
     def test_skips_non_credits_plan(self):
         record = MagicMock()
         record.plan_tier = "internal"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}):
-            _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+            asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
 
     def test_raises_402_when_credits_exhausted(self):
         from fastapi import HTTPException
@@ -106,7 +110,7 @@ class TestCheckCreditsExhausted:
         balance.credits_per_eur_cent = 1.82
 
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
         mock_balances = MagicMock()
         mock_balances.get.return_value = balance
 
@@ -120,7 +124,7 @@ class TestCheckCreditsExhausted:
                  patch.object(cb_mod, "CreditBalances", mock_balances), \
                  patch.object(uc_mod, "eur_to_credits", return_value=200), \
                  pytest.raises(HTTPException) as exc_info:
-                _billing._check_credits_exhausted("user@example.com", "user-uuid-123")
+                asyncio.run(_billing._check_credits_exhausted("user@example.com", "user-uuid-123"))
             assert exc_info.value.status_code == 402
             assert exc_info.value.detail == "credits_exhausted"
 
@@ -268,7 +272,8 @@ class TestAutoOnboardUserTierConstants:
 
     def test_internal_user_upserted_with_constant(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None  # not yet onboarded
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)  # not yet onboarded
+        mock_billings.upsert = AsyncMock()
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
              patch.object(_billing, "has_unlimited_access", return_value=True):
@@ -283,7 +288,8 @@ class TestAutoOnboardUserTierConstants:
 
     def test_external_trial_user_upserted_with_constant(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None  # not yet onboarded
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)  # not yet onboarded
+        mock_billings.upsert = AsyncMock()
         mock_stripe = MagicMock()
         mock_customer = MagicMock()
         mock_customer.id = "cus_test"
@@ -326,7 +332,7 @@ class TestNoPaidTierBlock:
         record.subscription_status = None
 
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "BILLING_ENABLED", True), \
@@ -501,10 +507,10 @@ class TestGetTeamCurrentMonthCost:
         member_user.email = "member@example.com"
 
         mock_team_members = MagicMock()
-        mock_team_members.get_by_team_id.return_value = [self._member()]
+        mock_team_members.get_by_team_id = AsyncMock(return_value=[self._member()])
 
         mock_users = MagicMock()
-        mock_users.get_user_by_id.return_value = member_user
+        mock_users.get_user_by_id = AsyncMock(return_value=member_user)
 
         mock_ledger = MagicMock()
         mock_ledger.get_cost_eur_for_users_since.return_value = {"member@example.com": 0.42}
@@ -523,7 +529,7 @@ class TestGetTeamCurrentMonthCost:
              patch("open_webui.models.users.Users", mock_users), \
              patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            total = _billing._get_team_current_month_cost("team-123")
+            total = asyncio.run(_billing._get_team_current_month_cost("team-123"))
 
         mock_ledger.get_cost_eur_for_users_since.assert_called_once_with(
             ["member@example.com"], 1_700_000_000
@@ -540,10 +546,10 @@ class TestGetTeamCurrentMonthCost:
         member_user.email = "member2@example.com"
 
         mock_team_members = MagicMock()
-        mock_team_members.get_by_team_id.return_value = [self._member("member-uid-2")]
+        mock_team_members.get_by_team_id = AsyncMock(return_value=[self._member("member-uid-2")])
 
         mock_users = MagicMock()
-        mock_users.get_user_by_id.return_value = member_user
+        mock_users.get_user_by_id = AsyncMock(return_value=member_user)
 
         mock_ledger = MagicMock()
         mock_ledger.get_cost_eur_for_users_current_month.return_value = {"member2@example.com": 1.23}
@@ -558,7 +564,7 @@ class TestGetTeamCurrentMonthCost:
              patch("open_webui.models.users.Users", mock_users), \
              patch.object(ledger_mod, "UsageLedgerDB", mock_ledger), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            total = _billing._get_team_current_month_cost("team-456")
+            total = asyncio.run(_billing._get_team_current_month_cost("team-456"))
 
         mock_ledger.get_cost_eur_for_users_current_month.assert_called_once_with(
             ["member2@example.com"]
@@ -577,7 +583,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = "trial"
         record.team_id = None
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         user_balance = MagicMock()
         user_balance.period_start = 1_600_000_000
@@ -589,7 +595,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("uid-1", "trial@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid-1", "trial@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("user", "trial@example.com")
         assert result == 1_600_000_000
@@ -599,7 +605,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = _billing.PLAN_TIER_TEAM
         record.team_id = "team-abc"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         team_balance = MagicMock()
         team_balance.period_start = 1_650_000_000
@@ -611,7 +617,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("owner-uid", "owner@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("owner-uid", "owner@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("team", "team-abc")
         assert result == 1_650_000_000
@@ -621,7 +627,7 @@ class TestResolveBillingPeriodStart:
         record.plan_tier = _billing.PLAN_TIER_TEAM_MEMBER
         record.team_id = "team-xyz"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         team_balance = MagicMock()
         team_balance.period_start = 1_660_000_000
@@ -633,17 +639,17 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("member-uid", "member@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("member-uid", "member@example.com"))
 
         mock_credit_balances.get.assert_called_once_with("team", "team-xyz")
         assert result == 1_660_000_000
 
     def test_returns_none_for_internal_or_no_record(self):
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = None
+        mock_billings.get_by_user_id = AsyncMock(return_value=None)
 
         with patch.object(_billing, "StripeBillings", mock_billings):
-            result = _billing._resolve_billing_period_start("uid", "internal@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid", "internal@example.com"))
 
         assert result is None
 
@@ -651,7 +657,7 @@ class TestResolveBillingPeriodStart:
         record = MagicMock()
         record.plan_tier = "trial"
         mock_billings = MagicMock()
-        mock_billings.get_by_user_id.return_value = record
+        mock_billings.get_by_user_id = AsyncMock(return_value=record)
 
         mock_credit_balances = MagicMock()
         mock_credit_balances.get.return_value = None
@@ -661,7 +667,7 @@ class TestResolveBillingPeriodStart:
         with patch.object(_billing, "StripeBillings", mock_billings), \
              patch.object(_billing, "CREDITS_TIERS", {"trial", "pro", "premium"}), \
              patch.object(cb_mod, "CreditBalances", mock_credit_balances):
-            result = _billing._resolve_billing_period_start("uid", "trial@example.com")
+            result = asyncio.run(_billing._resolve_billing_period_start("uid", "trial@example.com"))
 
         assert result is None
 
