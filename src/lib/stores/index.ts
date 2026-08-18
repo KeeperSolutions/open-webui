@@ -322,6 +322,8 @@ type Config = {
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
 		folder_max_file_count?: number;
+		/** Backend's PII_FILTER_IDS; absent on older backends, hence optional. */
+		pii_filter_ids?: string[];
 	};
 	oauth: {
 		providers: {

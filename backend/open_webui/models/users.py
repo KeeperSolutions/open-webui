@@ -179,6 +179,18 @@ class UpdateProfileForm(BaseModel):
 
 class UserGroupIdsModel(UserModel):
     group_ids: list[str] = []
+    # Resolved server-side from the groups already batched for this page, so the
+    # governance dashboard can report WHO IS UNDER POLICY without an extra query
+    # per user and without reimplementing the merge rule.
+    # Report-only: nothing writes policy through this endpoint.
+    pii_masking_enforced: bool = False
+    # WHICH of this user's groups carry the policy, not just whether one does.
+    # A row action that offers to unlock someone has to know that removing them
+    # from one group actually unlocks them — with the merge being "any group
+    # wins", the boolean alone cannot answer that. Empty while
+    # `pii_masking_enforced` is True means the instance-wide default is the
+    # source, which no membership change can undo.
+    pii_policy_group_ids: list[str] = []
 
 
 class UserModelResponse(UserModel):
@@ -387,12 +399,24 @@ class UsersTable:
         skip: int | None = None,
         limit: int | None = None,
         db: AsyncSession | None = None,
+        locate: str | None = None,
     ) -> dict:
-        """Paginated user listing with optional filters for role, group, and channel."""
+        """Paginated user listing with optional filters for role, group, and channel.
+
+        `locate` adds `position` to the result: the zero-based index of that user
+        in the FULL filtered, ordered list — not in the page being returned.
+
+        ⚠️ It is a parameter here rather than a function of its own so the
+        position is measured against the very same `filter` and `order_by` the
+        page is built from. A separate implementation could drift from this one,
+        and a position measured under a different order is not a position, it is
+        a wrong answer that looks right.
+        """
         async with get_async_db_context(db) as session:
             # Deferred imports to avoid circular dependencies
             from open_webui.models.channels import ChannelMember
             from open_webui.models.groups import GroupMember
+
 
             # Join GroupMember so we can order by group_id when requested
             stmt = select(User)
@@ -513,6 +537,15 @@ class UsersTable:
             count_result = await session.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
 
+            # Also before pagination, and reading ids only: the position is an
+            # index into the whole list, so it cannot be taken from the page.
+            position = None
+            if locate:
+                ids_result = await session.execute(stmt.with_only_columns(User.id))
+                ids = ids_result.scalars().all()
+                if locate in ids:
+                    position = ids.index(locate)
+
             # correct pagination logic
             if skip is not None:
                 stmt = stmt.offset(skip)
@@ -524,6 +557,7 @@ class UsersTable:
             return {
                 'users': [UserModel.model_validate(user) for user in users],
                 'total': total,
+                'position': position,
             }
 
     async def get_users_by_group_id(self, group_id: str, db: AsyncSession | None = None) -> list[UserModel]:

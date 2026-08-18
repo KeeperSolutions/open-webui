@@ -7,7 +7,8 @@ export const getModelItems = async (
 	selectedTag,
 	orderBy,
 	direction,
-	page
+	page,
+	signal?: AbortSignal
 ) => {
 	let error = null;
 
@@ -37,7 +38,8 @@ export const getModelItems = async (
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
 			authorization: `Bearer ${token}`
-		}
+		},
+		signal
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -47,6 +49,9 @@ export const getModelItems = async (
 			return json;
 		})
 		.catch((err) => {
+			// A caller that went away aborted this on purpose and discards the result,
+			// so it must not surface as a console error.
+			if (err?.name === 'AbortError') return null;
 			error = err;
 			console.error(err);
 			return null;

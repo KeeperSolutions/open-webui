@@ -5,7 +5,8 @@
 	import Evaluations from '$lib/components/admin/Evaluations.svelte';
 
 	onMount(() => {
-		goto('/admin/evaluations/leaderboard');
+		// A redirect, not a destination — see the note in /admin/+page.svelte.
+		goto('/admin/evaluations/leaderboard', { replaceState: true });
 	});
 </script>
 

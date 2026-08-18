@@ -2,7 +2,9 @@
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, showSidebar } from '$lib/stores';
 	import { goto } from '$app/navigation';
-	import { onMount, getContext, onDestroy } from 'svelte';
+	// Aliased: `page` is already this component's pagination counter.
+	import { page as currentPage } from '$app/stores';
+	import { onMount, getContext, onDestroy, tick } from 'svelte';
 
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -12,7 +14,7 @@
 
 	import { toast } from 'svelte-sonner';
 
-	import { updateUserRole, getUsers, deleteUserById } from '$lib/apis/users';
+	import { updateUserRole, getUsers, deleteUserById, locateUser } from '$lib/apis/users';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -42,6 +44,44 @@
 
 	let users = null;
 	let total = null;
+
+	/**
+	 * Briefly point at one row, for callers that sent an admin here to look at a
+	 * specific person — the PII dashboard's `Manage` button.
+	 *
+	 * The id arrives in the URL rather than in a store so the jump survives a
+	 * reload and can be shared, and it is read ONCE: leaving it reactive would
+	 * re-highlight every time this component re-rendered.
+	 *
+	 * ⚠️ The list is paginated server-side, so the target is usually not on the
+	 * page that loads first. `locateUser` asks the backend which page it is on
+	 * UNDER THE ORDERING THIS COMPONENT IS USING, and that page is loaded before
+	 * the highlight means anything. Highlighting without the jump would be a
+	 * feature that silently does nothing for all but the first 30 users.
+	 */
+	const highlightParam = $currentPage.url.searchParams.get('highlight');
+	let highlightedUserId: string | null = null;
+	/** Cleared after this long, so the row does not stay marked for the session. */
+	const HIGHLIGHT_MS = 2600;
+
+	/**
+	 * Scroll to the marked row once it is on screen — driven by the rows arriving,
+	 * not by the node being created.
+	 *
+	 * The target can appear two ways: it was already on the first page, or it
+	 * turned up after the jump refetched. An action on the row only fires in the
+	 * second case, because in the first the node was built before the id was
+	 * known. `scrolled` makes it happen exactly once either way.
+	 */
+	let scrolled = false;
+	$: if (highlightedUserId && users?.length && !scrolled) {
+		scrolled = true;
+		tick().then(() => {
+			document
+				.getElementById(`user-row-${highlightedUserId}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		});
+	}
 
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
@@ -112,8 +152,33 @@
 		getUserList();
 	}
 
+	let highlightTimer: ReturnType<typeof setTimeout>;
+
+	onMount(async () => {
+		if (!highlightParam) return;
+
+		// Ask under the ordering this component renders with, not the default:
+		// the page a user sits on is a function of the sort.
+		const target = await locateUser(localStorage.token, highlightParam, orderBy, direction);
+		// null means "not in this directory" or the call failed. Jumping to page 1
+		// and marking nothing would be a worse answer than doing nothing.
+		if (target === null) return;
+
+		// ⚠️ The search debounce schedules `page = 1` on mount (the `query !==
+		// undefined` block fires once during init). It lands ~300ms in — after this
+		// await — and would stomp the jump. Cancelling makes this assignment the
+		// last word; if the timer already fired, this is a harmless no-op and the
+		// assignment below still wins.
+		clearTimeout(searchDebounceTimer);
+
+		page = target;
+		highlightedUserId = highlightParam;
+		highlightTimer = setTimeout(() => (highlightedUserId = null), HIGHLIGHT_MS);
+	});
+
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
+		clearTimeout(highlightTimer);
 	});
 </script>
 
@@ -357,7 +422,13 @@
 			</thead>
 			<tbody class="">
 				{#each users as user, userIdx (user.id)}
-					<tr class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs">
+					<tr
+						id="user-row-{user.id}"
+						class="dark:border-gray-850 text-xs transition-colors duration-700 {user.id ===
+						highlightedUserId
+							? 'bg-yellow-100 dark:bg-yellow-500/15'
+							: 'bg-white dark:bg-gray-900'}"
+					>
 						<td class="px-3 py-1 min-w-[7rem] w-28">
 							<button
 								class=" translate-y-0.5"

@@ -436,6 +436,21 @@
 	export let piiMaskingEnabled = true;
 	let showSkills = false;
 
+	/**
+	 * Team policy makes masking mandatory for this user.
+	 *
+	 * ⚠️ Deliberately a SEPARATE prop, not folded into `piiMaskingEnabled`. The
+	 * policy decides what is DISPLAYED; `piiMaskingEnabled` stays the user's own
+	 * value and is never written by the policy — the same policy-never-writes
+	 * invariant as in Privacy.svelte, enforced here by there being no assignment
+	 * path at all.
+	 */
+	export let piiMaskingLocked = false;
+
+	// What the control shows. Under policy this is ON regardless of the user's
+	// own value, which stays untouched underneath.
+	$: piiMaskingDisplayed = piiMaskingLocked || piiMaskingEnabled;
+
 	let loaded = false;
 	let recording = false;
 
@@ -1695,7 +1710,9 @@
 									</InputMenu>
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
-										<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"></div>
+										<div
+											class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"
+										></div>
 									{/if}
 
 									<Tooltip content={$i18n.t('Settings')} placement="top">
@@ -1984,20 +2001,43 @@
 											</button>
 										</Tooltip>
 									{:else}
-									<!-- PII Masking toggle (stub) -->
+										<!-- PII Masking toggle (stub) -->
 										<Tooltip
-											content={$i18n.t(
-												'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
-											)}
+											content={piiMaskingLocked
+												? $i18n.t(
+														'PII masking is enforced by your organisation’s policy and cannot be turned off. Contact your administrator if this needs to change.'
+													)
+												: $i18n.t(
+														'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
+													)}
 											placement="top"
 										>
+											<!--
+												Locked by team policy. A native `disabled` is the right
+												mechanism here — unlike Privacy.svelte, this is our own
+												<button>, so it blocks pointer AND keyboard and is exposed
+												to assistive tech without wrapping anything in `inert`.
+												The control is NOT hidden: a toggle that vanished
+												overnight reads as a bug, a locked one reads as a policy.
+											-->
 											<button
 												type="button"
 												role="switch"
-												aria-checked={piiMaskingEnabled}
-												class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
-												on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
+												disabled={piiMaskingLocked}
+												aria-checked={piiMaskingDisplayed}
+												class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+												on:click={() => {
+													// `disabled` already stops real clicks, but the handler
+													// guards too: this is the only line that can write the
+													// user's own value, so it must not depend on the
+													// attribute surviving. Any synthetic dispatch would
+													// otherwise flip a locked toggle and corrupt the value
+													// the policy is layered on top of.
+													if (piiMaskingLocked) return;
+													piiMaskingEnabled = !piiMaskingEnabled;
+												}}
 												aria-label="Toggle PII Masking"
+												data-testid="pii-masking-toggle"
 											>
 												<div class="flex items-center gap-1">
 													<HgIconShield class="w-4 h-4 text-hg-text-primary dark:text-gray-400" />
@@ -2008,12 +2048,12 @@
 												</div>
 												<div class="relative w-5 h-5">
 													<HgIconToggleOn
-														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingDisplayed
 															? 'opacity-100'
 															: 'opacity-0'}"
 													/>
 													<HgIconToggleOff
-														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingDisplayed
 															? 'opacity-0'
 															: 'opacity-100'}"
 													/>
@@ -2021,69 +2061,71 @@
 											</button>
 										</Tooltip>
 
-									{#if prompt !== '' && !history?.currentId && !$selectedTerminalId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
-										<!-- {$i18n.t('Create Note')}  -->
-										<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
-											<button
-												id="create-note-button"
-												class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
-												type="button"
-												disabled={prompt === '' && files.length === 0}
-												on:click={() => {
-													createNote();
-												}}
-											>
-												<Note className="size-4.5 translate-y-[0.5px]" />
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if !history?.currentId || history.messages[history.currentId]?.done == true}
-										<!-- Terminal Server Selector -->
-										{@const hasDirectToolServerAccess = $_user?.role === 'admin' || ($_user?.permissions?.features?.direct_tool_servers ?? true)}
-										{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
-											<TerminalMenu bind:show={showTerminalMenu} />
-										{/if}
-
-										{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
-											<Tooltip content={$i18n.t('Dictate')}>
+										{#if prompt !== '' && !history?.currentId && !$selectedTerminalId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
+											<!-- {$i18n.t('Create Note')}  -->
+											<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
 												<button
-													id="voice-input-button"
-													class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+													id="create-note-button"
+													class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
 													type="button"
-													on:click={async () => {
-														try {
-															let stream = await navigator.mediaDevices
-																.getUserMedia({ audio: true })
-																.catch(function (err) {
-																	toast.error(
-																		$i18n.t(
-																			`Permission denied when accessing microphone: {{error}}`,
-																			{
-																				error: err
-																			}
-																		)
-																	);
-																	return null;
-																});
-
-															if (stream) {
-																recording = true;
-																const tracks = stream.getTracks();
-																tracks.forEach((track) => track.stop());
-															}
-															stream = null;
-														} catch {
-															toast.error($i18n.t('Permission denied when accessing microphone'));
-														}
+													disabled={prompt === '' && files.length === 0}
+													on:click={() => {
+														createNote();
 													}}
-													aria-label="Voice Input"
 												>
-													<HgIconMic class="w-5 h-5" />
+													<Note className="size-4.5 translate-y-[0.5px]" />
 												</button>
 											</Tooltip>
 										{/if}
-									{/if}
+
+										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
+											<!-- Terminal Server Selector -->
+											{@const hasDirectToolServerAccess =
+												$_user?.role === 'admin' ||
+												($_user?.permissions?.features?.direct_tool_servers ?? true)}
+											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
+												<TerminalMenu bind:show={showTerminalMenu} />
+											{/if}
+
+											{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
+												<Tooltip content={$i18n.t('Dictate')}>
+													<button
+														id="voice-input-button"
+														class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+														type="button"
+														on:click={async () => {
+															try {
+																let stream = await navigator.mediaDevices
+																	.getUserMedia({ audio: true })
+																	.catch(function (err) {
+																		toast.error(
+																			$i18n.t(
+																				`Permission denied when accessing microphone: {{error}}`,
+																				{
+																					error: err
+																				}
+																			)
+																		);
+																		return null;
+																	});
+
+																if (stream) {
+																	recording = true;
+																	const tracks = stream.getTracks();
+																	tracks.forEach((track) => track.stop());
+																}
+																stream = null;
+															} catch {
+																toast.error($i18n.t('Permission denied when accessing microphone'));
+															}
+														}}
+														aria-label="Voice Input"
+													>
+														<HgIconMic class="w-5 h-5" />
+													</button>
+												</Tooltip>
+											{/if}
+										{/if}
 
 										{#if prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">

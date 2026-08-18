@@ -84,6 +84,7 @@
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWeb, processWebSearch, processYoutubeVideo } from '$lib/apis/retrieval';
 	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
+	import { getSessionUser } from '$lib/apis/auths';
 	import {
 		generateQueries,
 		chatAction,
@@ -113,7 +114,11 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
-	import { getPiiMaskingDefault, isPiiPipelineConfigured } from '$lib/utils/pii';
+	import {
+		getPiiMaskingDefault,
+		isPiiPipelineConfigured,
+		piiMaskingForRequest
+	} from '$lib/utils/pii';
 	import { getBanners } from '$lib/apis/configs';
 
 	export let chatIdProp = '';
@@ -160,7 +165,20 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	/**
+	 * The user's own per-conversation choice. Seeded from their stored global
+	 * setting and toggled only by them.
+	 *
+	 * ⚠️ The team policy NEVER assigns to this. It is layered on top via
+	 * `piiPolicyEnforced` for both the displayed state and the request payload,
+	 * so a locked control can never launder the policy's `true` back into the
+	 * user's own value — the policy-never-writes invariant, at its second site.
+	 */
 	let piiMaskingEnabled = getPiiMaskingDefault($settings);
+
+	// Team policy overlay. Read-only: decides display and payload,
+	// never storage.
+	$: piiPolicyEnforced = $user?.permissions?.chat?.pii_masking_enforced ?? false;
 
 	let showCommands = false;
 
@@ -786,6 +804,23 @@
 					enabled: $selectedTerminalId !== null && s.url === $selectedTerminalId
 				}))
 			});
+		}
+
+		// `$user.permissions` is only refilled on a full page load, so a tab
+		// left open carries a stale policy for hours. Refresh it once per opened
+		// chat — but ONLY while the toggle is unlocked. The asymmetry is
+		// deliberate: an unlocked toggle the backend already overrules is a
+		// security-facing lie, a briefly over-locked one is an inconvenience. If
+		// it is already locked there is nothing stale to correct, so no call.
+		// Fire-and-forget, like the pipeline check below, so it never blocks load.
+		if (!piiPolicyEnforced) {
+			getSessionUser(localStorage.token)
+				.then((sessionUser) => {
+					if (sessionUser) {
+						user.set(sessionUser);
+					}
+				})
+				.catch(() => {});
 		}
 
 		// Admin-only: warn when masking is requested but no PII filter pipeline is
@@ -2216,7 +2251,12 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 						? webSearchEnabled
 						: false,
-				pii_masking: piiMaskingEnabled
+				// Team policy wins over the per-conversation toggle.
+				// The backend enforces this regardless; sending the effective value
+				// keeps the payload consistent with what the UI is showing, instead
+				// of shipping a `false` the server is about to overrule.
+				// `piiMaskingEnabled` itself is never reassigned — see below.
+				pii_masking: piiMaskingForRequest(piiPolicyEnforced, piiMaskingEnabled)
 			};
 
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
@@ -3129,6 +3169,7 @@
 									{pendingOAuthTools}
 									bind:webSearchEnabled
 									bind:piiMaskingEnabled
+									piiMaskingLocked={piiPolicyEnforced}
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged
@@ -3211,6 +3252,7 @@
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
 									bind:piiMaskingEnabled
+									piiMaskingLocked={piiPolicyEnforced}
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged

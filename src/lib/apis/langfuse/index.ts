@@ -5,6 +5,7 @@ export type MetricRow = {
 	model: string;
 	tokens: number;
 	cost: number;
+	observations: number;
 };
 
 export type MyUsage = {
@@ -14,11 +15,19 @@ export type MyUsage = {
 	total_cost: number;
 };
 
+/** Rows plus the exact UTC window the backend queried for them. */
+export type MetricsResponse = {
+	from: string;
+	to: string;
+	rows: MetricRow[];
+};
+
 export const getLangfuseMetrics = async (
 	token: string,
 	period: string = 'week',
-	days?: number
-): Promise<MetricRow[]> => {
+	days?: number,
+	signal?: AbortSignal
+): Promise<MetricsResponse> => {
 	let error = null;
 
 	const params = new URLSearchParams({ period });
@@ -31,13 +40,17 @@ export const getLangfuseMetrics = async (
 		headers: {
 			Accept: 'application/json',
 			authorization: `Bearer ${token}`
-		}
+		},
+		signal
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
 		.catch((err) => {
+			// A superseded request is not a failure — the caller aborted it on purpose
+			// and discards the result, so it must not surface as a console error.
+			if (err?.name === 'AbortError') return null;
 			error = err.detail;
 			console.error(err);
 			return null;
