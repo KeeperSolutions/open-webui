@@ -1541,6 +1541,7 @@
 	"PDF Extract Images (OCR)": "",
 	"PDF Loader Mode": "",
 	"PDF document (.pdf)": "",
+	"PII Protection — Team Dashboard": "",
 	"PII masked": "",
 	"PII masking for {{name}}": "",
 	"PII masking is enabled, but no PII filter pipeline is connected (locally or in the cloud). Messages will not be masked.": "",

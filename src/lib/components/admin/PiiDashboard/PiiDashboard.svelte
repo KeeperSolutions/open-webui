@@ -125,7 +125,7 @@
 <!-- Light-lock: neutralises .dark body globals; real dark mode is out of scope. -->
 <div class="min-h-full bg-pii-bg text-pii-ink font-['Inter'] px-6 py-4">
 	<div class="mx-auto flex max-w-[1190px] flex-col gap-6">
-		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} />
+		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} {teamId} />
 		<CostAnalytics
 			{rows}
 			users={$directory.users}
