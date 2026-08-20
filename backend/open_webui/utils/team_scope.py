@@ -260,3 +260,56 @@ def team_directory_filter(scope: TeamIdentities) -> dict:
     """
     return {'user_ids': sorted(scope.ids), 'group_ids': []}
 
+
+#: The same key, deliberately looser: case-folded and stripped of ALL whitespace,
+#: not just the edges. Used only to notice near misses - see `scope_metric_rows`.
+def _loose_user_key(value: Optional[str]) -> str:
+    return ''.join((value or '').split()).casefold()
+
+
+def scope_metric_rows(
+    rows: list, scope: Optional[TeamIdentities], team_id: Optional[str] = None
+) -> list:
+    """Keep only the Langfuse rows belonging to one team.
+
+    `scope=None` means the unscoped view and returns `rows` unchanged, so the call
+    site has no branch of its own to get wrong.
+
+    A row is kept when its normalised key is one of the team's - which covers BOTH
+    member emails and member ids, because the frontend claims a row under either
+    (`usersAccess.ts:169-179`). `"(unknown)"` (`langfuse/metrics.py:132`) belongs to
+    nobody and is dropped: unattributed spend is by definition not the team's.
+
+    ⚠️ **Near misses are counted and logged.** A plain count of dropped rows would
+    be useless under scoping - most drops are legitimately other teams' - so what
+    is counted instead is rows that match a member under `_loose_user_key` but not
+    under `normalize_user_key`. Under a correct implementation that number is
+    ALWAYS zero, so any other value is an unambiguous alarm that the two
+    normalisations have drifted apart. That drift is the one failure mode which
+    does not raise: it silently drops rows on a screen claiming to be exhaustive,
+    and in the owner's scoped view it vanishes from both sides of the
+    reconciliation, leaving the arithmetic green.
+
+    ⚠️ The log carries a count and a team id, NEVER a key. A Langfuse key is an
+    email.
+    """
+    if scope is None:
+        return rows
+
+    loose = {_loose_user_key(k) for k in scope.keys}
+    kept, near_misses = [], 0
+    for row in rows:
+        raw = row.get('user', '')
+        if normalize_user_key(raw) in scope.keys:
+            kept.append(row)
+        elif _loose_user_key(raw) in loose:
+            near_misses += 1
+
+    if near_misses:
+        log.warning(
+            'team_scope: %d row(s) for team %s matched a member only under the loose key; '
+            'the two normalisations have drifted apart',
+            near_misses,
+            team_id,
+        )
+    return kept

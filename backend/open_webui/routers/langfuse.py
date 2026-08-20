@@ -3,8 +3,11 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from open_webui.internal.db import get_async_session
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.team_scope import resolve_dashboard_scope, scope_metric_rows
 from open_webui.langfuse.metrics import (
     get_today_so_far,
     get_last_day,
@@ -47,14 +50,28 @@ class MyUsage(BaseModel):
 async def get_langfuse_metrics(
     period: str = "week",
     days: Optional[int] = None,
-    user=Depends(get_admin_user),
+    team_id: Optional[str] = None,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Fetch Langfuse token/cost metrics per user, plus the exact UTC window used.
 
     period: today | day | week | month | current_month | custom
     days: required when period=custom
+    team_id: scope the rows to one team; omit for the instance-wide view
+
+    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule did not go
+    away — it moved into `resolve_dashboard_scope`, which refuses any non-admin who
+    omits `team_id`. That makes the FIRST executable line below the only thing
+    standing between a logged-in user and the whole instance's spend, which is why
+    it is a named function called before anything else rather than an inline
+    condition somewhere in the body.
     """
+    # Before the `try`, deliberately: a guard inside it would be one refactor away
+    # from being caught by an `except` and turned into a 502.
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
     try:
         if period == "today":
             from_ts, to_ts, rows = get_today_so_far()
@@ -78,7 +95,16 @@ async def get_langfuse_metrics(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unknown period '{period}'. Use: today, day, week, month, current_month, custom",
             )
-        return MetricsResponse(**{"from": from_ts, "to": to_ts, "rows": rows})
+        # Scoping happens here, on the way out, and never on the frontend:
+        # Langfuse has no notion of a team, so the rows arrive instance-wide no
+        # matter who asked.
+        return MetricsResponse(
+            **{
+                "from": from_ts,
+                "to": to_ts,
+                "rows": scope_metric_rows(rows, scope, team_id),
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:
