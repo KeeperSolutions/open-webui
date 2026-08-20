@@ -122,7 +122,9 @@ export const getUsers = async (
 	orderBy?: string,
 	direction?: string,
 	page = 1,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	// Last, and optional: existing callers pass positionally and stop before it.
+	teamId?: string | null
 ) => {
 	let error = null;
 	let res = null;
@@ -141,6 +143,10 @@ export const getUsers = async (
 
 	if (direction) {
 		searchParams.set('direction', direction);
+	}
+
+	if (teamId) {
+		searchParams.set('team_id', teamId);
 	}
 
 	res = await fetch(`${WEBUI_API_BASE_URL}/users/?${searchParams.toString()}`, {
@@ -254,11 +260,18 @@ export const searchUsers = async (
 	return res;
 };
 
-export const getAllUsers = async (token: string, signal?: AbortSignal) => {
+export const getAllUsers = async (
+	token: string,
+	signal?: AbortSignal,
+	// Last, and optional: existing callers pass positionally and stop before it.
+	teamId?: string | null
+) => {
 	let error = null;
 	let res = null;
 
-	res = await fetch(`${WEBUI_API_BASE_URL}/users/all`, {
+	const query = teamId ? `?team_id=${encodeURIComponent(teamId)}` : '';
+
+	res = await fetch(`${WEBUI_API_BASE_URL}/users/all${query}`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',

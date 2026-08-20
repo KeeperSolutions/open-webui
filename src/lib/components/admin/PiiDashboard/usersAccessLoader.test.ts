@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
+import { getGroups } from '$lib/apis/groups';
+import { getUsers } from '$lib/apis/users';
 import type { AccessUser } from './sections/usersAccess';
 import {
 	createUsersAccessLoader as createLoaderWithFetchers,
@@ -385,5 +387,49 @@ describe('createUsersAccessLoader — policy groups', () => {
 
 		expect(groupCalls).toHaveLength(1);
 		expect(get(loader).users).toEqual([mkUser(9)]);
+	});
+});
+/**
+ * ⚠️ The propagation tests below mock the API MODULE, not the fetcher.
+ *
+ * `teamId` is bound inside the DEFAULT fetcher, so a test that injects its own
+ * fetcher never sees it — such a test would pass green while the id was being
+ * dropped on the way to the request. That is precisely the bug worth catching, so
+ * the assertion has to sit on the API wrapper itself.
+ *
+ * Every other test in this file supplies its own fetchers and never reaches these.
+ */
+
+vi.mock('$lib/apis/users', () => ({ getUsers: vi.fn() }));
+vi.mock('$lib/apis/groups', () => ({ getGroups: vi.fn() }));
+
+describe('createUsersAccessLoader — team id propagation', () => {
+	const usersApi = vi.mocked(getUsers);
+	const groupsApi = vi.mocked(getGroups);
+
+	beforeEach(() => {
+		usersApi.mockReset();
+		groupsApi.mockReset();
+		usersApi.mockResolvedValue({ users: [], total: 0 });
+		groupsApi.mockResolvedValue([]);
+	});
+
+	it('hands the team id to the users API', async () => {
+		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
+		expect(usersApi).toHaveBeenCalledTimes(1);
+		expect(usersApi.mock.calls[0][6]).toBe('T1');
+	});
+
+	it('hands null to the users API when the screen is instance-wide', async () => {
+		await createLoaderWithFetchers().load();
+		expect(usersApi.mock.calls[0][6]).toBeNull();
+	});
+
+	it('does NOT hand the team id to the groups API', async () => {
+		// `GET /groups/` is not scoped by team in level A, and passing an id there
+		// would advertise a scoping that does not exist.
+		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
+		expect(groupsApi).toHaveBeenCalledTimes(1);
+		expect(groupsApi.mock.calls[0].slice(1)).not.toContain('T1');
 	});
 });

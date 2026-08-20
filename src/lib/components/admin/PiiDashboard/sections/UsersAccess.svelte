@@ -51,6 +51,16 @@
 	export let onPolicyChanged: () => void = () => {};
 
 	/**
+	 * Whether this viewer may change membership from here.
+	 *
+	 * ⚠️ Display only. The membership routes are admin-only on the server and this
+	 * ticket does not touch them, so a viewer who somehow reached a button would
+	 * still be refused. Hiding it keeps the screen truthful; it does not make it
+	 * safe, and nothing here should ever be read as if it did.
+	 */
+	export let mayAct: boolean = true;
+
+	/**
 	 * The row currently being acted on, if any.
 	 *
 	 * ⚠️ Holds the chosen destination for exactly as long as one action takes,
@@ -375,7 +385,7 @@
 						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
-							{@const action = rowActionFor(row, policyGroups)}
+							{@const action = rowActionFor(row, policyGroups, mayAct)}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -445,7 +455,20 @@
 										them enforced — so nothing is offered and the source is named
 										instead.
 									-->
-									{#if action.kind === 'remove'}
+									{#if action.kind === 'readonly'}
+										<span class="text-pii-muted">—</span>
+									{:else if action.kind === 'masked-elsewhere'}
+										<!--
+											Says a source exists and that it is outside the team, and
+											names nothing. The owner has no business knowing what
+											administration keeps in its own groups, and `action` does
+											not carry the name for this template to print even by
+											accident.
+										-->
+										<span class="text-[12px] text-pii-muted">
+											{$i18n.t('Masked · source outside the team')}
+										</span>
+									{:else if action.kind === 'remove'}
 										<Button on:click={() => openRemove(row, action.group)}>
 											{$i18n.t('Remove')}
 										</Button>
@@ -483,6 +506,10 @@
 								</td>
 								<td class="px-2.5 py-2.5 text-right align-middle">
 									<!--
+										⚠️ Only for a viewer who may act. The destination lives under
+										`/admin`, whose layout redirects anyone without the role — so
+										for everyone else this button leads out of the app.
+
 										The full users tab, not a deep link to this row. There is no
 										per-user admin route — editing happens in a modal held in
 										`UserList`'s local state — and handing that page a pre-filled
@@ -496,12 +523,14 @@
 										the stub, which redirected forward again. The dashboard became
 										unreachable by Back. Same destination, one entry.
 									-->
-									<Button
-										on:click={() =>
-											goto(`/admin/users/overview?highlight=${encodeURIComponent(row.id)}`)}
-									>
-										{$i18n.t('Manage')}
-									</Button>
+									{#if mayAct}
+										<Button
+											on:click={() =>
+												goto(`/admin/users/overview?highlight=${encodeURIComponent(row.id)}`)}
+										>
+											{$i18n.t('Manage')}
+										</Button>
+									{/if}
 								</td>
 							</tr>
 						{/each}

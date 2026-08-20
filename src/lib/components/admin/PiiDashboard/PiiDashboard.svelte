@@ -6,16 +6,34 @@
 	import { createMetricsLoader } from './metricsLoader';
 	import { createDirectoryLoader } from './directoryLoader';
 	import { createUsersAccessLoader } from './usersAccessLoader';
+	import { mayActFor } from './sections/usersAccess';
 	import type { PeriodKey } from './periods';
-	import { settings } from '$lib/stores';
+	import { settings, user } from '$lib/stores';
 	import { getStoredPiiMasking, type StoredPiiMasking } from '$lib/utils/pii';
+
+	/**
+	 * The team whose data this screen shows, or `null` for the instance-wide view.
+	 *
+	 * Read once, at construction, and handed to the three loaders. The route keys
+	 * the component on it so a different team means a different instance rather
+	 * than a stale one — see `team/[team_id]/pii-dashboard/+page.svelte`.
+	 */
+	export let teamId: string | null = null;
+
+	/**
+	 * Whether this viewer may act on a row, or only read it.
+	 *
+	 * ⚠️ Derived from the ROLE, never from `teamId` — see `mayActFor`, which cannot
+	 * see the address even if someone tried.
+	 */
+	$: mayAct = mayActFor($user?.role);
 
 	let period: PeriodKey = 'week';
 	let customDays = 7;
 
-	const metrics = createMetricsLoader();
-	const directory = createDirectoryLoader();
-	const usersAccess = createUsersAccessLoader();
+	const metrics = createMetricsLoader(undefined, teamId);
+	const directory = createDirectoryLoader(undefined, teamId);
+	const usersAccess = createUsersAccessLoader(undefined, undefined, teamId);
 
 	// Reload whenever the period selection changes.
 	$: metrics.load(period, customDays);
@@ -128,6 +146,7 @@
 			{costStale}
 			onRetry={() => usersAccess.load()}
 			onPolicyChanged={() => usersAccess.load()}
+			{mayAct}
 		/>
 	</div>
 </div>

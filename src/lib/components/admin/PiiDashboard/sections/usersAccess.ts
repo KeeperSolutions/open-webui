@@ -84,10 +84,28 @@ export type UserRow = {
  * `none.via` is the middle case — the one that matters. An empty `via` means the
  * instance-wide default, not "unknown".
  */
+/**
+ * Whether a viewer may act on a row, from their role alone.
+ *
+ * ⚠️ A function of the ROLE and nothing else, and that is the point of extracting
+ * it: an address selects a scope, not a permission, so the decision must not be
+ * able to see the address. Written as `mayActFor(role)` rather than as a line in
+ * the component, the team id is not in scope to be consulted even by mistake —
+ * the same reasoning that keeps `masked-elsewhere` empty.
+ *
+ * Display only. The membership routes are admin-only server-side.
+ */
+export function mayActFor(role: string | undefined | null): boolean {
+	return role === 'admin';
+}
+
 export type RowAction =
 	| { kind: 'enforce'; targets: PolicyGroup[] }
 	| { kind: 'remove'; group: PolicyGroup }
-	| { kind: 'none'; via: PolicyGroup[] };
+	| { kind: 'none'; via: PolicyGroup[] }
+	// A viewer who may not act. Carries nothing, deliberately — see `rowActionFor`.
+	| { kind: 'readonly' }
+	| { kind: 'masked-elsewhere' };
 
 /**
  * The action offered on one row.
@@ -104,11 +122,37 @@ export type RowAction =
  *
  * Membership is the only thing this touches — the value of the policy still
  * lives on the group and is edited only in `Permissions.svelte`.
+ *
+ * `mayAct` is the viewer's ROLE, never the address they arrived at: an address
+ * selects a scope, not a permission. It governs what is DISPLAYED and is not a
+ * security boundary — the membership routes are admin-only server-side, and this
+ * ticket does not touch them.
  */
 export function rowActionFor(
 	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,
-	policyGroups: PolicyGroup[]
+	policyGroups: PolicyGroup[],
+	mayAct: boolean = true
 ): RowAction {
+	if (!mayAct) {
+		// Not enforced: an em dash. NOT `{ kind: 'none', via: [] }` — the component
+		// renders an empty `via` as "Enforced instance-wide", so reusing it here
+		// would tell an unmasked person they are masked instance-wide.
+		if (!row.enforced) return { kind: 'readonly' };
+
+		// Enforced with no group behind it IS the instance default, and saying so
+		// names no group. Unchanged, and outside level A to revisit.
+		if (row.policyGroupIds.length === 0) return { kind: 'none', via: [] };
+
+		// Enforced through a group the viewer does not administer. The row says a
+		// source exists and that it is outside the team, and stops there.
+		//
+		// ⚠️ This value carries NO fields — not the group's name, not its id, not
+		// even how many there are. That is the protection, not the markup: an
+		// object without the name cannot leak the name, whereas a `via` array plus
+		// a careful template is one incautious edit away from printing it.
+		return { kind: 'masked-elsewhere' };
+	}
+
 	if (!row.enforced) return { kind: 'enforce', targets: policyGroups };
 
 	const byId = new Map(policyGroups.map((g) => [g.id, g]));

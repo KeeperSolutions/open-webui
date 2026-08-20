@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { MetricRow } from '$lib/apis/langfuse';
 import { totals } from './costAnalytics';
 import {
+	mayActFor,
 	statusOf,
 	costByUser,
 	buildRows,
@@ -465,6 +466,86 @@ describe('rowActionFor — more than one source', () => {
 		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
 			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER]).kind).not.toBe('enforce');
 		}
+	});
+});
+
+describe('mayActFor', () => {
+	it('lets an administrator act', () => {
+		expect(mayActFor('admin')).toBe(true);
+	});
+
+	it('does not let anyone else act', () => {
+		for (const role of ['user', 'pending', '', undefined, null]) {
+			expect(mayActFor(role)).toBe(false);
+		}
+	});
+
+	it('takes the role and nothing else', () => {
+		// ⚠️ The guarantee is structural: there is no second parameter, so the
+		// address this viewer arrived at cannot enter the decision. A signature that
+		// grew one would break this line, which is the point of asserting on it.
+		expect(mayActFor.length).toBe(1);
+	});
+});
+
+describe('rowActionFor — a viewer who may not act', () => {
+	it('offers an em dash, not a claim, on a row that is not enforced', () => {
+		// ⚠️ NOT `{ kind: 'none', via: [] }`. The component renders an empty `via` as
+		// "Enforced instance-wide", so reusing it here would tell an unmasked person
+		// they are masked instance-wide.
+		expect(rowActionFor(actionRow(false), [POLICY], false)).toEqual({ kind: 'readonly' });
+	});
+
+	it('says a source exists outside the team, and names nothing', () => {
+		expect(rowActionFor(actionRow(true, ['g1']), [POLICY], false)).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('gives the same answer for two sources as for one', () => {
+		// How many groups administration keeps is also administration's business.
+		expect(rowActionFor(actionRow(true, ['g1', 'g2']), [POLICY, OTHER], false)).toEqual(
+			rowActionFor(actionRow(true, ['g1']), [POLICY], false)
+		);
+	});
+
+	it('carries no group data at all, checked over the serialised value', () => {
+		// Checked over the whole serialisation rather than named fields: a future
+		// field that leaks the name would pass a `toEqual` on the fields we thought
+		// to list, and fail this.
+		const serialised = JSON.stringify(
+			rowActionFor(actionRow(true, ['g1', 'ghost']), [POLICY], false)
+		);
+		expect(serialised).not.toContain('g1');
+		expect(serialised).not.toContain('ghost');
+		expect(serialised).not.toContain(POLICY.name);
+		expect(JSON.parse(serialised)).toEqual({ kind: 'masked-elsewhere' });
+	});
+
+	it('does not leak a group id even when the group list cannot name it', () => {
+		// The raw-uuid fallback is exactly the case where a name is out of reach.
+		const action = rowActionFor(actionRow(true, ['ghost']), [], false);
+		expect(JSON.stringify(action)).not.toContain('ghost');
+	});
+
+	it('leaves the instance-wide default exactly as it was', () => {
+		// It names no group, so nothing about it needs hiding — and level A does not
+		// touch it.
+		expect(rowActionFor(actionRow(true, []), [POLICY], false)).toEqual({
+			kind: 'none',
+			via: []
+		});
+	});
+
+	it('changes nothing for a viewer who may act', () => {
+		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
+			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER], true)).toEqual(
+				rowActionFor(actionRow(true, sources), [POLICY, OTHER])
+			);
+		}
+		expect(rowActionFor(actionRow(false), [POLICY], true)).toEqual(
+			rowActionFor(actionRow(false), [POLICY])
+		);
 	});
 });
 

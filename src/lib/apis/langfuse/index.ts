@@ -26,13 +26,19 @@ export const getLangfuseMetrics = async (
 	token: string,
 	period: string = 'week',
 	days?: number,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	// Last, and optional: every existing caller passes positionally and stops
+	// before this, so adding it cannot silently shift an argument.
+	teamId?: string | null
 ): Promise<MetricsResponse> => {
 	let error = null;
 
 	const params = new URLSearchParams({ period });
 	if (period === 'custom' && days) {
 		params.set('days', String(days));
+	}
+	if (teamId) {
+		params.set('team_id', teamId);
 	}
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/langfuse/metrics?${params}`, {

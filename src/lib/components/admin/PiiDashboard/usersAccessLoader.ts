@@ -66,9 +66,6 @@ const INITIAL: UsersAccessState = {
 	errorDetail: null
 };
 
-const defaultUsersFetcher: UsersFetcher = (page, signal) =>
-	getUsers(localStorage.token, undefined, undefined, undefined, page, signal);
-
 const defaultGroupsFetcher: GroupsFetcher = () => getGroups(localStorage.token);
 
 /** Sentinel for "the sequence was superseded or destroyed; publish nothing". */
@@ -76,10 +73,23 @@ const ABORTED = Symbol('aborted');
 
 type Collected<T> = { items: T[]; truncated: Truncation | null };
 
+/**
+ * ⚠️ `teamId` last, default users fetcher built here - see `metricsLoader.ts`.
+ *
+ * The GROUPS fetcher deliberately does not take it: `GET /groups/` already returns
+ * only the groups the caller belongs to, and level A has no team-to-group bridge to
+ * scope it by. Passing a team id there would suggest a scoping that does not exist.
+ */
 export function createUsersAccessLoader(
-	usersFetcher: UsersFetcher = defaultUsersFetcher,
-	groupsFetcher: GroupsFetcher = defaultGroupsFetcher
+	usersFetcher?: UsersFetcher,
+	groupsFetcher: GroupsFetcher = defaultGroupsFetcher,
+	teamId: string | null = null
 ): UsersAccessLoader {
+	const fetchUsers: UsersFetcher =
+		usersFetcher ??
+		((page, signal) =>
+			getUsers(localStorage.token, undefined, undefined, undefined, page, signal, teamId));
+
 	const { subscribe, update } = writable<UsersAccessState>({ ...INITIAL });
 
 	let inFlight: AbortController | null = null;
@@ -145,7 +155,7 @@ export function createUsersAccessLoader(
 		try {
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
-					const res = await usersFetcher(page, signal);
+					const res = await fetchUsers(page, signal);
 					return res ? { items: res.users, total: res.total } : null;
 				},
 				USERS_MAX,
