@@ -44,6 +44,7 @@ from open_webui.utils.auth import (
     get_verified_user,
     validate_password,
 )
+from open_webui.utils.team_scope import resolve_dashboard_scope, team_directory_filter
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,15 +98,29 @@ async def get_users(
     order_by: str | None = None,
     direction: str | None = None,
     page: int | None = 1,
-    user=Depends(get_admin_user),
+    team_id: str | None = None,
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Paginated directory listing.
+
+    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule moved into
+    `resolve_dashboard_scope`, which refuses any non-admin who omits `team_id`.
+    That call is the FIRST executable line here for a reason: without it this route
+    hands the whole directory to every logged-in account.
+    """
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
     limit = PAGE_ITEM_COUNT
 
     page = max(1, page)
     skip = (page - 1) * limit
 
     filter = _list_filter(query=query, order_by=order_by, direction=direction)
+    if scope is not None:
+        # `user_ids` AND `group_ids`, always together — see `team_directory_filter`.
+        # Dropping either does not fail; it returns the whole instance.
+        filter.update(team_directory_filter(scope))
 
     result = await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
@@ -188,10 +203,21 @@ async def locate_user(
 
 @router.get('/all', response_model=UserInfoListResponse)
 async def get_all_users(
-    user=Depends(get_admin_user),
+    team_id: str | None = None,
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    return await Users.get_users(db=db)
+    """Unpaginated directory listing.
+
+    ⚠️ This route passed NO filter at all, so the difference between correct and
+    catastrophic is one argument: omit it and every logged-in account receives
+    every user on the instance.
+    """
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
+    return await Users.get_users(
+        filter=team_directory_filter(scope) if scope is not None else None, db=db
+    )
 
 
 @router.get('/search', response_model=UserInfoListResponse)
