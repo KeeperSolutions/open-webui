@@ -390,10 +390,72 @@ class GroupTable:
 
             return group_user_ids
 
+    @staticmethod
+    def _has_reason(reason: Optional[str]) -> bool:
+        """Whitespace is not a reason.
+
+        Same rule as the route (`groups.py:378`) and the audit model
+        (`pii_policy_audit.py:138`), repeated rather than imported because those
+        two are HTTP and audit concerns; this one is a data-integrity concern and
+        must not start failing if either of them is refactored.
+        """
+        return bool((reason or '').strip())
+
+    async def _enforces_pii_masking(self, group_id: str, db: AsyncSession) -> bool:
+        """Whether ONE group carries the masking policy.
+
+        ⚠️ Function-local import, and not a style choice: `utils.pii_policy` imports
+        `open_webui.config`, and `config` transitively imports THIS module. A
+        top-level import here is a genuine cycle that fails at application start.
+        Measured, not assumed.
+        """
+        from open_webui.utils.pii_policy import group_enforces_pii_masking
+
+        result = await db.execute(select(Group.permissions).filter_by(id=group_id))
+        row = result.first()
+        return bool(row) and group_enforces_pii_masking(row[0])
+
+    async def _enforcing_group_ids(self, group_ids, db: AsyncSession) -> set[str]:
+        """Which of `group_ids` carry the masking policy.
+
+        Bulk form of `_enforces_pii_masking`, for the sync path, which decides about
+        many groups at once and must not issue one query per group.
+        """
+        from open_webui.utils.pii_policy import group_enforces_pii_masking
+
+        ids = list(group_ids)
+        if not ids:
+            return set()
+        result = await db.execute(select(Group.id, Group.permissions).filter(Group.id.in_(ids)))
+        return {gid for gid, permissions in result.all() if group_enforces_pii_masking(permissions)}
+
     async def set_group_user_ids_by_id(
-        self, group_id: str, user_ids: list[str], db: Optional[AsyncSession] = None
-    ) -> None:
+        self,
+        group_id: str,
+        user_ids: list[str],
+        reason: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> bool:
         async with get_async_db_context(db) as db:
+            # "Set membership to this list" is delete-then-insert, so it is also a
+            # REMOVAL for anyone the list omits. Refusing the whole call would stop
+            # SCIM managing the group at all — including adding people, which is
+            # always allowed — so the refusal is narrowed to the case that actually
+            # takes protection away.
+            if await self._enforces_pii_masking(group_id, db) and not self._has_reason(reason):
+                result = await db.execute(
+                    select(GroupMember.user_id).filter(GroupMember.group_id == group_id)
+                )
+                dropped = {uid for (uid,) in result.all()} - set(user_ids)
+                if dropped:
+                    log.warning(
+                        'Refusing to drop %d member(s) from group %s: it enforces PII masking '
+                        'and no reason was given.',
+                        len(dropped),
+                        group_id,
+                    )
+                    return False
+
             # Delete existing members
             await db.execute(delete(GroupMember).filter(GroupMember.group_id == group_id))
 
@@ -412,6 +474,7 @@ class GroupTable:
 
             db.add_all(new_members)
             await db.commit()
+            return True
 
     async def get_group_member_count_by_id(self, id: str, db: Optional[AsyncSession] = None) -> int:
         async with get_async_db_context(db) as db:
@@ -559,6 +622,26 @@ class GroupTable:
                 groups_to_add = target_group_ids - existing_group_ids
                 groups_to_remove = existing_group_ids - target_group_ids
 
+                # ⚠️ THE bug this guard exists for: an LDAP login removes the user
+                # from every group the directory does not list, and the PII policy
+                # group is not something LDAP knows about. Left alone, signing in
+                # silently takes people out from under masking.
+                #
+                # LDAP has no notion of a reason and no way to supply one, so for
+                # this path "refuse without a reason" is simply "refuse". The user
+                # keeps the membership; every other group still syncs normally,
+                # because breaking directory sync to protect one group would be a
+                # worse trade than the one being made here.
+                protected = await self._enforcing_group_ids(groups_to_remove, db)
+                if protected:
+                    log.warning(
+                        'Keeping user %s in %d group(s) that enforce PII masking; '
+                        'directory sync cannot remove them without a reason.',
+                        user_id,
+                        len(protected),
+                    )
+                    groups_to_remove = groups_to_remove - protected
+
                 # 4. Remove in one bulk delete
                 if groups_to_remove:
                     await db.execute(
@@ -638,6 +721,7 @@ class GroupTable:
         self,
         id: str,
         user_ids: Optional[list[str]] = None,
+        reason: Optional[str] = None,
         db: Optional[AsyncSession] = None,
     ) -> Optional[GroupModel]:
         try:
@@ -649,6 +733,34 @@ class GroupTable:
 
                 if not user_ids:
                     return GroupModel.model_validate(group)
+
+                # Taking someone out from under masking exposes them, so it has to
+                # say why. The route already refuses this (`routers/groups.py:378`);
+                # the check lives here as well because OAuth and SCIM reach this
+                # method WITHOUT passing through that route, and they are the callers
+                # that were quietly stripping protection.
+                from open_webui.utils.pii_policy import group_enforces_pii_masking
+
+                if group_enforces_pii_masking(group.permissions) and not self._has_reason(reason):
+                    # Only an ACTUAL member is something being taken away. Asking to
+                    # remove a non-member removes nothing, so there is nothing to
+                    # justify — the same distinction the route draws before it
+                    # writes an audit row (`routers/groups.py:474-479`). Refusing a
+                    # no-op here would turn a harmless call into a 400.
+                    current = await db.execute(
+                        select(GroupMember.user_id).filter(
+                            GroupMember.group_id == id, GroupMember.user_id.in_(user_ids)
+                        )
+                    )
+                    losing = {uid for (uid,) in current.all()}
+                    if losing:
+                        log.warning(
+                            'Refusing to remove %d member(s) from group %s: it enforces PII '
+                            'masking and no reason was given.',
+                            len(losing),
+                            id,
+                        )
+                        return None
 
                 # Remove users from group_member in batch
                 await db.execute(

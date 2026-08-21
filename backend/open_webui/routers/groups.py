@@ -478,7 +478,11 @@ async def remove_users_from_group(
     )
 
     try:
-        group = await Groups.remove_users_from_group(id, form_data.user_ids, db=db)
+        # The reason is no longer only an audit field: the model refuses a removal
+        # from an enforcing group without one. Passing it here keeps the route's own
+        # 400 above as the readable error, and the model check as the backstop for
+        # OAuth and SCIM, which never reach this handler.
+        group = await Groups.remove_users_from_group(id, form_data.user_ids, reason=form_data.reason, db=db)
         if group:
             return GroupResponse(
                 **group.model_dump(),
