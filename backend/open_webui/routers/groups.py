@@ -34,6 +34,7 @@ from open_webui.models.pii_policy_audit import (
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserInfoResponse, Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.team_groups import team_group_derived_changes, team_group_kind
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -192,6 +193,37 @@ async def update_group_by_id(
     # rather than gaining a 404 it never had.
     existing = await Groups.get_group_by_id(id, db=db)
 
+    # ⚠️ Refused BEFORE anything is recorded, and this ordering is the whole point.
+    #
+    # `Groups.update_group_by_id` returning None used to mean one thing — the
+    # database failed — and the audit row committed just above was accepted as a
+    # "narrow residual". The team-group guard gave that same None a SECOND
+    # meaning: a guard working correctly. The residual stopped being narrow, and
+    # every refused edit of a team group left a row saying an administrator
+    # disabled a policy they never touched.
+    #
+    # For a table whose rule is "no record → no mutation", that is the inverted
+    # error, and the worse one: a missing record says something is absent, a
+    # false record ACCUSES someone.
+    #
+    # The model keeps its own guard — SCIM and OAuth never reach this handler —
+    # so this is not the protection. It is what stops the protection from
+    # writing history.
+    if existing is not None:
+        blocked = team_group_derived_changes(
+            existing, form_data.model_dump(exclude_none=True, exclude={'reason'})
+        )
+        # Cheap half first: the classifier costs a query, and a form that changes
+        # nothing derived cannot be refused whatever kind of group this is.
+        if blocked and await team_group_kind(id, db=db) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(
+                    'This group belongs to a team. Its name and its masking policy follow '
+                    'the team, so they cannot be changed here.'
+                ),
+            )
+
     event_type = None
     if existing is not None and form_data.permissions is not None:
         # `permissions=None` is not "clear the permissions": update_group_by_id
@@ -246,8 +278,11 @@ async def update_group_by_id(
         # into an UPDATE statement. update_group_by_id itself is unchanged.
         group = await Groups.update_group_by_id(id, GroupUpdateForm(**form_data.model_dump(exclude={'reason'})), db=db)
         if group is None and event_type is not None:
-            # Narrow residual: the audit row is already committed. Chosen over
-            # the alternative, which is a policy change with no record at all.
+            # Still a residual, and now genuinely narrow again: every REFUSAL is
+            # taken above, before anything is written, so what is left here is a
+            # database failure. Kept, and still logged loudly, because the
+            # alternative — auditing after the fact — is a policy change with no
+            # record at all (D-6).
             log.error(
                 f'PII policy audit recorded {event_type} for group {id} but the update failed; '
                 f'the audit log now claims a change that did not happen.'

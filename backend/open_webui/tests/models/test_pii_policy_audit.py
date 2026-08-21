@@ -24,6 +24,7 @@ sys.modules.setdefault("stripe", MagicMock())
 
 from fastapi import HTTPException
 
+from open_webui.models.billing import Team
 from open_webui.models.groups import Group, GroupMember, GroupPolicyUpdateForm
 from open_webui.models.pii_policy_audit import (
     EVENT_MEMBER_ADDED,
@@ -53,8 +54,14 @@ async def db_engine():
         await conn.run_sync(Group.__table__.create, checkfirst=True)
         # The route's success path counts members before responding.
         await conn.run_sync(GroupMember.__table__.create, checkfirst=True)
+        # ⚠️ Required since the route refuses a team group's derived edits before
+        # writing anything: `team_group_kind` reads `teams`. Deliberately NOT
+        # made tolerant of a missing table — a route that cannot tell whether a
+        # group belongs to a team must fail loudly, not guess.
+        await conn.run_sync(Team.__table__.create, checkfirst=True)
     yield engine
     async with engine.begin() as conn:
+        await conn.run_sync(Team.__table__.drop)
         await conn.run_sync(GroupMember.__table__.drop)
         await conn.run_sync(Group.__table__.drop)
         await conn.run_sync(PiiPolicyAudit.__table__.drop)
@@ -68,6 +75,7 @@ async def db_session(db_engine):
     yield session
     await session.rollback()
     await session.execute(PiiPolicyAudit.__table__.delete())
+    await session.execute(Team.__table__.delete())
     await session.execute(GroupMember.__table__.delete())
     await session.execute(Group.__table__.delete())
     await session.commit()
@@ -88,14 +96,25 @@ async def audits(db_session):
 
 @pytest_asyncio.fixture
 async def groups_bound(db_session):
-    """`Groups` (the real GroupTable) bound to the in-memory session."""
+    """`Groups` (the real GroupTable) bound to the in-memory session.
+
+    ⚠️ BOTH context managers are patched. `models.groups` opens its own, and
+    `team_group_kind` reaches for `internal.db`'s. Patching only the first leaves
+    the classifier talking to the developer's own database — it answers "not a
+    team group" for everything, and every guard that depends on it silently stops
+    guarding while the tests still pass. Measured here: the team-group tests
+    below failed on exactly that, in the direction that looks like the guard is
+    missing rather than the fixture.
+    """
     from open_webui.models import groups as groups_module
 
     @asynccontextmanager
     async def _get_async_db_context(db=None):
         yield db_session
 
-    with patch.object(groups_module, "get_async_db_context", _get_async_db_context):
+    with patch.object(groups_module, "get_async_db_context", _get_async_db_context), patch(
+        "open_webui.internal.db.get_async_db_context", _get_async_db_context
+    ):
         yield groups_module.Groups
 
 
@@ -404,6 +423,147 @@ async def _call_membership(action, group_id, user_ids, db_session, audits, group
             user=MagicMock(id="admin-1", email="admin@example.com"),
             db=db_session,
         )
+
+
+async def _make_team_group(db_session, group_id="g-team", team_id="t1", enforced=True):
+    """A group a team owns: the group, plus the team whose `group_id` points at it."""
+    now = int(time.time())
+    db_session.add(
+        Group(
+            id=group_id,
+            user_id="",
+            name="PII \u2014 Acme \u00b7 t1",
+            description="",
+            permissions={"chat": {"pii_masking_enforced": enforced}},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db_session.add(
+        Team(
+            id=team_id,
+            name="Acme",
+            owner_user_id="owner",
+            seat_limit=10,
+            monthly_credits=0,
+            group_id=group_id,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    await db_session.commit()
+
+
+def _team_form(name="PII \u2014 Acme \u00b7 t1", enforced=True, description="", reason=None):
+    return GroupPolicyUpdateForm(
+        name=name,
+        description=description,
+        permissions={"chat": {"pii_masking_enforced": enforced}},
+        reason=reason,
+    )
+
+
+class TestRefusalIsNotRecorded:
+    """\u26a0\ufe0f A refused edit must leave NOTHING in the audit log.
+
+    The route writes the audit row before the mutation, on purpose: the model
+    commits on its own session, so there is no shared transaction to roll back,
+    and "no record \u2192 no mutation" only holds in that order (D-6). That ordering
+    was chosen when `update_group_by_id` returning None meant one thing \u2014 the
+    database failed \u2014 and the already-committed row was accepted as a narrow
+    residual.
+
+    The team-group guard gave the same None a second meaning: a guard working
+    correctly. From then on EVERY refused edit of a team group wrote a row
+    claiming an administrator disabled a policy they never touched. Measured in
+    the browser against the running application, not deduced.
+
+    A missing audit row says something is absent. A false one accuses somebody.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_refused_policy_change_records_nothing(self, db_session, audits, groups_bound):
+        await _make_team_group(db_session)
+
+        with pytest.raises(HTTPException) as exc:
+            await _call_route(
+                "g-team", _team_form(enforced=False, reason="testing"), db_session, audits, groups_bound
+            )
+
+        assert exc.value.status_code == 400
+        result = await db_session.execute(select(PiiPolicyAudit))
+        assert result.scalars().all() == []
+        assert await _stored_enforced(db_session, "g-team") is True
+
+    @pytest.mark.asyncio
+    async def test_a_refused_rename_records_nothing_and_changes_nothing(
+        self, db_session, audits, groups_bound
+    ):
+        await _make_team_group(db_session)
+
+        with pytest.raises(HTTPException) as exc:
+            await _call_route("g-team", _team_form(name="Hijacked"), db_session, audits, groups_bound)
+
+        assert exc.value.status_code == 400
+        result = await db_session.execute(select(Group).filter_by(id="g-team"))
+        assert result.scalars().first().name == "PII \u2014 Acme \u00b7 t1"
+        result = await db_session.execute(select(PiiPolicyAudit))
+        assert result.scalars().all() == []
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_says_the_group_belongs_to_a_team(self, db_session, audits, groups_bound):
+        """Not the generic "Error updating group" the model's None produced."""
+        await _make_team_group(db_session)
+
+        with pytest.raises(HTTPException) as exc:
+            await _call_route("g-team", _team_form(name="Hijacked"), db_session, audits, groups_bound)
+
+        assert "team" in str(exc.value.detail).lower()
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_group_is_unaffected(self, db_session, audits, groups_bound):
+        """The check must not become "no policy group may be edited"."""
+        await _make_group(db_session, enforced=False)
+
+        await _call_route("g1", _form(True), db_session, audits, groups_bound)
+
+        result = await db_session.execute(select(PiiPolicyAudit))
+        assert result.scalars().one().event_type == EVENT_POLICY_ENABLED
+        assert await _stored_enforced(db_session) is True
+
+    @pytest.mark.asyncio
+    async def test_restating_a_team_groups_own_values_still_goes_through(
+        self, db_session, audits, groups_bound
+    ):
+        """\u26a0\ufe0f The route refuses a CHANGE, never a restatement.
+
+        Same rule as the model guard, and the same reason: SCIM resends the
+        current name on every membership edit and OAuth writes a group's own
+        permissions straight back to it. A route check that refused any non-None
+        `name` would pass every other test here and break directory sync.
+        """
+        await _make_team_group(db_session)
+
+        await _call_route("g-team", _team_form(description="New blurb"), db_session, audits, groups_bound)
+
+        result = await db_session.execute(select(Group).filter_by(id="g-team"))
+        assert result.scalars().first().description == "New blurb"
+
+    @pytest.mark.asyncio
+    async def test_the_model_guard_is_still_the_backstop(self, db_session, groups_bound):
+        """\u26a0\ufe0f The route is NOT the protection, and must not become it.
+
+        SCIM and OAuth reach `Groups.update_group_by_id` without passing through
+        this handler. Moving the refusal into the route would leave them
+        unguarded while every route test above still passed \u2014 so the model keeps
+        its own guard, and this is the test that notices if it is removed.
+        """
+        await _make_team_group(db_session)
+
+        assert await groups_bound.update_group_by_id("g-team", _team_form(name="Hijacked")) is None
+
+        result = await db_session.execute(select(Group).filter_by(id="g-team"))
+        assert result.scalars().first().name == "PII \u2014 Acme \u00b7 t1"
 
 
 class TestMembershipAudit:

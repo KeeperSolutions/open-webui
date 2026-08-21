@@ -552,19 +552,22 @@ class GroupTable:
                 # (`routers/scim.py:911`) — refusing those would break directory
                 # sync for team groups while protecting nothing.
                 if await self._is_team_pii_group(id, db):
+                    from open_webui.utils.team_groups import team_group_derived_changes
+
                     result = await db.execute(select(Group).filter_by(id=id))
                     existing = result.scalars().first()
                     if existing is not None:
-                        changes = form_data.model_dump(exclude_none=True)
-                        for field in ('name', 'permissions'):
-                            if field in changes and changes[field] != getattr(existing, field):
-                                log.warning(
-                                    'Refusing to change %s on group %s: it belongs to a team '
-                                    'and is derived from it.',
-                                    field,
-                                    id,
-                                )
-                                return None
+                        blocked = team_group_derived_changes(
+                            existing, form_data.model_dump(exclude_none=True)
+                        )
+                        if blocked:
+                            log.warning(
+                                'Refusing to change %s on group %s: it belongs to a team '
+                                'and is derived from it.',
+                                ', '.join(blocked),
+                                id,
+                            )
+                            return None
 
                 await db.execute(
                     update(Group)

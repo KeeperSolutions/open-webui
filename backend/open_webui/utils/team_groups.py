@@ -92,6 +92,40 @@ def team_pii_group_name(team_name: str, team_id: str) -> str:
     return f'PII — {team_name} · {team_id[:TEAM_ID_DISCRIMINATOR_LENGTH]}'
 
 
+#: The fields a team's PII group derives from the team. Neither is editable
+#: directly: the honest way to change either is to change the team.
+TEAM_GROUP_DERIVED_FIELDS = ('name', 'permissions')
+
+
+def team_group_derived_changes(existing, changes: dict) -> list:
+    """Which derived fields this form would actually CHANGE. Never a restatement.
+
+    Extracted so the model guard and the route ask the same question. They ask it
+    for different reasons and at different moments — the model refuses the write,
+    the route refuses before writing an audit row — and two copies of "is this a
+    change?" would drift on exactly the case that matters: OAuth writes a group's
+    own permissions straight back to it (`utils/oauth.py:1409`) and SCIM resends
+    the current name on every membership edit (`routers/scim.py:911`). A copy that
+    treated those as changes would break directory sync while protecting nothing.
+
+    ⚠️ Deliberately pure and synchronous, and it does NOT ask whether the group
+    belongs to a team — that is `team_group_kind`, one query, and the caller
+    decides when to pay for it. Keeping the two apart lets the route check the
+    cheap half first.
+
+    Args:
+        existing: the stored group — an ORM `Group` or a `GroupModel`; only
+            attribute access is used, so either works.
+        changes: the proposed values, already stripped of `None` fields the way
+            `update_group_by_id` strips them.
+    """
+    return [
+        field
+        for field in TEAM_GROUP_DERIVED_FIELDS
+        if field in changes and changes[field] != getattr(existing, field, None)
+    ]
+
+
 def team_group_flag_column(group_id_column):
     """A SQL expression: does any team claim this group.
 
