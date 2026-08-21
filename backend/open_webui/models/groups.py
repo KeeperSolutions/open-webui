@@ -390,6 +390,22 @@ class GroupTable:
 
             return group_user_ids
 
+    async def _is_team_pii_group(self, group_id: str, db: AsyncSession) -> bool:
+        """Whether this group belongs to a team.
+
+        ⚠️ Delegates to `utils.team_groups.team_group_kind` and does not reimplement
+        it. That function is the single reader of `teams.group_id`, and a structural
+        test enforces it — a second query here would be the exact duplication that
+        test exists to prevent.
+
+        Function-local import: `team_groups` reaches `models.billing`, which pulls
+        in the billing stack, and no guard in this module should depend on that
+        loading cleanly at import time.
+        """
+        from open_webui.utils.team_groups import team_group_kind
+
+        return await team_group_kind(group_id, db) == 'team_pii'
+
     @staticmethod
     def _has_reason(reason: Optional[str]) -> bool:
         """Whitespace is not a reason.
@@ -503,6 +519,31 @@ class GroupTable:
     ) -> Optional[GroupModel]:
         try:
             async with get_async_db_context(db) as db:
+                # A team's PII group derives BOTH its permissions and its name from
+                # the team, so neither may be edited here. The guard is in the model
+                # rather than in the route because SCIM reaches this method without
+                # going through the route at all.
+                #
+                # ⚠️ It refuses a CHANGE, never a restatement. OAuth writes a group's
+                # own permissions straight back to it (`utils/oauth.py:1412`), and
+                # SCIM sends the current name on every membership edit
+                # (`routers/scim.py:911`) — refusing those would break directory
+                # sync for team groups while protecting nothing.
+                if await self._is_team_pii_group(id, db):
+                    result = await db.execute(select(Group).filter_by(id=id))
+                    existing = result.scalars().first()
+                    if existing is not None:
+                        changes = form_data.model_dump(exclude_none=True)
+                        for field in ('name', 'permissions'):
+                            if field in changes and changes[field] != getattr(existing, field):
+                                log.warning(
+                                    'Refusing to change %s on group %s: it belongs to a team '
+                                    'and is derived from it.',
+                                    field,
+                                    id,
+                                )
+                                return None
+
                 await db.execute(
                     update(Group)
                     .filter_by(id=id)
@@ -520,6 +561,16 @@ class GroupTable:
     async def delete_group_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
             async with get_async_db_context(db) as db:
+                # ⚠️ The only defence, not the second one. `group_member.group_id`
+                # declares ON DELETE CASCADE, but `PRAGMA foreign_keys` is 0 on
+                # SQLite and this application never turns it on — measured — so a
+                # deleted group leaves its membership rows behind AND leaves
+                # `teams.group_id` pointing at nothing. Nothing downstream cleans
+                # either up.
+                if await self._is_team_pii_group(id, db):
+                    log.warning('Refusing to delete group %s: it belongs to a team.', id)
+                    return False
+
                 await db.execute(delete(Group).filter_by(id=id))
                 await db.commit()
                 return True

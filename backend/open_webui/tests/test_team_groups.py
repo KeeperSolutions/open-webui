@@ -207,24 +207,33 @@ def test_group_id_is_read_in_exactly_one_module():
     `if` over `teams.group_id` anywhere outside `migrations/` makes this fail, and
     whoever wrote it has to come here and say why.
     """
+    import ast
     import pathlib
-    import re
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    pattern = re.compile(r"\bgroup_id\b")
     readers = set()
 
+    # ⚠️ Parsed, not grepped, and both refinements were forced by a false
+    # positive:
+    #   * a bare `group_id` also names `group_member.group_id` and
+    #     `stripe_billing.group_id` — that reported four innocent modules
+    #   * a qualified TEXT match then reported `models/groups.py`, because its
+    #     docstring MENTIONS `teams.group_id` while reading nothing
+    # An attribute access is the only form that is actually a read.
     for path in root.rglob("*.py"):
-        parts = path.parts
-        if "migrations" in parts or "tests" in parts:
+        if "migrations" in path.parts or "tests" in path.parts:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
-        # ⚠️ Qualified only. A bare `group_id` also names `group_member.group_id`
-        # and `stripe_billing.group_id`, which have nothing to do with this
-        # back-reference — an unqualified match reported four innocent modules on
-        # the first run of this test.
-        for line in text.splitlines():
-            if pattern.search(line) and re.search(r"Team\.group_id|teams\.group_id", line):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "group_id"
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "Team"
+            ):
                 readers.add(str(path.relative_to(root)))
 
     assert readers == {"utils/team_groups.py"}, sorted(readers)
