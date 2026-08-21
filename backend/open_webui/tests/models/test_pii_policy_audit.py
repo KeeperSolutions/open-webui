@@ -32,6 +32,7 @@ from open_webui.models.pii_policy_audit import (
     EVENT_POLICY_ENABLED,
     PiiPolicyAudit,
     PiiPolicyAuditTable,
+    validate_pii_policy_event,
 )
 
 
@@ -666,3 +667,91 @@ class TestAuditReader:
         assert res.total == groups_router.PII_AUDIT_PAGE_LIMIT + 5
         # The newest end is what survived the cut.
         assert res.items[0].event_ts == now + groups_router.PII_AUDIT_PAGE_LIMIT + 4
+
+
+# ---------------------------------------------------------------------------
+# G-B5 — the validator, reachable without a database and without awaiting
+# ---------------------------------------------------------------------------
+
+
+class TestValidatorIsUsableByAMigration:
+    """⚠️ These tests exist for a caller that does not exist yet.
+
+    The bridge migration cannot call `insert_event`: Alembic runs synchronously
+    and `insert_event` is a coroutine that commits. It has to issue raw `INSERT`s
+    instead — which skip every invariant unless the checks are reachable on their
+    own. This class pins the two properties that make them reachable: the
+    validator is SYNCHRONOUS, and it touches NO database.
+
+    A future refactor that adds an `await` or a query here would pass every other
+    test in this file and quietly put the migration back outside the rules.
+    """
+
+    def test_is_not_a_coroutine_function(self):
+        import inspect
+
+        assert not inspect.iscoroutinefunction(validate_pii_policy_event)
+
+    def test_runs_with_no_session_and_no_event_loop(self):
+        """Called bare — no fixture, no `await`, no patched session."""
+        assert validate_pii_policy_event(EVENT_POLICY_ENABLED, "g1", "admin-1", "a@x.com") is None
+
+    def test_takes_no_db_argument(self):
+        import inspect
+
+        assert "db" not in inspect.signature(validate_pii_policy_event).parameters
+
+
+class TestValidatorRules:
+    """Each invariant, exercised through the extracted function directly.
+
+    The same rules are already covered through `insert_event`; these assert them
+    on the seam the migration will use, so the two cannot drift apart.
+    """
+
+    def test_unknown_event_type(self):
+        with pytest.raises(ValueError, match="unknown pii policy audit event_type"):
+            validate_pii_policy_event("policy_maybe", "g1", "admin-1", "a@x.com")
+
+    def test_member_event_requires_user_id(self):
+        with pytest.raises(ValueError, match="requires user_id"):
+            validate_pii_policy_event(EVENT_MEMBER_ADDED, "g1", "admin-1", "a@x.com")
+
+    def test_policy_event_must_not_carry_user_id(self):
+        with pytest.raises(ValueError, match="must not carry user_id"):
+            validate_pii_policy_event(
+                EVENT_POLICY_ENABLED, "g1", "admin-1", "a@x.com", user_id="u1"
+            )
+
+    def test_member_removed_requires_a_reason(self):
+        with pytest.raises(ValueError, match="requires a reason"):
+            validate_pii_policy_event(
+                EVENT_MEMBER_REMOVED, "g1", "admin-1", "a@x.com", user_id="u1"
+            )
+
+    def test_whitespace_is_not_a_reason(self):
+        with pytest.raises(ValueError, match="requires a reason"):
+            validate_pii_policy_event(
+                EVENT_MEMBER_REMOVED, "g1", "admin-1", "a@x.com", user_id="u1", reason="  \n "
+            )
+
+    def test_policy_disabled_requires_a_reason(self):
+        with pytest.raises(ValueError, match="requires a reason"):
+            validate_pii_policy_event(EVENT_POLICY_DISABLED, "g1", "admin-1", "a@x.com")
+
+    def test_group_id_is_required(self):
+        with pytest.raises(ValueError, match="group_id is required"):
+            validate_pii_policy_event(EVENT_POLICY_ENABLED, "", "admin-1", "a@x.com")
+
+    def test_actor_is_required(self):
+        with pytest.raises(ValueError, match="actor_user_id and actor_email are required"):
+            validate_pii_policy_event(EVENT_POLICY_ENABLED, "g1", "", "a@x.com")
+        with pytest.raises(ValueError, match="actor_user_id and actor_email are required"):
+            validate_pii_policy_event(EVENT_POLICY_ENABLED, "g1", "admin-1", "")
+
+    def test_member_added_needs_no_reason(self):
+        """Adding exposes nobody, so it asks nothing — the asymmetry, on this seam too."""
+        assert (
+            validate_pii_policy_event(EVENT_MEMBER_ADDED, "g1", "admin-1", "a@x.com", user_id="u1")
+            is None
+        )

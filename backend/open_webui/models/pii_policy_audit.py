@@ -52,6 +52,53 @@ REASON_REQUIRED_EVENT_TYPES = frozenset({EVENT_POLICY_DISABLED, EVENT_MEMBER_REM
 
 
 ####################
+# Validation
+####################
+
+
+def validate_pii_policy_event(
+    event_type: str,
+    group_id: str,
+    actor_user_id: str,
+    actor_email: str,
+    user_id: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> None:
+    """The invariants of one audit row. Raises `ValueError`; returns nothing.
+
+    Extracted from `insert_event` so that a WRITER WHICH CANNOT AWAIT can still be
+    held to them. Alembic runs synchronously, so a migration cannot call
+    `insert_event` at all — it has to issue raw `INSERT`s, and a raw insert
+    otherwise skips every check below. The bridge migration writes two rows per
+    member rather than the one row the seed migration wrote, so the exposure is an
+    order of magnitude larger than the precedent that accepted it.
+
+    ⚠️ Deliberately synchronous and database-free. Adding an `await` or a query
+    here would put it back out of reach of the one caller it was extracted for.
+    """
+    if event_type not in EVENT_TYPES:
+        raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
+
+    if event_type in MEMBER_EVENT_TYPES and not user_id:
+        raise ValueError(f'{event_type} requires user_id')
+
+    if event_type in POLICY_EVENT_TYPES and user_id:
+        # Not cosmetic: a policy row carrying a user_id reads as "this person's
+        # policy changed", which is a claim this feature never makes — the policy
+        # is per group.
+        raise ValueError(f'{event_type} must not carry user_id')
+
+    if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
+        raise ValueError(f'{event_type} requires a reason')
+
+    if not group_id:
+        raise ValueError('group_id is required')
+
+    if not actor_user_id or not actor_email:
+        raise ValueError('actor_user_id and actor_email are required')
+
+
+####################
 # DB Schema
 ####################
 
@@ -119,30 +166,19 @@ class PiiPolicyAuditTable:
         None; this one must not. The caller's contract is "no record → no
         mutation", which it can only honour if a failed write is visible to it.
 
-        Validation lives here rather than only in the route so the invariants
-        hold for every future caller — the membership events go through this same
-        door.
+        Validation lives in `validate_pii_policy_event` rather than only in the
+        route so the invariants hold for every future caller — the membership
+        events go through this same door, and so does the bridge migration, which
+        cannot await this method and calls the validator directly.
         """
-        if event_type not in EVENT_TYPES:
-            raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
-
-        if event_type in MEMBER_EVENT_TYPES and not user_id:
-            raise ValueError(f'{event_type} requires user_id')
-
-        if event_type in POLICY_EVENT_TYPES and user_id:
-            # Not cosmetic: a policy row carrying a user_id reads as "this
-            # person's policy changed", which is a claim this feature never
-            # makes — the policy is per group.
-            raise ValueError(f'{event_type} must not carry user_id')
-
-        if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
-            raise ValueError(f'{event_type} requires a reason')
-
-        if not group_id:
-            raise ValueError('group_id is required')
-
-        if not actor_user_id or not actor_email:
-            raise ValueError('actor_user_id and actor_email are required')
+        validate_pii_policy_event(
+            event_type=event_type,
+            group_id=group_id,
+            actor_user_id=actor_user_id,
+            actor_email=actor_email,
+            user_id=user_id,
+            reason=reason,
+        )
 
         row = PiiPolicyAudit(
             id=str(uuid.uuid4()),
