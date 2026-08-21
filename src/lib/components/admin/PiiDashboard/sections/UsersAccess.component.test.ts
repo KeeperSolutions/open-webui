@@ -44,7 +44,8 @@ const mount = (props: Record<string, unknown>) =>
 			loading: false,
 			failed: false,
 			onRetry: () => {},
-			policyGroups: [{ id: 'g1', name: 'Global PII Policy' }],
+			policyGroups: [{ id: 'g1', name: 'Global PII Policy', isTeamGroup: false }],
+			enforceTargets: [{ id: 'g1', name: 'Global PII Policy', isTeamGroup: false }],
 			...props
 		},
 		context: new Map([['i18n', i18n]])
@@ -104,8 +105,8 @@ describe('UsersAccess — a viewer who may not act', () => {
 			mayAct: true,
 			users: [account({ pii_masking_enforced: true, pii_policy_group_ids: ['g1', 'g2'] })],
 			policyGroups: [
-				{ id: 'g1', name: 'Global PII Policy' },
-				{ id: 'g2', name: 'Second Policy' }
+				{ id: 'g1', name: 'Global PII Policy', isTeamGroup: false },
+				{ id: 'g2', name: 'Second Policy', isTeamGroup: false }
 			]
 		});
 		expect(document.body.textContent).toContain('Global PII Policy');
@@ -127,6 +128,7 @@ describe('the empty destination list explains itself', () => {
 				failed: false,
 				onRetry: () => {},
 				policyGroups: [],
+				enforceTargets: [],
 				mayAct: true,
 				teamOnlyPolicyGroups
 			},
@@ -165,9 +167,10 @@ describe('what the team-policy row actually renders', () => {
 				failed: false,
 				onRetry: () => {},
 				policyGroups: [
-					{ id: TEAM, name: 'PII — Acme · abcdef01' },
-					{ id: OTHER, name: 'Global PII Policy' }
+					{ id: TEAM, name: 'PII — Acme · abcdef01', isTeamGroup: true },
+					{ id: OTHER, name: 'Global PII Policy', isTeamGroup: false }
 				],
+				enforceTargets: [{ id: OTHER, name: 'Global PII Policy', isTeamGroup: false }],
 				mayAct: false,
 				teamGroupId
 			},
@@ -201,5 +204,62 @@ describe('what the team-policy row actually renders', () => {
 	it('falls back to outside-the-team when the team has no group yet', () => {
 		mountMasked([OTHER], null);
 		expect(screen.getByText('Masked · source outside the team')).toBeTruthy();
+	});
+});
+
+describe('what an admin sees for somebody else’s team member', () => {
+	const TEAM_ID = 'g-team';
+	const TEAM_NAME = 'PII — Acme · abcdef01';
+	const GLOBAL = { id: 'g1', name: 'Global PII Policy', isTeamGroup: false };
+	const TEAM = { id: TEAM_ID, name: TEAM_NAME, isTeamGroup: true };
+
+	const mountAdmin = (policyGroupIds: string[]) =>
+		render(UsersAccess, {
+			props: {
+				users: [
+					account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })
+				],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				// The split the loader produces: nameable, not targetable.
+				policyGroups: [GLOBAL, TEAM],
+				enforceTargets: [GLOBAL],
+				mayAct: true,
+				teamGroupId: null
+			},
+			context: new Map([['i18n', i18n]])
+		});
+
+	it('names the team group next to the button, never its id', () => {
+		const { container } = mountAdmin([TEAM_ID]);
+		expect(screen.getByText('Remove')).toBeTruthy();
+		expect(container.innerHTML).toContain(TEAM_NAME);
+		expect(container.innerHTML).not.toContain(TEAM_ID);
+	});
+
+	it('says nothing extra for an ordinary policy group', () => {
+		// The wording is for the surprising case only; the common one is unchanged.
+		const { container } = mountAdmin(['g1']);
+		expect(screen.getByText('Remove')).toBeTruthy();
+		expect(container.innerHTML).not.toContain(TEAM_NAME);
+	});
+
+	it('the confirmation says the group belongs to a team, and names it', async () => {
+		/**
+		 * ⚠️ The markup half, and the half that was actually leaking. The old
+		 * dialog line was `pending.targets[0]?.name ?? pending.groupId` — with the
+		 * fallback supplying `name: id`, it printed a raw UUID at the exact moment
+		 * an admin was deciding whether to act.
+		 */
+		mountAdmin([TEAM_ID]);
+		screen.getByText('Remove').click();
+		await new Promise((r) => setTimeout(r, 0));
+
+		const text = document.body.textContent ?? '';
+		expect(text).toContain('which belongs to a team');
+		expect(text).toContain(TEAM_NAME);
+		expect(text).not.toContain(TEAM_ID);
 	});
 });

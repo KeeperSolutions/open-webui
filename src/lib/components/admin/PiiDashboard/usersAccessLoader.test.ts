@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import { getGroups } from '$lib/apis/groups';
@@ -62,6 +64,7 @@ describe('createUsersAccessLoader', () => {
 			users: [],
 			truncatedUsers: null,
 			policyGroups: [],
+			enforceTargets: [],
 			// Enforcing groups excluded for belonging to a team — the empty state
 			// needs it to tell its two causes apart.
 			teamOnlyPolicyGroups: 0,
@@ -350,7 +353,9 @@ describe('createUsersAccessLoader — policy groups', () => {
 
 		await loader.load();
 
-		expect(get(loader).policyGroups).toEqual([{ id: 'g1', name: 'Policy' }]);
+		expect(get(loader).policyGroups).toEqual([
+			{ id: 'g1', name: 'Policy', isTeamGroup: false }
+		]);
 	});
 
 	it('fails the section when the group list cannot be read', async () => {
@@ -436,5 +441,65 @@ describe('createUsersAccessLoader — team id propagation', () => {
 		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
 		expect(groupsApi).toHaveBeenCalledTimes(1);
 		expect(groupsApi.mock.calls[0].slice(1)).not.toContain('T1');
+	});
+});
+
+describe('createUsersAccessLoader — naming and destinations are separate lists', () => {
+	const oneUser: UsersFetcher = async () => ({ users: [mkUser(1)], total: 1 });
+
+	it('publishes a team group for naming but not as a destination', async () => {
+		/**
+		 * ⚠️ One list served both questions, and that is what put a raw UUID in
+		 * the removal dialog: the team group was filtered out of the only list
+		 * `rowActionFor` could name from, so it fell back to the id.
+		 */
+		const groups: GroupsFetcher = async () => [
+			{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } },
+			{
+				id: 'g-team',
+				name: 'PII — Acme · abcdef01',
+				permissions: { chat: { pii_masking_enforced: true } },
+				is_team_group: true
+			}
+		];
+		const loader = createUsersAccessLoader(oneUser, groups);
+
+		await loader.load();
+
+		const state = get(loader);
+		expect(state.policyGroups.map((g) => g.id)).toEqual(['g1', 'g-team']);
+		expect(state.enforceTargets.map((g) => g.id)).toEqual(['g1']);
+	});
+});
+
+describe('the dashboard hands each list to the prop of the same name', () => {
+	/**
+	 * ⚠️ Written because a mutation SURVIVED: swapping `enforceTargets` for
+	 * `policyGroups` in `PiiDashboard.svelte` broke nothing.
+	 *
+	 * Every other test here passes the two lists to `rowActionFor` or to
+	 * `UsersAccess` directly, so all of them keep passing while the one line that
+	 * connects the loader to the component quietly puts team groups back in the
+	 * Enforce dropdown — the defect this split was made to close.
+	 *
+	 * Structural rather than behavioural because the alternative is mounting the
+	 * whole dashboard, with three loaders and four stores, to prove one binding.
+	 * Only this pair is pinned: other props are deliberately renamed on the way
+	 * through (`truncated` reads `truncatedUsers`), so a blanket rule would be
+	 * false.
+	 */
+	// `import.meta.url` is not a file: URL under vite, so the path is resolved
+	// from the project root, which is where vitest runs.
+	const source = readFileSync(
+		resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/PiiDashboard.svelte'),
+		'utf-8'
+	);
+
+	it.each(['policyGroups', 'enforceTargets'])('passes %s from the field of that name', (prop) => {
+		expect(source).toContain(`${prop}={$usersAccess.${prop}}`);
+	});
+
+	it('never feeds the naming list to the destination prop', () => {
+		expect(source).not.toContain('enforceTargets={$usersAccess.policyGroups}');
 	});
 });

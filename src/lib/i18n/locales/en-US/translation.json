@@ -2173,6 +2173,7 @@
 	"Underline": "",
 	"Unknown": "",
 	"Unknown User": "",
+  "Unknown group": "Unknown group",
 	"Unloads {{FROM_NOW}}": "",
 	"Unlock mysteries": "",
 	"Unmute": "",
@@ -2467,6 +2468,7 @@
 	"{{model}} download has been canceled": "",
 	"{{name}} will be added to the group and will no longer be able to turn PII masking off.": "",
 	"{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.": "",
+  "{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.": "{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.",
 	"{{user}}'s Chats": "",
 	"{{webUIName}} Backend Required": ""
 }

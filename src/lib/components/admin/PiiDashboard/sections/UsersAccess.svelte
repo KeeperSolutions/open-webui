@@ -45,8 +45,16 @@
 	export let costUnknown = false;
 	/** Spend on screen belongs to the previous window; a newer one is in flight. */
 	export let costStale = false;
-	/** Groups that carry the policy — the only destinations an action may use. */
+	/**
+	 * Every group that carries the policy — used to NAME a source.
+	 *
+	 * ⚠️ Includes team groups. Not a destination list: see `enforceTargets`. The
+	 * two were one prop, and that is precisely what let a team member's `Remove`
+	 * dialog print a raw group id.
+	 */
 	export let policyGroups: PolicyGroup[] = [];
+	/** The subset a person may be SENT to. A team's own group is never one. */
+	export let enforceTargets: PolicyGroup[] = [];
 	/**
 	 * Enforcing groups that were excluded for belonging to a team.
 	 *
@@ -401,7 +409,7 @@
 						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
-							{@const action = rowActionFor(row, policyGroups, mayAct, teamGroupId)}
+							{@const action = rowActionFor(row, { naming: policyGroups, targets: enforceTargets }, mayAct, teamGroupId)}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -494,9 +502,27 @@
 											{$i18n.t('Masked · source outside the team')}
 										</span>
 									{:else if action.kind === 'remove'}
-										<Button on:click={() => openRemove(row, action.group)}>
-											{$i18n.t('Remove')}
-										</Button>
+										<!--
+											⚠️ When the source is a team's own group the button NAMES it.
+											An admin may take someone out of a team's policy — they are
+											not bound by the seat limit and a team's group is not
+											untouchable to them — but the action must not read as an
+											ordinary policy removal when it is not one.
+
+											`name` is null only for a group the list does not contain,
+											which `namedGroup` has already logged. A sentence, never
+											the id.
+										-->
+										<div class="flex flex-col items-start gap-0.5">
+											<Button on:click={() => openRemove(row, action.group)}>
+												{$i18n.t('Remove')}
+											</Button>
+											{#if action.group.isTeamGroup}
+												<span class="text-[11px] leading-tight text-pii-muted">
+													{action.group.name ?? $i18n.t('Unknown group')}
+												</span>
+											{/if}
+										</div>
 									{:else if action.kind === 'enforce'}
 										{#if action.targets.length === 0}
 											<!--
@@ -679,10 +705,15 @@
 								'{{name}} will be added to the group and will no longer be able to turn PII masking off.',
 								{ name: pending.row.name }
 							)
-						: $i18n.t(
-								'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
-								{ name: pending.row.name }
-							)}
+						: pending.targets[0]?.isTeamGroup
+							? $i18n.t(
+									'{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.',
+									{ name: pending.row.name, group: pending.targets[0]?.name ?? $i18n.t('Unknown group') }
+								)
+							: $i18n.t(
+									'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
+									{ name: pending.row.name }
+								)}
 				</p>
 
 				{#if pending.mode === 'enforce' && pending.targets.length > 1}
@@ -698,13 +729,17 @@
 					>
 						<option value="">{$i18n.t('Select a group')}</option>
 						{#each pending.targets as group (group.id)}
-							<option value={group.id}>{group.name}</option>
+							<option value={group.id}>{group.name ?? $i18n.t('Unknown group')}</option>
 						{/each}
 					</select>
 				{:else}
 					<div class="mt-3 text-[12px] text-pii-muted">
 						{$i18n.t('Group')}:
-						<span class="text-pii-ink">{pending.targets[0]?.name ?? pending.groupId}</span>
+						<!-- ⚠️ Never `?? pending.groupId`. That printed a raw UUID at exactly
+						     the moment an admin was deciding whether to act. -->
+						<span class="text-pii-ink"
+							>{pending.targets[0]?.name ?? $i18n.t('Unknown group')}</span
+						>
 					</div>
 				{/if}
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { MetricRow } from '$lib/apis/langfuse';
 import { totals } from './costAnalytics';
 import {
@@ -14,6 +14,7 @@ import {
 	pageRange,
 	ROWS_PER_PAGE,
 	policyGroupsOf,
+	enforceTargetsOf,
 	rowActionFor,
 	type AccessUser,
 	type PolicyGroup,
@@ -398,8 +399,18 @@ describe('maskingRank', () => {
 // The row action
 // ---------------------------------------------------------------------------
 
-const POLICY: PolicyGroup = { id: 'g1', name: 'Policy' };
-const OTHER: PolicyGroup = { id: 'g2', name: 'Legal' };
+const POLICY: PolicyGroup = { id: 'g1', name: 'Policy', isTeamGroup: false };
+const OTHER: PolicyGroup = { id: 'g2', name: 'Legal', isTeamGroup: false };
+const TEAM_GROUP: PolicyGroup = { id: 'g-team', name: 'PII \u2014 Acme \u00b7 t1', isTeamGroup: true };
+
+/**
+ * The old single-list argument, when naming and destinations are the same set.
+ *
+ * \u26a0\ufe0f Kept as a helper rather than inlined so the tests that DO distinguish
+ * them stand out: those pass `{ naming, targets }` explicitly, and the
+ * difference is the whole point of the split.
+ */
+const lists = (gs: PolicyGroup[]) => ({ naming: gs, targets: gs });
 
 const actionRow = (enforced: boolean, policyGroupIds: string[] = []) => ({
 	enforced,
@@ -415,26 +426,29 @@ describe('policyGroupsOf', () => {
 				{ id: 'g3', name: 'Bare', permissions: {} },
 				{ id: 'g4', name: 'Null', permissions: null }
 			])
-		).toEqual([{ id: 'g1', name: 'Policy' }]);
+		).toEqual([{ id: 'g1', name: 'Policy', isTeamGroup: false }]);
 	});
 
-	it('falls back to the id when a group has no name', () => {
+	it('reports a nameless group as unnamed rather than as its id', () => {
+		// ⚠️ `name: id` was the old answer, and it is what put a raw UUID in the
+		// removal dialog. `null` is a state the component can render a sentence
+		// for; an id is one it renders verbatim.
 		expect(
 			policyGroupsOf([{ id: 'g1', permissions: { chat: { pii_masking_enforced: true } } }])
-		).toEqual([{ id: 'g1', name: 'g1' }]);
+		).toEqual([{ id: 'g1', name: null, isTeamGroup: false }]);
 	});
 });
 
 describe('rowActionFor — more than one source', () => {
 	it('offers Enforce when the user is not under policy', () => {
-		expect(rowActionFor(actionRow(false), [POLICY])).toEqual({
+		expect(rowActionFor(actionRow(false), lists([POLICY]))).toEqual({
 			kind: 'enforce',
 			targets: [POLICY]
 		});
 	});
 
 	it('offers Remove when exactly one group is the source', () => {
-		expect(rowActionFor(actionRow(true, ['g1']), [POLICY, OTHER])).toEqual({
+		expect(rowActionFor(actionRow(true, ['g1']), lists([POLICY, OTHER]))).toEqual({
 			kind: 'remove',
 			group: POLICY
 		});
@@ -444,28 +458,33 @@ describe('rowActionFor — more than one source', () => {
 		// The middle case, and the only one that can lie: `Remove` here would take
 		// the user out of one group and leave them enforced by the other, while the
 		// label promised an unlock.
-		expect(rowActionFor(actionRow(true, ['g1', 'g2']), [POLICY, OTHER])).toEqual({
+		expect(rowActionFor(actionRow(true, ['g1', 'g2']), lists([POLICY, OTHER]))).toEqual({
 			kind: 'none',
 			via: [POLICY, OTHER]
 		});
 	});
 
-	it('names an unknown source group by id rather than dropping it', () => {
+	it('counts an unknown source group without printing its id', () => {
 		// Dropping it would turn a two-source user into a one-source user, and put
-		// a Remove button on a row where removal unlocks nothing.
-		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), [POLICY])).toEqual({
+		// a Remove button on a row where removal unlocks nothing. Naming it by id
+		// was the other wrong answer: see `namedGroup`.
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]))).toEqual({
 			kind: 'none',
-			via: [POLICY, { id: 'ghost', name: 'ghost' }]
+			via: [POLICY, { id: 'ghost', name: null, isTeamGroup: false }]
 		});
+		// ⚠️ A fallback nobody can see is a fallback nobody fixes.
+		expect(warn).toHaveBeenCalledOnce();
+		warn.mockRestore();
 	});
 
 	it('offers nothing, and blames no group, under an instance-wide default', () => {
-		expect(rowActionFor(actionRow(true, []), [POLICY])).toEqual({ kind: 'none', via: [] });
+		expect(rowActionFor(actionRow(true, []), lists([POLICY]))).toEqual({ kind: 'none', via: [] });
 	});
 
 	it('never offers Enforce to someone already enforced — the mirror case', () => {
 		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
-			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER]).kind).not.toBe('enforce');
+			expect(rowActionFor(actionRow(true, sources), lists([POLICY, OTHER])).kind).not.toBe('enforce');
 		}
 	});
 });
@@ -494,19 +513,19 @@ describe('rowActionFor — a viewer who may not act', () => {
 		// ⚠️ NOT `{ kind: 'none', via: [] }`. The component renders an empty `via` as
 		// "Enforced instance-wide", so reusing it here would tell an unmasked person
 		// they are masked instance-wide.
-		expect(rowActionFor(actionRow(false), [POLICY], false)).toEqual({ kind: 'readonly' });
+		expect(rowActionFor(actionRow(false), lists([POLICY]), false)).toEqual({ kind: 'readonly' });
 	});
 
 	it('says a source exists outside the team, and names nothing', () => {
-		expect(rowActionFor(actionRow(true, ['g1']), [POLICY], false)).toEqual({
+		expect(rowActionFor(actionRow(true, ['g1']), lists([POLICY]), false)).toEqual({
 			kind: 'masked-elsewhere'
 		});
 	});
 
 	it('gives the same answer for two sources as for one', () => {
 		// How many groups administration keeps is also administration's business.
-		expect(rowActionFor(actionRow(true, ['g1', 'g2']), [POLICY, OTHER], false)).toEqual(
-			rowActionFor(actionRow(true, ['g1']), [POLICY], false)
+		expect(rowActionFor(actionRow(true, ['g1', 'g2']), lists([POLICY, OTHER]), false)).toEqual(
+			rowActionFor(actionRow(true, ['g1']), lists([POLICY]), false)
 		);
 	});
 
@@ -515,7 +534,7 @@ describe('rowActionFor — a viewer who may not act', () => {
 		// field that leaks the name would pass a `toEqual` on the fields we thought
 		// to list, and fail this.
 		const serialised = JSON.stringify(
-			rowActionFor(actionRow(true, ['g1', 'ghost']), [POLICY], false)
+			rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]), false)
 		);
 		expect(serialised).not.toContain('g1');
 		expect(serialised).not.toContain('ghost');
@@ -525,14 +544,14 @@ describe('rowActionFor — a viewer who may not act', () => {
 
 	it('does not leak a group id even when the group list cannot name it', () => {
 		// The raw-uuid fallback is exactly the case where a name is out of reach.
-		const action = rowActionFor(actionRow(true, ['ghost']), [], false);
+		const action = rowActionFor(actionRow(true, ['ghost']), lists([]), false);
 		expect(JSON.stringify(action)).not.toContain('ghost');
 	});
 
 	it('leaves the instance-wide default exactly as it was', () => {
 		// It names no group, so nothing about it needs hiding — and level A does not
 		// touch it.
-		expect(rowActionFor(actionRow(true, []), [POLICY], false)).toEqual({
+		expect(rowActionFor(actionRow(true, []), lists([POLICY]), false)).toEqual({
 			kind: 'none',
 			via: []
 		});
@@ -540,31 +559,31 @@ describe('rowActionFor — a viewer who may not act', () => {
 
 	it('changes nothing for a viewer who may act', () => {
 		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
-			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER], true)).toEqual(
-				rowActionFor(actionRow(true, sources), [POLICY, OTHER])
+			expect(rowActionFor(actionRow(true, sources), lists([POLICY, OTHER]), true)).toEqual(
+				rowActionFor(actionRow(true, sources), lists([POLICY, OTHER]))
 			);
 		}
-		expect(rowActionFor(actionRow(false), [POLICY], true)).toEqual(
-			rowActionFor(actionRow(false), [POLICY])
+		expect(rowActionFor(actionRow(false), lists([POLICY]), true)).toEqual(
+			rowActionFor(actionRow(false), lists([POLICY]))
 		);
 	});
 });
 
 describe('rowActionFor — destinations', () => {
 	it('carries the single destination when exactly one group has the policy', () => {
-		const action = rowActionFor(actionRow(false), [POLICY]);
+		const action = rowActionFor(actionRow(false), lists([POLICY]));
 		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });
 	});
 
 	it('carries every candidate when several groups have the policy', () => {
 		// The choice is made per call, from these; nothing here remembers one.
-		const action = rowActionFor(actionRow(false), [POLICY, OTHER]);
+		const action = rowActionFor(actionRow(false), lists([POLICY, OTHER]));
 		expect(action.kind === 'enforce' && action.targets).toEqual([POLICY, OTHER]);
 	});
 
 	it('carries no destination when no group has the policy', () => {
 		// The component disables the action on this; it must never invent a group.
-		expect(rowActionFor(actionRow(false), [])).toEqual({ kind: 'enforce', targets: [] });
+		expect(rowActionFor(actionRow(false), lists([]))).toEqual({ kind: 'enforce', targets: [] });
 	});
 });
 
@@ -691,8 +710,23 @@ describe('policyGroupsOf — a team group is not an enforce destination', () => 
 	});
 
 	it('excludes groups a team owns', () => {
-		const out = policyGroupsOf([enforcing('custom'), enforcing('team-a', { is_team_group: true })]);
+		const out = enforceTargetsOf([
+			enforcing('custom'),
+			enforcing('team-a', { is_team_group: true })
+		]);
 		expect(out.map((g) => g.id)).toEqual(['custom']);
+	});
+
+	it('⚠️ but policyGroupsOf KEEPS them, because naming is not a destination', () => {
+		/**
+		 * The two questions were one list, and that is the whole defect. An admin
+		 * looking at a team member was offered `Remove` for a group the naming
+		 * lookup could not find, so the dialog printed a raw UUID for a group
+		 * belonging to somebody else's team, with nothing saying so.
+		 */
+		const out = policyGroupsOf([enforcing('custom'), enforcing('team-a', { is_team_group: true })]);
+		expect(out.map((g) => g.id)).toEqual(['custom', 'team-a']);
+		expect(out.find((g) => g.id === 'team-a')?.isTeamGroup).toBe(true);
 	});
 
 	it('keeps custom groups that enforce', () => {
@@ -762,14 +796,14 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 	const OTHER = 'g-other';
 
 	it('names the team policy when the team group is the source', () => {
-		expect(rowActionFor(enforced([TEAM]), [], false, TEAM)).toEqual({
+		expect(rowActionFor(enforced([TEAM]), lists([]), false, TEAM)).toEqual({
 			kind: 'masked-team',
 			teamGroupId: TEAM
 		});
 	});
 
 	it('still says "outside the team" when the source is another group', () => {
-		expect(rowActionFor(enforced([OTHER]), [], false, TEAM)).toEqual({
+		expect(rowActionFor(enforced([OTHER]), lists([]), false, TEAM)).toEqual({
 			kind: 'masked-elsewhere'
 		});
 	});
@@ -780,7 +814,7 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 		 * reach exists, which is the fact decision 5 withholds. The team answer is
 		 * true and complete enough.
 		 */
-		expect(rowActionFor(enforced([TEAM, OTHER]), [], false, TEAM)).toEqual({
+		expect(rowActionFor(enforced([TEAM, OTHER]), lists([]), false, TEAM)).toEqual({
 			kind: 'masked-team',
 			teamGroupId: TEAM
 		});
@@ -788,25 +822,25 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 
 	it('falls back to "outside the team" when the team has no group yet', () => {
 		// The normal state until the bridge migration runs — see path B.
-		expect(rowActionFor(enforced([OTHER]), [], false, null)).toEqual({
+		expect(rowActionFor(enforced([OTHER]), lists([]), false, null)).toEqual({
 			kind: 'masked-elsewhere'
 		});
 	});
 
 	it('is still an em dash for someone who is not masked at all', () => {
-		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, [], false, TEAM)).toEqual({
+		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, lists([]), false, TEAM)).toEqual({
 			kind: 'readonly'
 		});
 	});
 
 	it('carries the team id and nothing else', () => {
-		const action = rowActionFor(enforced([TEAM, OTHER]), [], false, TEAM);
+		const action = rowActionFor(enforced([TEAM, OTHER]), lists([]), false, TEAM);
 		expect(Object.keys(action).sort()).toEqual(['kind', 'teamGroupId']);
 	});
 
 	it('changes nothing for a viewer who may act', () => {
 		// `mayAct` is the role; the team id must not reach that branch at all.
-		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, [], true, TEAM)).toEqual({
+		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, lists([]), true, TEAM)).toEqual({
 			kind: 'enforce',
 			targets: []
 		});
@@ -816,4 +850,65 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 	// could not be consulted; here the team id IS an input by design, so counting
 	// parameters would assert nothing. What matters is the PAYLOAD — covered by
 	// "carries the team id and nothing else".
+});
+
+// ---------------------------------------------------------------------------
+// An admin acting on somebody else's team member
+// ---------------------------------------------------------------------------
+
+describe('rowActionFor — naming is not a destination', () => {
+	const teamMember = { enforced: true, policyGroupIds: ['g-team'] };
+	// What the loader actually produces: the team group is nameable, not targetable.
+	const split = { naming: [POLICY, TEAM_GROUP], targets: [POLICY] };
+
+	it('names the team group instead of falling back to its id', () => {
+		/**
+		 * ⚠️ The defect, in one assertion. With one list serving both questions the
+		 * team group was absent from the lookup, so the action carried
+		 * `{ id, name: id }` — and the removal dialog printed that id, a raw UUID,
+		 * for a group belonging to somebody else's team.
+		 */
+		expect(rowActionFor(teamMember, split)).toEqual({
+			kind: 'remove',
+			group: TEAM_GROUP
+		});
+	});
+
+	it('still offers Remove — an admin is not barred from a team policy', () => {
+		// Decided, not inherited: an admin is not bound by the seat limit, not
+		// exempt from the policy, and a team's group is not untouchable to them.
+		// The button had to say what it does, not stop existing.
+		expect(rowActionFor(teamMember, split).kind).toBe('remove');
+	});
+
+	it('does not offer the team group as an Enforce destination', () => {
+		const action = rowActionFor({ enforced: false, policyGroupIds: [] }, split);
+		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });
+		expect(JSON.stringify(action)).not.toContain('g-team');
+	});
+
+	it('marks which named group belongs to a team', () => {
+		const action = rowActionFor(teamMember, split);
+		expect(action.kind === 'remove' && action.group.isTeamGroup).toBe(true);
+	});
+
+	it('leaves an ordinary policy group exactly as it was', () => {
+		expect(rowActionFor({ enforced: true, policyGroupIds: ['g1'] }, split)).toEqual({
+			kind: 'remove',
+			group: POLICY
+		});
+	});
+
+	it('⚠️ changes nothing for a viewer who may not act — decision 5', () => {
+		/**
+		 * The owner branch must not learn any of this. It is reached before the
+		 * naming lookup and carries no group, so widening `naming` cannot reach it
+		 * — and this is the test that fails if the two branches are ever merged.
+		 */
+		expect(rowActionFor(teamMember, split, false, 'g-team')).toEqual({
+			kind: 'masked-team',
+			teamGroupId: 'g-team'
+		});
+		expect(rowActionFor(teamMember, split, false, null)).toEqual({ kind: 'masked-elsewhere' });
+	});
 });

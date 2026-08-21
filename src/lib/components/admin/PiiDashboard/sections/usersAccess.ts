@@ -25,8 +25,14 @@ export type AccessUser = {
 	pii_policy_group_ids?: string[];
 };
 
-/** A group that carries `chat.pii_masking_enforced`. */
-export type PolicyGroup = { id: string; name: string };
+/**
+ * A group that carries `chat.pii_masking_enforced`.
+ *
+ * `name` is `null` for a group a row claims to be enforced by that the group
+ * list does not contain — see `namedGroup`. It is a state nobody designed, so it
+ * is representable rather than papered over with the id.
+ */
+export type PolicyGroup = { id: string; name: string | null; isTeamGroup: boolean };
 
 /** The shape of a group as `GET /groups/` returns it, narrowed to what is read. */
 export type GroupRecord = {
@@ -44,7 +50,17 @@ export type GroupRecord = {
 };
 
 /**
- * The groups an admin can enforce THROUGH.
+ * Every group that enforces masking — the list used to NAME a source.
+ *
+ * ⚠️ This and `enforceTargetsOf` are two different questions about the same
+ * groups, and they were one list until a team group could not be a destination.
+ * Conflating them is what produced the defect this split exists to fix: the
+ * destination filter was applied to the naming list too, so an admin looking at
+ * a team member saw a `Remove` button whose dialog printed a raw UUID, for a
+ * group belonging to somebody else's team, with nothing saying so.
+ *
+ * "May I send someone here?" is a policy question. "What is this called?" is
+ * not. Keep them apart.
  *
  * Derived, never stored: "the policy group" is not a configured thing, it is
  * whichever groups happen to carry the key right now. Deriving it means the
@@ -54,8 +70,44 @@ export type GroupRecord = {
 export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 	return groups
 		.filter((g) => g?.permissions?.chat?.pii_masking_enforced === true)
-		.filter((g) => g?.is_team_group !== true)
-		.map((g) => ({ id: g.id, name: g.name || g.id }));
+		.map((g) => ({
+			id: g.id,
+			name: g.name || null,
+			isTeamGroup: g?.is_team_group === true
+		}));
+}
+
+/**
+ * The groups an admin can enforce THROUGH — destinations, not names.
+ *
+ * A team's group is excluded: it belongs to that team, its membership follows
+ * the team, and sending an unrelated person into it would make the team's own
+ * policy mean something else.
+ */
+export function enforceTargetsOf(groups: GroupRecord[]): PolicyGroup[] {
+	return policyGroupsOf(groups).filter((g) => !g.isTeamGroup);
+}
+
+/**
+ * The group behind one id, named — or explicitly unnamed.
+ *
+ * ⚠️ Replaces `?? { id, name: id }`, which put a raw UUID where a group name
+ * goes. That fallback was written for a race — a group the directory knows about
+ * that the group list has not caught up with — and the team-group filter quietly
+ * turned it into the ordinary path, firing for every team member on every load.
+ *
+ * Now it fires only in the state it was written for, says so in the console, and
+ * hands back `name: null` so the component prints a sentence instead of an id. A
+ * fallback nobody can see is a fallback nobody fixes.
+ */
+function namedGroup(id: string, byId: Map<string, PolicyGroup>): PolicyGroup {
+	const known = byId.get(id);
+	if (known) return known;
+
+	console.warn(
+		`[PiiDashboard] a user is enforced by group ${id}, which is not in the group list`
+	);
+	return { id, name: null, isTeamGroup: false };
 }
 
 /**
@@ -162,7 +214,14 @@ export type RowAction =
  */
 export function rowActionFor(
 	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,
-	policyGroups: PolicyGroup[],
+	/**
+	 * ⚠️ Two lists, named, rather than one used for both. `naming` is every
+	 * enforcing group; `targets` is the subset a person may be sent to. Passing
+	 * an object rather than two positional arrays is deliberate: a caller has to
+	 * say which is which, and the bug this replaced was exactly a caller handing
+	 * the destination list to the naming code without noticing.
+	 */
+	groups: { naming: PolicyGroup[]; targets: PolicyGroup[] },
 	mayAct: boolean = true,
 	teamGroupId: string | null = null
 ): RowAction {
@@ -197,14 +256,18 @@ export function rowActionFor(
 		return { kind: 'masked-elsewhere' };
 	}
 
-	if (!row.enforced) return { kind: 'enforce', targets: policyGroups };
+	if (!row.enforced) return { kind: 'enforce', targets: groups.targets };
 
-	const byId = new Map(policyGroups.map((g) => [g.id, g]));
-	// Falling back to the id keeps this total: a group the directory knows about
-	// but the group list does not must still be named, not silently dropped —
-	// dropping it would turn a two-source user into a one-source user and put
-	// a `Remove` button on a row where removal would not unlock anything.
-	const via = row.policyGroupIds.map((id) => byId.get(id) ?? { id, name: id });
+	// ⚠️ Named from `naming`, which includes team groups. An admin MAY take
+	// someone out of their team's policy — they are not bound by the seat limit,
+	// not exempt from the policy, and a team's group is not untouchable to them.
+	// What they may not have is an action that does something other than what it
+	// says, which is what a destination-filtered naming list produced.
+	const byId = new Map(groups.naming.map((g) => [g.id, g]));
+	// Total by construction: a group missing from the list is still counted, so a
+	// two-source user does not become a one-source user and gain a `Remove`
+	// button that would not actually unlock anything.
+	const via = row.policyGroupIds.map((id) => namedGroup(id, byId));
 
 	if (via.length === 1) return { kind: 'remove', group: via[0] };
 	return { kind: 'none', via };
