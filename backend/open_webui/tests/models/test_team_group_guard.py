@@ -31,7 +31,7 @@ sys.modules.setdefault("stripe", MagicMock())
 from fastapi import HTTPException
 
 from open_webui.models.billing import Team
-from open_webui.models.groups import Group, GroupUpdateForm
+from open_webui.models.groups import Group, GroupMember, GroupUpdateForm
 
 
 TEAM_GROUP = "g-team-pii"
@@ -46,6 +46,9 @@ async def db_session():
     async with engine.begin() as conn:
         await conn.run_sync(Team.__table__.create, checkfirst=True)
         await conn.run_sync(Group.__table__.create, checkfirst=True)
+        # `get_groups` counts members in the same statement, so the table has to
+        # exist even when no test in this file adds a member.
+        await conn.run_sync(GroupMember.__table__.create, checkfirst=True)
 
     session = async_sessionmaker(bind=engine, expire_on_commit=False)()
     now = int(time.time())
@@ -230,3 +233,27 @@ async def test_the_guard_asks_team_group_kind_rather_than_querying_itself(groups
 
     with patch("open_webui.utils.team_groups.team_group_kind", _says_not_a_team_group):
         assert await groups.delete_group_by_id(TEAM_GROUP) is True
+
+
+class TestIsTeamGroupFlag:
+    """`GET /groups/` reports which groups a team owns, so the UI can exclude them.
+
+    ⚠️ A flag rather than the team id: the only question the reader has is "may
+    this be an enforce destination". And it is REPORTED, not filtered — the admin
+    group screen must keep listing team groups.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_team_group_is_flagged(self, groups):
+        listed = {g.id: g for g in await groups.get_groups({})}
+        assert listed[TEAM_GROUP].is_team_group is True
+
+    @pytest.mark.asyncio
+    async def test_a_custom_group_is_not(self, groups):
+        listed = {g.id: g for g in await groups.get_groups({})}
+        assert listed[CUSTOM_GROUP].is_team_group is False
+
+    @pytest.mark.asyncio
+    async def test_team_groups_are_still_listed(self, groups):
+        """Reported, not hidden — the group admin screen still needs them."""
+        assert TEAM_GROUP in {g.id for g in await groups.get_groups({})}

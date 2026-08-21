@@ -4,6 +4,7 @@ import { getGroups } from '$lib/apis/groups';
 import { describeLoadError } from './sections/costAnalytics';
 import {
 	policyGroupsOf,
+	teamOnlyPolicyGroupCount,
 	type AccessUser,
 	type GroupRecord,
 	type PolicyGroup
@@ -36,6 +37,8 @@ export type UsersAccessState = {
 	 * action would land in different groups with nothing recording why.
 	 */
 	policyGroups: PolicyGroup[];
+	/** Enforcing groups excluded because they belong to a team — see the empty state. */
+	teamOnlyPolicyGroups: number;
 	truncatedUsers: Truncation | null;
 	loading: boolean;
 	failed: boolean;
@@ -60,6 +63,7 @@ export type UsersAccessLoader = Readable<UsersAccessState> & {
 const INITIAL: UsersAccessState = {
 	users: [],
 	policyGroups: [],
+	teamOnlyPolicyGroups: 0,
 	truncatedUsers: null,
 	loading: true,
 	failed: false,
@@ -103,6 +107,7 @@ export function createUsersAccessLoader(
 			// compliance table silently listing 3 of 7 pages asserts something untrue.
 			users: [],
 			policyGroups: [],
+	teamOnlyPolicyGroups: 0,
 			truncatedUsers: null
 		}));
 
@@ -182,6 +187,7 @@ export function createUsersAccessLoader(
 				...s,
 				users: usersResult.items,
 				policyGroups: policyGroupsOf(groups),
+				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
 				truncatedUsers: usersResult.truncated,
 				failed: false,
 				errorDetail: null

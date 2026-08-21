@@ -1498,6 +1498,7 @@
 	"Only markdown files are allowed": "",
 	"Only select users and groups with permission can access": "",
 	"Only sync new/updated chats": "",
+	"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions.": "",
 	"Oops! Looks like the URL is invalid. Please double-check and try again.": "",
 	"Oops! There are files still uploading. Please wait for the upload to complete.": "",
 	"Oops! There was an error in the previous response.": "",

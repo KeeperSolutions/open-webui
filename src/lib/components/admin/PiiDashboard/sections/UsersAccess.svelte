@@ -47,6 +47,14 @@
 	export let costStale = false;
 	/** Groups that carry the policy — the only destinations an action may use. */
 	export let policyGroups: PolicyGroup[] = [];
+	/**
+	 * Enforcing groups that were excluded for belonging to a team.
+	 *
+	 * ⚠️ Only the empty state reads it, and only to choose which sentence is
+	 * true. A zero here means "nothing enforces masking"; a non-zero means
+	 * "things do, but none of them can be a destination" — opposite advice.
+	 */
+	export let teamOnlyPolicyGroups = 0;
 	/** Reload the section after a membership change. */
 	export let onPolicyChanged: () => void = () => {};
 
@@ -474,11 +482,21 @@
 										</Button>
 									{:else if action.kind === 'enforce'}
 										{#if action.targets.length === 0}
+											<!--
+												Two causes, two sentences. Once every team carries its own
+												policy group, "nothing enforces masking" stops being the
+												reason the list is empty — and the old sentence starts
+												telling an admin to switch on something they already did.
+											-->
 											<span
 												class="text-[12px] text-pii-muted"
-												title={$i18n.t(
-													'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.'
-												)}
+												title={teamOnlyPolicyGroups > 0
+													? $i18n.t(
+															"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions."
+														)
+													: $i18n.t(
+															'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.'
+														)}
 											>
 												{$i18n.t('No policy group')}
 											</span>

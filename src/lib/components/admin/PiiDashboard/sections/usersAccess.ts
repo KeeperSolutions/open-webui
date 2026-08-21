@@ -33,6 +33,14 @@ export type GroupRecord = {
 	id: string;
 	name?: string;
 	permissions?: { chat?: { pii_masking_enforced?: boolean } } | null;
+	/**
+	 * A team's own policy group, per `GET /groups/`.
+	 *
+	 * ⚠️ A flag, not a team id: the only question here is "may this be an enforce
+	 * destination". Optional so an older payload reads as `false` rather than
+	 * throwing — the wrong direction to fail would be hiding every destination.
+	 */
+	is_team_group?: boolean;
 };
 
 /**
@@ -46,7 +54,23 @@ export type GroupRecord = {
 export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 	return groups
 		.filter((g) => g?.permissions?.chat?.pii_masking_enforced === true)
+		.filter((g) => g?.is_team_group !== true)
 		.map((g) => ({ id: g.id, name: g.name || g.id }));
+}
+
+/**
+ * How many enforcing groups were excluded for belonging to a team.
+ *
+ * ⚠️ Exists so the empty state can tell its two causes apart. "No destinations"
+ * because nothing enforces masking and "no destinations because the only things
+ * that enforce it are team groups" need opposite advice, and the count is the
+ * only thing that distinguishes them. Without it the screen tells an admin to
+ * turn on something they already turned on.
+ */
+export function teamOnlyPolicyGroupCount(groups: GroupRecord[]): number {
+	return groups.filter(
+		(g) => g?.permissions?.chat?.pii_masking_enforced === true && g?.is_team_group === true
+	).length;
 }
 
 /**

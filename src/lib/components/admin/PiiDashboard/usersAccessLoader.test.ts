@@ -62,6 +62,9 @@ describe('createUsersAccessLoader', () => {
 			users: [],
 			truncatedUsers: null,
 			policyGroups: [],
+			// Enforcing groups excluded for belonging to a team — the empty state
+			// needs it to tell its two causes apart.
+			teamOnlyPolicyGroups: 0,
 			loading: true,
 			failed: false,
 			errorDetail: null

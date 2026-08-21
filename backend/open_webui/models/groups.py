@@ -99,6 +99,12 @@ class GroupMemberModel(BaseModel):
 
 class GroupResponse(GroupModel):
     member_count: Optional[int] = None
+    #: True when a team's `group_id` points at this group.
+    #:
+    #: ⚠️ A flag, not the team id. The consumer only needs "may this be an enforce
+    #: destination"; returning `team_id` would hand every group reader a fact
+    #: about team membership they have no use for.
+    is_team_group: bool = False
 
 
 class GroupInfoResponse(BaseModel):
@@ -215,7 +221,22 @@ class GroupTable:
                 .scalar_subquery()
                 .label('member_count')
             )
-            stmt = select(Group, member_count)
+
+            # Whether a team claims this group, computed in the same statement.
+            #
+            # ⚠️ Returned as a FLAG, not filtered out. The admin group screen must
+            # keep showing team groups; they are only ineligible as an `Enforce`
+            # destination, and filtering here would hide them everywhere.
+            #
+            # A correlated EXISTS rather than the `LEFT JOIN` the plan sketched:
+            # the join needs `Team` at module scope, which drags the billing stack
+            # into every import of this module, and it would sit under the `share`
+            # and `member_id` filters that already build their own subqueries.
+            # Same cost — one lookup on the unique index — and no new coupling.
+            from open_webui.utils.team_groups import team_group_flag_column
+
+            is_team_group = team_group_flag_column(Group.id).label('is_team_group')
+            stmt = select(Group, member_count, is_team_group)
 
             if filter:
                 if 'query' in filter:
@@ -264,9 +285,10 @@ class GroupTable:
                     {
                         **GroupModel.model_validate(group).model_dump(),
                         'member_count': count or 0,
+                        'is_team_group': bool(team_count),
                     }
                 )
-                for group, count in rows
+                for group, count, team_count in rows
             ]
 
     async def search_groups(

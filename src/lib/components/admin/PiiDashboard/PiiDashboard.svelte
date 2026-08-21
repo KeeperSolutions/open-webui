@@ -139,6 +139,7 @@
 			metricRows={$metrics.rows}
 			truncated={$usersAccess.truncatedUsers}
 			policyGroups={$usersAccess.policyGroups}
+			teamOnlyPolicyGroups={$usersAccess.teamOnlyPolicyGroups}
 			loading={usersLoading}
 			failed={usersFailed}
 			errorDetail={$usersAccess.errorDetail}

@@ -92,6 +92,29 @@ def team_pii_group_name(team_name: str, team_id: str) -> str:
     return f'PII — {team_name} · {team_id[:TEAM_ID_DISCRIMINATOR_LENGTH]}'
 
 
+def team_group_flag_column(group_id_column):
+    """A SQL expression: does any team claim this group.
+
+    ⚠️ Lives here, not in `models/groups.py`, and the structural test in
+    `tests/test_team_groups.py` is why — it fired the moment the subquery was
+    written over there. `teams.group_id` has one reader, and "one reader" has to
+    survive the case where the caller needs an EXPRESSION rather than an answer:
+    `team_group_kind` is per-group and async, so using it inside a listing would
+    be one query per row.
+
+    Takes the column to correlate against so the caller decides what "this group"
+    means in its own statement.
+    """
+    from open_webui.models.billing import Team
+    from sqlalchemy import func, select
+
+    return (
+        select(func.count(Team.id))
+        .where(Team.group_id == group_id_column)
+        .scalar_subquery()
+    )
+
+
 async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None) -> Optional[str]:
     """The team's PII policy group, creating it if it is not there yet.
 

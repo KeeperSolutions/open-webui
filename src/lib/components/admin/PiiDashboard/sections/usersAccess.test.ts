@@ -16,7 +16,8 @@ import {
 	policyGroupsOf,
 	rowActionFor,
 	type AccessUser,
-	type PolicyGroup
+	type PolicyGroup,
+	teamOnlyPolicyGroupCount
 } from './usersAccess';
 
 const row = (user: string, cost: number, model = 'gpt-4', tokens = 10): MetricRow => ({
@@ -678,5 +679,79 @@ describe('pageRange', () => {
 
 	it('defaults to the page size the table uses', () => {
 		expect(pageRange(57, 1)).toEqual({ from: 1, to: ROWS_PER_PAGE });
+	});
+});
+
+describe('policyGroupsOf — a team group is not an enforce destination', () => {
+	const enforcing = (id: string, over = {}) => ({
+		id,
+		name: id,
+		permissions: { chat: { pii_masking_enforced: true } },
+		...over
+	});
+
+	it('excludes groups a team owns', () => {
+		const out = policyGroupsOf([enforcing('custom'), enforcing('team-a', { is_team_group: true })]);
+		expect(out.map((g) => g.id)).toEqual(['custom']);
+	});
+
+	it('keeps custom groups that enforce', () => {
+		expect(policyGroupsOf([enforcing('custom')]).map((g) => g.id)).toEqual(['custom']);
+	});
+
+	it('keeps a group the backend explicitly marked as not a team group', () => {
+		/**
+		 * ⚠️ The case the first version of this suite was missing, and the reason
+		 * it mattered: `GET /groups/` sends `is_team_group: false` for every
+		 * ordinary group — the field has a default, it is never omitted. A filter
+		 * written as `=== undefined` passes every other test here and drops EVERY
+		 * destination in production. Found by a surviving mutation, not by review.
+		 */
+		expect(policyGroupsOf([enforcing('custom', { is_team_group: false })]).map((g) => g.id)).toEqual([
+			'custom'
+		]);
+	});
+
+	it('treats a missing flag as "not a team group"', () => {
+		// ⚠️ The safe direction. Failing the other way would hide every destination
+		// the moment a payload predates the field.
+		expect(policyGroupsOf([enforcing('older-payload')]).map((g) => g.id)).toEqual([
+			'older-payload'
+		]);
+	});
+
+	it('still ignores groups that do not enforce at all', () => {
+		expect(policyGroupsOf([{ id: 'plain', name: 'plain', permissions: {} }])).toEqual([]);
+	});
+});
+
+describe('teamOnlyPolicyGroupCount — why the destination list is empty', () => {
+	const enforcing = (id: string, over = {}) => ({
+		id,
+		name: id,
+		permissions: { chat: { pii_masking_enforced: true } },
+		...over
+	});
+
+	it('counts enforcing team groups', () => {
+		expect(
+			teamOnlyPolicyGroupCount([
+				enforcing('t1', { is_team_group: true }),
+				enforcing('t2', { is_team_group: true }),
+				enforcing('custom')
+			])
+		).toBe(2);
+	});
+
+	it('is zero when nothing enforces', () => {
+		expect(teamOnlyPolicyGroupCount([{ id: 'plain', permissions: {} }])).toBe(0);
+	});
+
+	it('does not count a team group that does not enforce', () => {
+		// A team group always enforces today, but the count answers "was a
+		// DESTINATION excluded" — a non-enforcing group was never one.
+		expect(
+			teamOnlyPolicyGroupCount([{ id: 't', permissions: {}, is_team_group: true }])
+		).toBe(0);
 	});
 });

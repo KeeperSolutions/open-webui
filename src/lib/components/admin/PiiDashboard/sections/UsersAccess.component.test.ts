@@ -111,3 +111,41 @@ describe('UsersAccess — a viewer who may not act', () => {
 		expect(document.body.textContent).toContain('Global PII Policy');
 	});
 });
+
+describe('the empty destination list explains itself', () => {
+	const OLD =
+		'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.';
+	const NEW =
+		"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions.";
+
+	const mountEmpty = (teamOnlyPolicyGroups: number) =>
+		render(UsersAccess, {
+			props: {
+				users: [account()],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				policyGroups: [],
+				mayAct: true,
+				teamOnlyPolicyGroups
+			},
+			context: new Map([['i18n', i18n]])
+		});
+
+	it('says nothing enforces masking when nothing does', () => {
+		mountEmpty(0);
+		expect(screen.getByTitle(OLD)).toBeTruthy();
+	});
+
+	it('says the enforcing groups are team groups when they are', () => {
+		/**
+		 * ⚠️ The old sentence is a lie here: groups DO enforce masking, the admin
+		 * DID turn it on, and the filter is what hides them. Following it sends
+		 * them to switch on something already switched on.
+		 */
+		mountEmpty(2);
+		expect(screen.getByTitle(NEW)).toBeTruthy();
+		expect(screen.queryByTitle(OLD)).toBeNull();
+	});
+});
