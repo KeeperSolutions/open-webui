@@ -149,3 +149,57 @@ describe('the empty destination list explains itself', () => {
 		expect(screen.queryByTitle(OLD)).toBeNull();
 	});
 });
+
+describe('what the team-policy row actually renders', () => {
+	const TEAM = 'g-team';
+	const OTHER = 'g-other';
+
+	const mountMasked = (policyGroupIds: string[], teamGroupId: string | null) =>
+		render(UsersAccess, {
+			props: {
+				users: [
+					account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })
+				],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				policyGroups: [
+					{ id: TEAM, name: 'PII — Acme · abcdef01' },
+					{ id: OTHER, name: 'Global PII Policy' }
+				],
+				mayAct: false,
+				teamGroupId
+			},
+			context: new Map([['i18n', i18n]])
+		});
+
+	it('says team policy when the team group is the source', () => {
+		mountMasked([TEAM], TEAM);
+		expect(screen.getByText('Masked · team policy')).toBeTruthy();
+		expect(screen.queryByText('Masked · source outside the team')).toBeNull();
+	});
+
+	it('says outside the team when it is not', () => {
+		mountMasked([OTHER], TEAM);
+		expect(screen.getByText('Masked · source outside the team')).toBeTruthy();
+	});
+
+	it('names no group and prints no id, in either case', () => {
+		/**
+		 * ⚠️ The markup half of decision 5. `rowActionFor` carries only the team id,
+		 * but only this test proves the template does not reach past it into
+		 * `policyGroups`, which is right there in scope and DOES hold the names.
+		 */
+		const { container } = mountMasked([TEAM, OTHER], TEAM);
+		const html = container.innerHTML;
+		expect(html).not.toContain('Global PII Policy');
+		expect(html).not.toContain('PII — Acme · abcdef01');
+		expect(html).not.toContain(OTHER);
+	});
+
+	it('falls back to outside-the-team when the team has no group yet', () => {
+		mountMasked([OTHER], null);
+		expect(screen.getByText('Masked · source outside the team')).toBeTruthy();
+	});
+});

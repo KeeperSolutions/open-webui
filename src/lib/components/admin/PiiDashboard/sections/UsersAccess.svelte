@@ -55,6 +55,14 @@
 	 * "things do, but none of them can be a destination" — opposite advice.
 	 */
 	export let teamOnlyPolicyGroups = 0;
+	/**
+	 * The addressed team's own policy group, or `null`.
+	 *
+	 * ⚠️ One id, and it is the team the viewer already opened. Decision 5 forbids
+	 * naming groups OUTSIDE their reach; it does not forbid knowing which group
+	 * is theirs. No other group id is in scope here to be printed by mistake.
+	 */
+	export let teamGroupId: string | null = null;
 	/** Reload the section after a membership change. */
 	export let onPolicyChanged: () => void = () => {};
 
@@ -393,7 +401,7 @@
 						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
-							{@const action = rowActionFor(row, policyGroups, mayAct)}
+							{@const action = rowActionFor(row, policyGroups, mayAct, teamGroupId)}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -465,6 +473,15 @@
 									-->
 									{#if action.kind === 'readonly'}
 										<span class="text-pii-muted">—</span>
+									{:else if action.kind === 'masked-team'}
+										<!--
+											The team's own policy. Named as such because the owner owns
+											it — and still without printing the group, because the label
+											is about WHERE the policy comes from, not what it is called.
+										-->
+										<span class="text-[12px] text-pii-muted">
+											{$i18n.t('Masked · team policy')}
+										</span>
 									{:else if action.kind === 'masked-elsewhere'}
 										<!--
 											Says a source exists and that it is outside the team, and

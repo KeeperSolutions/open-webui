@@ -65,6 +65,8 @@ describe('createUsersAccessLoader', () => {
 			// Enforcing groups excluded for belonging to a team — the empty state
 			// needs it to tell its two causes apart.
 			teamOnlyPolicyGroups: 0,
+			// The addressed team's own policy group; `null` until a scoped load lands.
+			teamGroupId: null,
 			loading: true,
 			failed: false,
 			errorDetail: null

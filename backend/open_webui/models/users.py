@@ -205,6 +205,14 @@ class UserListResponse(BaseModel):
 class UserGroupIdsListResponse(BaseModel):
     users: list[UserGroupIdsModel]
     total: int
+    #: The addressed team's own policy group, when the request was team-scoped.
+    #:
+    #: ⚠️ ONE id, and only the viewer's own team's. It is what lets section 4 say
+    #: "masked by team policy" instead of "masked somewhere else"; no other group
+    #: id travels with it, so no other group's identity can leak through this
+    #: field. `None` on the instance-wide view and on a team with no group yet —
+    #: both mean "there is no team policy to attribute masking to".
+    team_group_id: Optional[str] = None
 
 
 class UserStatus(BaseModel):

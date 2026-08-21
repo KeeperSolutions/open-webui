@@ -755,3 +755,65 @@ describe('teamOnlyPolicyGroupCount — why the destination list is empty', () =>
 		).toBe(0);
 	});
 });
+
+describe('rowActionFor — masking that comes from the viewer’s own team', () => {
+	const enforced = (ids: string[]) => ({ enforced: true, policyGroupIds: ids });
+	const TEAM = 'g-team';
+	const OTHER = 'g-other';
+
+	it('names the team policy when the team group is the source', () => {
+		expect(rowActionFor(enforced([TEAM]), [], false, TEAM)).toEqual({
+			kind: 'masked-team',
+			teamGroupId: TEAM
+		});
+	});
+
+	it('still says "outside the team" when the source is another group', () => {
+		expect(rowActionFor(enforced([OTHER]), [], false, TEAM)).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('says team policy — and nothing else — when BOTH are sources', () => {
+		/**
+		 * ⚠️ "and also elsewhere" would disclose that a source outside the owner's
+		 * reach exists, which is the fact decision 5 withholds. The team answer is
+		 * true and complete enough.
+		 */
+		expect(rowActionFor(enforced([TEAM, OTHER]), [], false, TEAM)).toEqual({
+			kind: 'masked-team',
+			teamGroupId: TEAM
+		});
+	});
+
+	it('falls back to "outside the team" when the team has no group yet', () => {
+		// The normal state until the bridge migration runs — see path B.
+		expect(rowActionFor(enforced([OTHER]), [], false, null)).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('is still an em dash for someone who is not masked at all', () => {
+		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, [], false, TEAM)).toEqual({
+			kind: 'readonly'
+		});
+	});
+
+	it('carries the team id and nothing else', () => {
+		const action = rowActionFor(enforced([TEAM, OTHER]), [], false, TEAM);
+		expect(Object.keys(action).sort()).toEqual(['kind', 'teamGroupId']);
+	});
+
+	it('changes nothing for a viewer who may act', () => {
+		// `mayAct` is the role; the team id must not reach that branch at all.
+		expect(rowActionFor({ enforced: false, policyGroupIds: [] }, [], true, TEAM)).toEqual({
+			kind: 'enforce',
+			targets: []
+		});
+	});
+
+	// ⚠️ No arity assertion here, unlike `mayActFor`. There it proved the address
+	// could not be consulted; here the team id IS an input by design, so counting
+	// parameters would assert nothing. What matters is the PAYLOAD — covered by
+	// "carries the team id and nothing else".
+});

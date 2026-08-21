@@ -162,6 +162,9 @@ async def get_users(
             for user in users
         ],
         'total': total,
+        # `scope` is None on the instance-wide view, so this is None there too —
+        # the unscoped dashboard has no team whose policy could be named.
+        'team_group_id': scope.group_id if scope is not None else None,
     }
 
 

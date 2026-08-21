@@ -129,6 +129,14 @@ export type RowAction =
 	| { kind: 'none'; via: PolicyGroup[] }
 	// A viewer who may not act. Carries nothing, deliberately — see `rowActionFor`.
 	| { kind: 'readonly' }
+	/**
+	 * Masked by the viewer's OWN team's policy.
+	 *
+	 * ⚠️ Carries one id, and it is the id the viewer already addressed. That is
+	 * what keeps decision 5 intact: no group outside their reach is named, or even
+	 * present, so none can be leaked by an incautious template.
+	 */
+	| { kind: 'masked-team'; teamGroupId: string }
 	| { kind: 'masked-elsewhere' };
 
 /**
@@ -155,7 +163,8 @@ export type RowAction =
 export function rowActionFor(
 	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,
 	policyGroups: PolicyGroup[],
-	mayAct: boolean = true
+	mayAct: boolean = true,
+	teamGroupId: string | null = null
 ): RowAction {
 	if (!mayAct) {
 		// Not enforced: an em dash. NOT `{ kind: 'none', via: [] }` — the component
@@ -166,6 +175,17 @@ export function rowActionFor(
 		// Enforced with no group behind it IS the instance default, and saying so
 		// names no group. Unchanged, and outside level A to revisit.
 		if (row.policyGroupIds.length === 0) return { kind: 'none', via: [] };
+
+		// Masked by this team's own policy. Named, because the viewer owns it and
+		// "somewhere outside the team" would be false.
+		//
+		// ⚠️ Checked BEFORE the outside case, so someone masked by both reads as
+		// team policy and the other source is not mentioned at all. Saying "and
+		// also elsewhere" would disclose that a source outside their reach exists,
+		// which is the thing decision 5 withholds.
+		if (teamGroupId && row.policyGroupIds.includes(teamGroupId)) {
+			return { kind: 'masked-team', teamGroupId };
+		}
 
 		// Enforced through a group the viewer does not administer. The row says a
 		// source exists and that it is outside the team, and stops there.

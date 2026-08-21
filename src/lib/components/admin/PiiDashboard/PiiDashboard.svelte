@@ -140,6 +140,7 @@
 			truncated={$usersAccess.truncatedUsers}
 			policyGroups={$usersAccess.policyGroups}
 			teamOnlyPolicyGroups={$usersAccess.teamOnlyPolicyGroups}
+			teamGroupId={$usersAccess.teamGroupId}
 			loading={usersLoading}
 			failed={usersFailed}
 			errorDetail={$usersAccess.errorDetail}

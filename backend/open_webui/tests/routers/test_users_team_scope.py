@@ -226,3 +226,38 @@ def test_the_paged_route_keeps_its_ordering_filter_alongside_the_scope(which):
     sent = _filter_of(get_users_mock)
     assert sent["query"] == "ana" and sent["order_by"] == "name"
     assert sent["user_ids"] == ["u1", "u2"]
+
+
+# ---------------------------------------------------------------------------
+# G-B8 — the team's own policy group travels with the directory
+# ---------------------------------------------------------------------------
+
+
+class TestTeamGroupIdInTheResponse:
+    """Section 4 needs one id to say "team policy" instead of "somewhere else".
+
+    ⚠️ One id, and only the addressed team's. No other group identity rides along,
+    so decision 5 holds by the shape of the payload rather than by the template
+    being careful.
+    """
+
+    def test_the_paged_route_reports_it(self):
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group",
+            AsyncMock(return_value="g-team"),
+        ):
+            result, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
+        assert result["team_group_id"] == "g-team"
+
+    def test_the_instance_wide_view_reports_none(self):
+        """No team addressed, so there is no team policy to attribute masking to."""
+        result, _ = _run("paged", _caller(role="admin"))
+        assert result["team_group_id"] is None
+
+    def test_a_team_with_no_group_yet_reports_none(self):
+        """Normal under path B, and the fallback the frontend already renders."""
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group", AsyncMock(return_value=None)
+        ):
+            result, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
+        assert result["team_group_id"] is None

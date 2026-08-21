@@ -262,12 +262,17 @@ def test_remove_user_from_all_groups_has_exactly_one_caller():
     import re
 
     root = pathlib.Path(__file__).resolve().parents[2]
-    callers = []
+    callers = {}
     for path in root.rglob("*.py"):
         if "tests" in path.parts or path.name == "groups.py" and path.parent.name == "models":
             continue
         for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             if re.search(r"remove_user_from_all_groups\s*\(", line):
-                callers.append(f"{path.relative_to(root)}:{i}")
+                callers[str(path.relative_to(root))] = i
 
-    assert callers == ["models/users.py:723"], callers
+    # ⚠️ Files, not line numbers. The first version pinned `models/users.py:723`
+    # and broke the moment an unrelated field was added above it — a failure that
+    # says nothing about the property under test, and the kind that teaches people
+    # to edit the assertion without reading it. The line is kept in the message so
+    # the one caller is still easy to find.
+    assert set(callers) == {"models/users.py"}, callers

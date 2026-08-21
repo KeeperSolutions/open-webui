@@ -39,13 +39,26 @@ export type UsersAccessState = {
 	policyGroups: PolicyGroup[];
 	/** Enforcing groups excluded because they belong to a team — see the empty state. */
 	teamOnlyPolicyGroups: number;
+	/** The addressed team's own policy group, or `null` — see `rowActionFor`. */
+	teamGroupId: string | null;
 	truncatedUsers: Truncation | null;
 	loading: boolean;
 	failed: boolean;
 	errorDetail: string | null;
 };
 
-export type UsersPage = { users: AccessUser[]; total: number };
+export type UsersPage = {
+	users: AccessUser[];
+	total: number;
+	/**
+	 * The addressed team's own policy group, straight from `GET /users/`.
+	 *
+	 * Snake case because it is the API's field, not ours — the same reason `users`
+	 * and `total` are named the way they are. `null`/absent on the instance-wide
+	 * view and on a team that has no group yet.
+	 */
+	team_group_id?: string | null;
+};
 
 /**
  * One page each. Injectable so pagination, truncation and abort can be driven
@@ -64,6 +77,7 @@ const INITIAL: UsersAccessState = {
 	users: [],
 	policyGroups: [],
 	teamOnlyPolicyGroups: 0,
+	teamGroupId: null,
 	truncatedUsers: null,
 	loading: true,
 	failed: false,
@@ -108,6 +122,7 @@ export function createUsersAccessLoader(
 			users: [],
 			policyGroups: [],
 	teamOnlyPolicyGroups: 0,
+	teamGroupId: null,
 			truncatedUsers: null
 		}));
 
@@ -158,9 +173,14 @@ export function createUsersAccessLoader(
 		update((s) => ({ ...s, loading: true, failed: false, errorDetail: null }));
 
 		try {
+			// Read from the first page only. Every page of a scoped read carries the
+			// same value, and taking it from the last would mean an aborted run
+			// could leave it unset while the rows were already published.
+			let teamGroupId: string | null = null;
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
 					const res = await fetchUsers(page, signal);
+					if (res && page === 1) teamGroupId = res.team_group_id ?? null;
 					return res ? { items: res.users, total: res.total } : null;
 				},
 				USERS_MAX,
@@ -188,6 +208,7 @@ export function createUsersAccessLoader(
 				users: usersResult.items,
 				policyGroups: policyGroupsOf(groups),
 				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
+				teamGroupId,
 				truncatedUsers: usersResult.truncated,
 				failed: false,
 				errorDetail: null
