@@ -91,6 +91,13 @@ class TeamIdentities(NamedTuple):
 
     ids: frozenset
     keys: frozenset
+    #: The team's own PII policy group, or `None` when the team has none yet.
+    #:
+    #: ⚠️ Defaulted, and populated only by `resolve_dashboard_scope`.
+    #: `resolve_team_identities` answers "who is in this team" and must stay
+    #: answerable without touching groups at all — the migration and the tests
+    #: both call it that way.
+    group_id: Optional[str] = None
 
 
 async def resolve_team_identities(
@@ -236,7 +243,28 @@ async def resolve_dashboard_scope(
         log.warning('team_scope: refusing dashboard for team %s, scope is empty', team_id)
         raise _prohibited()
 
-    return scope
+    # ⚠️ Reached ONLY on the scoped path. The instance-wide branch returned above
+    # without coming near this, which is the whole level-A guarantee: an admin
+    # reading the unscoped dashboard creates nothing and writes nothing.
+    #
+    # ⚠️ And this is where a read becomes a write — see `ensure_team_pii_group`.
+    # It reads first, so a team that already has its group costs one SELECT and
+    # no write, which is what makes three routes per screen affordable.
+    from open_webui.utils.team_groups import ensure_team_pii_group
+
+    try:
+        group_id = await ensure_team_pii_group(team_id, db=db)
+    except Exception as e:
+        # ⚠️ Best-effort, and the distinction matters: the group is what section 4
+        # uses to say "masked by team policy" instead of "masked somewhere else".
+        # It is a LABEL. Letting a failed write take the whole dashboard down would
+        # trade a read that works for a write that is only a convenience — and
+        # `teamGroupId: null` is already a supported state, so there is a correct
+        # thing to fall back to.
+        log.warning('team_scope: could not resolve the policy group for team %s: %s', team_id, e)
+        group_id = None
+
+    return scope._replace(group_id=group_id)
 
 
 def team_directory_filter(scope: TeamIdentities) -> dict:

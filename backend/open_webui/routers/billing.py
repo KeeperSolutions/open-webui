@@ -19,6 +19,7 @@ from open_webui.env import (
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
+from open_webui.utils.team_groups import ensure_team_pii_group, rename_team_pii_group
 from open_webui.models.billing_plans import (
     CREDITS_TIERS,
     PLAN_TIER_INTERNAL,
@@ -1059,6 +1060,17 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
                 seat_limit=seat_count,
             )
             await Teams.update(team.id, stripe_customer_id=customer_id)
+            # The team's PII policy group, born empty. An empty group masks nobody,
+            # so creating a team still changes nobody's protection.
+            #
+            # ⚠️ Best-effort ON PURPOSE, and only because it is idempotent: this
+            # route cannot make the team and the group atomic (N-6), so a failure
+            # here must not lose the team. The group is created on first read
+            # instead — see `ensure_team_pii_group`.
+            try:
+                await ensure_team_pii_group(team.id)
+            except Exception as e:
+                log.warning("[billing] Team PII group not created yet for %s: %s", team.id, e)
             await TeamMembers.add(team.id, user.id, role="owner")
         except Exception as e:
             log.error(f"[billing] Team DB create failed: {e}")
@@ -1235,6 +1247,15 @@ async def update_team_name(body: TeamUpdateNameRequest, user=Depends(get_verifie
     updated = await Teams.update(team.id, name=name)
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update team name.")
+
+    # The group's name is derived from the team's, so renaming one renames both.
+    # This is the ONLY place a team name changes, which is what keeps the derived
+    # name honest — the model refuses any other route to it.
+    try:
+        await rename_team_pii_group(team.id, name)
+    except Exception as e:
+        log.warning("[billing] Team PII group not renamed for %s: %s", team.id, e)
+
     return {"name": updated.name}
 
 
@@ -1924,6 +1945,16 @@ async def _handle_stripe_event(event_type: str, data):
                                         seat_limit=pkg.seat_count or 5,
                                     )
                                     await Teams.update(team.id, stripe_customer_id=customer_id)
+                                    # Same as `create_team`. Not optional: without
+                                    # it a team upgraded through the Stripe portal
+                                    # has no policy group and nothing says so.
+                                    try:
+                                        await ensure_team_pii_group(team.id)
+                                    except Exception as e:
+                                        log.warning(
+                                            "[billing] Team PII group not created yet for %s: %s",
+                                            team.id, e,
+                                        )
                                     await TeamMembers.add(team.id, rec.user_id, role="owner")
                                     log.info(
                                         "[billing] Auto-created team on portal upgrade: team=%s user=%s",
