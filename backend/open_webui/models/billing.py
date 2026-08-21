@@ -197,6 +197,10 @@ class Team(Base):
     stripe_payment_method_id = Column(Text, nullable=True)
 
     subscription_status = Column(Text, nullable=True)
+    # The team's own PII policy group. Nullable and UNIQUE: nullable because a team
+    # may not have one yet, UNIQUE because two teams pointing at one group would
+    # make "the team's own group" ambiguous — see `utils/team_groups.py`.
+    group_id = Column(Text, unique=True, nullable=True)
     seat_limit = Column(Integer, nullable=False, default=5)
     # How many subscription credits this plan includes per month (display only; authoritative value is in credit_balances)
     monthly_credits = Column(Integer, nullable=False, default=0)
@@ -218,6 +222,10 @@ class TeamModel(BaseModel):
     stripe_payment_method_id: Optional[str] = None
 
     subscription_status: Optional[str] = None
+    # ⚠️ Optional all the way out to the edge. A team without a group is a normal
+    # state, not an error — narrowing this type is how a caller starts assuming
+    # otherwise.
+    group_id: Optional[str] = None
     seat_limit: int = 5
     monthly_credits: int = 0
 
