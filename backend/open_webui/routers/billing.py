@@ -19,7 +19,11 @@ from open_webui.env import (
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
-from open_webui.utils.team_groups import ensure_team_pii_group, rename_team_pii_group
+from open_webui.utils.team_groups import (
+    ensure_team_pii_group,
+    remove_from_team_policy_group,
+    rename_team_pii_group,
+)
 from open_webui.models.billing_plans import (
     CREDITS_TIERS,
     PLAN_TIER_INTERNAL,
@@ -1348,6 +1352,13 @@ async def remove_team_member(member_user_id: str, user=Depends(get_verified_user
         raise HTTPException(status_code=404, detail="Member not found.")
 
     await StripeBillings.revert_to_trial(member_user_id)
+
+    # ⚠️ Last, and after the billing revert on purpose. If this raises — the audit
+    # write is blocking — the person is out of the team but still in its policy
+    # group, so they stay MASKED and the request fails loudly. The other order
+    # would leave them unmasked on the same failure, which is the direction this
+    # feature exists to prevent.
+    await remove_from_team_policy_group(team.id, member_user_id)
 
     return {"removed": True}
 

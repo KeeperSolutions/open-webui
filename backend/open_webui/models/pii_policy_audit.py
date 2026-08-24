@@ -52,6 +52,37 @@ REASON_REQUIRED_EVENT_TYPES = frozenset({EVENT_POLICY_DISABLED, EVENT_MEMBER_REM
 
 
 ####################
+# The system actor
+####################
+
+# The product itself acting, with no person behind it. The actor columns are NOT
+# NULL, and the moves this feature makes on its own — the bridge migration, and
+# every automatic move that follows it — have nobody to name.
+#
+# ⚠️ Defined HERE, and here only, for anything written from now on. Two literal
+# copies already exist, both inside applied migrations, which are history and
+# cannot be edited; a third copy would be drift that nobody notices until two
+# spellings of "system" split the audit trail in half. New writers import these.
+# `test_leaving_a_team_clears_policy.py` asserts the migrations' copies still
+# agree with them.
+SYSTEM_ACTOR_ID = 'system'
+SYSTEM_ACTOR_EMAIL = 'system@open-webui'
+
+# ⚠️ Reasons for automatic moves live beside the actor that makes them, for the
+# same reason the actor does: `member_removed` REQUIRES a reason, so every
+# automatic removal needs one, and four more such moves are still to come.
+#
+# The text names the CAUSE, not the gesture. Read a year later by someone who was
+# not here, "removed from the policy group" alone reads as protection having been
+# taken away from a person; what actually happened is that the team which was
+# giving them that protection stopped covering them.
+REASON_LEFT_TEAM = (
+    'Removed from the team policy group because they are no longer a member of the team. '
+    'The team that was enforcing masking for them no longer covers them.'
+)
+
+
+####################
 # Validation
 ####################
 

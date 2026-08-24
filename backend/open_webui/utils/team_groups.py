@@ -323,3 +323,77 @@ async def rename_team_pii_group(
         )
         await session.commit()
         return group_id
+
+
+async def remove_from_team_policy_group(
+    team_id: str, user_id: str, db: Optional[AsyncSession] = None
+) -> bool:
+    """Take somebody out of their team's PII policy group. Says whether it acted.
+
+    Called when a person leaves the team (`routers/billing.py:1348`). Their
+    masking was the team's doing; once the team no longer covers them, the
+    membership that carried it goes with it.
+
+    Two shapes are a no-op and leave NO audit row behind:
+
+      * the team has no policy group — under path B that is a normal state, not
+        an error
+      * the person is not in it — an admin may have taken them out already, or
+        they may never have been in
+
+    ⚠️ The second one is not a formality. This table records TRANSITIONS, not
+    requests, and a `member_removed` row for a removal that removed nobody reads,
+    months later, exactly like protection having been taken away from someone who
+    still had it. Same rule the bridge migration and the human routes follow.
+
+    ⚠️ **The audit row is written BEFORE the membership is removed, and a failed
+    write stops the removal.** The two directions of failure are not symmetric,
+    which is the whole reason for the order:
+
+      * a record with no mutation is a discrepancy someone can SEE and reconcile
+      * a mutation with no record is invisible — afterwards nothing can tell it
+        happened at all
+
+    So this order is deliberate, and reversing it is not a tidy-up. Do not move
+    the write after the mutation "so we only log what really happened": that
+    trades a visible error for a silent one. Identical to the ordering on the
+    human path (`routers/groups.py:_audit_membership_change`) — the system actor
+    is held to the same rule as a person, not a weaker one.
+    """
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.billing import Team
+    from open_webui.models.groups import Groups
+    from open_webui.models.pii_policy_audit import (
+        EVENT_MEMBER_REMOVED,
+        PiiPolicyAudits,
+        REASON_LEFT_TEAM,
+        SYSTEM_ACTOR_EMAIL,
+        SYSTEM_ACTOR_ID,
+    )
+    from sqlalchemy import select
+
+    async with get_async_db_context(db) as session:
+        result = await session.execute(select(Team.group_id).filter(Team.id == team_id))
+        group_id = result.scalars().first()
+
+    if not group_id:
+        return False
+
+    if user_id not in set(await Groups.get_group_user_ids_by_id(group_id, db=db)):
+        return False
+
+    await PiiPolicyAudits.insert_event(
+        event_type=EVENT_MEMBER_REMOVED,
+        group_id=group_id,
+        user_id=user_id,
+        actor_user_id=SYSTEM_ACTOR_ID,
+        actor_email=SYSTEM_ACTOR_EMAIL,
+        reason=REASON_LEFT_TEAM,
+        db=db,
+    )
+
+    # The reason is passed again rather than left to the audit row: the model
+    # refuses a removal from an enforcing group without one, and that refusal is
+    # the backstop for callers that never reach an audited route at all.
+    await Groups.remove_users_from_group(group_id, [user_id], reason=REASON_LEFT_TEAM, db=db)
+    return True
