@@ -44,6 +44,8 @@ export type UsersAccessState = {
 	teamOnlyPolicyGroups: number;
 	/** The addressed team's own policy group, or `null` — see `rowActionFor`. */
 	teamGroupId: string | null;
+	/** Whether the viewer may change who is in that group. Server-computed. */
+	mayManagePolicy: boolean;
 	truncatedUsers: Truncation | null;
 	loading: boolean;
 	failed: boolean;
@@ -61,6 +63,14 @@ export type UsersPage = {
 	 * view and on a team that has no group yet.
 	 */
 	team_group_id?: string | null;
+	/**
+	 * Whether this viewer may change who is in that group, per `GET /users/`.
+	 *
+	 * ⚠️ A permission the SERVER worked out, not one derived here. The frontend
+	 * cannot check who owns a team, and level A is written so that an address
+	 * cannot be mistaken for a permission.
+	 */
+	may_manage_team_policy?: boolean;
 };
 
 /**
@@ -82,6 +92,7 @@ const INITIAL: UsersAccessState = {
 	enforceTargets: [],
 	teamOnlyPolicyGroups: 0,
 	teamGroupId: null,
+	mayManagePolicy: false,
 	truncatedUsers: null,
 	loading: true,
 	failed: false,
@@ -128,6 +139,7 @@ export function createUsersAccessLoader(
 	enforceTargets: [],
 	teamOnlyPolicyGroups: 0,
 	teamGroupId: null,
+	mayManagePolicy: false,
 			truncatedUsers: null
 		}));
 
@@ -182,10 +194,18 @@ export function createUsersAccessLoader(
 			// same value, and taking it from the last would mean an aborted run
 			// could leave it unset while the rows were already published.
 			let teamGroupId: string | null = null;
+			let mayManagePolicy = false;
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
 					const res = await fetchUsers(page, signal);
-					if (res && page === 1) teamGroupId = res.team_group_id ?? null;
+					if (res && page === 1) {
+						// Both are properties of the SCOPE, not of the page — the server
+						// computes them without looking at `page`, and a test on page 2
+						// pins that. Read here for the reason above: taking them from the
+						// last page would let an aborted run publish rows without them.
+						teamGroupId = res.team_group_id ?? null;
+						mayManagePolicy = res.may_manage_team_policy === true;
+					}
 					return res ? { items: res.users, total: res.total } : null;
 				},
 				USERS_MAX,
@@ -215,6 +235,7 @@ export function createUsersAccessLoader(
 				enforceTargets: enforceTargetsOf(groups),
 				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
 				teamGroupId,
+				mayManagePolicy,
 				truncatedUsers: usersResult.truncated,
 				failed: false,
 				errorDetail: null

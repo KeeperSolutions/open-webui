@@ -107,6 +107,20 @@
 		targets: PolicyGroup[];
 		groupId: string;
 		reason: string;
+		/**
+		 * The viewer's OWN team policy, so the group is never named.
+		 *
+		 * ⚠️ The dialog's `Group:` line is omitted entirely when this is true, and
+		 * that omission is a CONSEQUENCE OF DECISION 5, not an oversight. An owner
+		 * has no business knowing what administration keeps in its groups, and the
+		 * group they are acting on is their team's — which they already know by
+		 * being here. Adding the line back "for consistency with the admin dialog"
+		 * reopens exactly the leak G-B9 closed, where the fallback put a raw UUID
+		 * in front of somebody deciding whether to act.
+		 */
+		teamPolicy: boolean;
+		/** Another group also enforces them, so this removal will not unlock. */
+		maskedElsewhere: boolean;
 	} | null = null;
 	let submitting = false;
 
@@ -118,12 +132,43 @@
 			// Pre-selected only when there is exactly one; with several the admin
 			// must say which, every time.
 			groupId: targets.length === 1 ? targets[0].id : '',
-			reason: ''
+			reason: '',
+			teamPolicy: false,
+			maskedElsewhere: false
 		};
 	};
 
 	const openRemove = (row: UserRow, group: PolicyGroup) => {
-		pending = { row, mode: 'remove', targets: [group], groupId: group.id, reason: '' };
+		pending = {
+			row,
+			mode: 'remove',
+			targets: [group],
+			groupId: group.id,
+			reason: '',
+			teamPolicy: false,
+			maskedElsewhere: false
+		};
+	};
+
+	/**
+	 * The team owner's two actions. One destination, and it is never named.
+	 *
+	 * ⚠️ `targets` is deliberately EMPTY. The admin dialog names its group out of
+	 * that array; leaving it empty means the owner's dialog has nothing to print
+	 * even if a future template forgets the `teamPolicy` check. The destination
+	 * travels in `groupId`, which no template renders.
+	 */
+	const openTeamAction = (row: UserRow, adding: boolean, maskedElsewhere: boolean) => {
+		if (!teamGroupId) return;
+		pending = {
+			row,
+			mode: adding ? 'enforce' : 'remove',
+			targets: [],
+			groupId: teamGroupId,
+			reason: '',
+			teamPolicy: true,
+			maskedElsewhere
+		};
 	};
 
 	const submitAction = async () => {
@@ -156,6 +201,17 @@
 			onPolicyChanged();
 		}
 	};
+
+	// One place, so the heading and the accessible name cannot drift apart.
+	$: dialogTitle = !pending
+		? ''
+		: pending.teamPolicy
+			? pending.mode === 'enforce'
+				? $i18n.t('Add to team policy')
+				: $i18n.t('Remove from team policy')
+			: pending.mode === 'enforce'
+				? $i18n.t('Enforce PII masking')
+				: $i18n.t('Stop enforcing PII masking');
 
 	type SortKey = 'name' | 'role' | 'status' | 'masking' | 'cost';
 
@@ -558,13 +614,36 @@
 										{/if}
 									{:else if action.kind === 'team-add' || action.kind === 'team-remove'}
 										<!--
-											⚠️ The team owner's two buttons are rendered in G-C6, and this
-											branch exists now only so the union narrows below it. It is
-											unreachable today: `mayManagePolicy` defaults to false and
-											nothing passes it yet, so `rowActionFor` never returns either
-											kind. Rendering an invented control here would put untested
-											markup in front of the one viewer who cannot check it.
+											The team owner's two actions, and the whole of their power.
+
+											⚠️ Labelled for MEMBERSHIP of the team's policy, never for
+											anyone's masking — decision 9. Which one appears is decided by
+											`rowActionFor` from membership of that one group, so someone
+											masked only by an administrator's group is offered Add.
+
+											⚠️ Nothing here names a group. `action` carries a kind and a
+											boolean, and no id or name is in scope for this markup to print
+											by accident.
 										-->
+										<div class="flex flex-col items-start gap-0.5">
+											<Button
+												on:click={() =>
+													openTeamAction(row, action.kind === 'team-add', action.maskedElsewhere)}
+											>
+												{action.kind === 'team-add'
+													? $i18n.t('Add to team policy')
+													: $i18n.t('Remove from team policy')}
+											</Button>
+											{#if action.maskedElsewhere}
+												<!-- Says the removal will not unlock, or that the addition is
+												     not the current source — and names neither. -->
+												<span class="text-[11px] leading-tight text-pii-muted">
+													{action.kind === 'team-remove'
+														? $i18n.t('Will stay masked · source outside the team')
+														: $i18n.t('Masked · source outside the team')}
+												</span>
+											{/if}
+										</div>
 									{:else if action.via.length === 0}
 										<span class="text-[12px] text-pii-muted">
 											{$i18n.t('Enforced instance-wide')}
@@ -706,18 +785,31 @@
 				class="w-full max-w-[420px] rounded-2xl border border-pii-line bg-pii-white p-5 font-['Inter']"
 				role="dialog"
 				aria-modal="true"
-				aria-label={pending.mode === 'enforce'
-					? $i18n.t('Enforce PII masking')
-					: $i18n.t('Stop enforcing PII masking')}
+				aria-label={dialogTitle}
 			>
-				<div class="text-[15px] font-bold text-pii-ink">
-					{pending.mode === 'enforce'
-						? $i18n.t('Enforce PII masking')
-						: $i18n.t('Stop enforcing PII masking')}
-				</div>
+				<div class="text-[15px] font-bold text-pii-ink">{dialogTitle}</div>
 
 				<p class="mt-1.5 text-[12.5px] leading-[1.55] text-pii-muted">
-					{pending.mode === 'enforce'
+					{#if pending.teamPolicy}
+						<!--
+							⚠️ The owner's sentences name the TEAM'S POLICY and no group. The
+							omission is decision 5 — see `pending.teamPolicy`.
+						-->
+						{pending.mode === 'enforce'
+							? $i18n.t(
+								"{{name}} will be added to your team's policy and will no longer be able to turn PII masking off.",
+								{ name: pending.row.name }
+							)
+							: pending.maskedElsewhere
+								? $i18n.t(
+									"{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.",
+									{ name: pending.row.name }
+								)
+								: $i18n.t(
+									"{{name}} will be removed from your team's policy and will be able to turn PII masking off again.",
+									{ name: pending.row.name }
+								)}
+					{:else}{pending.mode === 'enforce'
 						? $i18n.t(
 								'{{name}} will be added to the group and will no longer be able to turn PII masking off.',
 								{ name: pending.row.name }
@@ -730,10 +822,20 @@
 							: $i18n.t(
 									'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
 									{ name: pending.row.name }
-								)}
+								)}{/if}
 				</p>
 
-				{#if pending.mode === 'enforce' && pending.targets.length > 1}
+				{#if pending.teamPolicy}
+					<!--
+						⚠️ NO `Group:` line here, and that is deliberate.
+
+						The admin dialog names its group; this one must not. The owner is acting
+						on their own team's policy — which they know by being here — and naming
+						any group to them is what decision 5 forbids. Adding the line back "for
+						consistency with the admin dialog" reopens the leak G-B9 closed, where a
+						fallback printed a raw UUID in front of somebody deciding whether to act.
+					-->
+				{:else if pending.mode === 'enforce' && pending.targets.length > 1}
 					<!-- More than one group carries the policy, so the destination is
 					     asked for on every call and remembered on none. -->
 					<label class="mt-3 block text-[12px] text-pii-muted" for="pii-policy-group">
@@ -788,7 +890,17 @@
 							(pending.mode === 'remove' && !pending.reason.trim())}
 						on:click={submitAction}
 					>
-						{pending.mode === 'enforce' ? $i18n.t('Enforce') : $i18n.t('Remove')}
+						<!--
+							⚠️ The owner's confirm button repeats the membership wording rather
+							than saying "Enforce" or "Remove". Decision 9 applies to the button
+							that commits, not only to the one that opens: "Remove" alone would
+							not say remove from WHAT, and the answer is never a group name.
+						-->
+						{pending.teamPolicy
+							? dialogTitle
+							: pending.mode === 'enforce'
+								? $i18n.t('Enforce')
+								: $i18n.t('Remove')}
 					</Button>
 				</div>
 			</div>

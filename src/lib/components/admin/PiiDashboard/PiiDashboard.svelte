@@ -142,6 +142,7 @@
 			enforceTargets={$usersAccess.enforceTargets}
 			teamOnlyPolicyGroups={$usersAccess.teamOnlyPolicyGroups}
 			teamGroupId={$usersAccess.teamGroupId}
+			mayManagePolicy={$usersAccess.mayManagePolicy}
 			loading={usersLoading}
 			failed={usersFailed}
 			errorDetail={$usersAccess.errorDetail}

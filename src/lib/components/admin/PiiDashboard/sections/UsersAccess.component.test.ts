@@ -10,6 +10,8 @@
  * The Manage button has no other coverage at all — it lives entirely in markup.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 
@@ -261,5 +263,197 @@ describe('what an admin sees for somebody else’s team member', () => {
 		expect(text).toContain('which belongs to a team');
 		expect(text).toContain(TEAM_NAME);
 		expect(text).not.toContain(TEAM_ID);
+	});
+});
+
+describe('what a team owner sees, and what must never be in the page', () => {
+	const TEAM = 'g-team';
+	const TEAM_NAME = 'PII — Acme · abcdef01';
+	const ELSEWHERE = 'g-admins';
+	const ELSEWHERE_NAME = 'Legal hold';
+
+	/**
+	 * ⚠️ Every viewer field spelled out, none left to a default.
+	 *
+	 * `mayAct: false` and `mayManagePolicy: true` are the whole difference between
+	 * this viewer and the read-only one, and a corpus that omitted either would
+	 * let a branch pass for the wrong reason — the failure that let M5 survive in
+	 * G-B7 and C5-M3 survive in G-C5.
+	 */
+	const mountOwner = (policyGroupIds: string[]) =>
+		render(UsersAccess, {
+			props: {
+				users: [account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				// The naming list holds BOTH names, so a template that reached past
+				// the action into it would have something to print. That is the point.
+				policyGroups: [
+					{ id: TEAM, name: TEAM_NAME, isTeamGroup: true },
+					{ id: ELSEWHERE, name: ELSEWHERE_NAME, isTeamGroup: false }
+				],
+				enforceTargets: [{ id: ELSEWHERE, name: ELSEWHERE_NAME, isTeamGroup: false }],
+				mayAct: false,
+				mayManagePolicy: true,
+				teamGroupId: TEAM
+			},
+			context: new Map([['i18n', i18n]])
+		});
+
+	it('offers Remove when the person is in the team policy', () => {
+		mountOwner([TEAM]);
+		expect(screen.getByText('Remove from team policy')).toBeTruthy();
+		expect(screen.queryByText('Add to team policy')).toBeNull();
+	});
+
+	it('⚠️ offers Add to someone masked only by an administrator group', () => {
+		// Decision 9 in the markup. They ARE masked; they are not in the team
+		// policy, so what the owner is offered is Add.
+		mountOwner([ELSEWHERE]);
+		expect(screen.getByText('Add to team policy')).toBeTruthy();
+		expect(screen.getByText('Masked · source outside the team')).toBeTruthy();
+	});
+
+	it('says the removal will not unlock, without naming what does', () => {
+		mountOwner([TEAM, ELSEWHERE]);
+		expect(screen.getByText('Remove from team policy')).toBeTruthy();
+		expect(screen.getByText('Will stay masked · source outside the team')).toBeTruthy();
+	});
+
+	it('⚠️ names no group and prints no id, in every state — over outerHTML', () => {
+		/**
+		 * ⚠️ `outerHTML`, not the cell's text. Decision 5 asks that the data not be
+		 * IN the page, not merely that it be invisible — a title attribute, an aria
+		 * label or a value bound to a hidden control leaks just as well. That
+		 * difference is what caught the raw UUID in the G-B9 dialog, which the
+		 * table's text had shown nothing of.
+		 */
+		for (const groups of [[], [TEAM], [ELSEWHERE], [TEAM, ELSEWHERE]]) {
+			const { container } = mountOwner(groups);
+			const html = container.innerHTML;
+			expect(html).not.toContain(TEAM_NAME);
+			expect(html).not.toContain(ELSEWHERE_NAME);
+			expect(html).not.toContain(TEAM);
+			expect(html).not.toContain(ELSEWHERE);
+		}
+	});
+
+	it('⚠️ renders no Manage button', () => {
+		// M-1 from the spec, and the only reason there are two flags: `Manage`
+		// hangs off `mayAct`, which links to the admin user screen. Widening that
+		// one flag instead of adding a second would hand the owner a page the
+		// server refuses them.
+		mountOwner([TEAM]);
+		expect(screen.queryByText('Manage')).toBeNull();
+	});
+});
+
+describe("the owner's confirmation dialog", () => {
+	const TEAM = 'g-team';
+	const TEAM_NAME = 'PII — Acme · abcdef01';
+	const ELSEWHERE = 'g-admins';
+
+	const open = async (policyGroupIds: string[], label: string) => {
+		const view = render(UsersAccess, {
+			props: {
+				users: [account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				policyGroups: [
+					{ id: TEAM, name: TEAM_NAME, isTeamGroup: true },
+					{ id: ELSEWHERE, name: 'Legal hold', isTeamGroup: false }
+				],
+				enforceTargets: [],
+				mayAct: false,
+				mayManagePolicy: true,
+				teamGroupId: TEAM
+			},
+			context: new Map([['i18n', i18n]])
+		});
+		screen.getByText(label).click();
+		await new Promise((r) => setTimeout(r, 0));
+		return view;
+	};
+
+	it('⚠️ has no Group line at all', async () => {
+		/**
+		 * O-C5, and the omission is a CONSEQUENCE OF DECISION 5 rather than an
+		 * oversight. The admin dialog names its group; this one must not, and the
+		 * reason is written beside the branch in the component so nobody adds
+		 * `Group:` back "for consistency" and reopens what G-B9 closed.
+		 */
+		await open([TEAM], 'Remove from team policy');
+		expect(document.body.textContent).not.toContain('Group:');
+		expect(document.body.innerHTML).not.toContain(TEAM_NAME);
+		expect(document.body.innerHTML).not.toContain(TEAM);
+	});
+
+	it('names the team policy, never a group', async () => {
+		await open([TEAM], 'Remove from team policy');
+		expect(document.body.textContent).toContain("will be removed from your team's policy");
+	});
+
+	it('says they stay masked when another group also enforces them', async () => {
+		await open([TEAM, ELSEWHERE], 'Remove from team policy');
+		expect(document.body.textContent).toContain('they will stay masked');
+		expect(document.body.innerHTML).not.toContain(ELSEWHERE);
+	});
+
+	it('⚠️ keeps the confirm button really disabled until a reason is given', async () => {
+		/**
+		 * The real `disabled` attribute, not a visual state: decision 8 makes the
+		 * reason mandatory unconditionally, the model refuses a removal without
+		 * one, and a keyboard reaching a merely dimmed button would be a dead
+		 * keypress that assistive technology announced as live.
+		 */
+		await open([TEAM], 'Remove from team policy');
+		const confirm = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Remove from team policy' && b.closest('[role="dialog"]')
+		);
+		expect(confirm).toBeTruthy();
+		expect(confirm?.hasAttribute('disabled')).toBe(true);
+	});
+
+	it('asks for no reason when adding', async () => {
+		await open([], 'Add to team policy');
+		expect(document.body.textContent).toContain("will be added to your team's policy");
+		const confirm = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Add to team policy' && b.closest('[role="dialog"]')
+		);
+		expect(confirm?.hasAttribute('disabled')).toBe(false);
+	});
+});
+
+describe("the owner's pending action carries no group", () => {
+	it('⚠️ opens with an empty targets array, and that is the second lock', () => {
+		/**
+		 * Found by a mutation that SURVIVED: filling `targets` with the team's
+		 * group broke nothing, because the template's `teamPolicy` check hides the
+		 * `Group:` line anyway.
+		 *
+		 * It matters for the case where that check is the thing that fails. With
+		 * `targets: []` the dialog would print "Unknown group"; with the group in
+		 * there it prints the NAME — which is the leak G-B9 closed, arriving by a
+		 * different door. One lock is a template condition somebody can delete; the
+		 * other is the absence of the data.
+		 *
+		 * Structural because the property is about what is HANDED to the dialog,
+		 * and a rendered page cannot show the difference while the template check
+		 * still holds. The same kind of test as the route-ordering one in G-C3.
+		 */
+		const source = readFileSync(
+			resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/sections/UsersAccess.svelte'),
+			'utf-8'
+		);
+		const opener = source.slice(
+			source.indexOf('const openTeamAction'),
+			source.indexOf('const submitAction')
+		);
+		const assignments = opener.match(/targets:.*/g) ?? [];
+		expect(assignments).toEqual(['targets: [],']);
 	});
 });

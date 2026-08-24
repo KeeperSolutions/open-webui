@@ -70,6 +70,7 @@ describe('createUsersAccessLoader', () => {
 			teamOnlyPolicyGroups: 0,
 			// The addressed team's own policy group; `null` until a scoped load lands.
 			teamGroupId: null,
+			mayManagePolicy: false,
 			loading: true,
 			failed: false,
 			errorDetail: null
@@ -503,3 +504,53 @@ describe('the dashboard hands each list to the prop of the same name', () => {
 		expect(source).not.toContain('enforceTargets={$usersAccess.policyGroups}');
 	});
 });
+
+describe('createUsersAccessLoader — the permission the server reports', () => {
+	/**
+	 * ⚠️ Written because a mutation SURVIVED: reading the field as `!== false`
+	 * broke nothing, since every payload on file carried it.
+	 *
+	 * A payload that OMITS it is the case that matters, and it is reachable — an
+	 * older backend, or any response built before this field existed. The two
+	 * readings differ only there, and they differ in the dangerous direction:
+	 * absent would become permitted, and a viewer with no right to act would be
+	 * shown buttons the server then refuses.
+	 *
+	 * Same failure as M5 in G-B7, where the corpus lacked the explicit `false`
+	 * the backend always sends.
+	 */
+	const page = (over: Record<string, unknown>): UsersFetcher => async () => ({
+		users: [mkUser(1)],
+		total: 1,
+		...over
+	});
+
+	it('reports the permission when the server grants it', async () => {
+		const loader = createUsersAccessLoader(page({ may_manage_team_policy: true }));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(true);
+	});
+
+	it('reports no permission when the server denies it', async () => {
+		const loader = createUsersAccessLoader(page({ may_manage_team_policy: false }));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(false);
+	});
+
+	it('⚠️ reports no permission when the field is absent', async () => {
+		// Absent is not "yes". A permission has to be granted to exist.
+		const loader = createUsersAccessLoader(page({}));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(false);
+	});
+
+	it('⚠️ reports no permission for any value that is not literally true', async () => {
+		// `'true'`, `1` and `null` are all things a payload can carry and none of
+		// them is a grant.
+		for (const value of ['true', 1, null, undefined]) {
+			const loader = createUsersAccessLoader(page({ may_manage_team_policy: value }));
+			await loader.load();
+			expect(get(loader).mayManagePolicy).toBe(false);
+		}
+	});
+})
