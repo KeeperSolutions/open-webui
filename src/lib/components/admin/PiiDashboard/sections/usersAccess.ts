@@ -189,7 +189,48 @@ export type RowAction =
 	 * present, so none can be leaked by an incautious template.
 	 */
 	| { kind: 'masked-team'; teamGroupId: string }
-	| { kind: 'masked-elsewhere' };
+	| { kind: 'masked-elsewhere' }
+	/**
+	 * The two actions a team owner has, and the only ones.
+	 *
+	 * ⚠️ Named for MEMBERSHIP of the team's policy group, never for anyone's
+	 * masking — decision 9. Framed as masking they would both sometimes lie,
+	 * because masking can come from elsewhere; framed as membership they are true
+	 * in every state, which is why the action is always offered.
+	 *
+	 * ⚠️ `maskedElsewhere` is a BOOLEAN, derived from how many groups enforce the
+	 * person, and it is the only thing either action carries. No id, no name, no
+	 * count. An object without the name cannot leak the name — the same reasoning
+	 * that keeps `masked-elsewhere` empty.
+	 */
+	| { kind: 'team-add'; maskedElsewhere: boolean }
+	| { kind: 'team-remove'; maskedElsewhere: boolean };
+
+/**
+ * Everything about the person looking at the row, in one place.
+ *
+ * ⚠️ An object rather than three positional arguments, and that is not tidiness.
+ * `mayAct` and `mayManagePolicy` are both booleans about permission and they mean
+ * very different things — the first also unlocks the link to the admin user
+ * screen. Positionally they can be swapped; named, they cannot. The same hazard
+ * caught in the shell during G-B9, where swapping two lists survived 241 tests.
+ */
+export type Viewer = {
+	/** ⚠️ The ADMINISTRATOR flag. Governs the admin branch AND the Manage link. */
+	mayAct: boolean;
+	/** The addressed team's own policy group, or `null`. */
+	teamGroupId: string | null;
+	/**
+	 * Whether this viewer may change who is in that group.
+	 *
+	 * Computed on the SERVER (`may_manage_team_policy`) and reported, never
+	 * derived from the address here: an address selects a scope, not a permission.
+	 */
+	mayManagePolicy: boolean;
+};
+
+/** An administrator on the instance-wide view: today's default for every caller. */
+const INSTANCE_ADMIN: Viewer = { mayAct: true, teamGroupId: null, mayManagePolicy: false };
 
 /**
  * The action offered on one row.
@@ -222,9 +263,35 @@ export function rowActionFor(
 	 * the destination list to the naming code without noticing.
 	 */
 	groups: { naming: PolicyGroup[]; targets: PolicyGroup[] },
-	mayAct: boolean = true,
-	teamGroupId: string | null = null
+	viewer: Viewer = INSTANCE_ADMIN
 ): RowAction {
+	const { mayAct, teamGroupId, mayManagePolicy } = viewer;
+
+	// ⚠️ The team owner: may not reach the admin screen, may govern this one
+	// group. Checked BEFORE the read-only branch, and never entered by an
+	// administrator — `mayAct` sends them to their own branch below, where G-B9
+	// names the team.
+	//
+	// ⚠️ `teamGroupId` is required, not incidental. A team whose policy group was
+	// never created has nothing to add anyone to, and the server says so too by
+	// reporting `may_manage_team_policy: false`. Without this the row would offer
+	// an action with no destination.
+	if (!mayAct && mayManagePolicy && teamGroupId) {
+		// ⚠️ MEMBERSHIP of that one group decides which button appears — never
+		// `row.enforced`. Someone masked only through an administrator's group is
+		// not in the team policy, so what they are offered is Add. Offering Remove
+		// would name an action with nothing to remove, which is the lie the
+		// membership model was adopted to end.
+		const inTeamPolicy = row.policyGroupIds.includes(teamGroupId);
+		// Some OTHER group also enforces them. A count, reduced to a yes/no before
+		// it leaves this function, so nothing downstream can print what it was.
+		const maskedElsewhere = row.policyGroupIds.some((id) => id !== teamGroupId);
+
+		return inTeamPolicy
+			? { kind: 'team-remove', maskedElsewhere }
+			: { kind: 'team-add', maskedElsewhere };
+	}
+
 	if (!mayAct) {
 		// Not enforced: an em dash. NOT `{ kind: 'none', via: [] }` — the component
 		// renders an empty `via` as "Enforced instance-wide", so reusing it here

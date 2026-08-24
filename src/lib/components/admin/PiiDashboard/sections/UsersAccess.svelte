@@ -71,6 +71,14 @@
 	 * is theirs. No other group id is in scope here to be printed by mistake.
 	 */
 	export let teamGroupId: string | null = null;
+	/**
+	 * Whether this viewer may change who is in the team's policy group.
+	 *
+	 * ⚠️ NOT `mayAct`. That one is the administrator flag and also unlocks the
+	 * link to the admin user screen; this one unlocks two buttons on this table
+	 * and nothing else. Computed on the server — see `may_manage_team_policy`.
+	 */
+	export let mayManagePolicy = false;
 	/** Reload the section after a membership change. */
 	export let onPolicyChanged: () => void = () => {};
 
@@ -409,7 +417,7 @@
 						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
-							{@const action = rowActionFor(row, { naming: policyGroups, targets: enforceTargets }, mayAct, teamGroupId)}
+							{@const action = rowActionFor(row, { naming: policyGroups, targets: enforceTargets }, { mayAct, teamGroupId, mayManagePolicy })}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -548,6 +556,15 @@
 												{$i18n.t('Enforce')}
 											</Button>
 										{/if}
+									{:else if action.kind === 'team-add' || action.kind === 'team-remove'}
+										<!--
+											⚠️ The team owner's two buttons are rendered in G-C6, and this
+											branch exists now only so the union narrows below it. It is
+											unreachable today: `mayManagePolicy` defaults to false and
+											nothing passes it yet, so `rowActionFor` never returns either
+											kind. Rendering an invented control here would put untested
+											markup in front of the one viewer who cannot check it.
+										-->
 									{:else if action.via.length === 0}
 										<span class="text-[12px] text-pii-muted">
 											{$i18n.t('Enforced instance-wide')}
