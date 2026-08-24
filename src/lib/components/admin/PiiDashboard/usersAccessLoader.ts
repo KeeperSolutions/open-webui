@@ -136,10 +136,10 @@ export function createUsersAccessLoader(
 			// compliance table silently listing 3 of 7 pages asserts something untrue.
 			users: [],
 			policyGroups: [],
-	enforceTargets: [],
-	teamOnlyPolicyGroups: 0,
-	teamGroupId: null,
-	mayManagePolicy: false,
+			enforceTargets: [],
+			teamOnlyPolicyGroups: 0,
+			teamGroupId: null,
+			mayManagePolicy: false,
 			truncatedUsers: null
 		}));
 

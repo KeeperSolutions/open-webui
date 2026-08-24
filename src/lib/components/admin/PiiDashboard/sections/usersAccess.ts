@@ -104,9 +104,7 @@ function namedGroup(id: string, byId: Map<string, PolicyGroup>): PolicyGroup {
 	const known = byId.get(id);
 	if (known) return known;
 
-	console.warn(
-		`[PiiDashboard] a user is enforced by group ${id}, which is not in the group list`
-	);
+	console.warn(`[PiiDashboard] a user is enforced by group ${id}, which is not in the group list`);
 	return { id, name: null, isTeamGroup: false };
 }
 

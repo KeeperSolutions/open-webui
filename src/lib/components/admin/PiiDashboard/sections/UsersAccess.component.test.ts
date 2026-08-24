@@ -219,9 +219,7 @@ describe('what the team-policy row actually renders', () => {
 	const mountMasked = (policyGroupIds: string[], teamGroupId: string | null) =>
 		render(UsersAccess, {
 			props: {
-				users: [
-					account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })
-				],
+				users: [account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })],
 				metricRows: [],
 				loading: false,
 				failed: false,
@@ -276,9 +274,7 @@ describe('what an admin sees for somebody else’s team member', () => {
 	const mountAdmin = (policyGroupIds: string[]) =>
 		render(UsersAccess, {
 			props: {
-				users: [
-					account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })
-				],
+				users: [account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })],
 				metricRows: [],
 				loading: false,
 				failed: false,

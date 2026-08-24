@@ -354,9 +354,7 @@ describe('createUsersAccessLoader — policy groups', () => {
 
 		await loader.load();
 
-		expect(get(loader).policyGroups).toEqual([
-			{ id: 'g1', name: 'Policy', isTeamGroup: false }
-		]);
+		expect(get(loader).policyGroups).toEqual([{ id: 'g1', name: 'Policy', isTeamGroup: false }]);
 	});
 
 	it('fails the section when the group list cannot be read', async () => {
@@ -586,11 +584,13 @@ describe('createUsersAccessLoader — the permission the server reports', () => 
 	 * Same failure as M5 in G-B7, where the corpus lacked the explicit `false`
 	 * the backend always sends.
 	 */
-	const page = (over: Record<string, unknown>): UsersFetcher => async () => ({
-		users: [mkUser(1)],
-		total: 1,
-		...over
-	});
+	const page =
+		(over: Record<string, unknown>): UsersFetcher =>
+		async () => ({
+			users: [mkUser(1)],
+			total: 1,
+			...over
+		});
 
 	it('reports the permission when the server grants it', async () => {
 		const loader = createUsersAccessLoader(page({ may_manage_team_policy: true }));
@@ -620,4 +620,4 @@ describe('createUsersAccessLoader — the permission the server reports', () => 
 			expect(get(loader).mayManagePolicy).toBe(false);
 		}
 	});
-})
+});
