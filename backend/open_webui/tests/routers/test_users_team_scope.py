@@ -21,6 +21,7 @@ from fastapi import HTTPException
 sys.modules.setdefault("stripe", MagicMock())
 
 from open_webui.models.users import UserModel
+from open_webui.utils.team_groups import TeamOwnership
 from open_webui.routers import users as route_mod
 from open_webui.routers.users import get_all_users, get_users
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -62,8 +63,13 @@ def _request():
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
 
 
-def _run(which, caller, team_id=None, team=None, members=None, accounts=None):
-    """Call one directory route and report the filter it handed the model."""
+def _run(which, caller, team_id=None, team=None, members=None, accounts=None, page=1):
+    """Call one directory route and report the filter it handed the model.
+
+    `page` is threaded through because two fields of the response are properties
+    of the SCOPE rather than of the page, and the only way to say so is to ask
+    for a second page and look.
+    """
     get_users_mock = AsyncMock(return_value=dict(DIRECTORY))
     with patch(TEAMS, AsyncMock(return_value=team)), patch(
         MEMBERS, AsyncMock(return_value=list(TEAM_MEMBERS if members is None else members))
@@ -73,7 +79,7 @@ def _run(which, caller, team_id=None, team=None, members=None, accounts=None):
         if which == "paged":
             coro = get_users(
                 request=_request(), query=None, order_by=None, direction=None,
-                page=1, team_id=team_id, user=caller, db=None,
+                page=page, team_id=team_id, user=caller, db=None,
             )
         else:
             coro = get_all_users(team_id=team_id, user=caller, db=None)
@@ -261,3 +267,117 @@ class TestTeamGroupIdInTheResponse:
         ):
             result, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
         assert result["team_group_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# G-C4 — whether the viewer may govern that policy group
+# ---------------------------------------------------------------------------
+
+
+class TestMayManageTeamPolicyInTheResponse:
+    """The permission is worked out on the SERVER and reported.
+
+    ⚠️ Not derivable on the client. An address selects a scope; it does not
+    confer a permission, and the frontend cannot check who owns a team. Level A
+    was written so that `mayActFor` could not even see the address — reporting a
+    computed permission is what keeps that rule intact once a second kind of
+    viewer can act.
+    """
+
+    @staticmethod
+    def _with_owner(owner_user_id, group_id="g-team"):
+        """Patch both halves the flag rests on: the group's existence and its team."""
+        return (
+            patch(
+                "open_webui.utils.team_groups.ensure_team_pii_group",
+                AsyncMock(return_value=group_id),
+            ),
+            patch(
+                "open_webui.utils.team_groups.team_ownership_of_group",
+                AsyncMock(return_value=TeamOwnership(team_id="T1", owner_user_id=owner_user_id)),
+            ),
+        )
+
+    def test_the_owner_of_the_addressed_team_may(self):
+        ensure, ownership = self._with_owner("owner")
+        with ensure, ownership:
+            result, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
+        assert result["may_manage_team_policy"] is True
+
+    def test_an_admin_may_on_somebody_elses_team(self):
+        """Unbounded, and costing no lookup at all."""
+        ensure, ownership = self._with_owner("someone-else")
+        with ensure, ownership:
+            result, _ = _run("paged", _caller(role="admin"), team_id="T1", team=_team("someone-else"))
+        assert result["may_manage_team_policy"] is True
+
+    def test_the_instance_wide_view_reports_false(self):
+        """No team addressed, so there is no team policy to govern."""
+        result, _ = _run("paged", _caller(role="admin"))
+        assert result["may_manage_team_policy"] is False
+
+    def test_a_team_with_no_group_yet_reports_false(self):
+        """⚠️ Same answer for every role — there is nothing to be in charge of.
+
+        An administrator reading `true` here would be told they may manage a
+        group that does not exist.
+        """
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group", AsyncMock(return_value=None)
+        ):
+            owner, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
+            admin, _ = _run("paged", _caller(role="admin"), team_id="T1", team=_team("owner"))
+        assert owner["may_manage_team_policy"] is False
+        assert admin["may_manage_team_policy"] is False
+
+
+    def test_the_route_asks_the_permission_rather_than_inferring_it(self):
+        """⚠️ A tripwire, because agreeing with the right answer is not asking.
+
+        Every case above happens to be one where "is this view team-scoped" gives
+        the same result as ownership — it has to be, since level A admits only an
+        administrator or the team's owner. So a route that replaced the call with
+        that proxy would pass them all.
+
+        It would also be wrong the moment the read audience widens, which is
+        precisely what `_may_read_team_dashboard` is written to allow. The only
+        thing that tells the two apart is watching the route ask.
+        """
+        sentinel = AsyncMock(return_value=False)
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group", AsyncMock(return_value="g-team")
+        ), patch("open_webui.routers.users.may_manage_team_policy", sentinel):
+            result, _ = _run("paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"))
+
+        sentinel.assert_awaited_once()
+        assert sentinel.await_args.args[1] == "g-team", "the addressed team's group, not the team id"
+        assert result["may_manage_team_policy"] is False, "the route reports what it was told"
+
+
+class TestTheScopeFieldsAreNotPageProperties:
+    """⚠️ A pin on the contract, not a repair.
+
+    Measured before it was written: the server computes `team_group_id` from the
+    scope, and `resolve_dashboard_scope` never looks at `page`. Nothing is broken
+    today, and the frontend collects every page before publishing anything, so
+    the failure this guards against — buttons that work on page 1 and vanish on
+    page 2, with nothing said — is not reachable through the paging control.
+
+    It is written anyway, because a SECOND scope field is exactly the moment
+    somebody computes one of them next to the slice.
+    """
+
+    def test_both_scope_fields_travel_on_page_two(self):
+        ensure, ownership = TestMayManageTeamPolicyInTheResponse._with_owner("owner")
+        with ensure, ownership:
+            first, _ = _run(
+                "paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"), page=1
+            )
+            second, _ = _run(
+                "paged", _caller(user_id="owner"), team_id="T1", team=_team("owner"), page=2
+            )
+
+        for field in ("team_group_id", "may_manage_team_policy"):
+            assert second[field] == first[field], field
+        assert second["team_group_id"] == "g-team"
+        assert second["may_manage_team_policy"] is True

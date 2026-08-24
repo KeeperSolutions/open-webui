@@ -193,6 +193,55 @@ async def _may_read_team_dashboard(
     return team is not None and team.owner_user_id == user.id
 
 
+def _governs(user, ownership) -> bool:
+    """Check 1, once, so the guard and the response flag cannot disagree.
+
+    ⚠️ Shared deliberately. The route guard and `may_manage_team_policy` ask the
+    same question at different moments — before a write, and while drawing a page
+    — and two copies of "is this their team" would drift on exactly the case
+    where drift is unrecoverable.
+    """
+    return ownership is not None and ownership.owner_user_id == user.id
+
+
+async def may_manage_team_policy(
+    user, group_id: Optional[str], db: Optional[AsyncSession] = None
+) -> bool:
+    """Whether this viewer may govern this team's policy at all. Check 1, alone.
+
+    ⚠️ **Check 1 only, and that is not a shortcut.** The full guard also asks
+    whether every named target belongs to the team — and while a page is being
+    drawn there are no targets, because nobody has been clicked. The two share
+    `team_ownership_of_group` and `_governs`; they differ in what else they ask.
+
+    Check 2 cannot fail from the screen anyway: level A shows a team's dashboard
+    only the members of that team. It exists for requests that do not come from
+    the screen.
+
+    ⚠️ Do NOT reach for `authorise_policy_membership_change` here. That function
+    raises, and it refuses a request with no targets — which is every request
+    that has not been made yet.
+
+    ⚠️ And do NOT derive this from "is the view team-scoped". Today the two
+    coincide, because `_may_read_team_dashboard` admits only administrators and
+    the team's owner, so anyone holding a scope may already manage it. That is a
+    coincidence, not the rule: the docstring of that function anticipates the
+    audience widening by an `or` on one line, and on the day a plain member gains
+    read access, the proxy would hand them the owner's power.
+    """
+    if not group_id:
+        # No group, nothing to govern — the same answer for every role, so a team
+        # whose policy group was never created reads consistently.
+        return False
+
+    if user.role == 'admin':
+        return True
+
+    from open_webui.utils.team_groups import team_ownership_of_group
+
+    return _governs(user, await team_ownership_of_group(group_id, db=db))
+
+
 async def _may_change_policy_membership(
     user,
     group_id: str,
@@ -248,7 +297,7 @@ async def _may_change_policy_membership(
     from open_webui.utils.team_groups import team_ownership_of_group
 
     ownership = await team_ownership_of_group(group_id, db=db)
-    if ownership is None or ownership.owner_user_id != user.id:
+    if not _governs(user, ownership):
         return False
 
     from open_webui.models.billing import TeamMembers

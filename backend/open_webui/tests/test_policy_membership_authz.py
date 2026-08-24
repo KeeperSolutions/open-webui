@@ -24,7 +24,10 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 sys.modules.setdefault("stripe", MagicMock())
 
 from open_webui.models.billing import Team, TeamMember, TeamMembers
-from open_webui.utils.team_scope import _may_change_policy_membership
+from open_webui.utils.team_scope import (
+    _may_change_policy_membership,
+    may_manage_team_policy,
+)
 
 
 OWNER, MEMBER, STRANGER = "u-owner", "u-member", "u-stranger"
@@ -409,3 +412,85 @@ class TestMembersAmong:
         counter = env
         await TeamMembers.members_among(TEAM, [OWNER, MEMBER, OTHER_MEMBER, STRANGER])
         assert counter.selects == 1
+
+
+# ---------------------------------------------------------------------------
+# G-C4 — check 1 on its own, as the response flag
+# ---------------------------------------------------------------------------
+
+
+class TestMayManageTeamPolicy:
+    """The flag the directory reports. Check 1, and only check 1.
+
+    ⚠️ Tested here rather than only through the route, because the case that
+    matters most cannot reach the route at all: `_may_read_team_dashboard` admits
+    an administrator or the team's owner and refuses everyone else, so a plain
+    member never gets a scope to carry a flag on.
+
+    That is exactly why the flag must not be derived from "is this view
+    team-scoped". Today the two agree; the day that guard widens by an `or` — the
+    way its own docstring anticipates — the proxy hands a plain member the
+    owner's power, and every test that went through the route keeps passing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_owner_may(self, env):
+        assert await may_manage_team_policy(_user(), TEAM_GROUP) is True
+
+    @pytest.mark.asyncio
+    async def test_an_admin_may_anywhere(self, env):
+        assert await may_manage_team_policy(_user(role="admin"), OTHER_TEAM_GROUP) is True
+
+    @pytest.mark.asyncio
+    async def test_a_plain_member_may_not(self, env):
+        """⚠️ The anti-proxy test. Unreachable through the route, by design."""
+        assert await may_manage_team_policy(_user(uid=MEMBER), TEAM_GROUP) is False
+
+    @pytest.mark.asyncio
+    async def test_another_teams_owner_may_not(self, env):
+        assert await may_manage_team_policy(_user(uid=OTHER_OWNER), TEAM_GROUP) is False
+
+    @pytest.mark.asyncio
+    async def test_an_administrators_group_belongs_to_no_owner(self, env):
+        assert await may_manage_team_policy(_user(), ADMIN_GROUP) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("group_id", [None, ""])
+    async def test_no_group_means_nothing_to_govern_for_anyone(self, env, group_id):
+        """Including an administrator: there is no group to be in charge of."""
+        assert await may_manage_team_policy(_user(), group_id) is False
+        assert await may_manage_team_policy(_user(role="admin"), group_id) is False
+
+    @pytest.mark.asyncio
+    async def test_an_admin_costs_no_query(self, env):
+        counter = env
+        assert await may_manage_team_policy(_user(role="admin"), TEAM_GROUP) is True
+        assert counter.selects == 0
+
+    @pytest.mark.asyncio
+    async def test_an_owner_costs_exactly_one_query(self, env):
+        """⚠️ Check 1 alone, so half the cost of the full guard — and it must stay
+        half. A flag that also asked about targets would pay for a question the
+        page cannot answer."""
+        counter = env
+        await may_manage_team_policy(_user(), TEAM_GROUP)
+        assert counter.selects == 1
+
+    @pytest.mark.asyncio
+    async def test_it_agrees_with_the_guard_wherever_the_guard_has_targets(self, env):
+        """One source, two entries: `team_ownership_of_group` and `_governs`.
+
+        Where the flag says no, the guard must say no too — otherwise a screen
+        that hides the button protects nothing, or one that shows it lies.
+        """
+        for caller, group in [
+            (_user(), TEAM_GROUP),
+            (_user(uid=MEMBER), TEAM_GROUP),
+            (_user(uid=OTHER_OWNER), TEAM_GROUP),
+            (_user(), ADMIN_GROUP),
+            (_user(role="admin"), OTHER_TEAM_GROUP),
+        ]:
+            flag = await may_manage_team_policy(caller, group)
+            allowed = await _may_change_policy_membership(caller, group, [MEMBER, OWNER])
+            if not flag:
+                assert allowed is False, (caller.id, group)

@@ -44,7 +44,11 @@ from open_webui.utils.auth import (
     get_verified_user,
     validate_password,
 )
-from open_webui.utils.team_scope import resolve_dashboard_scope, team_directory_filter
+from open_webui.utils.team_scope import (
+    may_manage_team_policy,
+    resolve_dashboard_scope,
+    team_directory_filter,
+)
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -165,6 +169,15 @@ async def get_users(
         # `scope` is None on the instance-wide view, so this is None there too —
         # the unscoped dashboard has no team whose policy could be named.
         'team_group_id': scope.group_id if scope is not None else None,
+        # ⚠️ Travels on EVERY page, like `team_group_id`, because neither is a
+        # property of a page. `resolve_dashboard_scope` does not look at `page`,
+        # and this must not start to — a viewer whose buttons worked on page 1
+        # and vanished on page 2 would be told nothing about why.
+        'may_manage_team_policy': (
+            await may_manage_team_policy(user, scope.group_id, db=db)
+            if scope is not None
+            else False
+        ),
     }
 
 

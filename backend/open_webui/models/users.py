@@ -214,6 +214,18 @@ class UserGroupIdsListResponse(BaseModel):
     #: both mean "there is no team policy to attribute masking to".
     team_group_id: Optional[str] = None
 
+    #: Whether this viewer may change who is in that policy group.
+    #:
+    #: ⚠️ Computed on the server, never derived from the address on the client.
+    #: An address selects a SCOPE; it does not confer a permission, and the
+    #: frontend has no way to check ownership. Reporting a permission the server
+    #: worked out keeps that rule intact and gives the route guard and the screen
+    #: one source.
+    #:
+    #: ⚠️ NOT the same as `mayAct` on the frontend, which is the administrator
+    #: flag and also unlocks the link to the admin user screen.
+    may_manage_team_policy: bool = False
+
 
 class UserStatus(BaseModel):
     status_emoji: str | None = None
