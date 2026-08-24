@@ -193,6 +193,74 @@ async def _may_read_team_dashboard(
     return team is not None and team.owner_user_id == user.id
 
 
+async def _may_change_policy_membership(
+    user,
+    group_id: str,
+    target_user_ids: Optional[list],
+    db: Optional[AsyncSession] = None,
+) -> bool:
+    """Who may add someone to, or remove someone from, a team's PII policy group.
+
+    Two checks, and **neither covers the other**. Each closes a different way for
+    a team owner to reach past their team:
+
+      1. **the group is their own team's policy** — without it an owner writes
+         into an administrator's group, or into another team's policy, and grants
+         their people whatever that group grants
+      2. **every named target is a member of that team** — without it an owner
+         imposes masking on any account on the instance
+
+    A guard covered by another guard looks exactly like a guard that works, so
+    the two are tested with non-overlapping cases and killed by separate
+    mutations. That is the same shape as D1/D2 in level A.
+
+    ⚠️ Ownership is read from `teams.owner_user_id`, never from
+    `team_members.role` — both are written when a team is created and nothing
+    keeps them in step afterwards, so exactly one of them has to be the answer.
+    The same choice, for the same reason, as `_may_read_team_dashboard`.
+
+    ⚠️ And it does NOT use `Teams.get_by_owner_user_id`: that is a `.first()` over
+    a column with no index, so an owner of two teams gets an arbitrary row. Going
+    from the GROUP to the team travels a unique index and has no such freedom.
+
+    Display only? No — this is the boundary. `mayActFor` on the frontend decides
+    what is drawn; this decides what is allowed.
+    """
+    if not target_user_ids:
+        # ⚠️ Fail CLOSED on an empty request, before the role is even consulted.
+        #
+        # The natural reading — "nobody named, so nobody to refuse" — makes check
+        # 2 pass vacuously, because the set of targets that are not members of the
+        # team is also empty. That is the same shape as the filter in
+        # `models/users.py:456`, where an empty `user_ids` meant "no filter" and
+        # therefore "every user", until it was closed by returning nothing.
+        #
+        # An empty request authorises nothing, so there is no honest yes. A caller
+        # that wants an empty body to be a no-op has to say so itself, before
+        # asking this question.
+        return False
+
+    if user.role == 'admin':
+        # Unbounded by design, and decided in level C: an administrator is not
+        # held to a team boundary. Costs no query at all.
+        return True
+
+    from open_webui.utils.team_groups import team_ownership_of_group
+
+    ownership = await team_ownership_of_group(group_id, db=db)
+    if ownership is None or ownership.owner_user_id != user.id:
+        return False
+
+    from open_webui.models.billing import TeamMembers
+
+    members = await TeamMembers.members_among(ownership.team_id, list(target_user_ids), db=db)
+    # ALL of them, not any: a request naming one member and one stranger is one
+    # request, and it is refused whole. Authorising the part that happens to be
+    # allowed would let an owner discover who exists outside their team by
+    # watching which halves succeed.
+    return not (set(target_user_ids) - members)
+
+
 def _prohibited() -> HTTPException:
     """The one refusal this module makes, so all three routes refuse alike.
 

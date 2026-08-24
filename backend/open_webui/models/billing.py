@@ -376,6 +376,32 @@ class TeamMembersTable:
             row = result.scalars().first()
             return TeamMemberModel.model_validate(row) if row else None
 
+    async def members_among(
+        self, team_id: str, user_ids: list[str], db: Optional[AsyncSession] = None
+    ) -> set:
+        """Which of these people are in this team. One query, whatever the count.
+
+        Written for the authorisation guard, which has to answer "are ALL of these
+        my team's members" for a whole request body. `get_by_team_id` would load
+        the team and let the caller intersect in Python — correct, but it makes
+        the cost depend on the team's size rather than on the request's, and the
+        guard runs before every membership change.
+
+        Hits `uq_team_members_team_user`, so it is an index lookup rather than a
+        scan. Returns a set because the caller subtracts it; an empty input list
+        returns an empty set without touching the database.
+        """
+        if not user_ids:
+            return set()
+
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(TeamMember.user_id).filter(
+                    TeamMember.team_id == team_id, TeamMember.user_id.in_(user_ids)
+                )
+            )
+            return {row for (row,) in result.all()}
+
     async def remove(self, team_id: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         async with get_async_db_context(db) as db:
             result = await db.execute(

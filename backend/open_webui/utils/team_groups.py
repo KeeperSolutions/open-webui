@@ -18,7 +18,7 @@ rather than a list.
 
 import logging
 import time
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,13 +30,28 @@ log = logging.getLogger(__name__)
 TeamGroupKind = Optional[Literal['team_pii', 'team']]
 
 
-async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None) -> Optional[str]:
-    """The id of the team that owns this group, or `None` if no team does.
+class TeamOwnership(NamedTuple):
+    """Who owns the team that owns a group. Both facts, from one row.
+
+    ⚠️ Read together on purpose. The authorisation guard needs the team (to check
+    membership against) and its owner (to check the caller against), and taking
+    them in two reads would allow a window in which the two answers describe
+    different states of the same team. For an authorisation decision that window
+    is not a performance detail.
+    """
+
+    team_id: str
+    owner_user_id: str
+
+
+async def team_ownership_of_group(
+    group_id: str, db: Optional[AsyncSession] = None
+) -> Optional[TeamOwnership]:
+    """The team that owns this group and who owns that team, or `None`.
 
     The one question `teams.group_id` is asked, and the only place it is read
-    from — `team_group_kind` answers a DIFFERENT question on top of this one, and
-    so does the authorisation guard in `utils/team_scope.py`, which needs the team
-    itself rather than a classification.
+    from — everything else in this module and in `utils/team_scope.py` is written
+    on top of this.
 
     ⚠️ It lives here for a reason a comment cannot express on its own:
     `tests/test_team_groups.py::test_group_id_is_read_in_exactly_one_module` walks
@@ -44,7 +59,7 @@ async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None)
     outside this module. That test is the mechanism; this docstring is only the
     explanation.
 
-    `teams.group_id` is `UNIQUE`, which is what lets the answer be one id rather
+    `teams.group_id` is `UNIQUE`, which is what lets the answer be one team rather
     than a list.
 
     ⚠️ Function-local imports below: `models.billing` pulls in `stripe` and the
@@ -61,8 +76,25 @@ async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None)
     from sqlalchemy import select
 
     async with get_async_db_context(db) as session:
-        result = await session.execute(select(Team.id).filter(Team.group_id == group_id))
-        return result.scalars().first()
+        result = await session.execute(
+            select(Team.id, Team.owner_user_id).filter(Team.group_id == group_id)
+        )
+        row = result.first()
+
+    return None if row is None else TeamOwnership(team_id=row[0], owner_user_id=row[1])
+
+
+async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None) -> Optional[str]:
+    """Just the team id, for callers that have no business with the owner.
+
+    ⚠️ A wrapper rather than its own query. G-C1 made this the lookup; G-C2 showed
+    that authorisation needs a second field off the same row, so the query moved
+    down one level and this stayed as the narrow answer. Nothing G-C1 asserted
+    about it stopped being true — `test_team_group_kind_asks_the_owner_lookup`
+    still pins the classifier to it.
+    """
+    ownership = await team_ownership_of_group(group_id, db=db)
+    return None if ownership is None else ownership.team_id
 
 
 async def team_group_kind(group_id: str, db: Optional[AsyncSession] = None) -> TeamGroupKind:
