@@ -473,6 +473,26 @@ describe('createUsersAccessLoader — naming and destinations are separate lists
 	});
 });
 
+// `import.meta.url` is not a file: URL under vite, so the path is resolved from
+// the project root, which is where vitest runs.
+const dashboardSource = readFileSync(
+	resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/PiiDashboard.svelte'),
+	'utf-8'
+);
+
+/**
+ * The `<UsersAccess … />` element as written. Scoped rather than searched over
+ * the whole file so an assertion about a prop cannot be met by the same text on
+ * one of the neighbouring sections.
+ */
+const usersAccessCallSite = (() => {
+	const start = dashboardSource.indexOf('<UsersAccess');
+	if (start < 0) throw new Error('PiiDashboard.svelte no longer mounts <UsersAccess>');
+	const end = dashboardSource.indexOf('/>', start);
+	if (end < 0) throw new Error('<UsersAccess> is no longer self-closing; this slice is wrong');
+	return dashboardSource.slice(start, end + 2);
+})();
+
 describe('the dashboard hands each list to the prop of the same name', () => {
 	/**
 	 * ⚠️ Written because a mutation SURVIVED: swapping `enforceTargets` for
@@ -489,19 +509,66 @@ describe('the dashboard hands each list to the prop of the same name', () => {
 	 * through (`truncated` reads `truncatedUsers`), so a blanket rule would be
 	 * false.
 	 */
-	// `import.meta.url` is not a file: URL under vite, so the path is resolved
-	// from the project root, which is where vitest runs.
-	const source = readFileSync(
-		resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/PiiDashboard.svelte'),
-		'utf-8'
-	);
-
 	it.each(['policyGroups', 'enforceTargets'])('passes %s from the field of that name', (prop) => {
-		expect(source).toContain(`${prop}={$usersAccess.${prop}}`);
+		expect(dashboardSource).toContain(`${prop}={$usersAccess.${prop}}`);
 	});
 
 	it('never feeds the naming list to the destination prop', () => {
-		expect(source).not.toContain('enforceTargets={$usersAccess.policyGroups}');
+		expect(dashboardSource).not.toContain('enforceTargets={$usersAccess.policyGroups}');
+	});
+});
+
+describe('the dashboard hands each permission to the prop of that name', () => {
+	/**
+	 * ⚠️ The same shape as the mutation above, with a worse outcome. Swapping
+	 * `mayAct` and `mayManagePolicy` at this one line survives the whole suite:
+	 * `usersAccess.test.ts` calls `rowActionFor` with a viewer it builds itself,
+	 * and `UsersAccess.component.test.ts` sets both props by hand. A team owner
+	 * would be handed the `Manage` link — the way to the admin screen — while the
+	 * two membership buttons disappear.
+	 *
+	 * The `viewer` object introduced in G-C5 closed the swap INSIDE the function.
+	 * This closes the swap while PASSING. They are two different places, and
+	 * neither test covers the other.
+	 *
+	 * Three props by name, never a rule over all of them: `truncated` reads
+	 * `truncatedUsers` deliberately, so "prop X takes the field of that name" is
+	 * false for the component as a whole. An allow-list is the only form that
+	 * does not fail on correct code — see the last case here.
+	 */
+	it.each([
+		// Derived from the ROLE, not from the loader — see `mayActFor`. The
+		// shorthand `{mayAct}` is also the tail of `mayAct={mayAct}`, so either
+		// spelling satisfies this.
+		['mayAct', '{mayAct}'],
+		['mayManagePolicy', 'mayManagePolicy={$usersAccess.mayManagePolicy}'],
+		['teamGroupId', 'teamGroupId={$usersAccess.teamGroupId}']
+	])('binds %s at the call site', (_prop, binding) => {
+		expect(usersAccessCallSite).toContain(binding);
+	});
+
+	it('never lets the reported permission decide who may act', () => {
+		// The load-bearing half. Under a genuine swap the shorthand `{mayAct}` is
+		// still present — as the tail of `mayManagePolicy={mayAct}` — so the
+		// positive case above is satisfied BY the mutation. Only this sees it.
+		expect(usersAccessCallSite).not.toMatch(/mayAct=\{\$usersAccess\./);
+	});
+
+	it('never lets the role stand in for the reported permission', () => {
+		expect(usersAccessCallSite).not.toContain('mayManagePolicy={mayAct}');
+	});
+
+	it('never passes the addressed team where its policy group belongs', () => {
+		// `teamId` is a team id and `teamGroupId` a group id. The owner's criterion
+		// is membership of the latter, so this swap hides both buttons without
+		// erroring — and reads as "the owner has no policy" rather than as a bug.
+		expect(usersAccessCallSite).not.toContain('teamGroupId={teamId}');
+	});
+
+	it('does not claim that prop and field always share a name', () => {
+		// The counter-example that forces the allow-list, pinned so the reason
+		// given above cannot quietly stop being true.
+		expect(usersAccessCallSite).toContain('truncated={$usersAccess.truncatedUsers}');
 	});
 });
 
