@@ -341,12 +341,17 @@ class TestTheCostIsMeasured:
 
 
 def test_no_route_calls_the_guard_yet():
-    """⚠️ G-C2 delivers the guard and wires it to nothing.
+    """⚠️ Routers go through `authorise_policy_membership_change`, never through this.
 
-    This is what keeps G-C2 and G-C3 apart: a mutation applied to the guard now
-    can only be caught by the tests above, never by a route test that happens to
-    refuse for some other reason. G-C3 is where this test is deleted, by whoever
-    wires it up.
+    Written in G-C2, when nothing called the guard at all, to keep that gate's
+    mutations from being caught by a route refusing for its own reasons. G-C3
+    wired the routes up and the test survived unchanged, because what it pins
+    turned out to be worth keeping permanently:
+
+    the boolean is reachable only through the function that RAISES. A router that
+    imported it directly would write `if not await guard(...)`, and that is one
+    missing `not` away from failing open, on the two routes in this feature that
+    can fail open at all.
     """
     import ast
     import pathlib

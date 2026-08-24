@@ -261,6 +261,32 @@ async def _may_change_policy_membership(
     return not (set(target_user_ids) - members)
 
 
+async def authorise_policy_membership_change(
+    user,
+    group_id: str,
+    target_user_ids: Optional[list],
+    db: Optional[AsyncSession] = None,
+) -> None:
+    """Refuse, or return. The routers call THIS, never the boolean above.
+
+    ⚠️ Raising rather than returning is the whole point, and it is the same
+    reasoning `resolve_dashboard_scope` is written on: a caller cannot forget to
+    check a value it never receives. `if not await guard(...)` is one missing
+    `not` away from failing open, on the two routes in this feature that can
+    fail open at all.
+
+    ⚠️ It does NOT decide what an empty request means. A route that treats an
+    empty body as a no-op has to say so before it gets here — see the short
+    circuits in `routers/groups.py`. Reaching this function with nobody named is
+    a refusal, because there is nothing to authorise.
+
+    `test_no_route_calls_the_guard_yet` in `tests/test_policy_membership_authz.py`
+    is what keeps the boolean out of the routers.
+    """
+    if not await _may_change_policy_membership(user, group_id, target_user_ids, db=db):
+        raise _prohibited()
+
+
 def _prohibited() -> HTTPException:
     """The one refusal this module makes, so all three routes refuse alike.
 

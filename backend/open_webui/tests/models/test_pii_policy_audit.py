@@ -420,7 +420,14 @@ async def _call_membership(action, group_id, user_ids, db_session, audits, group
         return await handler(
             id=group_id,
             form_data=GroupMembershipForm(user_ids=user_ids, reason=reason),
-            user=MagicMock(id="admin-1", email="admin@example.com"),
+            # ⚠️ `role` is load-bearing now, and was not when this was written.
+            #
+            # Both membership routes used to carry `get_admin_user`, so calling
+            # the handler directly skipped the check entirely and the fake user
+            # never needed a role. Level C moved the rule inside the function,
+            # where `admin-1` has to actually BE an admin. The tests below are
+            # unchanged; only the actor they always meant is now spelled out.
+            user=MagicMock(id="admin-1", role="admin", email="admin@example.com"),
             db=db_session,
         )
 

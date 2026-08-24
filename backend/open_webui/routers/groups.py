@@ -35,6 +35,7 @@ from open_webui.models.tools import Tools
 from open_webui.models.users import UserInfoResponse, Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.team_groups import team_group_derived_changes, team_group_kind
+from open_webui.utils.team_scope import authorise_policy_membership_change
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -448,9 +449,26 @@ async def _audit_membership_change(
 async def add_user_to_group(
     id: str,
     form_data: GroupMembershipForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Add people to a group. Admin-wide, or a team owner within their own team.
+
+    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule did not
+    disappear — it moved into `authorise_policy_membership_change`, which is the
+    first thing this function does. Swapping the dependency is the only change in
+    level C that can fail OPEN, so the guard is a named call on the first line
+    rather than a condition folded into something else.
+    """
+    if not form_data.user_ids:
+        # ⚠️ Before the guard and before the audit: no query, no audit row, no
+        # authorisation decision. A request that names nobody changes nothing, so
+        # there is nothing to authorise and nothing to record — and asking the
+        # guard anyway would make an empty body an authorisation event.
+        return None
+
+    await authorise_policy_membership_change(user, id, form_data.user_ids, db=db)
+
     try:
         if form_data.user_ids:
             form_data.user_ids = await Users.get_valid_user_ids(form_data.user_ids, db=db)
@@ -497,9 +515,21 @@ async def add_user_to_group(
 async def remove_users_from_group(
     id: str,
     form_data: GroupMembershipForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Take people out of a group. Same audience, same guard, same ordering.
+
+    ⚠️ Guarded separately from `/users/add`, and tested separately. One guard on
+    one of the two routes looks exactly like a guard on both — until somebody
+    calls the other one.
+    """
+    if not form_data.user_ids:
+        # Before the guard and before the audit. See `add_user_to_group`.
+        return None
+
+    await authorise_policy_membership_change(user, id, form_data.user_ids, db=db)
+
     # Only actual members are a change; asking to remove a non-member removes
     # nothing, and must not leave a record saying otherwise.
     members = set(await Groups.get_group_user_ids_by_id(id, db=db))
