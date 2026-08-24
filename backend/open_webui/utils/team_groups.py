@@ -30,6 +30,41 @@ log = logging.getLogger(__name__)
 TeamGroupKind = Optional[Literal['team_pii', 'team']]
 
 
+async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None) -> Optional[str]:
+    """The id of the team that owns this group, or `None` if no team does.
+
+    The one question `teams.group_id` is asked, and the only place it is read
+    from — `team_group_kind` answers a DIFFERENT question on top of this one, and
+    so does the authorisation guard in `utils/team_scope.py`, which needs the team
+    itself rather than a classification.
+
+    ⚠️ It lives here for a reason a comment cannot express on its own:
+    `tests/test_team_groups.py::test_group_id_is_read_in_exactly_one_module` walks
+    the source for `Team.group_id` attribute access and fails on any reader
+    outside this module. That test is the mechanism; this docstring is only the
+    explanation.
+
+    `teams.group_id` is `UNIQUE`, which is what lets the answer be one id rather
+    than a list.
+
+    ⚠️ Function-local imports below: `models.billing` pulls in `stripe` and the
+    billing tables, and importing that at module scope would make every guard in
+    `models.groups` depend on the billing stack loading cleanly.
+    """
+    if not group_id:
+        # No query at all. An empty id cannot match anything, and a guard that is
+        # about to refuse should not pay for a round trip to find that out.
+        return None
+
+    from open_webui.internal.db import get_async_db_context
+    from open_webui.models.billing import Team
+    from sqlalchemy import select
+
+    async with get_async_db_context(db) as session:
+        result = await session.execute(select(Team.id).filter(Team.group_id == group_id))
+        return result.scalars().first()
+
+
 async def team_group_kind(group_id: str, db: Optional[AsyncSession] = None) -> TeamGroupKind:
     """What kind of team group this is, or `None` if it is not one.
 
@@ -47,25 +82,13 @@ async def team_group_kind(group_id: str, db: Optional[AsyncSession] = None) -> T
         ``None`` — every other group: custom policy groups, the global policy
         group, and groups with no policy at all.
 
-    ⚠️ Function-local imports below: `models.billing` pulls in `stripe` and the
-    billing tables, and importing that at module scope would make every guard in
-    `models.groups` depend on the billing stack loading cleanly.
+    ⚠️ Asks `team_owning_group_id` rather than querying itself. Two functions, one
+    read: this one classifies, that one looks up. The structural test would not
+    notice a second query written here — both functions live in this module — so
+    `test_team_group_kind_asks_the_owner_lookup` covers it behaviourally instead,
+    by patching the lookup and checking that this function changes its mind.
     """
-    if not group_id:
-        return None
-
-    from open_webui.internal.db import get_async_db_context
-    from open_webui.models.billing import Team
-    from sqlalchemy import select
-
-    async with get_async_db_context(db) as session:
-        result = await session.execute(select(Team.id).filter(Team.group_id == group_id))
-        team_id = result.scalars().first()
-
-    if team_id is None:
-        return None
-
-    return 'team_pii'
+    return None if await team_owning_group_id(group_id, db=db) is None else 'team_pii'
 
 
 #: Exactly the key the group exists for, and nothing else. The sparseness is

@@ -24,7 +24,7 @@ sys.modules.setdefault("stripe", MagicMock())
 
 from open_webui.models.billing import Team
 from open_webui.models.groups import Group
-from open_webui.utils.team_groups import team_group_kind
+from open_webui.utils.team_groups import team_group_kind, team_owning_group_id
 
 
 TEAM_GROUP = "g-team-pii"
@@ -237,3 +237,84 @@ def test_group_id_is_read_in_exactly_one_module():
                 readers.add(str(path.relative_to(root)))
 
     assert readers == {"utils/team_groups.py"}, sorted(readers)
+
+
+# ---------------------------------------------------------------------------
+# G-C1 — the lookup underneath the classification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_owner_lookup_returns_the_team(bound):
+    """The guard in `utils/team_scope.py` needs the TEAM, not a classification.
+
+    `team_group_kind` throws the id away — deliberately, because its callers only
+    ask "is this a team's group". Authorisation asks "which team", and then
+    "whose", so it needs the value the classifier discards.
+    """
+    assert await team_owning_group_id(TEAM_GROUP) == "t1"
+
+
+@pytest.mark.asyncio
+async def test_the_owner_lookup_is_none_when_no_team_claims_the_group(bound):
+    """Enforcing and named like a team group; still owned by nobody."""
+    assert await team_owning_group_id(CUSTOM_GROUP) is None
+    assert await team_owning_group_id(GLOBAL_GROUP) is None
+    assert await team_owning_group_id("g-does-not-exist") is None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_group_id_costs_no_query():
+    """⚠️ Not "returns None" — that is the test above. This is "opens no session".
+
+    The authorisation guard calls this before refusing, and a refusal should not
+    pay for a round trip to learn that an empty id matches nothing. Proved by
+    making the session context explode: if it is ever entered, the test fails
+    rather than quietly passing on the right answer for the wrong reason.
+    """
+
+    @asynccontextmanager
+    async def _explodes(db=None):
+        raise AssertionError("team_owning_group_id opened a session for an empty id")
+        yield  # pragma: no cover — unreachable, keeps this a generator
+
+    with patch("open_webui.internal.db.get_async_db_context", _explodes):
+        assert await team_owning_group_id("") is None
+        assert await team_owning_group_id(None) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "group_id,expected",
+    [(TEAM_GROUP, "team_pii"), (CUSTOM_GROUP, None), (GLOBAL_GROUP, None), ("", None)],
+)
+async def test_the_classification_is_unchanged_by_the_extraction(bound, group_id, expected):
+    """G-C1 is a refactor. Every answer `team_group_kind` gave before, it still gives."""
+    assert await team_group_kind(group_id) == expected
+
+
+@pytest.mark.asyncio
+async def test_team_group_kind_asks_the_owner_lookup(bound):
+    """⚠️ Both directions, because one direction is not enough.
+
+    The structural test cannot see this: `team_group_kind` and
+    `team_owning_group_id` live in the SAME module, so a second query written
+    inside the classifier reads `Team.group_id` from a module that is already
+    allowed to. Patching the lookup is the only thing that distinguishes "asks"
+    from "happens to agree".
+
+    Checking only the None direction would pass for a classifier that had grown
+    its own query and returned None for everything.
+    """
+
+    async def _claims_everything(group_id, db=None):
+        return "t-somebody"
+
+    async def _claims_nothing(group_id, db=None):
+        return None
+
+    with patch("open_webui.utils.team_groups.team_owning_group_id", _claims_everything):
+        assert await team_group_kind(CUSTOM_GROUP) == "team_pii"
+
+    with patch("open_webui.utils.team_groups.team_owning_group_id", _claims_nothing):
+        assert await team_group_kind(TEAM_GROUP) is None
