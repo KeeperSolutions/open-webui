@@ -417,13 +417,16 @@
 						<tr class="border-b border-pii-line">
 							{#each COLUMNS as col}
 								{#if col.key === null}
-									<th scope="col" class="px-2.5 py-2 text-[11px] font-semibold text-pii-muted">
+									<th
+										scope="col"
+										class="px-2.5 py-2 text-[11px] font-semibold whitespace-nowrap text-pii-muted"
+									>
 										{$i18n.t(col.label)}
 									</th>
 								{:else}
 									<th
 										scope="col"
-										class="cursor-pointer px-2.5 py-2 text-[11px] font-semibold text-pii-muted select-none"
+										class="cursor-pointer px-2.5 py-2 text-[11px] font-semibold whitespace-nowrap text-pii-muted select-none"
 										on:click={() => setSortKey(col.key)}
 									>
 										<div class="flex items-center gap-1.5">
@@ -458,22 +461,38 @@
 							     Account is the trailing column, so it is right-aligned instead —
 							     header and button both end on the cell's right edge. Same rule,
 							     mirrored. -->
-							<th scope="col" class="px-2.5 py-2 text-[11px] font-semibold text-pii-muted">
-								{$i18n.t('Policy group')}
-							</th>
 							<th
 								scope="col"
-								class="px-2.5 py-2 text-right text-[11px] font-semibold text-pii-muted"
+								class="px-2.5 py-2 text-[11px] font-semibold whitespace-nowrap text-pii-muted"
 							>
-								{$i18n.t('Account')}
+								{$i18n.t('Policy group')}
 							</th>
+							<!--
+								⚠️ The whole column, not only the button inside it. `Manage` is the
+								column's only content, so for a viewer who may not act the header
+								stood over 65px of empty cells — a column that names something the
+								reader has no way to reach, in the one view built to show them less.
+								Measured on the team board before it was made conditional.
+							-->
+							{#if mayAct}
+								<th
+									scope="col"
+									class="px-2.5 py-2 text-right text-[11px] font-semibold whitespace-nowrap text-pii-muted"
+								>
+									{$i18n.t('Account')}
+								</th>
+							{/if}
 						</tr>
 					</thead>
 					<tbody>
 						{#each paged as row (row.id)}
 							<!-- Declared here rather than in the cell that uses it: {@const} must
 							     be the immediate child of a block. -->
-							{@const action = rowActionFor(row, { naming: policyGroups, targets: enforceTargets }, { mayAct, teamGroupId, mayManagePolicy })}
+							{@const action = rowActionFor(
+								row,
+								{ naming: policyGroups, targets: enforceTargets },
+								{ mayAct, teamGroupId, mayManagePolicy }
+							)}
 							<tr class="border-b border-pii-line last:border-b-0">
 								<td class="px-2.5 py-2.5 align-middle">
 									<div class="flex flex-col items-start gap-[3px]">
@@ -484,7 +503,15 @@
 										>
 									</div>
 								</td>
-								<td class="px-2.5 py-2.5 align-middle text-pii-ink">
+								<!-- ⚠️ `whitespace-nowrap` here and on every header above, because
+								     `html { word-break: break-word }` (`src/app.css:40`) is app-wide:
+								     once a long value in Policy group squeezes this column, "Admin"
+								     breaks as "Admi/n" and the headers as "Rol/e" and "Cos/t".
+								     Measured on the admin board with somebody in two policy groups.
+								     The global rule is left alone — it is there for long URLs in
+								     chat — and `overflow-x-auto` on the wrapper is what absorbs the
+								     extra width on a narrow screen. -->
+								<td class="px-2.5 py-2.5 align-middle whitespace-nowrap text-pii-ink">
 									{$i18n.t(ROLE_LABELS[row.role] ?? row.role)}
 								</td>
 								<td
@@ -661,8 +688,9 @@
 										</span>
 									{/if}
 								</td>
-								<td class="px-2.5 py-2.5 text-right align-middle">
-									<!--
+								{#if mayAct}
+									<td class="px-2.5 py-2.5 text-right align-middle">
+										<!--
 										⚠️ Only for a viewer who may act. The destination lives under
 										`/admin`, whose layout redirects anyone without the role — so
 										for everyone else this button leads out of the app.
@@ -680,15 +708,14 @@
 										the stub, which redirected forward again. The dashboard became
 										unreachable by Back. Same destination, one entry.
 									-->
-									{#if mayAct}
 										<Button
 											on:click={() =>
 												goto(`/admin/users/overview?highlight=${encodeURIComponent(row.id)}`)}
 										>
 											{$i18n.t('Manage')}
 										</Button>
-									{/if}
-								</td>
+									</td>
+								{/if}
 							</tr>
 						{/each}
 					</tbody>
@@ -716,9 +743,13 @@
 									{formatCostDisplay(unattributed)}
 								</td>
 								<!-- No policy action and no Manage button: there is no account
-								     here to put in a group, let alone to manage. -->
+								     here to put in a group, let alone to manage. The second cell
+								     follows the header: a column that is not drawn must not be
+								     padded for here either, or the footer runs one cell wide. -->
 								<td class="px-2.5 py-2.5"></td>
-								<td class="px-2.5 py-2.5"></td>
+								{#if mayAct}
+									<td class="px-2.5 py-2.5"></td>
+								{/if}
 							</tr>
 						</tfoot>
 					{/if}
@@ -797,32 +828,35 @@
 						-->
 						{pending.mode === 'enforce'
 							? $i18n.t(
-								"{{name}} will be added to your team's policy and will no longer be able to turn PII masking off.",
-								{ name: pending.row.name }
-							)
+									"{{name}} will be added to your team's policy and will no longer be able to turn PII masking off.",
+									{ name: pending.row.name }
+								)
 							: pending.maskedElsewhere
 								? $i18n.t(
-									"{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.",
-									{ name: pending.row.name }
-								)
+										"{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.",
+										{ name: pending.row.name }
+									)
 								: $i18n.t(
-									"{{name}} will be removed from your team's policy and will be able to turn PII masking off again.",
-									{ name: pending.row.name }
-								)}
+										"{{name}} will be removed from your team's policy and will be able to turn PII masking off again.",
+										{ name: pending.row.name }
+									)}
 					{:else}{pending.mode === 'enforce'
-						? $i18n.t(
-								'{{name}} will be added to the group and will no longer be able to turn PII masking off.',
-								{ name: pending.row.name }
-							)
-						: pending.targets[0]?.isTeamGroup
 							? $i18n.t(
-									'{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.',
-									{ name: pending.row.name, group: pending.targets[0]?.name ?? $i18n.t('Unknown group') }
-								)
-							: $i18n.t(
-									'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
+									'{{name}} will be added to the group and will no longer be able to turn PII masking off.',
 									{ name: pending.row.name }
-								)}{/if}
+								)
+							: pending.targets[0]?.isTeamGroup
+								? $i18n.t(
+										'{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.',
+										{
+											name: pending.row.name,
+											group: pending.targets[0]?.name ?? $i18n.t('Unknown group')
+										}
+									)
+								: $i18n.t(
+										'{{name}} will be removed from the group and will be able to turn PII masking off again. They also lose everything else that group grants.',
+										{ name: pending.row.name }
+									)}{/if}
 				</p>
 
 				{#if pending.teamPolicy}
@@ -856,9 +890,7 @@
 						{$i18n.t('Group')}:
 						<!-- ⚠️ Never `?? pending.groupId`. That printed a raw UUID at exactly
 						     the moment an admin was deciding whether to act. -->
-						<span class="text-pii-ink"
-							>{pending.targets[0]?.name ?? $i18n.t('Unknown group')}</span
-						>
+						<span class="text-pii-ink">{pending.targets[0]?.name ?? $i18n.t('Unknown group')}</span>
 					</div>
 				{/if}
 

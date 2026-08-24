@@ -67,6 +67,64 @@ describe('UsersAccess — a viewer who may not act', () => {
 		expect(screen.queryByText('Manage')).not.toBeNull();
 	});
 
+	it('draws no Account column at all', () => {
+		// ⚠️ The header, not only the button. `Manage` is the column's ONLY
+		// content, so hiding the button alone left a labelled 65px of empty cells
+		// — measured on the team board — naming a destination the reader cannot
+		// reach, in the one view built to show them less.
+		const { container } = mount({ mayAct: false });
+		const headers = [...container.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
+		expect(headers).not.toContain('Account');
+	});
+
+	it('draws the Account column for a viewer who may act', () => {
+		const { container } = mount({ mayAct: true });
+		const headers = [...container.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
+		expect(headers).toContain('Account');
+	});
+
+	it('keeps every row as wide as the header', () => {
+		// A conditional header and an unconditional cell is the other half of the
+		// same bug, and it renders as a table that looks fine until the last
+		// column silently shifts under the wrong label.
+		for (const mayAct of [false, true]) {
+			const { container } = mount({ mayAct });
+			const headerCount = container.querySelectorAll('thead th').length;
+			for (const row of container.querySelectorAll('tbody tr')) {
+				expect(row.querySelectorAll('td').length, `mayAct=${mayAct}`).toBe(headerCount);
+			}
+		}
+	});
+
+	it('keeps the unattributed footer as wide as the header', () => {
+		// The footer is a hand-written row of <td>s, so it does not follow the
+		// header on its own — it is the cell most likely to be left behind.
+		for (const mayAct of [false, true]) {
+			const { container } = mount({
+				mayAct,
+				metricRows: [{ user: 'nobody@x.com', cost: 4.2 }]
+			});
+			const headerCount = container.querySelectorAll('thead th').length;
+			const foot = container.querySelector('tfoot tr');
+			expect(foot, `no footer rendered for mayAct=${mayAct}`).not.toBeNull();
+			expect(foot!.querySelectorAll('td').length, `mayAct=${mayAct}`).toBe(headerCount);
+		}
+	});
+
+	it('never lets a header or the role break mid-word', () => {
+		// ⚠️ Structural, because jsdom does no layout: the defect is that
+		// `html { word-break: break-word }` (`src/app.css:40`, app-wide) turns a
+		// squeezed column into "Rol/e", "Cos/t" and "Admi/n". Measured in a real
+		// browser on the admin board with somebody in two policy groups — which is
+		// what makes the Policy group column wide enough to squeeze the rest.
+		const { container } = mount({ mayAct: true });
+		for (const th of container.querySelectorAll('thead th')) {
+			expect(th.className, `header "${th.textContent?.trim()}"`).toContain('whitespace-nowrap');
+		}
+		const roleCell = container.querySelector('tbody tr td:nth-child(2)');
+		expect(roleCell?.className).toContain('whitespace-nowrap');
+	});
+
 	it('does not claim an unmasked person is enforced instance-wide', () => {
 		mount({ mayAct: false });
 		expect(screen.queryByText('Enforced instance-wide')).toBeNull();
