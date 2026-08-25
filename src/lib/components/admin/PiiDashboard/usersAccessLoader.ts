@@ -5,6 +5,7 @@ import { describeLoadError } from './sections/costAnalytics';
 import {
 	policyGroupsOf,
 	enforceTargetsOf,
+	broadPolicyGroupCount,
 	teamOnlyPolicyGroupCount,
 	type AccessUser,
 	type GroupRecord,
@@ -42,6 +43,8 @@ export type UsersAccessState = {
 	enforceTargets: PolicyGroup[];
 	/** Enforcing groups excluded because they belong to a team — see the empty state. */
 	teamOnlyPolicyGroups: number;
+	/** Enforcing groups excluded for granting more than masking — see the empty state. */
+	broadPolicyGroups: number;
 	/** The addressed team's own policy group, or `null` — see `rowActionFor`. */
 	teamGroupId: string | null;
 	/** Whether the viewer may change who is in that group. Server-computed. */
@@ -91,6 +94,7 @@ const INITIAL: UsersAccessState = {
 	policyGroups: [],
 	enforceTargets: [],
 	teamOnlyPolicyGroups: 0,
+	broadPolicyGroups: 0,
 	teamGroupId: null,
 	mayManagePolicy: false,
 	truncatedUsers: null,
@@ -138,6 +142,7 @@ export function createUsersAccessLoader(
 			policyGroups: [],
 			enforceTargets: [],
 			teamOnlyPolicyGroups: 0,
+			broadPolicyGroups: 0,
 			teamGroupId: null,
 			mayManagePolicy: false,
 			truncatedUsers: null
@@ -234,6 +239,7 @@ export function createUsersAccessLoader(
 				policyGroups: policyGroupsOf(groups),
 				enforceTargets: enforceTargetsOf(groups),
 				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
+				broadPolicyGroups: broadPolicyGroupCount(groups),
 				teamGroupId,
 				mayManagePolicy,
 				truncatedUsers: usersResult.truncated,

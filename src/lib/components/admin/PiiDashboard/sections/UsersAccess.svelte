@@ -64,6 +64,13 @@
 	 */
 	export let teamOnlyPolicyGroups = 0;
 	/**
+	 * Enforcing groups kept out of the destination list for granting more than
+	 * masking. The third cause of an empty list, and the one most likely to be
+	 * read as a broken screen — the group is visible in Groups and carries the
+	 * policy, and is still not offered.
+	 */
+	export let broadPolicyGroups = 0;
+	/**
 	 * The addressed team's own policy group, or `null`.
 	 *
 	 * ⚠️ One id, and it is the team the viewer already opened. Decision 5 forbids
@@ -617,20 +624,28 @@
 									{:else if action.kind === 'enforce'}
 										{#if action.targets.length === 0}
 											<!--
-												Two causes, two sentences. Once every team carries its own
+												Three causes, three sentences. Once every team carries its own
 												policy group, "nothing enforces masking" stops being the
 												reason the list is empty — and the old sentence starts
 												telling an admin to switch on something they already did.
+
+												⚠️ The broad-group cause is named FIRST when both apply: it
+												is the one the admin can act on, and the one that otherwise
+												reads as the screen having lost a group it can plainly see.
 											-->
 											<span
 												class="text-[12px] text-pii-muted"
-												title={teamOnlyPolicyGroups > 0
+												title={broadPolicyGroups > 0
 													? $i18n.t(
-															"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions."
+															'The groups that enforce PII masking also grant other permissions, so they are not offered here — joining one would hand over everything else it grants. Create a group whose only permission is PII masking, in Admin → Users → Groups.'
 														)
-													: $i18n.t(
-															'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.'
-														)}
+													: teamOnlyPolicyGroups > 0
+														? $i18n.t(
+																"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions."
+															)
+														: $i18n.t(
+																'No group enforces PII masking yet. Turn it on for a group in Admin → Users → Groups → Permissions first.'
+															)}
 											>
 												{$i18n.t('No policy group')}
 											</span>

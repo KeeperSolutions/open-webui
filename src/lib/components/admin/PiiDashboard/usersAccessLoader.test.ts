@@ -68,6 +68,9 @@ describe('createUsersAccessLoader', () => {
 			// Enforcing groups excluded for belonging to a team — the empty state
 			// needs it to tell its two causes apart.
 			teamOnlyPolicyGroups: 0,
+			// Enforcing groups excluded for granting more than masking — the same
+			// question as above, asked of a different exclusion.
+			broadPolicyGroups: 0,
 			// The addressed team's own policy group; `null` until a scoped load lands.
 			teamGroupId: null,
 			mayManagePolicy: false,
@@ -507,9 +510,12 @@ describe('the dashboard hands each list to the prop of the same name', () => {
 	 * through (`truncated` reads `truncatedUsers`), so a blanket rule would be
 	 * false.
 	 */
-	it.each(['policyGroups', 'enforceTargets'])('passes %s from the field of that name', (prop) => {
-		expect(dashboardSource).toContain(`${prop}={$usersAccess.${prop}}`);
-	});
+	it.each(['policyGroups', 'enforceTargets', 'broadPolicyGroups'])(
+		'passes %s from the field of that name',
+		(prop) => {
+			expect(dashboardSource).toContain(`${prop}={$usersAccess.${prop}}`);
+		}
+	);
 
 	it('never feeds the naming list to the destination prop', () => {
 		expect(dashboardSource).not.toContain('enforceTargets={$usersAccess.policyGroups}');

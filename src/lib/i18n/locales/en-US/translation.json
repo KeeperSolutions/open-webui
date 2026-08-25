@@ -2053,6 +2053,7 @@
 	"The developers behind this plugin are passionate volunteers from the community. If you find this plugin helpful, please consider contributing to its development.": "",
 	"The evaluation leaderboard is based on the Elo rating system and is updated in real-time.": "",
 	"The format to return a response in. Format can be json or a JSON schema.": "",
+	"The groups that enforce PII masking also grant other permissions, so they are not offered here — joining one would hand over everything else it grants. Create a group whose only permission is PII masking, in Admin → Users → Groups.": "",
 	"The height in pixels to compress images to. Leave empty for no compression.": "",
 	"The language of the input audio. Supplying the input language in ISO-639-1 (e.g. en) format will improve accuracy and latency. Leave blank to automatically detect the language.": "",
 	"The leaderboard is currently in beta, and we may adjust the rating calculations as we refine the algorithm.": "",

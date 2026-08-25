@@ -179,7 +179,10 @@ describe('the empty destination list explains itself', () => {
 	const NEW =
 		"Only team policy groups enforce PII masking, and a team's group cannot be used here. Create a group in Admin → Users → Groups, then turn on PII masking in its Permissions.";
 
-	const mountEmpty = (teamOnlyPolicyGroups: number) =>
+	const BROAD =
+		'The groups that enforce PII masking also grant other permissions, so they are not offered here — joining one would hand over everything else it grants. Create a group whose only permission is PII masking, in Admin → Users → Groups.';
+
+	const mountEmpty = (teamOnlyPolicyGroups: number, broadPolicyGroups = 0) =>
 		render(UsersAccess, {
 			props: {
 				users: [account()],
@@ -190,7 +193,8 @@ describe('the empty destination list explains itself', () => {
 				policyGroups: [],
 				enforceTargets: [],
 				mayAct: true,
-				teamOnlyPolicyGroups
+				teamOnlyPolicyGroups,
+				broadPolicyGroups
 			},
 			context: new Map([['i18n', i18n]])
 		});
@@ -198,6 +202,29 @@ describe('the empty destination list explains itself', () => {
 	it('says nothing enforces masking when nothing does', () => {
 		mountEmpty(0);
 		expect(screen.getByTitle(OLD)).toBeTruthy();
+	});
+
+	it('says the enforcing groups grant too much when they do', () => {
+		// ⚠️ Without this the screen simply drops a group the admin can see in
+		// Groups, carrying the policy, with no explanation — which reads as the
+		// feature being broken rather than as a deliberate exclusion.
+		mountEmpty(0, 1);
+		expect(screen.getByTitle(BROAD)).toBeTruthy();
+	});
+
+	it('names the broad-group cause first when both apply', () => {
+		// Both are true at once on any instance that has a team AND a wide group.
+		// The broad one wins because it is the one an admin can act on.
+		mountEmpty(1, 1);
+		expect(screen.getByTitle(BROAD)).toBeTruthy();
+		expect(screen.queryByTitle(NEW)).toBeNull();
+	});
+
+	it('keeps the team-group sentence when only that cause applies', () => {
+		// The mirror of the case above: the new branch must not swallow the old one.
+		mountEmpty(1, 0);
+		expect(screen.getByTitle(NEW)).toBeTruthy();
+		expect(screen.queryByTitle(BROAD)).toBeNull();
 	});
 
 	it('says the enforcing groups are team groups when they are', () => {

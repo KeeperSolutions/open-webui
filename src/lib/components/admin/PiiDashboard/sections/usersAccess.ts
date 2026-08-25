@@ -34,11 +34,17 @@ export type AccessUser = {
  */
 export type PolicyGroup = { id: string; name: string | null; isTeamGroup: boolean };
 
+/**
+ * One group's permission tree, as stored. Arbitrarily nested, values may be
+ * anything — only `true` is read, and only as "this group grants that".
+ */
+export type PermissionTree = { [key: string]: unknown };
+
 /** The shape of a group as `GET /groups/` returns it, narrowed to what is read. */
 export type GroupRecord = {
 	id: string;
 	name?: string;
-	permissions?: { chat?: { pii_masking_enforced?: boolean } } | null;
+	permissions?: PermissionTree | null;
 	/**
 	 * A team's own policy group, per `GET /groups/`.
 	 *
@@ -48,6 +54,45 @@ export type GroupRecord = {
 	 */
 	is_team_group?: boolean;
 };
+
+/** The one key that carries the policy. Spelled once. */
+const MASKING_PATH = ['chat', 'pii_masking_enforced'] as const;
+
+/** Does this group carry the policy at all. */
+export function enforcesMasking(permissions: GroupRecord['permissions']): boolean {
+	const chat = (permissions ?? {})[MASKING_PATH[0]];
+	return (
+		typeof chat === 'object' && chat !== null && (chat as PermissionTree)[MASKING_PATH[1]] === true
+	);
+}
+
+/** Every permission this group switches ON, as dotted paths. */
+function grantedPaths(permissions: GroupRecord['permissions'], prefix = ''): string[] {
+	const out: string[] = [];
+	for (const [key, value] of Object.entries(permissions ?? {})) {
+		if (value === true) out.push(prefix + key);
+		else if (typeof value === 'object' && value !== null)
+			out.push(...grantedPaths(value as PermissionTree, `${prefix}${key}.`));
+	}
+	return out;
+}
+
+/**
+ * Does this group grant masking AND NOTHING ELSE.
+ *
+ * ⚠️ Group permissions merge with OR, so joining a group hands over everything
+ * it switches on. `Enforce` is worded as protection — "this person can no longer
+ * turn masking off" — and must not also be a door for handing out web search,
+ * the code interpreter or anyone else's data. A group that grants more is still
+ * a perfectly good group; it is just the wrong destination for THIS action.
+ *
+ * Only `true` counts. A permission set to `false` grants nothing, and the stored
+ * tree is full of them.
+ */
+export function grantsOnlyMasking(permissions: GroupRecord['permissions']): boolean {
+	const granted = grantedPaths(permissions);
+	return granted.length === 1 && granted[0] === MASKING_PATH.join('.');
+}
 
 /**
  * Every group that enforces masking — the list used to NAME a source.
@@ -69,7 +114,7 @@ export type GroupRecord = {
  */
 export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 	return groups
-		.filter((g) => g?.permissions?.chat?.pii_masking_enforced === true)
+		.filter((g) => enforcesMasking(g?.permissions))
 		.map((g) => ({
 			id: g.id,
 			name: g.name || null,
@@ -80,12 +125,23 @@ export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 /**
  * The groups an admin can enforce THROUGH — destinations, not names.
  *
- * A team's group is excluded: it belongs to that team, its membership follows
- * the team, and sending an unrelated person into it would make the team's own
- * policy mean something else.
+ * Two exclusions, for two different reasons:
+ *
+ *   * **a team's own group** — it belongs to that team, its membership follows
+ *     the team, and sending an unrelated person into it would make the team's
+ *     own policy mean something else
+ *   * **a group that grants anything besides masking** — see `grantsOnlyMasking`
+ *
+ * ⚠️ Neither exclusion touches `policyGroupsOf`. A group that is a bad
+ * destination is still the honest ANSWER to "what is masking this person", and
+ * conflating the two lists is exactly the defect that once printed a raw UUID in
+ * front of an admin deciding whether to act.
  */
 export function enforceTargetsOf(groups: GroupRecord[]): PolicyGroup[] {
-	return policyGroupsOf(groups).filter((g) => !g.isTeamGroup);
+	const byId = new Map(groups.map((g) => [g.id, g]));
+	return policyGroupsOf(groups).filter(
+		(g) => !g.isTeamGroup && grantsOnlyMasking(byId.get(g.id)?.permissions)
+	);
 }
 
 /**
@@ -118,8 +174,22 @@ function namedGroup(id: string, byId: Map<string, PolicyGroup>): PolicyGroup {
  * turn on something they already turned on.
  */
 export function teamOnlyPolicyGroupCount(groups: GroupRecord[]): number {
+	return groups.filter((g) => enforcesMasking(g?.permissions) && g?.is_team_group === true).length;
+}
+
+/**
+ * Enforcing groups kept out of the destination list for granting other things.
+ *
+ * The third cause of an empty destination list, and the only one an admin can
+ * mistake for the feature being broken: the group is right there in Groups, it
+ * carries the policy, and it is not offered.
+ */
+export function broadPolicyGroupCount(groups: GroupRecord[]): number {
 	return groups.filter(
-		(g) => g?.permissions?.chat?.pii_masking_enforced === true && g?.is_team_group === true
+		(g) =>
+			enforcesMasking(g?.permissions) &&
+			g?.is_team_group !== true &&
+			!grantsOnlyMasking(g?.permissions)
 	).length;
 }
 

@@ -141,6 +141,7 @@
 			policyGroups={$usersAccess.policyGroups}
 			enforceTargets={$usersAccess.enforceTargets}
 			teamOnlyPolicyGroups={$usersAccess.teamOnlyPolicyGroups}
+			broadPolicyGroups={$usersAccess.broadPolicyGroups}
 			teamGroupId={$usersAccess.teamGroupId}
 			mayManagePolicy={$usersAccess.mayManagePolicy}
 			loading={usersLoading}

@@ -18,7 +18,9 @@ import {
 	rowActionFor,
 	type AccessUser,
 	type PolicyGroup,
-	teamOnlyPolicyGroupCount
+	teamOnlyPolicyGroupCount,
+	grantsOnlyMasking,
+	broadPolicyGroupCount
 } from './usersAccess';
 
 const row = (user: string, cost: number, model = 'gpt-4', tokens = 10): MetricRow => ({
@@ -806,6 +808,113 @@ describe('policyGroupsOf — a team group is not an enforce destination', () => 
 
 	it('still ignores groups that do not enforce at all', () => {
 		expect(policyGroupsOf([{ id: 'plain', name: 'plain', permissions: {} }])).toEqual([]);
+	});
+});
+
+describe('grantsOnlyMasking', () => {
+	it('accepts a group whose only permission is masking', () => {
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true } })).toBe(true);
+	});
+
+	it('accepts one carrying other permissions that are OFF', () => {
+		// ⚠️ The stored tree is mostly `false`. A permission set to false grants
+		// nothing, so counting keys instead of values would reject every real group.
+		expect(
+			grantsOnlyMasking({
+				chat: { pii_masking_enforced: true, file_upload: false, temporary_enforced: false },
+				features: { web_search: false }
+			})
+		).toBe(true);
+	});
+
+	it('rejects one that also switches something else on', () => {
+		expect(
+			grantsOnlyMasking({ chat: { pii_masking_enforced: true }, features: { web_search: true } })
+		).toBe(false);
+	});
+
+	it('rejects one that grants something else in the SAME branch', () => {
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, file_upload: true } })).toBe(
+			false
+		);
+	});
+
+	it('rejects a group that grants nothing at all', () => {
+		expect(grantsOnlyMasking({})).toBe(false);
+		expect(grantsOnlyMasking(null)).toBe(false);
+		expect(grantsOnlyMasking(undefined)).toBe(false);
+	});
+
+	it('rejects one that grants only something else', () => {
+		expect(grantsOnlyMasking({ features: { web_search: true } })).toBe(false);
+	});
+
+	it('does not count a truthy non-boolean as a grant', () => {
+		// Only `true` is a grant. A count, a string or an object is configuration.
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true }, limits: { seats: 5 } })).toBe(
+			true
+		);
+	});
+});
+
+describe('enforceTargetsOf — a group that grants more is not a destination', () => {
+	const masking = { chat: { pii_masking_enforced: true } };
+	const broad = { chat: { pii_masking_enforced: true }, features: { web_search: true } };
+
+	it('offers only the single-purpose group', () => {
+		const out = enforceTargetsOf([
+			{ id: 'dedicated', name: 'PII Masking Policy', permissions: masking },
+			{ id: 'wide', name: 'Proba spajanja', permissions: broad }
+		]);
+		expect(out.map((g) => g.id)).toEqual(['dedicated']);
+	});
+
+	it('⚠️ but policyGroupsOf KEEPS the broad one, because naming is not a destination', () => {
+		/**
+		 * Somebody masked by the wide group must still be nameable in the admin's
+		 * Remove dialog. Applying a DESTINATION filter to the NAMING list is the
+		 * defect the two-list split exists to prevent, and this is the second
+		 * exclusion arriving at the same fork.
+		 */
+		const out = policyGroupsOf([
+			{ id: 'dedicated', name: 'PII Masking Policy', permissions: masking },
+			{ id: 'wide', name: 'Proba spajanja', permissions: broad }
+		]);
+		expect(out.map((g) => g.id)).toEqual(['dedicated', 'wide']);
+	});
+
+	it('can leave the list empty, which is a real state', () => {
+		expect(enforceTargetsOf([{ id: 'wide', permissions: broad }])).toEqual([]);
+	});
+
+	it('still excludes a team group even when it grants only masking', () => {
+		// The two exclusions are independent; neither may shadow the other.
+		expect(enforceTargetsOf([{ id: 'team', permissions: masking, is_team_group: true }])).toEqual(
+			[]
+		);
+	});
+});
+
+describe('broadPolicyGroupCount — the third reason the list is empty', () => {
+	const masking = { chat: { pii_masking_enforced: true } };
+	const broad = { chat: { pii_masking_enforced: true }, features: { web_search: true } };
+
+	it('counts enforcing groups excluded for granting more', () => {
+		expect(broadPolicyGroupCount([{ id: 'w', permissions: broad }])).toBe(1);
+	});
+
+	it('does not count the single-purpose one', () => {
+		expect(broadPolicyGroupCount([{ id: 'd', permissions: masking }])).toBe(0);
+	});
+
+	it('does not count a group that does not enforce at all', () => {
+		expect(
+			broadPolicyGroupCount([{ id: 'p', permissions: { features: { web_search: true } } }])
+		).toBe(0);
+	});
+
+	it('does not count a team group — that cause has its own counter', () => {
+		expect(broadPolicyGroupCount([{ id: 't', permissions: broad, is_team_group: true }])).toBe(0);
 	});
 });
 
