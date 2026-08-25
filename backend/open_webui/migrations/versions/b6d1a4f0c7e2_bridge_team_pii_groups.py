@@ -33,7 +33,7 @@ Three properties are what make that acceptable:
     the point above safe as well: the groups this migration creates all carry the
     flag, so a flag-based criterion would start eating its own output.
 
-O-5: people who are in the seeded group and in NO team stay exactly where they
+People who are in the seeded group and in NO team stay exactly where they
 are. The seeded group keeps its meaning — it is the policy for people a team does
 not cover.
 
@@ -123,7 +123,8 @@ def _audit_row(event_type, group_id, user_id, reason, now):
     # Every raw insert goes through the model's own validator first. A raw
     # `INSERT` otherwise skips the invariants entirely, and this migration writes
     # two rows per member where the precedent wrote one — the exposure is an
-    # order of magnitude larger, which is why G-B5 extracted the validator.
+    # order of magnitude larger, which is why the validator was extracted
+    # rather than left inline in the model.
     from open_webui.models.pii_policy_audit import validate_pii_policy_event
 
     validate_pii_policy_event(

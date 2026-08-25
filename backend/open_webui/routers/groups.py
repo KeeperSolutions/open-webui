@@ -283,7 +283,7 @@ async def update_group_by_id(
             # taken above, before anything is written, so what is left here is a
             # database failure. Kept, and still logged loudly, because the
             # alternative — auditing after the fact — is a policy change with no
-            # record at all (D-6).
+            # record at all.
             log.error(
                 f'PII policy audit recorded {event_type} for group {id} but the update failed; '
                 f'the audit log now claims a change that did not happen.'

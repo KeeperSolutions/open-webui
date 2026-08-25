@@ -1068,7 +1068,7 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
             # so creating a team still changes nobody's protection.
             #
             # ⚠️ Best-effort ON PURPOSE, and only because it is idempotent: this
-            # route cannot make the team and the group atomic (N-6), so a failure
+            # route cannot make the team and the group atomic, so a failure
             # here must not lose the team. The group is created on first read
             # instead — see `ensure_team_pii_group`.
             try:

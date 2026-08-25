@@ -87,10 +87,10 @@ async def team_ownership_of_group(
 async def team_owning_group_id(group_id: str, db: Optional[AsyncSession] = None) -> Optional[str]:
     """Just the team id, for callers that have no business with the owner.
 
-    ⚠️ A wrapper rather than its own query. G-C1 made this the lookup; G-C2 showed
-    that authorisation needs a second field off the same row, so the query moved
-    down one level and this stayed as the narrow answer. Nothing G-C1 asserted
-    about it stopped being true — `test_team_group_kind_asks_the_owner_lookup`
+    ⚠️ A wrapper rather than its own query. This was the lookup until
+    authorisation turned out to need a second field off the same row, so the
+    query moved down one level and this stayed as the narrow answer. Nothing
+    asserted about it stopped being true — `test_team_group_kind_asks_the_owner_lookup`
     still pins the classifier to it.
     """
     ownership = await team_ownership_of_group(group_id, db=db)
@@ -214,7 +214,7 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
     guarantee it happened together with the team — it cannot: the team is
     committed in its own transaction before anything else runs, session sharing
     is off by default (`env.py:356`), and the model methods commit internally.
-    That is N-6, it has its own ticket, and when it is fixed this call moves into
+    That has its own ticket, and when it is fixed this call moves into
     `create_team` and nothing else changes.
 
     ⚠️ **Reads before it writes, every time.** The dashboard calls three routes per

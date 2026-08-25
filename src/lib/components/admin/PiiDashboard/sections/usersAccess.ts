@@ -281,7 +281,7 @@ export type RowAction =
  * `mayAct` and `mayManagePolicy` are both booleans about permission and they mean
  * very different things — the first also unlocks the link to the admin user
  * screen. Positionally they can be swapped; named, they cannot. The same hazard
- * caught in the shell during G-B9, where swapping two lists survived 241 tests.
+ * caught in the shell once before, where swapping two lists survived 241 tests.
  */
 export type Viewer = {
 	/** ⚠️ The ADMINISTRATOR flag. Governs the admin branch AND the Manage link. */
@@ -337,8 +337,8 @@ export function rowActionFor(
 
 	// ⚠️ The team owner: may not reach the admin screen, may govern this one
 	// group. Checked BEFORE the read-only branch, and never entered by an
-	// administrator — `mayAct` sends them to their own branch below, where G-B9
-	// names the team.
+	// administrator — `mayAct` sends them to their own branch below, the one
+	// that names the team.
 	//
 	// ⚠️ `teamGroupId` is required, not incidental. A team whose policy group was
 	// never created has nothing to add anyone to, and the server says so too by

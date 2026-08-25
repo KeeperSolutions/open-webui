@@ -122,8 +122,8 @@
 		 * has no business knowing what administration keeps in its groups, and the
 		 * group they are acting on is their team's — which they already know by
 		 * being here. Adding the line back "for consistency with the admin dialog"
-		 * reopens exactly the leak G-B9 closed, where the fallback put a raw UUID
-		 * in front of somebody deciding whether to act.
+		 * reopens exactly the leak that was closed once already, where the fallback
+		 * put a raw UUID in front of somebody deciding whether to act.
 		 */
 		teamPolicy: boolean;
 		/** Another group also enforces them, so this removal will not unlock. */
@@ -881,8 +881,9 @@
 						The admin dialog names its group; this one must not. The owner is acting
 						on their own team's policy — which they know by being here — and naming
 						any group to them is what decision 5 forbids. Adding the line back "for
-						consistency with the admin dialog" reopens the leak G-B9 closed, where a
-						fallback printed a raw UUID in front of somebody deciding whether to act.
+						consistency with the admin dialog" reopens the leak that was closed once
+						already, where a fallback printed a raw UUID in front of somebody deciding
+						whether to act.
 					-->
 				{:else if pending.mode === 'enforce' && pending.targets.length > 1}
 					<!-- More than one group carries the policy, so the destination is
