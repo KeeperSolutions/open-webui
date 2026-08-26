@@ -1,0 +1,249 @@
+import { describe, it, expect } from 'vitest';
+import type { MetricRow } from '$lib/apis/langfuse';
+import {
+	aggregateByModel,
+	aggregateByUser,
+	describeLoadError,
+	toBars,
+	topModel,
+	totals,
+	inactiveUsers,
+	userDisplayNames
+} from './costAnalytics';
+
+const row = (
+	user: string,
+	model: string,
+	tokens: number,
+	cost: number,
+	observations = 1
+): MetricRow => ({
+	user,
+	model,
+	tokens,
+	cost,
+	observations
+});
+
+describe('aggregateByModel', () => {
+	it('sums per model and sorts by cost desc', () => {
+		const out = aggregateByModel([
+			row('a', 'gpt', 10, 0.2),
+			row('b', 'gpt', 5, 0.3),
+			row('a', 'claude', 1, 0.9)
+		]);
+		expect(out).toEqual([
+			{ name: 'claude', tokens: 1, cost: 0.9 },
+			{ name: 'gpt', tokens: 15, cost: 0.5 }
+		]);
+	});
+	it('handles empty input', () => {
+		expect(aggregateByModel([])).toEqual([]);
+	});
+});
+
+describe('aggregateByUser', () => {
+	it('sums per user and sorts by cost desc', () => {
+		const out = aggregateByUser([
+			row('a@x', 'm', 10, 0.5),
+			row('b@x', 'm', 5, 0.8),
+			row('a@x', 'm', 1, 0.25)
+		]);
+		expect(out).toEqual([
+			{ name: 'b@x', tokens: 5, cost: 0.8 },
+			{ name: 'a@x', tokens: 11, cost: 0.75 }
+		]);
+	});
+	it('groups case/whitespace variants of one user into a single bar', () => {
+		const out = aggregateByUser([row('A@x.com', 'm', 10, 0.5), row(' a@x.com ', 'm', 5, 0.25)]);
+		expect(out).toEqual([{ name: 'A@x.com', tokens: 15, cost: 0.75 }]);
+	});
+	it('labels the bar with the original casing of the first row, not the key', () => {
+		expect(aggregateByUser([row('Fiona@X.com', 'm', 1, 0.1)])[0].name).toBe('Fiona@X.com');
+	});
+
+	it('prefers the display name, keeping the traced value as detail', () => {
+		const users = [{ id: 'u1', email: 'fiona@x.com', name: 'Fiona Byrne' }];
+		expect(aggregateByUser([row('Fiona@X.com', 'm', 1, 0.1)], users)[0]).toEqual({
+			name: 'Fiona Byrne',
+			detail: 'Fiona@X.com',
+			tokens: 1,
+			cost: 0.1
+		});
+	});
+
+	it('resolves a user traced by id as well as by email', () => {
+		const users = [{ id: 'u1', email: 'fiona@x.com', name: 'Fiona Byrne' }];
+		expect(aggregateByUser([row('u1', 'm', 1, 0.1)], users)[0].name).toBe('Fiona Byrne');
+	});
+
+	it('falls back to the raw value, without a detail, when nobody matches', () => {
+		const users = [{ id: 'u1', email: 'fiona@x.com', name: 'Fiona Byrne' }];
+		expect(aggregateByUser([row('ghost@x.com', 'm', 1, 0.1)], users)[0]).toEqual({
+			name: 'ghost@x.com',
+			detail: undefined,
+			tokens: 1,
+			cost: 0.1
+		});
+	});
+
+	it('ignores directory entries with no usable name', () => {
+		const users = [{ id: 'u1', email: 'fiona@x.com', name: '   ' }];
+		expect(aggregateByUser([row('fiona@x.com', 'm', 1, 0.1)], users)[0].name).toBe('fiona@x.com');
+	});
+});
+
+describe('userDisplayNames', () => {
+	it('keys a name under both the email and the id', () => {
+		const map = userDisplayNames([{ id: 'u1', email: 'Fiona@X.com', name: 'Fiona Byrne' }]);
+		expect(map.get('fiona@x.com')).toBe('Fiona Byrne');
+		expect(map.get('u1')).toBe('Fiona Byrne');
+	});
+});
+
+describe('describeLoadError', () => {
+	it('reads the API detail off a thrown response body', () => {
+		expect(describeLoadError({ detail: 'Langfuse credentials are not configured' })).toBe(
+			'Langfuse credentials are not configured'
+		);
+	});
+	it('reads a detail thrown on its own, as the langfuse client rethrows it', () => {
+		expect(describeLoadError('Upstream returned 502')).toBe('Upstream returned 502');
+	});
+	it('reads the message off a network-layer Error', () => {
+		expect(describeLoadError(new TypeError('Failed to fetch'))).toBe('Failed to fetch');
+	});
+	it('returns null when the failure carries no message to show', () => {
+		expect(describeLoadError(undefined)).toBeNull();
+		expect(describeLoadError(null)).toBeNull();
+		expect(describeLoadError({})).toBeNull();
+		expect(describeLoadError({ detail: '   ' })).toBeNull();
+		expect(describeLoadError({ detail: { code: 500 } })).toBeNull();
+	});
+});
+
+describe('toBars', () => {
+	it('normalises to the slice max and caps to limit', () => {
+		const aggs = [
+			{ name: 'a', tokens: 0, cost: 1.0 },
+			{ name: 'b', tokens: 0, cost: 0.5 },
+			{ name: 'c', tokens: 0, cost: 0.25 }
+		];
+		expect(toBars(aggs, 2)).toEqual([
+			{ name: 'a', tokens: 0, cost: 1.0, percent: 100 },
+			{ name: 'b', tokens: 0, cost: 0.5, percent: 50 }
+		]);
+	});
+	it('returns 0 percent when all costs are zero', () => {
+		expect(toBars([{ name: 'a', tokens: 0, cost: 0 }], 5)).toEqual([
+			{ name: 'a', tokens: 0, cost: 0, percent: 0 }
+		]);
+	});
+	it('clamps negative cost to 0 percent', () => {
+		const out = toBars(
+			[
+				{ name: 'a', tokens: 0, cost: 1 },
+				{ name: 'b', tokens: 0, cost: -0.5 }
+			],
+			5
+		);
+		expect(out[1].percent).toBe(0);
+	});
+	it('tolerates fewer rows than the limit', () => {
+		expect(toBars([{ name: 'a', tokens: 0, cost: 1 }], 5)).toHaveLength(1);
+	});
+});
+
+describe('topModel', () => {
+	it('returns the highest-cost model', () => {
+		expect(topModel([row('a', 'x', 1, 0.1), row('a', 'y', 1, 0.9)])).toEqual({
+			name: 'y',
+			tokens: 1,
+			cost: 0.9
+		});
+	});
+	it('returns null for empty', () => {
+		expect(topModel([])).toBeNull();
+	});
+});
+
+describe('totals', () => {
+	it('sums cost, tokens, observations', () => {
+		expect(totals([row('a', 'x', 10, 0.2, 3), row('b', 'y', 5, 0.3, 4)])).toEqual({
+			cost: 0.5,
+			tokens: 15,
+			observations: 7
+		});
+	});
+});
+
+describe('inactiveUsers', () => {
+	const users = [
+		{ id: 'id-1', email: 'a@x.com' },
+		{ id: 'id-2', email: 'b@x.com' },
+		{ id: 'id-3', email: 'c@x.com' }
+	];
+	it('matches active users by email (case-insensitive)', () => {
+		const out = inactiveUsers([row('A@X.COM', 'm', 1, 0.1)], users);
+		expect(out).toEqual({ inactive: 2, total: 3 });
+	});
+	it('matches active users by id', () => {
+		const out = inactiveUsers([row('id-2', 'm', 1, 0.1)], users);
+		expect(out).toEqual({ inactive: 2, total: 3 });
+	});
+	it('never goes negative for unknown Langfuse users', () => {
+		const out = inactiveUsers(
+			[row('ghost@x.com', 'm', 1, 0.1), row('(unknown)', 'm', 1, 0.1)],
+			users
+		);
+		expect(out).toEqual({ inactive: 3, total: 3 });
+	});
+	it('handles no users', () => {
+		expect(inactiveUsers([row('a@x', 'm', 1, 0.1)], [])).toEqual({ inactive: 0, total: 0 });
+	});
+
+	it('leaves pending accounts out of both the numerator and the denominator', () => {
+		// A pending account is locked out at get_verified_user: its zero usage is
+		// structural, so counting it as an idle licence overstates the opportunity.
+		const out = inactiveUsers(
+			[row('a@x.com', 'm', 1, 0.1)],
+			[
+				...users,
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' },
+				{ id: 'id-5', email: 'e@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 2, total: 3 });
+	});
+
+	it('excludes a pending account even if it somehow has usage', () => {
+		// Structurally impossible, but the function stays total rather than
+		// letting impossible data decide the figure.
+		const out = inactiveUsers(
+			[row('d@x.com', 'm', 1, 0.1)],
+			[
+				{ id: 'id-1', email: 'a@x.com' },
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 1, total: 1 });
+	});
+
+	it('returns 0 / 0 for a directory of nothing but pending accounts', () => {
+		const out = inactiveUsers(
+			[row('a@x.com', 'm', 1, 0.1)],
+			[
+				{ id: 'id-4', email: 'd@x.com', role: 'pending' },
+				{ id: 'id-5', email: 'e@x.com', role: 'pending' }
+			]
+		);
+		expect(out).toEqual({ inactive: 0, total: 0 });
+	});
+
+	it('counts a user with no role as licensed, not as pending', () => {
+		// `role` is optional on DirectoryUser; treating unknown as pending would
+		// silently shrink the denominator.
+		const out = inactiveUsers([], [{ id: 'id-1', email: 'a@x.com' }]);
+		expect(out).toEqual({ inactive: 1, total: 1 });
+	});
+});

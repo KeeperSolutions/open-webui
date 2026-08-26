@@ -7,6 +7,7 @@
 	import { user as _user } from '$lib/stores';
 	import { copyToClipboard as _copyToClipboard, formatDate } from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
@@ -51,11 +52,17 @@
 	let editedFiles = [];
 
 	let messageEditTextAreaElement: HTMLTextAreaElement;
+	let editScrollContainer: HTMLDivElement;
 
-	let message = JSON.parse(JSON.stringify(history.messages[messageId]));
+	let message = structuredClone(history.messages[messageId]);
 	$: if (history.messages) {
-		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
-			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+		const source = history.messages[messageId];
+		if (source) {
+			if (message.content !== source.content) {
+				message = structuredClone(source);
+			} else if (!equal(message, source)) {
+				message = structuredClone(source);
+			}
 		}
 	}
 
@@ -91,10 +98,14 @@
 		await tick();
 
 		if (messageEditTextAreaElement) {
+			const messagesContainer = document.getElementById('messages-container');
+			const savedScrollTop = messagesContainer?.scrollTop;
+
 			messageEditTextAreaElement.style.height = '';
 			messageEditTextAreaElement.style.height = `${messageEditTextAreaElement.scrollHeight}px`;
 
-			messageEditTextAreaElement?.focus();
+			if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
+			messageEditTextAreaElement?.focus({ preventScroll: true });
 		}
 	};
 
@@ -138,11 +149,14 @@
 	class=" flex w-full user-message group"
 	dir={$settings.chatDirection}
 	id="message-{message.id}"
+	style="scroll-margin-top: 3rem;"
 >
 	{#if !($settings?.chatBubble ?? true)}
 		<div class={`shrink-0 ltr:mr-3 rtl:ml-3 mt-1`}>
 			<ProfileImage
-				src={`${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`}
+				src={user?.id
+					? `${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`
+					: `${WEBUI_BASE_URL}/static/favicon.png`}
 				className={'size-8 user-message-profile-image'}
 			/>
 		</div>
@@ -154,8 +168,8 @@
 					{#if message.user}
 						{$i18n.t('You')}
 						<span class=" text-gray-500 text-sm font-medium">{message?.user ?? ''}</span>
-					{:else if $settings.showUsername || $_user.name !== user.name}
-						{user.name}
+					{:else if $settings.showUsername || $_user?.name !== user?.name}
+						{user?.name ?? $i18n.t('You')}
 					{:else}
 						{$i18n.t('You')}
 					{/if}
@@ -164,7 +178,7 @@
 						<div
 							class="self-center text-xs font-medium first-letter:capitalize ml-0.5 translate-y-[1px] {($settings?.highContrastMode ??
 							false)
-								? 'dark:text-gray-900 text-gray-100'
+								? 'dark:text-gray-100 text-gray-900'
 								: 'invisible group-hover:visible transition'}"
 						>
 							<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
@@ -302,15 +316,22 @@
 						</div>
 					{/if}
 
-					<div class="max-h-96 overflow-auto">
+					<div class="max-h-96 overflow-auto" bind:this={editScrollContainer}>
 						<textarea
 							id="message-edit-{message.id}"
 							bind:this={messageEditTextAreaElement}
 							class=" bg-transparent outline-hidden w-full resize-none"
 							bind:value={editedContent}
 							on:input={(e) => {
+								const messagesContainer = document.getElementById('messages-container');
+								const savedScrollTop = messagesContainer?.scrollTop;
+								const savedInnerScroll = editScrollContainer?.scrollTop;
+
 								e.target.style.height = '';
 								e.target.style.height = `${e.target.scrollHeight}px`;
+
+								if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
+								if (editScrollContainer) editScrollContainer.scrollTop = savedInnerScroll;
 							}}
 							on:keydown={(e) => {
 								if (e.key === 'Escape') {
@@ -374,12 +395,18 @@
 								: ' w-full'}"
 						>
 							{#if message.content}
-								<Markdown
-									id={`${chatId}-${message.id}`}
-									content={message.content}
-									{editCodeBlock}
-									{topPadding}
-								/>
+								{#if $settings?.renderMarkdownInUserMessages ?? true}
+									<Markdown
+										id={`${chatId}-${message.id}`}
+										content={message.content}
+										{editCodeBlock}
+										{topPadding}
+									/>
+								{:else}
+									<div class="whitespace-pre-wrap" dir={$settings?.chatDirection ?? 'auto'}>
+										{message.content}
+									</div>
+								{/if}
 							{/if}
 						</div>
 					</div>
@@ -554,8 +581,12 @@
 										? ''
 										: 'invisible group-hover:visible'} p-1 rounded-sm dark:hover:text-white hover:text-black transition"
 									aria-label={$i18n.t('Delete')}
-									on:click={() => {
-										showDeleteConfirm = true;
+									on:click={(e) => {
+										if (e.shiftKey) {
+											deleteMessageHandler();
+										} else {
+											showDeleteConfirm = true;
+										}
 									}}
 								>
 									<svg

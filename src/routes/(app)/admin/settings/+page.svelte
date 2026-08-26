@@ -4,7 +4,8 @@
 	import Settings from '$lib/components/admin/Settings.svelte';
 
 	onMount(() => {
-		goto('/admin/settings/general');
+		// A redirect, not a destination — see the note in /admin/+page.svelte.
+		goto('/admin/settings/general', { replaceState: true });
 	});
 </script>
 

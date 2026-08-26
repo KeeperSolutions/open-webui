@@ -267,6 +267,28 @@ class UsageLedgerTable:
             )
         return {uid: float(total or 0.0) for uid, total in rows}
 
+    def get_cost_eur_for_users_since(self, user_ids: List[str], since_ts: int) -> Dict[str, float]:
+        """Same as get_cost_eur_for_users_current_month but bounded by an explicit
+        `since_ts` (e.g. a team's credit_balances.period_start) instead of the
+        calendar-month start. Used so usage incurred before a subscription/billing
+        period began (e.g. individual trial usage prior to a team upgrade) is not
+        counted against that period.
+        """
+        if not user_ids:
+            return {}
+        with get_db() as db:
+            rows = (
+                db.query(UsageLedger.user_id, func.sum(UsageLedger.cost_eur))
+                .filter(
+                    UsageLedger.user_id.in_(user_ids),
+                    UsageLedger.observed_at >= since_ts,
+                    UsageLedger.cost_eur.isnot(None),
+                )
+                .group_by(UsageLedger.user_id)
+                .all()
+            )
+        return {uid: float(total or 0.0) for uid, total in rows}
+
     def get_cost_usd_for_user_current_month(self, user_id: str) -> float:
         with get_db() as db:
             result = (
@@ -322,9 +344,18 @@ class UsageLedgerTable:
 
     def get_models_used_bulk_current_month(self, user_ids: List[str]) -> Dict[str, List[str]]:
         """Return {user_id: [top-3 model names by cost]} for all given users in one query."""
+        return self._get_models_used_bulk(user_ids, _month_start_epoch())
+
+    def get_models_used_bulk_since(self, user_ids: List[str], since_ts: int) -> Dict[str, List[str]]:
+        """Same as get_models_used_bulk_current_month but bounded by an explicit
+        `since_ts` (e.g. a team's credit_balances.period_start) instead of the
+        calendar-month start.
+        """
+        return self._get_models_used_bulk(user_ids, since_ts)
+
+    def _get_models_used_bulk(self, user_ids: List[str], since_ts: int) -> Dict[str, List[str]]:
         if not user_ids:
             return {}
-        month_start = _month_start_epoch()
         with get_db() as db:
             rows = (
                 db.query(
@@ -334,7 +365,7 @@ class UsageLedgerTable:
                 )
                 .filter(
                     UsageLedger.user_id.in_(user_ids),
-                    UsageLedger.observed_at >= month_start,
+                    UsageLedger.observed_at >= since_ts,
                 )
                 .group_by(UsageLedger.user_id, UsageLedger.model)
                 .order_by(func.coalesce(func.sum(UsageLedger.cost_eur), 0.0).desc())
@@ -348,7 +379,18 @@ class UsageLedgerTable:
         return result
 
     def get_model_breakdown_current_month(self, user_id: str) -> List[Dict]:
-        month_start = _month_start_epoch()
+        return self._get_model_breakdown(user_id, _month_start_epoch())
+
+    def get_model_breakdown_since(self, user_id: str, since_ts: int) -> List[Dict]:
+        """Same as get_model_breakdown_current_month but bounded by an explicit
+        `since_ts` (e.g. a user's or team's credit_balances.period_start) instead
+        of the calendar-month start. Used so the Per-Model Cost Breakdown on the
+        billing page doesn't include usage from before the current subscription
+        period began (e.g. individual trial usage before a team upgrade).
+        """
+        return self._get_model_breakdown(user_id, since_ts)
+
+    def _get_model_breakdown(self, user_id: str, since_ts: int) -> List[Dict]:
         with get_db() as db:
             rows = (
                 db.query(
@@ -358,7 +400,7 @@ class UsageLedgerTable:
                 )
                 .filter(
                     UsageLedger.user_id == user_id,
-                    UsageLedger.observed_at >= month_start,
+                    UsageLedger.observed_at >= since_ts,
                 )
                 .group_by(UsageLedger.model)
                 .order_by(func.coalesce(func.sum(UsageLedger.cost_eur), 0.0).desc())

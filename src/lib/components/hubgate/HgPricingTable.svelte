@@ -4,9 +4,7 @@
 	export let modelClasses: ModelClass[] = [];
 	export let loading = false;
 
-	$: maxCreditBurn = modelClasses.length
-		? Math.max(...modelClasses.map((m) => m.credit_burn))
-		: 1;
+	$: maxCreditBurn = modelClasses.length ? Math.max(...modelClasses.map((m) => m.credit_burn)) : 1;
 
 	const blurbs = [
 		{
@@ -43,8 +41,8 @@
 			class="self-start inline-flex items-center bg-hg-bg-surface border border-hg-text-secondary rounded-[87px] px-4 py-1.5"
 		>
 			<span class="font-hg-body text-xs text-hg-text-secondary"
-				>A standard message =&nbsp;<span
-					class="font-hg-body font-semibold text-sm text-hg-orange">1,500</span
+				>A standard message =&nbsp;<span class="font-hg-body font-semibold text-sm text-hg-orange"
+					>1,500</span
 				>&nbsp;tokens in +&nbsp;<span class="font-hg-body font-semibold text-sm text-hg-orange"
 					>500</span
 				>&nbsp;tokens out</span
@@ -53,9 +51,7 @@
 	</div>
 
 	<!-- Table -->
-	<div
-		class="bg-hg-bg-surface border border-[#f5f5f4] rounded-[16px] overflow-hidden"
-	>
+	<div class="bg-hg-bg-surface border border-[#f5f5f4] rounded-[16px] overflow-hidden">
 		<table class="w-full border-collapse">
 			<thead>
 				<tr class="bg-[#fffdfc] border-b border-[#f5f5f4]">
@@ -92,32 +88,34 @@
 						<tr class="border-b border-[#f5f5f4]">
 							<td class="px-3 md:px-5 py-4">
 								<div class="flex flex-col gap-2">
-									<div class="h-[18px] w-24 bg-hg-bg-muted animate-pulse rounded" />
-									<div class="h-[14px] w-40 bg-hg-bg-muted animate-pulse rounded" />
+									<div class="h-[18px] w-24 bg-hg-bg-muted animate-pulse rounded"></div>
+									<div class="h-[14px] w-40 bg-hg-bg-muted animate-pulse rounded"></div>
 								</div>
 							</td>
 							<td class="px-3 md:px-5 py-4">
 								<div class="flex flex-col gap-2 items-end">
-									<div class="h-[18px] w-10 bg-hg-bg-muted animate-pulse rounded" />
-									<div class="hidden md:block h-2 w-full bg-hg-bg-muted animate-pulse rounded-full" />
+									<div class="h-[18px] w-10 bg-hg-bg-muted animate-pulse rounded"></div>
+									<div
+										class="hidden md:block h-2 w-full bg-hg-bg-muted animate-pulse rounded-full"
+									></div>
 								</div>
 							</td>
 							<td class="hidden md:table-cell px-5 py-4">
 								<div class="flex flex-col gap-2 items-center">
-									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded" />
-									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded" />
+									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded"></div>
+									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded"></div>
 								</div>
 							</td>
 							<td class="hidden md:table-cell px-5 py-4">
 								<div class="flex flex-col gap-2 items-center">
-									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded" />
-									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded" />
+									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded"></div>
+									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded"></div>
 								</div>
 							</td>
 							<td class="hidden md:table-cell px-5 py-4">
 								<div class="flex flex-col gap-2 items-center">
-									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded" />
-									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded" />
+									<div class="h-[18px] w-16 bg-hg-bg-muted animate-pulse rounded"></div>
+									<div class="h-[14px] w-20 bg-hg-bg-muted animate-pulse rounded"></div>
 								</div>
 							</td>
 						</tr>
@@ -141,7 +139,7 @@
 										<div
 											class="bg-hg-orange h-2 rounded-full"
 											style="width: {Math.min((mc.credit_burn / maxCreditBurn) * 100, 100)}%"
-										/>
+										></div>
 									</div>
 								</div>
 							</td>
@@ -156,7 +154,7 @@
 										<div
 											class="bg-hg-orange h-2 rounded-full"
 											style="width: {Math.min((mc.credit_burn / maxCreditBurn) * 100, 100)}%"
-										/>
+										></div>
 									</div>
 								</div>
 							</td>

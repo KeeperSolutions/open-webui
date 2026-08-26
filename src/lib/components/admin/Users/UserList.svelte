@@ -1,8 +1,10 @@
-<script>
+<script lang="ts">
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, showSidebar } from '$lib/stores';
 	import { goto } from '$app/navigation';
-	import { onMount, getContext } from 'svelte';
+	// Aliased: `page` is already this component's pagination counter.
+	import { page as currentPage } from '$app/stores';
+	import { onMount, getContext, onDestroy, tick } from 'svelte';
 
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -12,7 +14,7 @@
 
 	import { toast } from 'svelte-sonner';
 
-	import { updateUserRole, getUsers, deleteUserById } from '$lib/apis/users';
+	import { updateUserRole, getUsers, deleteUserById, locateUser } from '$lib/apis/users';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -34,6 +36,7 @@
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ProfilePreview from '$lib/components/channel/Messages/Message/ProfilePreview.svelte';
+	import UserPreviewModal from '$lib/components/admin/UserPreviewModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -42,7 +45,46 @@
 	let users = null;
 	let total = null;
 
+	/**
+	 * Briefly point at one row, for callers that sent an admin here to look at a
+	 * specific person — the PII dashboard's `Manage` button.
+	 *
+	 * The id arrives in the URL rather than in a store so the jump survives a
+	 * reload and can be shared, and it is read ONCE: leaving it reactive would
+	 * re-highlight every time this component re-rendered.
+	 *
+	 * ⚠️ The list is paginated server-side, so the target is usually not on the
+	 * page that loads first. `locateUser` asks the backend which page it is on
+	 * UNDER THE ORDERING THIS COMPONENT IS USING, and that page is loaded before
+	 * the highlight means anything. Highlighting without the jump would be a
+	 * feature that silently does nothing for all but the first 30 users.
+	 */
+	const highlightParam = $currentPage.url.searchParams.get('highlight');
+	let highlightedUserId: string | null = null;
+	/** Cleared after this long, so the row does not stay marked for the session. */
+	const HIGHLIGHT_MS = 2600;
+
+	/**
+	 * Scroll to the marked row once it is on screen — driven by the rows arriving,
+	 * not by the node being created.
+	 *
+	 * The target can appear two ways: it was already on the first page, or it
+	 * turned up after the jump refetched. An action on the row only fires in the
+	 * second case, because in the first the node was built before the id was
+	 * known. `scrolled` makes it happen exactly once either way.
+	 */
+	let scrolled = false;
+	$: if (highlightedUserId && users?.length && !scrolled) {
+		scrolled = true;
+		tick().then(() => {
+			document
+				.getElementById(`user-row-${highlightedUserId}`)
+				?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		});
+	}
+
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let orderBy = 'created_at'; // default sort key
 	let direction = 'asc'; // default sort order
 
@@ -53,6 +95,7 @@
 
 	let showUserChatsModal = false;
 	let showEditUserModal = false;
+	let showUserPreviewModal = false;
 
 	const deleteUserHandler = async (id) => {
 		const res = await deleteUserById(localStorage.token, id).catch((error) => {
@@ -97,9 +140,46 @@
 		}
 	};
 
-	$: if (query !== null && page !== null && orderBy !== null && direction !== null) {
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			page = 1;
+			getUserList();
+		}, 300);
+	}
+
+	$: if (page !== null && orderBy !== null && direction !== null) {
 		getUserList();
 	}
+
+	let highlightTimer: ReturnType<typeof setTimeout>;
+
+	onMount(async () => {
+		if (!highlightParam) return;
+
+		// Ask under the ordering this component renders with, not the default:
+		// the page a user sits on is a function of the sort.
+		const target = await locateUser(localStorage.token, highlightParam, orderBy, direction);
+		// null means "not in this directory" or the call failed. Jumping to page 1
+		// and marking nothing would be a worse answer than doing nothing.
+		if (target === null) return;
+
+		// ⚠️ The search debounce schedules `page = 1` on mount (the `query !==
+		// undefined` block fires once during init). It lands ~300ms in — after this
+		// await — and would stomp the jump. Cancelling makes this assignment the
+		// last word; if the timer already fired, this is a harmless no-op and the
+		// assignment below still wins.
+		clearTimeout(searchDebounceTimer);
+
+		page = target;
+		highlightedUserId = highlightParam;
+		highlightTimer = setTimeout(() => (highlightedUserId = null), HIGHLIGHT_MS);
+	});
+
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+		clearTimeout(highlightTimer);
+	});
 </script>
 
 <ConfirmDialog
@@ -195,6 +275,7 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={query}
+						aria-label={$i18n.t('Search')}
 						placeholder={$i18n.t('Search')}
 					/>
 				</div>
@@ -296,6 +377,7 @@
 					>
 						<div class="flex gap-1.5 items-center">
 							{$i18n.t('Last Active')}
+							<!-- {$i18n.t('Last Modified')} -->
 
 							{#if orderBy === 'last_active_at'}
 								<span class="font-normal"
@@ -340,10 +422,17 @@
 			</thead>
 			<tbody class="">
 				{#each users as user, userIdx (user.id)}
-					<tr class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs">
+					<tr
+						id="user-row-{user.id}"
+						class="dark:border-gray-850 text-xs transition-colors duration-700 {user.id ===
+						highlightedUserId
+							? 'bg-yellow-100 dark:bg-yellow-500/15'
+							: 'bg-white dark:bg-gray-900'}"
+					>
 						<td class="px-3 py-1 min-w-[7rem] w-28">
 							<button
 								class=" translate-y-0.5"
+								aria-label={$i18n.t('Change User Role')}
 								on:click={() => {
 									selectedUser = user;
 									showEditUserModal = !showEditUserModal;
@@ -359,13 +448,16 @@
 							<div class="flex items-center gap-2">
 								<ProfilePreview {user} side="right" align="center" sideOffset={6}>
 									<img
-										class="rounded-full w-6 h-6 object-cover mr-0.5 flex-shrink-0"
+										class="rounded-full w-6 min-w-6 h-6 object-cover mr-0.5 flex-shrink-0"
 										src={user.profile_image_url?.startsWith('data:image') ||
 										user.profile_image_url?.startsWith('http')
 											? user.profile_image_url
 											: `${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`}
 										alt="user"
 										loading="lazy"
+										on:error={(e) => {
+											e.currentTarget.src = '/favicon.png';
+										}}
 									/>
 								</ProfilePreview>
 
@@ -383,7 +475,7 @@
 								{/if}
 							</div>
 						</td>
-						<td class=" px-3 py-1"> {user.email} </td>
+						<td class=" px-3 py-1 max-w-48 truncate"> {user.email} </td>
 
 						<td class=" px-3 py-1">
 							{dayjs(user.last_active_at * 1000).fromNow()}
@@ -399,12 +491,46 @@
 									<Tooltip content={$i18n.t('Chats')}>
 										<button
 											class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+											aria-label={$i18n.t('Chats')}
 											on:click={async () => {
 												showUserChatsModal = !showUserChatsModal;
 												selectedUser = user;
 											}}
 										>
 											<ChatBubbles />
+										</button>
+									</Tooltip>
+								{/if}
+
+								{#if user.role !== 'admin'}
+									<Tooltip content={$i18n.t('Preview Access')}>
+										<button
+											class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+											aria-label={$i18n.t('Preview Access')}
+											on:click={() => {
+												selectedUser = user;
+												showUserPreviewModal = true;
+											}}
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke-width="1.5"
+												stroke="currentColor"
+												class="w-4 h-4"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"
+												/>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+												/>
+											</svg>
 										</button>
 									</Tooltip>
 								{/if}
@@ -501,4 +627,12 @@
 			/>
 		</div>
 	{/if}
+{/if}
+
+{#if selectedUser}
+	<UserPreviewModal
+		bind:show={showUserPreviewModal}
+		userId={selectedUser.id}
+		userName={selectedUser.name}
+	/>
 {/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import dayjs from 'dayjs';
@@ -25,12 +25,25 @@
 
 	export let groupId: string;
 	export let userCount = 0;
+	/**
+	 * Whether this group carries `chat.pii_masking_enforced`.
+	 *
+	 * ⚠️ Not cosmetic. Removing someone from a group that enforces PII masking is
+	 * a compliance mutation, so the route requires a reason and records it —
+	 * whichever screen made the call. Without this prompt, unticking a member
+	 * here would simply fail with a 400.
+	 */
+	export let piiEnforced = false;
+
+	// Held only while the dialog is open; cleared on close either way.
+	let pendingRemoval: { userId: string; reason: string } | null = null;
 
 	let users = null;
 	let total = null;
 
 	let query = '';
-	let orderBy = 'created_at'; // default sort key
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+	let orderBy = groupId ? `group_id:${groupId}` : 'last_active_at'; // default sort key
 	let direction = 'desc'; // default sort order
 
 	let page = 1;
@@ -64,29 +77,66 @@
 		}
 	};
 
+	const removeMember = async (userId, reason = '') => {
+		const res = await removeUserFromGroup(localStorage.token, groupId, [userId], reason).catch(
+			(error) => {
+				toast.error(`${error}`);
+				return null;
+			}
+		);
+		// Refresh either way: on failure the checkbox must snap back to the state
+		// the server still holds, rather than showing the change that was refused.
+		getUserList();
+		return res;
+	};
+
 	const toggleMember = async (userId, state) => {
 		if (state === 'checked') {
 			await addUserToGroup(localStorage.token, groupId, [userId]).catch((error) => {
 				toast.error(`${error}`);
 				return null;
 			});
-		} else {
-			await removeUserFromGroup(localStorage.token, groupId, [userId]).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+			getUserList();
+			return;
 		}
 
+		if (piiEnforced) {
+			pendingRemoval = { userId, reason: '' };
+			return;
+		}
+
+		await removeMember(userId);
+	};
+
+	const confirmRemoval = async () => {
+		if (!pendingRemoval?.reason.trim()) return;
+		const { userId, reason } = pendingRemoval;
+		pendingRemoval = null;
+		await removeMember(userId, reason.trim());
+	};
+
+	const cancelRemoval = () => {
+		pendingRemoval = null;
+		// The tick was already cleared optimistically by the checkbox; re-reading
+		// puts it back, so cancelling leaves nothing changed.
 		getUserList();
 	};
 
-	$: if (page !== null && query !== null && orderBy !== null && direction !== null) {
+	$: if (page !== null && orderBy !== null && direction !== null) {
 		getUserList();
 	}
 
-	$: if (query) {
-		page = 1;
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			page = 1;
+			getUserList();
+		}, 300);
 	}
+
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+	});
 </script>
 
 <div class=" max-h-full h-full w-full flex flex-col overflow-y-hidden">
@@ -270,3 +320,49 @@
 		{/if}
 	{/if}
 </div>
+
+{#if pendingRemoval}
+	<!-- This group enforces PII masking, so taking someone out of it is a
+	     compliance mutation and has to say why. The route refuses
+	     it without a reason; this only asks before the round trip. -->
+	<div
+		class="fixed inset-0 z-9999 flex items-center justify-center bg-black/50 p-4"
+		role="presentation"
+		on:click|self={cancelRemoval}
+	>
+		<div
+			class="w-full max-w-sm rounded-2xl bg-white px-5 py-4 dark:bg-gray-900 dark:text-gray-100"
+			role="dialog"
+			aria-modal="true"
+			aria-label={$i18n.t('Stop enforcing PII masking')}
+		>
+			<div class="text-sm font-medium">{$i18n.t('Stop enforcing PII masking')}</div>
+			<div class="mt-1 text-xs text-gray-500">
+				{$i18n.t(
+					'This group enforces PII masking. Removing this user lets them turn PII masking off again.'
+				)}
+			</div>
+			<input
+				class="mt-3 w-full rounded-xl bg-gray-50 px-2.5 py-1.5 text-xs outline-hidden dark:bg-gray-850"
+				type="text"
+				bind:value={pendingRemoval.reason}
+				placeholder={$i18n.t('Reason for removing enforcement (required)')}
+			/>
+			<div class="mt-4 flex justify-end gap-2 text-xs font-medium">
+				<button type="button" class="px-3.5 py-1.5" on:click={cancelRemoval}>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					type="button"
+					class="rounded-full bg-black px-3.5 py-1.5 text-white transition dark:bg-white dark:text-black {pendingRemoval.reason.trim()
+						? 'hover:bg-gray-900 dark:hover:bg-gray-100'
+						: 'cursor-not-allowed opacity-40'}"
+					disabled={!pendingRemoval.reason.trim()}
+					on:click={confirmRemoval}
+				>
+					{$i18n.t('Remove')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}

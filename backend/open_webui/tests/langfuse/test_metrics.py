@@ -356,3 +356,101 @@ def test_load_env_custom_host(clean_langfuse_env, monkeypatch):
     monkeypatch.setenv("LANGFUSE_HOST", "https://my-langfuse.internal")
     _, _, host = load_env()
     assert host == "https://my-langfuse.internal"
+
+
+# ---------- observation count ----------
+
+def test_parse_rows_includes_observation_count():
+    from open_webui.langfuse.metrics import parse_rows
+    raw = [
+        {"userId": "u1", "providedModelName": "gpt-4",
+         "sum_totalTokens": 100, "sum_totalCost": 0.5, "count_count": 7},
+    ]
+    out = parse_rows(raw)
+    assert out == [
+        {"user": "u1", "model": "gpt-4", "tokens": 100, "cost": 0.5, "observations": 7},
+    ]
+
+
+def test_build_metrics_query_requests_count():
+    from open_webui.langfuse.metrics import build_metrics_query
+    q = build_metrics_query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z")
+    measures = {(m["measure"], m["aggregation"]) for m in q["metrics"]}
+    assert ("count", "count") in measures
+    assert ("totalCost", "sum") in measures  # existing measures preserved
+
+
+# ---------- period window envelope ----------
+
+def _fake_fetch(rows):
+    """Stub for fetch_metrics; the getters only pass its result to parse_rows."""
+    return lambda host, headers, query: rows
+
+
+@pytest.mark.parametrize(
+    "getter_name,window_fn",
+    [
+        ("get_today_so_far", today_utc_window_now),
+        ("get_last_day", last_day_fixed_window),
+        ("get_last_week", last_week_fixed_window),
+        ("get_last_month", last_month_fixed_window),
+        ("get_current_month", current_month_window),
+    ],
+)
+def test_getters_return_the_window_they_queried(getter_name, window_fn):
+    """The reported window must be the one actually sent to Langfuse, so a UI
+    cannot disagree with the data it labels."""
+    from open_webui.langfuse import metrics as m
+
+    seen = {}
+
+    def spy(host, headers, query):
+        seen["from"] = query["fromTimestamp"]
+        seen["to"] = query["toTimestamp"]
+        return []
+
+    with patch.object(m, "load_env", return_value=("pk", "sk", "https://h")), \
+         patch.object(m, "fetch_metrics", side_effect=spy):
+        from_ts, to_ts, rows = getattr(m, getter_name)()
+
+    expected_from, expected_to = window_fn()
+    assert (from_ts, to_ts) == (seen["from"], seen["to"])
+    assert from_ts == expected_from
+    assert to_ts == expected_to
+    assert rows == []
+
+
+def test_get_custom_days_returns_its_window():
+    from open_webui.langfuse import metrics as m
+
+    with patch.object(m, "load_env", return_value=("pk", "sk", "https://h")), \
+         patch.object(m, "fetch_metrics", return_value=[]):
+        from_ts, to_ts, rows = m.get_custom_days(7)
+
+    assert (from_ts, to_ts) == custom_days_fixed_window(7)
+    assert rows == []
+
+
+def test_getters_pass_rows_through_parse_rows():
+    from open_webui.langfuse import metrics as m
+
+    raw = [{"userId": "u1", "providedModelName": "gpt-4",
+            "sum_totalTokens": 10, "sum_totalCost": 0.25, "count_count": 3}]
+    with patch.object(m, "load_env", return_value=("pk", "sk", "https://h")), \
+         patch.object(m, "fetch_metrics", return_value=raw):
+        _, _, rows = m.get_last_week()
+
+    assert rows == [{"user": "u1", "model": "gpt-4", "tokens": 10,
+                     "cost": 0.25, "observations": 3}]
+
+
+def test_metrics_response_serialises_from_as_json_key():
+    """`from` is a Python keyword; the model must still emit it as the JSON key."""
+    from open_webui.routers.langfuse import MetricsResponse
+
+    payload = MetricsResponse(
+        **{"from": "2026-07-01T00:00:00Z", "to": "2026-07-31T23:59:59Z", "rows": []}
+    ).model_dump(by_alias=True)
+    assert payload["from"] == "2026-07-01T00:00:00Z"
+    assert payload["to"] == "2026-07-31T23:59:59Z"
+    assert payload["rows"] == []

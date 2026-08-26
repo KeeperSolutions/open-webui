@@ -1,1 +1,1 @@
-collect_ignore = ["test_provider.py"]
+collect_ignore = []

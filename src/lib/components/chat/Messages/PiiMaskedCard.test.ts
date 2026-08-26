@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 
 import PiiMaskedCard from './PiiMaskedCard.svelte';
@@ -73,6 +73,29 @@ describe('PiiMaskedCard', () => {
 			originalText: 'Ivan Horvat and Ana Anic'
 		});
 		expect(screen.getByText('2 values masked')).toBeTruthy();
+	});
+
+	// Regression (bits-ui 0.21 -> 2.x): Content used to be portalled to <body> by
+	// default. In 2.x it renders in place unless wrapped in Popover.Portal, and the
+	// chat column above it is a Tailwind `@container` (container-type: inline-size),
+	// which becomes the containing block for position:fixed descendants -- the panel
+	// then lands hundreds of px off the right edge of the viewport and reads as
+	// "clicking the badge does nothing". Assert the content escapes the component.
+	it('portals the opened panel out to the document body', async () => {
+		const { container } = renderCard({
+			detections: [{ type: 'PERSON', start: 9, end: 20 }],
+			originalText: SENTENCE
+		});
+		await fireEvent.click(screen.getByText('1 values masked'));
+
+		const content = document.querySelector('[data-popover-content]');
+		expect(content).not.toBeNull();
+		expect(screen.getByText('Ivan Horvat')).toBeTruthy();
+		// escaped the component's own subtree
+		expect(container.contains(content)).toBe(false);
+		// the hook the open/close CSS animation keys off (see the component's
+		// <style> block) — asserted so markup and selector can't drift apart
+		expect(content?.classList.contains('pii-masked-panel')).toBe(true);
 	});
 
 	it('filters out detections whose offsets yield an empty value', () => {
