@@ -234,3 +234,77 @@ class TestGetCostEurForUsersCurrentMonth:
     def test_missing_user_not_in_result(self, ledger):
         result = ledger.get_cost_eur_for_users_current_month(["ghost@x.com"])
         assert result.get("ghost@x.com", 0.0) == 0.0
+
+
+class TestGetCostEurForUsersSince:
+    """Bulk 'since' variant used to scope team usage to a billing period (e.g. a
+    team's credit_balances.period_start), rather than the calendar month — this
+    prevents e.g. a member's pre-team-upgrade trial usage from leaking into the
+    team's aggregate cost."""
+
+    def test_excludes_rows_before_since_ts(self, ledger):
+        period_start = _now_epoch()
+        before_period = period_start - 86400  # one day before period started (e.g. trial usage)
+        ledger.bulk_insert_ignore([
+            _make_row("obs_since_a", "alpha@x.com", cost_eur=0.50, observed_at=before_period),
+            _make_row("obs_since_b", "alpha@x.com", cost_eur=0.10, observed_at=period_start + 10),
+        ])
+        result = ledger.get_cost_eur_for_users_since(["alpha@x.com"], period_start)
+        assert result.get("alpha@x.com", 0.0) == pytest.approx(0.10)
+
+    def test_returns_per_user_dict(self, ledger):
+        period_start = _now_epoch() - 10
+        ledger.bulk_insert_ignore([
+            _make_row("obs_since_c", "alpha@x.com", cost_eur=0.10, observed_at=period_start + 5),
+            _make_row("obs_since_d", "beta@x.com", cost_eur=0.20, observed_at=period_start + 5),
+        ])
+        result = ledger.get_cost_eur_for_users_since(["alpha@x.com", "beta@x.com"], period_start)
+        assert result.get("alpha@x.com", 0.0) == pytest.approx(0.10)
+        assert result.get("beta@x.com", 0.0) == pytest.approx(0.20)
+
+    def test_returns_empty_dict_for_empty_input(self, ledger):
+        assert ledger.get_cost_eur_for_users_since([], _now_epoch()) == {}
+
+    def test_missing_user_not_in_result(self, ledger):
+        result = ledger.get_cost_eur_for_users_since(["ghost@x.com"], _now_epoch())
+        assert result.get("ghost@x.com", 0.0) == 0.0
+
+
+class TestGetModelBreakdownSince:
+    """Per-model breakdown scoped to an explicit since_ts (e.g. a user's or team's
+    credit_balances.period_start), used by the billing page's Per-Model Cost
+    Breakdown so it excludes usage from before the current subscription period
+    (e.g. individual/trial usage before a team upgrade)."""
+
+    def test_excludes_rows_before_since_ts(self, ledger):
+        period_start = _now_epoch()
+        before_period = period_start - 86400
+        ledger.bulk_insert_ignore([
+            _make_row("obs_mb_a", "user@x.com", cost_eur=0.50, observed_at=before_period),
+            _make_row("obs_mb_b", "user@x.com", cost_eur=0.10, observed_at=period_start + 10),
+        ])
+        rows = ledger.get_model_breakdown_since("user@x.com", period_start)
+        assert len(rows) == 1
+        assert rows[0]["cost_eur"] == pytest.approx(0.10)
+
+    def test_groups_by_model(self, ledger):
+        period_start = _now_epoch() - 10
+        ledger.bulk_insert_ignore([
+            _make_row("obs_mb_c", "user2@x.com", cost_eur=0.10, observed_at=period_start + 5),
+        ])
+        rows = ledger.get_model_breakdown_since("user2@x.com", period_start)
+        assert len(rows) == 1
+        assert rows[0]["model"] == "gpt-4o"
+        assert rows[0]["tokens"] == 150
+
+    def test_current_month_variant_still_works(self, ledger):
+        """get_model_breakdown_current_month (used as fallback when no period_start
+        exists) must still behave as a calendar-month filter."""
+        prev_month = _month_start() - 86400
+        ledger.bulk_insert_ignore([
+            _make_row("obs_mb_prev", "user3@x.com", cost_eur=0.30, observed_at=prev_month),
+            _make_row("obs_mb_curr", "user3@x.com", cost_eur=0.07),
+        ])
+        rows = ledger.get_model_breakdown_current_month("user3@x.com")
+        assert len(rows) == 1
+        assert rows[0]["cost_eur"] == pytest.approx(0.07)

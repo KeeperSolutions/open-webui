@@ -4,6 +4,7 @@ export const DEFAULT_PERMISSIONS = {
 		knowledge: false,
 		prompts: false,
 		tools: false,
+		skills: false,
 		models_import: false,
 		models_export: false,
 		prompts_import: false,
@@ -20,8 +21,15 @@ export const DEFAULT_PERMISSIONS = {
 		public_prompts: false,
 		tools: false,
 		public_tools: false,
+		skills: false,
+		public_skills: false,
 		notes: false,
-		public_notes: false
+		public_notes: false,
+		public_chats: false,
+		public_calendars: false
+	},
+	access_grants: {
+		allow_users: true
 	},
 	chat: {
 		controls: true,
@@ -29,6 +37,7 @@ export const DEFAULT_PERMISSIONS = {
 		system_prompt: true,
 		params: true,
 		file_upload: true,
+		web_upload: true,
 		delete: true,
 		delete_message: true,
 		continue_response: true,
@@ -42,7 +51,11 @@ export const DEFAULT_PERMISSIONS = {
 		call: true,
 		multiple_models: true,
 		temporary: true,
-		temporary_enforced: false
+		temporary_enforced: false,
+		// Named as a restriction ("masking is mandatory"), never as a
+		// freedom — the multi-group merge is OR, so a restriction gives
+		// "strictest wins" and a freedom would give "loosest wins".
+		pii_masking_enforced: false
 	},
 	features: {
 		api_keys: false,
@@ -53,7 +66,9 @@ export const DEFAULT_PERMISSIONS = {
 		web_search: true,
 		image_generation: true,
 		code_interpreter: true,
-		memories: true
+		memories: true,
+		automations: false,
+		calendar: true
 	},
 	settings: {
 		interface: true

@@ -39,7 +39,10 @@ downloads/
 eggs/
 .eggs/
 lib64/
-parts/
+# Anchored to the repo root: this is zc.buildout's build directory. Unanchored,
+# it also matched source dirs named "parts/" anywhere in the tree, which silently
+# hid them from Tailwind's source scanning and from Prettier.
+/parts/
 sdist/
 var/
 wheels/

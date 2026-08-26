@@ -3,12 +3,27 @@
 	const i18n = getContext('i18n');
 
 	import Switch from '$lib/components/common/Switch.svelte';
+	import PiiAudit from './PiiAudit.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
 
 	export let permissions = {};
 	export let defaultPermissions = {};
+
+	// The reason travels with the save and lands in the audit log; it is required
+	// only when enforcement is being turned OFF — a removal from protection has to
+	// say why. The route enforces the same rule, so this
+	// field is a convenience, never the control.
+	export let reason = '';
+	// Whether the group had enforcement on when the modal opened. Held by the
+	// parent, which sees the saved group: deriving it here would reset every
+	// time this tab is remounted, and the field would vanish mid-edit.
+	export let piiEnforcedInitially = false;
+	/** Absent in the default-permissions modal; the panel renders nothing then. */
+	export let groupId: string | undefined = undefined;
+
+	$: piiEnforcementBeingRemoved = piiEnforcedInitially && !permissions?.chat?.pii_masking_enforced;
 
 	// Reactive statement to ensure all fields are present in `permissions`
 	$: {
@@ -21,6 +36,7 @@
 			...obj,
 			workspace: { ...defaults.workspace, ...obj.workspace },
 			sharing: { ...defaults.sharing, ...obj.sharing },
+			access_grants: { ...defaults.access_grants, ...obj.access_grants },
 			chat: { ...defaults.chat, ...obj.chat },
 			features: { ...defaults.features, ...obj.features },
 			settings: { ...defaults.settings, ...obj.settings }
@@ -151,6 +167,29 @@
 					</div>
 				</div>
 			{:else if defaultPermissions?.workspace?.tools}
+				<div class="pb-0.5">
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<Tooltip
+				className="flex w-full justify-between my-1"
+				content={$i18n.t(
+					'Warning: Enabling this will allow users to upload arbitrary code on the server.'
+				)}
+				placement="top-start"
+			>
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Skills Access')}
+				</div>
+				<Switch bind:state={permissions.workspace.skills} />
+			</Tooltip>
+
+			{#if defaultPermissions?.workspace?.skills && !permissions.workspace.skills}
 				<div class="pb-0.5">
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}
@@ -304,6 +343,40 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Skills Sharing')}
+				</div>
+				<Switch bind:state={permissions.sharing.skills} />
+			</div>
+			{#if defaultPermissions?.sharing?.skills && !permissions.sharing.skills}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		{#if permissions.sharing.skills}
+			<div class="flex flex-col w-full">
+				<div class="flex w-full justify-between my-1">
+					<div class=" self-center text-xs font-medium">
+						{$i18n.t('Skills Public Sharing')}
+					</div>
+					<Switch bind:state={permissions.sharing.public_skills} />
+				</div>
+				{#if defaultPermissions?.sharing?.public_skills && !permissions.sharing.public_skills}
+					<div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('This is a default user permission and will remain enabled.')}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
 					{$i18n.t('Notes Sharing')}
 				</div>
 				<Switch bind:state={permissions.sharing.notes} />
@@ -334,6 +407,64 @@
 				{/if}
 			</div>
 		{/if}
+
+		{#if permissions.chat.share}
+			<div class="flex flex-col w-full">
+				<div class="flex w-full justify-between my-1">
+					<div class=" self-center text-xs font-medium">
+						{$i18n.t('Chats Public Sharing')}
+					</div>
+					<Switch bind:state={permissions.sharing.public_chats} />
+				</div>
+				{#if defaultPermissions?.sharing?.public_chats && !permissions.sharing.public_chats}
+					<div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('This is a default user permission and will remain enabled.')}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		{#if permissions.features.calendar}
+			<div class="flex flex-col w-full">
+				<div class="flex w-full justify-between my-1">
+					<div class=" self-center text-xs font-medium">
+						{$i18n.t('Calendars Public Sharing')}
+					</div>
+					<Switch bind:state={permissions.sharing.public_calendars} />
+				</div>
+				{#if defaultPermissions?.sharing?.public_calendars && !permissions.sharing.public_calendars}
+					<div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('This is a default user permission and will remain enabled.')}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</div>
+
+	<hr class=" border-gray-100/30 dark:border-gray-850/30" />
+
+	<div>
+		<div class=" mb-2 text-sm font-medium">{$i18n.t('Access Grants')}</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Sharing With Users')}
+				</div>
+				<Switch bind:state={permissions.access_grants.allow_users} />
+			</div>
+			{#if defaultPermissions?.access_grants?.allow_users && !permissions.access_grants.allow_users}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />
@@ -349,6 +480,22 @@
 				<Switch bind:state={permissions.chat.file_upload} />
 			</div>
 			{#if defaultPermissions?.chat?.file_upload && !permissions.chat.file_upload}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Allow Web Upload')}
+				</div>
+				<Switch bind:state={permissions.chat.web_upload} />
+			</div>
+			{#if defaultPermissions?.chat?.web_upload && !permissions.chat.web_upload}
 				<div>
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}
@@ -648,6 +795,40 @@
 				{/if}
 			</div>
 		{/if}
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Enforce PII Masking')}
+				</div>
+				<Switch bind:state={permissions.chat.pii_masking_enforced} />
+			</div>
+			{#if defaultPermissions?.chat?.pii_masking_enforced && !permissions.chat.pii_masking_enforced}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+
+			{#if piiEnforcementBeingRemoved}
+				<div class="mt-1.5">
+					<div class="text-xs text-gray-500 mb-1">
+						{$i18n.t('Members of this group will be able to turn PII masking off again.')}
+					</div>
+					<input
+						class="w-full text-xs py-1.5 px-2.5 rounded-xl bg-gray-50 dark:bg-gray-850 placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-hidden"
+						type="text"
+						bind:value={reason}
+						placeholder={$i18n.t('Reason for removing enforcement (required)')}
+						required
+					/>
+				</div>
+			{/if}
+
+			<!-- The record of what was done to this switch, next to the switch. -->
+			<PiiAudit {groupId} />
+		</div>
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />
@@ -791,6 +972,44 @@
 				<Switch bind:state={permissions.features.memories} />
 			</div>
 			{#if defaultPermissions?.features?.memories && !permissions.features.memories}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<Tooltip
+				className="flex w-full justify-between my-1"
+				content={$i18n.t(
+					'Warning: Enabling this will allow users to run scheduled prompts automatically.'
+				)}
+				placement="top-start"
+			>
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Automations')}
+				</div>
+				<Switch bind:state={permissions.features.automations} />
+			</Tooltip>
+			{#if defaultPermissions?.features?.automations && !permissions.features.automations}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Calendar')}
+				</div>
+				<Switch bind:state={permissions.features.calendar} />
+			</div>
+			{#if defaultPermissions?.features?.calendar && !permissions.features.calendar}
 				<div>
 					<div class="text-xs text-gray-500">
 						{$i18n.t('This is a default user permission and will remain enabled.')}

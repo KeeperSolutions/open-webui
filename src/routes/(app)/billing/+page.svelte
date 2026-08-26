@@ -371,6 +371,14 @@
 		activeMembers > 0 ? (teamStatus?.team_month_cost_eur ?? 0) / activeMembers : 0;
 	$: teamCreditsUsed = Math.max(0, teamBudgetTotal - (status?.credits_remaining ?? 0));
 	$: avgCreditsPerMember = activeMembers > 0 ? Math.round(teamCreditsUsed / activeMembers) : 0;
+
+	// Focuses an element as soon as it's mounted — used in place of the
+	// `autofocus` attribute (flagged by a11y-autofocus) for inputs that only
+	// render once a user explicitly enters an edit mode, e.g. the team-name
+	// rename field below.
+	const focusOnMount = (node: HTMLElement) => {
+		node.focus();
+	};
 </script>
 
 <div
@@ -448,13 +456,6 @@
 						</div>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
-						<button
-							on:click={handlePortal}
-							disabled={openingPortal}
-							class="px-4 py-2 rounded-full text-sm border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition font-medium disabled:opacity-50"
-						>
-							{openingPortal ? $i18n.t('Opening...') : $i18n.t('Manage Billing')}
-						</button>
 						{#if availablePlans.length > 0}
 							<button
 								on:click={() => (showPlans = !showPlans)}
@@ -571,7 +572,7 @@
 									bind:value={editingTeamNameValue}
 									on:keydown={(e) => { if (e.key === 'Enter') handleSaveTeamName(); else if (e.key === 'Escape') editingTeamName = false; }}
 									class="text-lg font-bold bg-transparent border-b border-gray-400 dark:border-gray-500 outline-none w-56"
-									autofocus
+									use:focusOnMount
 								/>
 								<button
 									on:click={handleSaveTeamName}
@@ -955,11 +956,13 @@
 
 <!-- ===== INVITE MODAL ===== -->
 {#if showInviteModal}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => (showInviteModal = false)}
 		role="dialog"
 		aria-modal="true"
+		tabindex="-1"
 	>
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
 			<div class="flex items-center justify-between">
@@ -1011,11 +1014,13 @@
 
 <!-- ===== CREATE TEAM MODAL ===== -->
 {#if showCreateTeam}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => (showCreateTeam = false)}
 		role="dialog"
 		aria-modal="true"
+		tabindex="-1"
 	>
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-5">
 			<div class="flex items-center justify-between">
@@ -1075,11 +1080,13 @@
 
 <!-- ===== TOP-UP MODAL ===== -->
 {#if showTopupModal}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => (showTopupModal = false)}
 		role="dialog"
 		aria-modal="true"
+		tabindex="-1"
 	>
 		<div class="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
 			<div class="flex items-center justify-between">
@@ -1113,8 +1120,23 @@
 {/if}
 
 <!-- ===== REMOVE MEMBER CONFIRM ===== -->
-<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && pendingRemoveUserId) { pendingRemoveUserId = null; pendingRemoveName = null; } }} />
+<svelte:window
+	on:keydown={(e) => {
+		if (e.key !== 'Escape') return;
+		if (pendingRemoveUserId) {
+			pendingRemoveUserId = null;
+			pendingRemoveName = null;
+		} else if (showTopupModal) {
+			showTopupModal = false;
+		} else if (showCreateTeam) {
+			showCreateTeam = false;
+		} else if (showInviteModal) {
+			showInviteModal = false;
+		}
+	}}
+/>
 {#if pendingRemoveUserId}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 		on:click|self={() => { pendingRemoveUserId = null; pendingRemoveName = null; }}

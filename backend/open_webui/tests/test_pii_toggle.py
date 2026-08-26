@@ -368,3 +368,112 @@ class TestMultipleFilters:
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
         # Second filter (priority 1) → pii_filter_pipeline → False
         assert captured[1]["user"]["valves"]["pii_masking_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# metadata.features fallback — Layer 1 fix for background task payloads
+# ---------------------------------------------------------------------------
+#
+# The main chat-completion path sends `features` at the top level of the
+# payload. Background task payloads (title/tags/follow_ups/... built in
+# tasks.py from request.state.metadata) instead carry the per-chat toggle
+# under metadata.features, with NO top-level features key. Without the
+# fallback, task payloads silently drop the per-chat toggle and the pipeline
+# uses the stored/default valve. Top-level features must still win when both
+# are present.
+
+class TestMetadataFeaturesFallback:
+
+    def test_task_payload_metadata_true_enables(self):
+        """Task-shaped payload (no top-level features) with
+        metadata.features.pii_masking=True → override True."""
+        captured = []
+        payload = {
+            "model": "gpt-4",
+            "metadata": {
+                "task": "title_generation",
+                "chat_id": "chat-1",
+                "features": {"pii_masking": True},
+            },
+        }
+        user = _make_user(pii_enabled=False)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
+    def test_task_payload_metadata_false_disables(self):
+        """Same shape with metadata.features.pii_masking=False → override False."""
+        captured = []
+        payload = {
+            "model": "gpt-4",
+            "metadata": {
+                "task": "title_generation",
+                "chat_id": "chat-1",
+                "features": {"pii_masking": False},
+            },
+        }
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is False
+
+    def test_top_level_features_wins_over_metadata(self):
+        """Top-level features.pii_masking=False must beat
+        metadata.features.pii_masking=True (top-level wins → False)."""
+        captured = []
+        payload = {
+            "model": "gpt-4",
+            "features": {"pii_masking": False},
+            "metadata": {
+                "task": "title_generation",
+                "chat_id": "chat-1",
+                "features": {"pii_masking": True},
+            },
+        }
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is False
+
+    def test_neither_present_no_override(self):
+        """No top-level features, no metadata.features → override not applied;
+        stored/default valve is preserved."""
+        captured = []
+        payload = {
+            "model": "gpt-4",
+            "metadata": {"task": "title_generation", "chat_id": "chat-1"},
+        }
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        # No override → stored value survives untouched.
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
+    def test_metadata_none_does_not_raise(self):
+        """metadata=None must not raise; no override applied."""
+        captured = []
+        payload = {"model": "gpt-4", "metadata": None}
+        user = _make_user(pii_enabled=True)
+
+        with _patch_session(captured):
+            _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+
+        assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True

@@ -5,9 +5,10 @@ import uuid
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Boolean, Column, Float, Integer, Text
+from sqlalchemy import BigInteger, Boolean, Column, Float, Integer, Text, delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_async_db_context
 
 log = logging.getLogger(__name__)
 
@@ -63,17 +64,23 @@ class StripeBillingModel(BaseModel):
 
 
 class StripeBillingTable:
-    def get_by_user_id(self, user_id: str) -> Optional[StripeBillingModel]:
-        with get_db() as db:
-            row = db.query(StripeBilling).filter_by(user_id=user_id).first()
+    async def get_by_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[StripeBillingModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(user_id=user_id))
+            row = result.scalars().first()
             return StripeBillingModel.model_validate(row) if row else None
 
-    def get_by_customer_id(self, customer_id: str) -> Optional[StripeBillingModel]:
-        with get_db() as db:
-            row = db.query(StripeBilling).filter_by(stripe_customer_id=customer_id).first()
+    async def get_by_customer_id(
+        self, customer_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[StripeBillingModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(stripe_customer_id=customer_id))
+            row = result.scalars().first()
             return StripeBillingModel.model_validate(row) if row else None
 
-    def upsert(
+    async def upsert(
         self,
         user_id: str,
         stripe_customer_id: Optional[str] = None,
@@ -84,9 +91,11 @@ class StripeBillingTable:
         free_tier_credit_applied: Optional[bool] = None,
         plan_tier: Optional[str] = None,
         team_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
     ) -> StripeBillingModel:
-        with get_db() as db:
-            row = db.query(StripeBilling).filter_by(user_id=user_id).first()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(user_id=user_id))
+            row = result.scalars().first()
             now = int(time.time())
             if row is None:
                 row = StripeBilling(
@@ -122,44 +131,49 @@ class StripeBillingTable:
                 if team_id is not None:
                     row.team_id = team_id
                 row.updated_at = now
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return StripeBillingModel.model_validate(row)
 
-    def update_subscription_status(self, customer_id: str, status: str) -> bool:
-        with get_db() as db:
-            updated = (
-                db.query(StripeBilling)
+    async def update_subscription_status(
+        self, customer_id: str, status: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(StripeBilling)
                 .filter_by(stripe_customer_id=customer_id)
-                .update({"subscription_status": status, "updated_at": int(time.time())})
+                .values(subscription_status=status, updated_at=int(time.time()))
             )
-            db.commit()
-            return updated > 0
+            await db.commit()
+            return result.rowcount > 0
 
-    def get_all_active(self) -> list[StripeBillingModel]:
-        with get_db() as db:
-            rows = db.query(StripeBilling).filter_by(subscription_status="active").all()
-            return [StripeBillingModel.model_validate(r) for r in rows]
+    async def get_all_active(self, db: Optional[AsyncSession] = None) -> list[StripeBillingModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(subscription_status="active"))
+            return [StripeBillingModel.model_validate(r) for r in result.scalars().all()]
 
-    def get_all(self) -> list[StripeBillingModel]:
-        with get_db() as db:
-            rows = db.query(StripeBilling).all()
-            return [StripeBillingModel.model_validate(r) for r in rows]
+    async def get_all(self, db: Optional[AsyncSession] = None) -> list[StripeBillingModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling))
+            return [StripeBillingModel.model_validate(r) for r in result.scalars().all()]
 
-    def get_team_members(self, team_id: str) -> list[StripeBillingModel]:
-        with get_db() as db:
-            rows = db.query(StripeBilling).filter_by(team_id=team_id).all()
-            return [StripeBillingModel.model_validate(r) for r in rows]
+    async def get_team_members(
+        self, team_id: str, db: Optional[AsyncSession] = None
+    ) -> list[StripeBillingModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(team_id=team_id))
+            return [StripeBillingModel.model_validate(r) for r in result.scalars().all()]
 
-    def revert_to_trial(self, user_id: str) -> None:
+    async def revert_to_trial(self, user_id: str, db: Optional[AsyncSession] = None) -> None:
         """Remove team association and revert user to trial tier."""
-        with get_db() as db:
-            row = db.query(StripeBilling).filter_by(user_id=user_id).first()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(StripeBilling).filter_by(user_id=user_id))
+            row = result.scalars().first()
             if row:
                 row.plan_tier = "trial"
                 row.team_id = None
                 row.updated_at = int(time.time())
-                db.commit()
+                await db.commit()
 
 
 StripeBillings = StripeBillingTable()
@@ -212,14 +226,15 @@ class TeamModel(BaseModel):
 
 
 class TeamsTable:
-    def create(
+    async def create(
         self,
         name: str,
         owner_user_id: str,
         seat_limit: int,
         monthly_credits: int = 0,
+        db: Optional[AsyncSession] = None,
     ) -> TeamModel:
-        with get_db() as db:
+        async with get_async_db_context(db) as db:
             now = int(time.time())
             row = Team(
                 id=str(uuid.uuid4()),
@@ -231,54 +246,66 @@ class TeamsTable:
                 updated_at=now,
             )
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return TeamModel.model_validate(row)
 
-    def get_by_id(self, team_id: str) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(id=team_id).first()
+    async def get_by_id(self, team_id: str, db: Optional[AsyncSession] = None) -> Optional[TeamModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Team).filter_by(id=team_id))
+            row = result.scalars().first()
             return TeamModel.model_validate(row) if row else None
 
-    def get_by_owner_user_id(self, user_id: str) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(owner_user_id=user_id).first()
+    async def get_by_owner_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[TeamModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Team).filter_by(owner_user_id=user_id))
+            row = result.scalars().first()
             return TeamModel.model_validate(row) if row else None
 
-    def get_by_customer_id(self, customer_id: str) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(stripe_customer_id=customer_id).first()
+    async def get_by_customer_id(
+        self, customer_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[TeamModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Team).filter_by(stripe_customer_id=customer_id))
+            row = result.scalars().first()
             return TeamModel.model_validate(row) if row else None
 
-    def get_all_active(self) -> list[TeamModel]:
-        with get_db() as db:
-            rows = db.query(Team).filter(
-                Team.subscription_status.in_(("active", "trialing"))
-            ).all()
-            return [TeamModel.model_validate(r) for r in rows]
+    async def get_all_active(self, db: Optional[AsyncSession] = None) -> list[TeamModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Team).filter(Team.subscription_status.in_(("active", "trialing")))
+            )
+            return [TeamModel.model_validate(r) for r in result.scalars().all()]
 
-    def update(self, team_id: str, **kwargs) -> Optional[TeamModel]:
-        with get_db() as db:
-            row = db.query(Team).filter_by(id=team_id).first()
+    async def update(
+        self, team_id: str, db: Optional[AsyncSession] = None, **kwargs
+    ) -> Optional[TeamModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Team).filter_by(id=team_id))
+            row = result.scalars().first()
             if not row:
                 return None
             for k, v in kwargs.items():
                 if hasattr(row, k) and v is not None:
                     setattr(row, k, v)
             row.updated_at = int(time.time())
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return TeamModel.model_validate(row)
 
-    def update_subscription_status(self, customer_id: str, status: str) -> bool:
-        with get_db() as db:
-            updated = (
-                db.query(Team)
+    async def update_subscription_status(
+        self, customer_id: str, status: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Team)
                 .filter_by(stripe_customer_id=customer_id)
-                .update({"subscription_status": status, "updated_at": int(time.time())})
+                .values(subscription_status=status, updated_at=int(time.time()))
             )
-            db.commit()
-            return updated > 0
+            await db.commit()
+            return result.rowcount > 0
 
 
 Teams = TeamsTable()
@@ -310,8 +337,10 @@ class TeamMemberModel(BaseModel):
 
 
 class TeamMembersTable:
-    def add(self, team_id: str, user_id: str, role: str = "member") -> TeamMemberModel:
-        with get_db() as db:
+    async def add(
+        self, team_id: str, user_id: str, role: str = "member", db: Optional[AsyncSession] = None
+    ) -> TeamMemberModel:
+        async with get_async_db_context(db) as db:
             row = TeamMember(
                 id=str(uuid.uuid4()),
                 team_id=team_id,
@@ -320,33 +349,37 @@ class TeamMembersTable:
                 created_at=int(time.time()),
             )
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return TeamMemberModel.model_validate(row)
 
-    def get_by_team_id(self, team_id: str) -> list[TeamMemberModel]:
-        with get_db() as db:
-            rows = db.query(TeamMember).filter_by(team_id=team_id).all()
-            return [TeamMemberModel.model_validate(r) for r in rows]
+    async def get_by_team_id(
+        self, team_id: str, db: Optional[AsyncSession] = None
+    ) -> list[TeamMemberModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(TeamMember).filter_by(team_id=team_id))
+            return [TeamMemberModel.model_validate(r) for r in result.scalars().all()]
 
-    def get_by_user_id(self, user_id: str) -> Optional[TeamMemberModel]:
-        with get_db() as db:
-            row = db.query(TeamMember).filter_by(user_id=user_id).first()
+    async def get_by_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[TeamMemberModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(TeamMember).filter_by(user_id=user_id))
+            row = result.scalars().first()
             return TeamMemberModel.model_validate(row) if row else None
 
-    def remove(self, team_id: str, user_id: str) -> bool:
-        with get_db() as db:
-            deleted = (
-                db.query(TeamMember)
-                .filter_by(team_id=team_id, user_id=user_id)
-                .delete()
+    async def remove(self, team_id: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                delete(TeamMember).filter_by(team_id=team_id, user_id=user_id)
             )
-            db.commit()
-            return deleted > 0
+            await db.commit()
+            return result.rowcount > 0
 
-    def count_members(self, team_id: str) -> int:
-        with get_db() as db:
-            return db.query(TeamMember).filter_by(team_id=team_id).count()
+    async def count_members(self, team_id: str, db: Optional[AsyncSession] = None) -> int:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(TeamMember).filter_by(team_id=team_id))
+            return len(result.scalars().all())
 
 
 TeamMembers = TeamMembersTable()
@@ -384,8 +417,10 @@ class TeamInviteModel(BaseModel):
 
 
 class TeamInvitesTable:
-    def create(self, team_id: str, invited_email: str, invited_by: str) -> TeamInviteModel:
-        with get_db() as db:
+    async def create(
+        self, team_id: str, invited_email: str, invited_by: str, db: Optional[AsyncSession] = None
+    ) -> TeamInviteModel:
+        async with get_async_db_context(db) as db:
             now = int(time.time())
             row = TeamInvite(
                 id=str(uuid.uuid4()),
@@ -398,41 +433,54 @@ class TeamInvitesTable:
                 expires_at=now + 7 * 24 * 3600,  # 7 days
             )
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             return TeamInviteModel.model_validate(row)
 
-    def get_by_token(self, token: str) -> Optional[TeamInviteModel]:
-        with get_db() as db:
-            row = db.query(TeamInvite).filter_by(token=token).first()
+    async def get_by_token(
+        self, token: str, db: Optional[AsyncSession] = None
+    ) -> Optional[TeamInviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(TeamInvite).filter_by(token=token))
+            row = result.scalars().first()
             return TeamInviteModel.model_validate(row) if row else None
 
-    def get_by_team_id(self, team_id: str) -> list[TeamInviteModel]:
-        with get_db() as db:
-            rows = db.query(TeamInvite).filter_by(team_id=team_id).all()
-            return [TeamInviteModel.model_validate(r) for r in rows]
+    async def get_by_team_id(
+        self, team_id: str, db: Optional[AsyncSession] = None
+    ) -> list[TeamInviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(TeamInvite).filter_by(team_id=team_id))
+            return [TeamInviteModel.model_validate(r) for r in result.scalars().all()]
 
-    def get_pending_by_email(self, email: str) -> list[TeamInviteModel]:
-        with get_db() as db:
-            rows = (
-                db.query(TeamInvite)
-                .filter_by(invited_email=email.lower(), status="pending")
-                .all()
+    async def get_pending_by_email(
+        self, email: str, db: Optional[AsyncSession] = None
+    ) -> list[TeamInviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(TeamInvite).filter_by(invited_email=email.lower(), status="pending")
             )
-            return [TeamInviteModel.model_validate(r) for r in rows]
+            return [TeamInviteModel.model_validate(r) for r in result.scalars().all()]
 
-    def update_status(self, token: str, status: str) -> bool:
-        with get_db() as db:
-            updated = db.query(TeamInvite).filter_by(token=token).update({"status": status})
-            db.commit()
-            return updated > 0
+    async def update_status(
+        self, token: str, status: str, db: Optional[AsyncSession] = None
+    ) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(TeamInvite).filter_by(token=token).values(status=status)
+            )
+            await db.commit()
+            return result.rowcount > 0
 
-    def delete_pending_by_email_and_team(self, team_id: str, email: str) -> None:
-        with get_db() as db:
-            db.query(TeamInvite).filter_by(
-                team_id=team_id, invited_email=email.lower(), status="pending"
-            ).delete()
-            db.commit()
+    async def delete_pending_by_email_and_team(
+        self, team_id: str, email: str, db: Optional[AsyncSession] = None
+    ) -> None:
+        async with get_async_db_context(db) as db:
+            await db.execute(
+                delete(TeamInvite).filter_by(
+                    team_id=team_id, invited_email=email.lower(), status="pending"
+                )
+            )
+            await db.commit()
 
 
 TeamInvites = TeamInvitesTable()

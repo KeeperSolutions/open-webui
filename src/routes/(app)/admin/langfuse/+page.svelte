@@ -55,11 +55,12 @@
 		loading = true;
 		currentPage = 1;
 		try {
-			rows = await getLangfuseMetrics(
+			const res = await getLangfuseMetrics(
 				localStorage.token,
 				p,
 				p === 'custom' ? customDays : undefined
 			);
+			rows = res.rows;
 		} catch (e) {
 			toast.error(String(e) || 'Failed to fetch Langfuse metrics');
 			rows = [];
