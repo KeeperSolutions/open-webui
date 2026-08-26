@@ -63,7 +63,13 @@ def _request():
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
 
 
-def _run(which, caller, team_id=None, team=None, members=None, accounts=None, page=1):
+def _group(group_id, masking=True):
+    """Only the two fields the route reads off a group."""
+    return SimpleNamespace(id=group_id, permissions={"chat": {"pii_masking_enforced": masking}})
+
+
+def _run(which, caller, team_id=None, team=None, members=None, accounts=None, page=1,
+         groups=None):
     """Call one directory route and report the filter it handed the model.
 
     `page` is threaded through because two fields of the response are properties
@@ -75,7 +81,9 @@ def _run(which, caller, team_id=None, team=None, members=None, accounts=None, pa
         MEMBERS, AsyncMock(return_value=list(TEAM_MEMBERS if members is None else members))
     ), patch(
         USER_IDS, AsyncMock(return_value=list(TEAM_ACCOUNTS if accounts is None else accounts))
-    ), patch(GET_USERS, get_users_mock), patch(GROUPS, AsyncMock(return_value={})):
+    ), patch(GET_USERS, get_users_mock), patch(
+        GROUPS, AsyncMock(return_value=groups if groups is not None else {})
+    ):
         if which == "paged":
             coro = get_users(
                 request=_request(), query=None, order_by=None, direction=None,
@@ -381,3 +389,135 @@ class TestTheScopeFieldsAreNotPageProperties:
             assert second[field] == first[field], field
         assert second["team_group_id"] == "g-team"
         assert second["may_manage_team_policy"] is True
+
+
+# ---------------------------------------------------------------------------
+# A group id is a group NAME, so a non-admin gets neither
+# ---------------------------------------------------------------------------
+
+
+class TestGroupIdsAreNotHandedToNonAdmins:
+    """⚠️ The no-group-name rule is not a property of the screen.
+
+    `GET /groups/id/{id}/info` is `get_verified_user` and checks no membership,
+    so any id in this response is one call away from that group's name,
+    description and member count. A payload that gives a team owner other
+    people's group ids has already told them the names, whatever the template
+    chooses to render.
+
+    Measured, not assumed: with the ids in the response, two `curl` calls as a
+    plain team owner returned `PII Masking Policy`, `Proba spajanja` and the id
+    of the administrator who created it.
+
+    ⚠️ Keyed on the ROLE, not on whether the request was scoped. An admin reading
+    a team's dashboard is still an admin, and their screen names groups.
+    """
+
+    TEAM_GROUP = "g-team"
+    OTHER = "g-legal"
+
+    def _rows(self, caller, groups):
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group",
+            AsyncMock(return_value=self.TEAM_GROUP),
+        ):
+            result, _ = _run(
+                "paged", caller, team_id="T1", team=_team("u1"), groups=groups
+            )
+        return {u.id: u for u in result["users"]}
+
+    def test_a_non_admin_is_told_nothing_about_groups_outside_their_team(self):
+        rows = self._rows(
+            _caller("user", "u1"),
+            {"u1": [_group(self.TEAM_GROUP), _group(self.OTHER)], "u2": [_group(self.OTHER)]},
+        )
+        assert rows["u1"].pii_policy_group_ids == [self.TEAM_GROUP]
+        assert rows["u2"].pii_policy_group_ids == []
+        # `group_ids` carries non-policy groups and leaks names just as well.
+        assert rows["u1"].group_ids == [] and rows["u2"].group_ids == []
+
+    def test_but_they_are_still_told_THAT_something_else_masks_them(self):
+        """The narrowing must not cost the owner the answer their screen needs.
+
+        Without this the dialog would promise that leaving the team's policy lets
+        somebody turn masking off, when an administrator's group still holds it.
+        """
+        rows = self._rows(
+            _caller("user", "u1"),
+            {"u1": [_group(self.TEAM_GROUP), _group(self.OTHER)], "u2": [_group(self.OTHER)]},
+        )
+        assert rows["u1"].masked_by_other_policy is True
+        assert rows["u2"].masked_by_other_policy is True
+
+    def test_and_it_is_false_when_only_the_team_masks_them(self):
+        rows = self._rows(_caller("user", "u1"), {"u1": [_group(self.TEAM_GROUP)]})
+        assert rows["u1"].masked_by_other_policy is False
+        assert rows["u2"].masked_by_other_policy is False
+
+    def test_an_admin_keeps_every_id(self):
+        rows = self._rows(
+            _caller("admin", "adm"),
+            {"u1": [_group(self.TEAM_GROUP), _group(self.OTHER)], "u2": [_group(self.OTHER)]},
+        )
+        assert set(rows["u1"].pii_policy_group_ids) == {self.TEAM_GROUP, self.OTHER}
+        assert rows["u2"].pii_policy_group_ids == [self.OTHER]
+        assert set(rows["u1"].group_ids) == {self.TEAM_GROUP, self.OTHER}
+
+    def test_a_group_that_does_not_mask_is_not_a_policy_group_for_either_viewer(self):
+        groups = {"u1": [_group(self.TEAM_GROUP), _group("g-plain", masking=False)]}
+        assert self._rows(_caller("user", "u1"), groups)["u1"].pii_policy_group_ids == [
+            self.TEAM_GROUP
+        ]
+        admin_row = self._rows(_caller("admin", "adm"), groups)["u1"]
+        assert admin_row.pii_policy_group_ids == [self.TEAM_GROUP]
+        assert set(admin_row.group_ids) == {self.TEAM_GROUP, "g-plain"}
+
+
+class TestMaskedByOtherPolicyCountsTheInstanceDefault:
+    """⚠️ The one source with no group behind it.
+
+    `pii_policy_group_ids` deliberately ignores the instance-wide default — it
+    answers "which groups say yes". This field answers a different question,
+    "would they still be masked afterwards", and there the default is an answer.
+
+    Nobody could see this while the frontend derived the flag from ids: an
+    instance with `USER_PERMISSIONS_CHAT_CHAT_PII_MASKING_ENFORCED` on would tell
+    every owner that removing somebody restores their ability to turn masking
+    off, which it does not.
+    """
+
+    def _rows(self, default_permissions, groups):
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(
+                    config=SimpleNamespace(USER_PERMISSIONS=default_permissions)
+                )
+            )
+        )
+        with patch(TEAMS, AsyncMock(return_value=_team("u1"))), patch(
+            MEMBERS, AsyncMock(return_value=list(TEAM_MEMBERS))
+        ), patch(USER_IDS, AsyncMock(return_value=list(TEAM_ACCOUNTS))), patch(
+            GET_USERS, AsyncMock(return_value=dict(DIRECTORY))
+        ), patch(GROUPS, AsyncMock(return_value=groups)), patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group",
+            AsyncMock(return_value="g-team"),
+        ):
+            result = asyncio.run(
+                get_users(
+                    request=request, query=None, order_by=None, direction=None,
+                    page=1, team_id="T1", user=_caller("user", "u1"), db=None,
+                )
+            )
+        return {u.id: u for u in result["users"]}
+
+    def test_the_instance_default_alone_makes_it_true(self):
+        rows = self._rows(
+            {"chat": {"pii_masking_enforced": True}}, {"u1": [_group("g-team")]}
+        )
+        assert rows["u1"].masked_by_other_policy is True
+
+    def test_and_off_by_default_it_is_false(self):
+        rows = self._rows(
+            {"chat": {"pii_masking_enforced": False}}, {"u1": [_group("g-team")]}
+        )
+        assert rows["u1"].masked_by_other_policy is False

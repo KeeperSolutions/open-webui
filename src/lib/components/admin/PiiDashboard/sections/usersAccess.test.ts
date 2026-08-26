@@ -641,6 +641,28 @@ describe('rowActionFor — destinations', () => {
 });
 
 describe('buildRows — policy sources', () => {
+	it("⚠️ carries the server's masked-elsewhere answer onto the row", () => {
+		/**
+		 * Found by a mutation that SURVIVED: hard-coding this to `false` broke no
+		 * test, because every `rowActionFor` test builds its own row object and
+		 * never goes through `buildRows`.
+		 *
+		 * It is the whole owner path. With the ids narrowed server-side, a row that
+		 * loses this field tells the owner that removing somebody restores their
+		 * ability to turn masking off — while an administrator's group still holds
+		 * it.
+		 */
+		expect(buildRows([user({ masked_by_other_policy: true })], [])[0].maskedByOtherPolicy).toBe(
+			true
+		);
+		expect(buildRows([user({ masked_by_other_policy: false })], [])[0].maskedByOtherPolicy).toBe(
+			false
+		);
+		// Absent is not "unknown" here — an older payload simply says nothing, and
+		// the id scan in `rowActionFor` is what answers instead.
+		expect(buildRows([user()], [])[0].maskedByOtherPolicy).toBe(false);
+	});
+
 	it('carries the enforcing group ids onto the row', () => {
 		const r = buildRows(
 			[user({ pii_masking_enforced: true, pii_policy_group_ids: ['g1'] })],
@@ -1274,6 +1296,70 @@ describe('rowActionFor — a team owner with the power to act', () => {
 			expect(JSON.stringify(action)).not.toContain(ELSEWHERE);
 			expect(JSON.stringify(action)).not.toContain(TEAM);
 		}
+	});
+
+	// -- the narrowed payload a non-admin actually receives -------------------
+
+	/**
+	 * ⚠️ The shape above is the ADMIN's. A team owner no longer gets other
+	 * people's group ids at all: `pii_policy_group_ids` is narrowed server-side to
+	 * this team's own group, because a group id is one call to
+	 * `GET /groups/id/{id}/info` — `get_verified_user`, no membership check — away
+	 * from that group's NAME.
+	 *
+	 * So for the owner the id scan can no longer see anything else, and
+	 * `masked_by_other_policy` is the whole answer. These tests use that shape.
+	 */
+	const narrowed = (inTeamPolicy: boolean, maskedByOtherPolicy: boolean) => ({
+		enforced: inTeamPolicy || maskedByOtherPolicy,
+		policyGroupIds: inTeamPolicy ? [TEAM] : [],
+		maskedByOtherPolicy
+	});
+
+	it('⚠️ believes the server when the ids can no longer say', () => {
+		// The exact regression the narrowing would otherwise cause: an empty list
+		// scanned for "any other id" says no, and the dialog would promise that
+		// leaving the team policy lets them turn masking off.
+		expect(rowActionFor(narrowed(true, true), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: true
+		});
+	});
+
+	it('offers Add, and says they are already masked, on the narrowed shape', () => {
+		expect(rowActionFor(narrowed(false, true), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: true
+		});
+	});
+
+	it('says nothing else masks them when the server says so', () => {
+		expect(rowActionFor(narrowed(true, false), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: false
+		});
+		expect(rowActionFor(narrowed(false, false), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: false
+		});
+	});
+
+	it('⚠️ still carries no identity once the flag is what answers', () => {
+		for (const shape of [narrowed(true, true), narrowed(false, true)]) {
+			const action = rowActionFor(shape, anyGroups, owner());
+			expect(Object.keys(action).sort()).toEqual(['kind', 'maskedElsewhere']);
+			expect(JSON.stringify(action)).not.toContain(TEAM);
+			expect(JSON.stringify(action)).not.toContain(ELSEWHERE);
+		}
+	});
+
+	it('keeps the id scan as a second term, for a fuller list', () => {
+		// An admin's row reaches this branch in no supported state today, but the
+		// scan costs nothing and the OR fails towards "still masked" — an
+		// over-cautious sentence rather than a false promise.
+		expect(
+			rowActionFor({ ...row([TEAM, ELSEWHERE]), maskedByOtherPolicy: false }, anyGroups, owner())
+		).toEqual({ kind: 'team-remove', maskedElsewhere: true });
 	});
 
 	// -- the boundaries of the branch ----------------------------------------

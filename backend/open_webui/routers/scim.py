@@ -80,12 +80,48 @@ PII_POLICY_REFUSED = (
     'directory sync, because doing so silently stops masking people it protects.'
 )
 
+# The second reason a membership write is refused: a team's policy group is
+# derived from the team, and nobody outside the team belongs in it.
+TEAM_GROUP_REFUSED = (
+    'This group belongs to a team. Only members of that team can be in it, so its '
+    'membership cannot be set through directory sync.'
+)
+
 
 def _pii_policy_refused():
     return scim_error(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=PII_POLICY_REFUSED,
         scim_type='mutability',
+    )
+
+
+async def _membership_refused(group, user_ids, db):
+    """Say WHICH rule refused the write, rather than guessing.
+
+    ⚠️ The model reports a refusal as `False` or `None`, and one such value cannot
+    say which of two rules produced it — nor whether it was a rule at all, since
+    `add_users_to_group` also answers `None` when the database fails. Naming the
+    wrong one tells an administrator that masking blocked a change masking had
+    nothing to do with.
+
+    So each candidate is asked in turn, and a value no rule explains is reported
+    as the failure it is rather than dressed up as a policy. One extra query, and
+    only on the failure path.
+    """
+    from open_webui.utils.pii_policy import group_enforces_pii_masking
+
+    if await Groups.users_outside_the_team_of_group(group.id, user_ids, db=db):
+        return scim_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TEAM_GROUP_REFUSED,
+            scim_type='mutability',
+        )
+    if group_enforces_pii_masking(group.permissions):
+        return _pii_policy_refused()
+    return scim_error(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f'Failed to update the membership of group {group.id}',
     )
 
 
@@ -941,7 +977,7 @@ async def update_group(
     if group_data.members is not None:
         member_ids = [member.value for member in group_data.members]
         if not await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db):
-            return _pii_policy_refused()
+            return await _membership_refused(group, member_ids, db)
 
     # Update group
     updated_group = await Groups.update_group_by_id(group_id, update_form, db=db)
@@ -971,8 +1007,6 @@ async def patch_group(
         )
 
     from open_webui.models.groups import GroupUpdateForm
-    from open_webui.utils.pii_policy import group_enforces_pii_masking
-
     update_form = GroupUpdateForm(
         name=group.name,
         description=group.description,
@@ -994,10 +1028,9 @@ async def patch_group(
                 # does not make it so — but a client that is told the request
                 # failed will re-send it, and a client told it succeeded never
                 # will.
-                if not await Groups.set_group_user_ids_by_id(
-                    group_id, [member['value'] for member in value], db=db
-                ):
-                    return _pii_policy_refused()
+                member_ids = [member['value'] for member in value]
+                if not await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db):
+                    return await _membership_refused(group, member_ids, db)
 
         elif op == 'add':
             if path == 'members':
@@ -1005,7 +1038,15 @@ async def patch_group(
                 if isinstance(value, list):
                     for member in value:
                         if isinstance(member, dict) and 'value' in member:
-                            await Groups.add_users_to_group(group_id, [member['value']], db=db)
+                            # ⚠️ Refusable too, now: a team's group takes nobody from
+                            # outside the team. Same discarded-result defect as the
+                            # two sites above, and the same answer.
+                            if await Groups.add_users_to_group(
+                                group_id, [member['value']], db=db
+                            ) is None:
+                                return await _membership_refused(
+                                    group, [member['value']], db
+                                )
         elif op == 'remove':
             if path and path.startswith('members[value eq'):
                 # Remove specific member
@@ -1016,12 +1057,7 @@ async def patch_group(
                 # than every `None` being reported as a policy refusal it may not
                 # be. `group` was read at the top of this handler.
                 if await Groups.remove_users_from_group(group_id, [member_id], db=db) is None:
-                    if group_enforces_pii_masking(group.permissions):
-                        return _pii_policy_refused()
-                    return scim_error(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f'Failed to remove member {member_id} from group {group_id}',
-                    )
+                    return await _membership_refused(group, [member_id], db)
 
     # Update group
     updated_group = await Groups.update_group_by_id(group_id, update_form, db=db)

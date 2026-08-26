@@ -29,12 +29,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 sys.modules.setdefault("stripe", MagicMock())
 
-from open_webui.models.billing import Team
+from open_webui.models.billing import Team, TeamMember
 from open_webui.models.groups import Group, GroupMember
 from open_webui.models.users import User
 
 GROUP = "g-policy"
 PLAIN = "g-plain"
+TEAM, TEAM_GROUP = "t1", "g-team"
 KEEP, DROP = "u-keep", "u-drop"
 ENFORCING = {"chat": {"pii_masking_enforced": True}}
 
@@ -45,7 +46,7 @@ async def session():
     async with engine.begin() as conn:
         # `teams` too: updating a group asks `team_group_kind` whether it
         # belongs to one, and that reads `teams.group_id`.
-        for table in (Group, GroupMember, User, Team):
+        for table in (Group, GroupMember, User, Team, TeamMember):
             await conn.run_sync(table.__table__.create, checkfirst=True)
 
     db = async_sessionmaker(bind=engine, expire_on_commit=False)()
@@ -76,6 +77,31 @@ async def session():
             ),
             GroupMember(id="m1", group_id=GROUP, user_id=KEEP, created_at=now, updated_at=now),
             GroupMember(id="m2", group_id=GROUP, user_id=DROP, created_at=now, updated_at=now),
+            # A team, its own policy group, and one member — so the OTHER refusal
+            # has something to fire on.
+            Group(
+                id=TEAM_GROUP,
+                user_id="",
+                name="PII — Acme · t1",
+                description="",
+                data={},
+                meta=None,
+                permissions=ENFORCING,
+                created_at=now,
+                updated_at=now,
+            ),
+            Team(
+                id=TEAM,
+                name="Acme",
+                owner_user_id=KEEP,
+                seat_limit=10,
+                monthly_credits=0,
+                group_id=TEAM_GROUP,
+                created_at=now,
+                updated_at=now,
+            ),
+            TeamMember(id="tm1", team_id=TEAM, user_id=KEEP, role="owner", created_at=now),
+            GroupMember(id="m3", group_id=TEAM_GROUP, user_id=KEEP, created_at=now, updated_at=now),
         ]
     )
     for uid in (KEEP, DROP):
@@ -223,3 +249,70 @@ async def test_a_failure_on_a_group_with_no_policy_is_not_called_a_policy_refusa
 
     assert response.status_code == 500
     assert json.loads(response.body).get("scimType") != "mutability"
+
+
+# ---------------------------------------------------------------------------
+# The second rule, and the message telling them apart
+# ---------------------------------------------------------------------------
+
+
+def _refused_because(response, needle):
+    import json
+
+    return response.status_code == 400 and needle in json.loads(response.body)["detail"]
+
+
+@pytest.mark.asyncio
+async def test_directory_sync_cannot_put_an_outsider_in_a_team_group(session):
+    """A team's group is derived from the team, membership included."""
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(
+            displayName="PII — Acme · t1",
+            members=[SCIMGroupMember(value=KEEP), SCIMGroupMember(value=DROP)],
+        ),
+        db=session,
+    )
+    assert _refused_because(response, "belongs to a team")
+    assert await _members(session, TEAM_GROUP) == {KEEP}
+
+
+@pytest.mark.asyncio
+async def test_the_two_refusals_do_not_borrow_each_other_s_message(session):
+    """⚠️ Both rules answer with the same falsy value, so the route has to ask
+    which one fired. Reporting the wrong one tells an administrator that masking
+    blocked a change masking had nothing to do with."""
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
+
+    dropping = await scim.update_group(
+        group_id=GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(
+            displayName="PII Masking Policy", members=[SCIMGroupMember(value=KEEP)]
+        ),
+        db=session,
+    )
+    assert _refused_because(dropping, "enforces PII masking")
+    assert not _refused_because(dropping, "belongs to a team")
+
+
+@pytest.mark.asyncio
+async def test_a_patch_that_adds_an_outsider_to_a_team_group_is_refused(session):
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMPatchOperation, SCIMPatchRequest
+
+    response = await scim.patch_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        patch_data=SCIMPatchRequest(
+            Operations=[SCIMPatchOperation(op="add", path="members", value=[{"value": DROP}])]
+        ),
+        db=session,
+    )
+    assert _refused_because(response, "belongs to a team")
+    assert await _members(session, TEAM_GROUP) == {KEEP}

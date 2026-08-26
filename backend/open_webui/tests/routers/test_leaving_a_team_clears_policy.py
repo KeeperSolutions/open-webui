@@ -293,6 +293,32 @@ async def test_a_failed_audit_write_leaves_the_membership_alone(env):
 
 
 @pytest.mark.asyncio
+async def test_a_failed_removal_is_not_reported_as_a_successful_one(env):
+    """⚠️ The other half of the ordering rule, and the half that was missing.
+
+    The rule tolerates "a record with no mutation" only because that discrepancy
+    is VISIBLE. `remove_users_from_group` swallows database errors into a `None`
+    return, and discarding it made this function answer `True` — so the caller
+    reported a successful removal, nobody had reason to read the table, and the
+    visible discrepancy became an invisible one.
+
+    It raises rather than returning `False`: `False` is this function's word for
+    "there was nothing to do" — see `test_someone_outside_the_policy_is_not_acted_on`
+    above — and one boolean cannot carry both meanings.
+    """
+    from open_webui.models.groups import Groups
+
+    with patch.object(Groups, "remove_users_from_group", return_value=None):
+        with pytest.raises(RuntimeError):
+            await remove_from_team_policy_group(TEAM, IN_POLICY)
+
+    # The person keeps their masking — the safe direction — and the audit row
+    # that disagrees with it is exactly what somebody is now able to find.
+    assert await _group_members(env) == {IN_POLICY}
+    assert len(await _audit_rows(env)) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_failed_audit_write_happens_before_the_removal(env):
     """Records the order at the two writers, rather than inferring it.
 

@@ -141,30 +141,70 @@ async def get_users(
     # enforcement path.
     default_permissions = request.app.state.config.USER_PERMISSIONS
 
-    return {
-        'users': [
-            UserGroupIdsModel(
-                **{
-                    **user.model_dump(),
-                    'group_ids': [group.id for group in user_groups.get(user.id, [])],
-                    'pii_masking_enforced': has_permission_for_groups(
-                        user_groups.get(user.id, []),
+    # ⚠️ An ADMINISTRATOR may know what the instance's groups are called; nobody
+    # else may. The dashboard's no-group-name rule is not a property of the
+    # screen — a group id reaches its name through `GET /groups/id/{id}/info`,
+    # which is `get_verified_user` and checks no membership — so a response that
+    # hands a team owner other people's group ids has already told them the
+    # names, whatever the screen chooses to render.
+    #
+    # Keyed on the ROLE, not on whether the request was scoped: an admin reading
+    # a team's dashboard is still an admin, and their screen names groups.
+    viewer_is_admin = user.role == 'admin'
+    team_group_id = scope.group_id if scope is not None else None
+
+    def row_for(subject):
+        """One directory row, with the ids narrowed to what this viewer may know.
+
+        ⚠️ `subject`, not `user`: `user` is the VIEWER, and the comprehension this
+        replaces shadowed it with the person being listed. The two decide
+        different halves of this function.
+        """
+        groups = user_groups.get(subject.id, [])
+        policy_groups = [g for g in groups if group_enforces_pii_masking(g.permissions)]
+
+        if viewer_is_admin:
+            group_ids = [g.id for g in groups]
+            policy_group_ids = [g.id for g in policy_groups]
+        else:
+            # The owner's screen asks exactly two things of the policy list: "are
+            # they in MY team's policy" and "is something else masking them". The
+            # first survives this narrowing; the second is the boolean below.
+            group_ids = []
+            policy_group_ids = [g.id for g in policy_groups if g.id == team_group_id]
+
+        return UserGroupIdsModel(
+            **{
+                **subject.model_dump(),
+                'group_ids': group_ids,
+                # The effective answer, over every group AND the instance
+                # defaults — the same function `has_permission` delegates to, so
+                # it cannot drift from the enforcement path.
+                'pii_masking_enforced': has_permission_for_groups(
+                    groups, PII_MASKING_ENFORCED_PERMISSION, default_permissions
+                ),
+                # A different question from the flag above — "which groups say
+                # yes" rather than "is this user enforced" — so it deliberately
+                # does NOT consult the instance defaults.
+                'pii_policy_group_ids': policy_group_ids,
+                # ⚠️ Third question again: "would they still be masked with the
+                # team's group taken away". This one DOES consult the defaults,
+                # because a person the instance masks by default still would be,
+                # with no group anywhere to name as the reason.
+                'masked_by_other_policy': (
+                    False
+                    if team_group_id is None
+                    else has_permission_for_groups(
+                        [g for g in groups if g.id != team_group_id],
                         PII_MASKING_ENFORCED_PERMISSION,
                         default_permissions,
-                    ),
-                    # Same already-fetched groups, still zero extra queries. This
-                    # asks a different question from the flag above — "which
-                    # groups say yes" rather than "is this user enforced" — so it
-                    # deliberately does NOT consult the instance defaults.
-                    'pii_policy_group_ids': [
-                        group.id
-                        for group in user_groups.get(user.id, [])
-                        if group_enforces_pii_masking(group.permissions)
-                    ],
-                }
-            )
-            for user in users
-        ],
+                    )
+                ),
+            }
+        )
+
+    return {
+        'users': [row_for(subject) for subject in users],
         'total': total,
         # `scope` is None on the instance-wide view, so this is None there too —
         # the unscoped dashboard has no team whose policy could be named.

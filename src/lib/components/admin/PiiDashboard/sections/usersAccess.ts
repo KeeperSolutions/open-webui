@@ -23,6 +23,17 @@ export type AccessUser = {
 	 * can undo it.
 	 */
 	pii_policy_group_ids?: string[];
+	/**
+	 * Would this person still be masked with the addressed team's policy group
+	 * taken away. Server-side, and for a non-admin it is the ONLY answer to that.
+	 *
+	 * ⚠️ `pii_policy_group_ids` is narrowed for a non-admin to the addressed
+	 * team's own group, because a group id is one call to
+	 * `GET /groups/id/{id}/info` away from that group's NAME. So the owner's
+	 * "masked somewhere else" cannot be derived from the ids any more — the
+	 * server derives it instead, over every group AND the instance-wide default.
+	 */
+	masked_by_other_policy?: boolean;
 };
 
 /**
@@ -236,6 +247,8 @@ export type UserRow = {
 	enforced: boolean;
 	/** Ids of this user's groups that carry the policy. See `AccessUser`. */
 	policyGroupIds: string[];
+	/** Masked by something other than the addressed team's policy. See `AccessUser`. */
+	maskedByOtherPolicy: boolean;
 	masking: MaskingState;
 	cost: number;
 	grantedCount: number;
@@ -347,7 +360,7 @@ const INSTANCE_ADMIN: Viewer = { mayAct: true, teamGroupId: null, mayManagePolic
  * ticket does not touch them.
  */
 export function rowActionFor(
-	row: Pick<UserRow, 'enforced' | 'policyGroupIds'>,
+	row: Pick<UserRow, 'enforced' | 'policyGroupIds'> & Partial<Pick<UserRow, 'maskedByOtherPolicy'>>,
 	/**
 	 * ⚠️ Two lists, named, rather than one used for both. `naming` is every
 	 * enforcing group; `targets` is the subset a person may be sent to. Passing
@@ -376,9 +389,20 @@ export function rowActionFor(
 		// would name an action with nothing to remove, which is the lie the
 		// membership model was adopted to end.
 		const inTeamPolicy = row.policyGroupIds.includes(teamGroupId);
-		// Some OTHER group also enforces them. A count, reduced to a yes/no before
-		// it leaves this function, so nothing downstream can print what it was.
-		const maskedElsewhere = row.policyGroupIds.some((id) => id !== teamGroupId);
+		// Masked by something OTHER than this team's policy.
+		//
+		// ⚠️ The server's answer first, and it is the only complete one: a
+		// non-admin's `policyGroupIds` is narrowed to this team's own group, so
+		// the id scan below can no longer see anything else — and the server's
+		// version also counts the instance-wide default, which no group carries.
+		//
+		// The id scan is kept as a second term rather than deleted. It costs
+		// nothing, it is what an admin's fuller list answers with, and if the
+		// field ever went missing the failure would be OR-ed towards "yes, still
+		// masked" — an over-cautious sentence rather than a false promise that
+		// somebody may turn masking off.
+		const maskedElsewhere =
+			row.maskedByOtherPolicy === true || row.policyGroupIds.some((id) => id !== teamGroupId);
 
 		return inTeamPolicy
 			? { kind: 'team-remove', maskedElsewhere }
@@ -524,6 +548,7 @@ export function buildRows(
 			status: statusOf(u, seen[index]),
 			enforced: u.pii_masking_enforced === true,
 			policyGroupIds: u.pii_policy_group_ids ?? [],
+			maskedByOtherPolicy: u.masked_by_other_policy === true,
 			masking: maskingStateOf(
 				u.pii_masking_enforced === true,
 				getStoredPiiMasking(u.settings?.ui ?? {})

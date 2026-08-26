@@ -478,6 +478,25 @@ async def add_user_to_group(
         log.exception(f'Error adding users to group {id}: {e}')
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
 
+    # ⚠️ Refused BEFORE the audit write, and that ordering is the point — the
+    # same lesson as the team-group edit guard above. `Groups.add_users_to_group`
+    # refuses this too, but it refuses AFTER this function has already recorded a
+    # `member_added` row, and a row claiming a membership that was rejected is
+    # the inverted error: a missing record says something is absent, a false one
+    # accuses somebody of a change they never made.
+    #
+    # A team's group is derived from the team. Nobody outside the team belongs in
+    # it — the owner could neither see such a person on their dashboard nor
+    # remove them, because the membership guard refuses targets outside the team.
+    outsiders = await Groups.users_outside_the_team_of_group(id, form_data.user_ids, db=db)
+    if outsiders:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(
+                'This group belongs to a team. Only members of that team can be in it.'
+            ),
+        )
+
     # Only those who are not members yet are a change. `add_users_to_group`
     # already ignores duplicates, so auditing the request rather than the
     # transition would log memberships that already existed.

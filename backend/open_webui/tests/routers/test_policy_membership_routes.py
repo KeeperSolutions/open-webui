@@ -424,3 +424,83 @@ def test_neither_route_still_carries_the_admin_dependency():
         }
         assert "get_admin_user" not in depends, route
         assert "get_verified_user" in depends, route
+
+
+# ---------------------------------------------------------------------------
+# A team's group takes nobody from outside the team — not even from an admin
+# ---------------------------------------------------------------------------
+
+
+class TestTheTeamGroupHoldsOnlyTheTeam:
+    """⚠️ The third derived property, and the one that was still open.
+
+    A team's group already takes its NAME and its PERMISSIONS from the team and
+    refuses to have either edited. Membership did not, so an administrator could
+    add somebody who is not in the team through Groups → Add — after which the
+    owner could neither SEE that person (their dashboard lists team members) nor
+    remove them (`authorise_policy_membership_change` refuses targets outside the
+    team). A member of the policy that nobody who owns the policy can reach.
+
+    Found in use, not in review: an administrator did exactly this and then asked
+    why the person was missing from the team dashboard.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_admin_cannot_add_an_outsider_to_a_team_group(self, env):
+        with pytest.raises(HTTPException) as raised:
+            await _add(TEAM_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
+        assert raised.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_and_no_audit_row_is_written_for_the_refusal(self, env):
+        """⚠️ The load-bearing half, and the reason the guard is on the ROUTE.
+
+        `Groups.add_users_to_group` refuses this too, but it refuses after the
+        route has already recorded `member_added`. A row claiming a membership
+        that was rejected is the inverted error and the worse one: a missing
+        record says something is absent, a false one accuses somebody of a change
+        they never made. Same lesson as the team-group edit guard.
+        """
+        with pytest.raises(HTTPException):
+            await _add(TEAM_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
+        assert await _audit_rows(env) == []
+        assert await _members(env, TEAM_GROUP) == {MEMBER}
+
+    @pytest.mark.asyncio
+    async def test_a_team_member_is_still_added(self, env):
+        """The guard is narrow: it refuses outsiders, not the action."""
+        await _add(TEAM_GROUP, [OWNER], _user(role="admin", uid="admin-1"), env)
+        assert await _members(env, TEAM_GROUP) == {MEMBER, OWNER}
+        assert len(await _audit_rows(env)) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_group_takes_anyone(self, env):
+        """⚠️ Non-overlap: a guard that refused every group would pass the two
+        tests above and break the instance-wide policy group."""
+        await _add(ADMIN_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
+        assert await _members(env, ADMIN_GROUP) == {STRANGER}
+
+    @pytest.mark.asyncio
+    async def test_a_mixed_request_is_refused_whole(self, env):
+        """One outsider among members refuses the request rather than admitting
+        the members and dropping them — a partially applied membership change is
+        the state nobody can reason about afterwards."""
+        with pytest.raises(HTTPException):
+            await _add(TEAM_GROUP, [OWNER, STRANGER], _user(role="admin", uid="admin-1"), env)
+        assert await _members(env, TEAM_GROUP) == {MEMBER}
+
+    @pytest.mark.asyncio
+    async def test_the_model_refuses_it_too_for_callers_that_skip_the_route(self, env):
+        """SCIM and OAuth never reach the route, so the model keeps its own copy.
+
+        ⚠️ Asserted separately from the route: one guard behaves exactly like two
+        until somebody calls the other door.
+        """
+        from open_webui.models.groups import Groups
+
+        assert await Groups.add_users_to_group(TEAM_GROUP, [STRANGER], db=env) is None
+        assert await _members(env, TEAM_GROUP) == {MEMBER}
+        assert await Groups.set_group_user_ids_by_id(
+            TEAM_GROUP, [MEMBER, STRANGER], reason="sync", db=env
+        ) is False
+        assert await _members(env, TEAM_GROUP) == {MEMBER}

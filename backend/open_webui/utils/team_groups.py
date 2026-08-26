@@ -400,6 +400,18 @@ async def remove_from_team_policy_group(
     trades a visible error for a silent one. Identical to the ordering on the
     human path (`routers/groups.py:_audit_membership_change`) — the system actor
     is held to the same rule as a person, not a weaker one.
+
+    ⚠️ **RAISES when the removal itself fails**, and that is not the same thing
+    as returning `False`.
+
+      * `False` means there was nothing to do — one of the two no-ops above
+      * a raise means the audit row now claims a removal that did not happen
+
+    The tolerated direction of failure is "visible", and `remove_users_from_group`
+    swallows database errors into a `None` return. Discarding that `None` and
+    answering `True` is what turns the visible discrepancy into an invisible one:
+    the caller reports success, nobody looks at the table, and the person stays
+    in the policy group with a row saying they left it.
     """
     from open_webui.internal.db import get_async_db_context
     from open_webui.models.billing import Team
@@ -436,5 +448,29 @@ async def remove_from_team_policy_group(
     # The reason is passed again rather than left to the audit row: the model
     # refuses a removal from an enforcing group without one, and that refusal is
     # the backstop for callers that never reach an audited route at all.
-    await Groups.remove_users_from_group(group_id, [user_id], reason=REASON_LEFT_TEAM, db=db)
+    removed = await Groups.remove_users_from_group(
+        group_id, [user_id], reason=REASON_LEFT_TEAM, db=db
+    )
+    if removed is None:
+        # ⚠️ `None` cannot be the refusal here — the reason above is what the
+        # refusal tests for — so it is a database failure, and the audit row
+        # written moments ago is now a claim about something that did not happen.
+        #
+        # Raising rather than returning `False`: `False` is this function's word
+        # for "there was nothing to do", and the caller cannot be asked to tell
+        # the two apart from one boolean. The failure direction is the safe one
+        # either way — the person keeps their masking — but only a raise makes
+        # anybody aware of it.
+        log.error(
+            'team_groups: audit row says user %s left the policy group %s of team %s, '
+            'but the removal failed; the two now disagree',
+            user_id,
+            group_id,
+            team_id,
+        )
+        raise RuntimeError(
+            f'Failed to remove user {user_id} from the policy group of team {team_id} '
+            'after recording the removal'
+        )
+
     return True

@@ -453,6 +453,60 @@ class GroupTable:
         row = result.first()
         return bool(row) and group_enforces_pii_masking(row[0])
 
+    async def users_outside_the_team_of_group(
+        self, group_id: str, user_ids, db: Optional[AsyncSession] = None
+    ) -> set[str]:
+        """Public form of `_outside_the_team`, for the route that must refuse first.
+
+        The route cannot use the private one: it needs the answer BEFORE it writes
+        an audit row, and it holds a request-scoped session rather than the one
+        this class opens for itself.
+        """
+        async with get_async_db_context(db) as db:
+            return await self._outside_the_team(group_id, user_ids, db)
+
+    async def _outside_the_team(self, group_id: str, user_ids, db: AsyncSession) -> set[str]:
+        """Which of `user_ids` are NOT in the team this group belongs to.
+
+        Empty for an ordinary group: only a team's own policy group constrains who
+        may be in it.
+
+        ⚠️ A team's group is DERIVED from the team. Its name and its permissions
+        already follow the team and cannot be edited (`update_group_by_id`);
+        membership is the third derived property and was the one still open. An
+        administrator could put somebody who is not in the team into it through
+        Groups → Add, and afterwards the owner could neither SEE that person (the
+        dashboard lists team members) nor remove them (the membership guard
+        refuses targets outside the team). A member of the policy that nobody who
+        owns the policy can reach.
+
+        ⚠️ Same idea as keeping team groups out of the `Enforce` destination list,
+        one level down: that closed the door the dashboard opened, this closes the
+        one the Groups tab left open.
+
+        Function-local imports for the reasons given on `_is_team_pii_group` and
+        `_enforces_pii_masking` — `team_groups` reaches `models.billing`, and no
+        guard here should depend on the billing stack importing cleanly.
+        """
+        from open_webui.models.billing import TeamMember
+        from open_webui.utils.team_groups import team_ownership_of_group
+
+        ids = list(user_ids or [])
+        if not ids:
+            return set()
+
+        # The single reader of `teams.group_id`, not a second query of our own.
+        ownership = await team_ownership_of_group(group_id, db)
+        if ownership is None:
+            return set()
+
+        result = await db.execute(
+            select(TeamMember.user_id).filter(
+                TeamMember.team_id == ownership.team_id, TeamMember.user_id.in_(ids)
+            )
+        )
+        return set(ids) - {uid for (uid,) in result.all()}
+
     async def _enforcing_group_ids(self, group_ids, db: AsyncSession) -> set[str]:
         """Which of `group_ids` carry the masking policy.
 
@@ -480,6 +534,18 @@ class GroupTable:
             # SCIM managing the group at all — including adding people, which is
             # always allowed — so the refusal is narrowed to the case that actually
             # takes protection away.
+            # Same rule, and checked first: a replacement list that admits a
+            # non-member is refused whether or not it also drops anybody.
+            outsiders = await self._outside_the_team(group_id, user_ids, db)
+            if outsiders:
+                log.warning(
+                    'Refusing to set the membership of group %s: it belongs to a team and '
+                    '%d of the given users are not in it.',
+                    group_id,
+                    len(outsiders),
+                )
+                return False
+
             if await self._enforces_pii_masking(group_id, db) and not self._has_reason(reason):
                 result = await db.execute(
                     select(GroupMember.user_id).filter(GroupMember.group_id == group_id)
@@ -763,6 +829,21 @@ class GroupTable:
                 result = await db.execute(select(Group).filter_by(id=id))
                 group = result.scalars().first()
                 if not group:
+                    return None
+
+                # ⚠️ The backstop, not the protection. The route refuses this
+                # BEFORE it writes an audit row (`routers/groups.py`), because a
+                # refusal recorded as a change is worse than no record at all.
+                # This copy exists for SCIM and OAuth, which never reach that
+                # route — the same reason `remove_users_from_group` keeps its own.
+                outsiders = await self._outside_the_team(id, user_ids, db)
+                if outsiders:
+                    log.warning(
+                        'Refusing to add %d user(s) to group %s: it belongs to a team '
+                        'and they are not in it.',
+                        len(outsiders),
+                        id,
+                    )
                     return None
 
                 now = int(time.time())

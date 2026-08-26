@@ -191,6 +191,21 @@ class UserGroupIdsModel(UserModel):
     # `pii_masking_enforced` is True means the instance-wide default is the
     # source, which no membership change can undo.
     pii_policy_group_ids: list[str] = []
+    #: Would this person still be masked with the addressed team's policy group
+    #: taken away.
+    #:
+    #: ⚠️ Computed on the SERVER so a non-admin never needs the ids to work it
+    #: out. `pii_policy_group_ids` names other people's groups, and a group id is
+    #: one call to `GET /groups/id/{id}/info` away from that group's NAME — a
+    #: route that is `get_verified_user` and checks no membership. Handing a team
+    #: owner the ids therefore hands them the names, and the whole point of the
+    #: owner's screen is that it names no group. So for a non-admin the two id
+    #: lists are narrowed and this boolean carries the answer instead.
+    #:
+    #: ⚠️ It consults the instance-wide default, unlike `pii_policy_group_ids`.
+    #: The question is "will they still be masked afterwards", and a person the
+    #: instance masks by default will be — with no group anywhere to say so.
+    masked_by_other_policy: bool = False
 
 
 class UserModelResponse(UserModel):
