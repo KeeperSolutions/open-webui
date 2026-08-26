@@ -14,6 +14,7 @@ import {
 	pageRange,
 	ROWS_PER_PAGE,
 	policyGroupsOf,
+	enforcesMasking,
 	enforceTargetsOf,
 	rowActionFor,
 	type AccessUser,
@@ -849,11 +850,45 @@ describe('grantsOnlyMasking', () => {
 		expect(grantsOnlyMasking({ features: { web_search: true } })).toBe(false);
 	});
 
-	it('does not count a truthy non-boolean as a grant', () => {
-		// Only `true` is a grant. A count, a string or an object is configuration.
+	it('⚠️ counts a truthy non-boolean as a grant, because the server does', () => {
+		/**
+		 * This assertion used to say the opposite, and the opposite is the
+		 * dangerous direction.
+		 *
+		 * The server ends every permission check in `bool(...)`
+		 * (`utils/access_control/__init__.py:94`), and `GroupForm.permissions` is a
+		 * bare `Optional[dict]` — no validation of its leaves — so `1` is a value
+		 * the API accepts and the server acts on. Reading it as "not a grant" here
+		 * would let `Enforce`, an action worded as protection, hand over a
+		 * capability while the screen counted the group as granting nothing.
+		 *
+		 * The cost of the strict reading is the safe failure: a group carrying a
+		 * numeric setting drops out of the destination list, the admin gets the
+		 * empty-state sentence saying why, and nobody gains a permission.
+		 */
 		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true }, limits: { seats: 5 } })).toBe(
-			true
+			false
 		);
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, web_search: 1 } })).toBe(false);
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, model: 'gpt' } })).toBe(false);
+	});
+
+	it('still ignores every falsy leaf, whatever its type', () => {
+		// `bool(0)`, `bool("")` and `bool(None)` are all False on the server too, and
+		// the stored tree is mostly `false`.
+		expect(
+			grantsOnlyMasking({
+				chat: { pii_masking_enforced: true, web_search: 0, note: '', other: null }
+			})
+		).toBe(true);
+	});
+
+	it('⚠️ treats a truthy masking flag as enforcing, matching the server', () => {
+		// `group_enforces_pii_masking` ends in `bool(node)` (`utils/pii_policy.py:34`),
+		// so a group carrying `1` DOES mask people. Missing it here would leave the
+		// person's real source of masking unnamed in the table.
+		expect(enforcesMasking({ chat: { pii_masking_enforced: 1 } })).toBe(true);
+		expect(enforcesMasking({ chat: { pii_masking_enforced: 0 } })).toBe(false);
 	});
 });
 

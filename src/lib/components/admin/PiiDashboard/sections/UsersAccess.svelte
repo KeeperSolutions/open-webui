@@ -184,7 +184,7 @@
 		if (pending.mode === 'remove' && !pending.reason.trim()) return;
 
 		submitting = true;
-		const { row, mode, groupId, reason } = pending;
+		const { row, mode, groupId, reason, teamPolicy } = pending;
 		const call =
 			mode === 'enforce'
 				? addUserToGroup(localStorage.token, groupId, [row.id])
@@ -198,9 +198,20 @@
 
 		if (res) {
 			toast.success(
-				mode === 'enforce'
-					? $i18n.t('PII masking is now enforced for this user.')
-					: $i18n.t('PII masking is no longer enforced for this user.')
+				// ⚠️ The owner's message is about MEMBERSHIP, never about the effect.
+				// "no longer enforced" is false whenever another group still masks
+				// the person — and the dialog they just confirmed said so in those
+				// words, so the instance-wide copy would contradict it in the same
+				// interaction. The admin keeps the effect wording: they are only
+				// offered `Remove` when exactly one group carries the policy, so for
+				// them the effect IS what changed.
+				teamPolicy
+					? mode === 'enforce'
+						? $i18n.t("{{name}} is now in your team's policy.", { name: row.name })
+						: $i18n.t("{{name}} is no longer in your team's policy.", { name: row.name })
+					: mode === 'enforce'
+						? $i18n.t('PII masking is now enforced for this user.')
+						: $i18n.t('PII masking is no longer enforced for this user.')
 			);
 			pending = null;
 			// Re-read rather than patch the row: the effective policy is a server-side
@@ -842,10 +853,19 @@
 							omission is decision 5 — see `pending.teamPolicy`.
 						-->
 						{pending.mode === 'enforce'
-							? $i18n.t(
-									"{{name}} will be added to your team's policy and will no longer be able to turn PII masking off.",
-									{ name: pending.row.name }
-								)
+							? pending.maskedElsewhere
+								? // ⚠️ Already masked by a group outside the team, so "will no
+									// longer be able to turn masking off" promises a change that
+									// has already happened. The sentence is about MEMBERSHIP
+									// instead — which is the only thing this action changes for
+									// them, and the reason `Add` is offered at all.
+									$i18n.t("{{name}} will be added to your team's policy.", {
+										name: pending.row.name
+									})
+								: $i18n.t(
+										"{{name}} will be added to your team's policy and will no longer be able to turn PII masking off.",
+										{ name: pending.row.name }
+									)
 							: pending.maskedElsewhere
 								? $i18n.t(
 										"{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.",

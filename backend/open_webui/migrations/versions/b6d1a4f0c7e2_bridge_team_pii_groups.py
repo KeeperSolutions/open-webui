@@ -1,9 +1,16 @@
 """Bridge existing teams to their own PII policy group
 
 Every team that exists on the day this lands gets the group `teams.group_id`
-points at, and every member of such a team is moved into it — added to the team's
-group FIRST, then taken out of the seeded instance-wide one. Nobody's masking
-changes: at every instant between the two writes the person is in both groups.
+points at, and every member of such a team **that the seeded instance-wide group
+already masks** is moved into it — added to the team's group FIRST, then taken
+out of the seeded one. Nobody's masking changes, in either direction: at every
+instant between the two writes the person is in both groups, and a member the
+seeded group does not mask is not touched at all.
+
+⚠️ A MOVE, not an enrolment. See the loop in `upgrade` for why: enrolling every
+member would newly enforce masking on people nobody decided to enforce, and it
+would make a team that existed the day before behave differently from one
+created the day after.
 
 ⚠️ **This is the one migration in this feature that changes existing data.**
 Three properties are what make that acceptable:
@@ -33,9 +40,9 @@ Three properties are what make that acceptable:
     the point above safe as well: the groups this migration creates all carry the
     flag, so a flag-based criterion would start eating its own output.
 
-People who are in the seeded group and in NO team stay exactly where they
-are. The seeded group keeps its meaning — it is the policy for people a team does
-not cover.
+People who are in the seeded group and in NO team stay exactly where they are.
+The seeded group keeps its meaning — it is the policy for people a team does not
+cover.
 
 ⚠️ The name and the permissions written here are DUPLICATED from
 `utils/team_groups.py`. Alembic is synchronous and `ensure_team_pii_group` is
@@ -266,6 +273,24 @@ def upgrade():
             )
 
         for user_id in members_by_team.get(team_id, []):
+            # ⚠️ ONLY people the seeded group already masks are moved. A team
+            # member who is not in it is left exactly as they are.
+            #
+            # This is a MOVE, not an enrolment. Adding every member would newly
+            # enforce masking on people nobody decided to enforce, and it would
+            # make an existing team behave differently from a new one: a team
+            # created after this lands gets an EMPTY policy group
+            # (`routers/billing.py:create_team`) and joining it enrols nobody.
+            # There is no reason a team that existed the day before should have
+            # its members enrolled automatically, and every reason a policy
+            # change should be somebody's decision.
+            #
+            # It also makes the module docstring's claim true rather than nearly
+            # true: with this check, no one's masking changes in EITHER
+            # direction.
+            if not (source_present and (SOURCE_GROUP_ID, user_id) in memberships):
+                continue
+
             if (team_group_id, user_id) not in memberships:
                 additions.append(
                     {
@@ -280,26 +305,23 @@ def upgrade():
                     _audit_row("member_added", team_group_id, user_id, MOVE_REASON, now)
                 )
 
-            if source_present and (SOURCE_GROUP_ID, user_id) in memberships:
-                removals.append(user_id)
-                # ⚠️ One row per removal, never "one row per person, ever".
-                #
-                # An earlier draft suppressed this when a `system` row already
-                # existed for the same (event_type, group_id, user_id). No test
-                # could kill that check, which is how it was found — and the one
-                # state where it fires is the state where it is WRONG: an admin
-                # puts someone back into the seeded group after the migration
-                # ran, the migration runs again, takes them out again, and the
-                # check swallows the record of it. A membership write with no
-                # audit row is the single thing this table exists to prevent.
-                #
-                # Idempotency does not need it: a second run finds the person
-                # already out of the seeded group and writes nothing at all.
-                audit_rows.append(
-                    _audit_row(
-                        "member_removed", SOURCE_GROUP_ID, user_id, MOVE_REASON, now
-                    )
-                )
+            removals.append(user_id)
+            # ⚠️ One row per removal, never "one row per person, ever".
+            #
+            # An earlier draft suppressed this when a `system` row already
+            # existed for the same (event_type, group_id, user_id). No test
+            # could kill that check, which is how it was found — and the one
+            # state where it fires is the state where it is WRONG: an admin
+            # puts someone back into the seeded group after the migration ran,
+            # the migration runs again, takes them out again, and the check
+            # swallows the record of it. A membership write with no audit row is
+            # the single thing this table exists to prevent.
+            #
+            # Idempotency does not need it: a second run finds the person
+            # already out of the seeded group and writes nothing at all.
+            audit_rows.append(
+                _audit_row("member_removed", SOURCE_GROUP_ID, user_id, MOVE_REASON, now)
+            )
 
     # --- writes start here; nothing above this line is re-read -----------------
 

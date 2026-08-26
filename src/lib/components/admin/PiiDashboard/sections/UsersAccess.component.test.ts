@@ -12,11 +12,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/apis/groups', () => ({ addUserToGroup: vi.fn(), removeUserFromGroup: vi.fn() }));
+vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { addUserToGroup, removeUserFromGroup } from '$lib/apis/groups';
+import { toast } from 'svelte-sonner';
 
 import UsersAccess from './UsersAccess.svelte';
 import type { AccessUser } from './usersAccess';
@@ -506,6 +510,88 @@ describe("the owner's confirmation dialog", () => {
 			(b) => b.textContent?.trim() === 'Add to team policy' && b.closest('[role="dialog"]')
 		);
 		expect(confirm?.hasAttribute('disabled')).toBe(false);
+	});
+
+	it('⚠️ promises no change of state to somebody another group already masks', async () => {
+		/**
+		 * The case the whole membership model exists for: they are masked, they are
+		 * not in the team's policy, so what they are offered is Add. Saying they
+		 * "will no longer be able to turn PII masking off" describes something that
+		 * has ALREADY happened, through a group the owner does not control and
+		 * cannot see — so the sentence promises a change this action does not make.
+		 */
+		await open([ELSEWHERE], 'Add to team policy');
+		expect(document.body.textContent).toContain("will be added to your team's policy");
+		expect(document.body.textContent).not.toContain('will no longer be able to turn PII masking');
+	});
+});
+
+describe("the owner's success message", () => {
+	const TEAM = 'g-team';
+	const ELSEWHERE = 'g-admins';
+
+	beforeEach(() => vi.clearAllMocks());
+
+	const openFor = async (policyGroupIds: string[], label: string) => {
+		render(UsersAccess, {
+			props: {
+				users: [account({ pii_masking_enforced: true, pii_policy_group_ids: policyGroupIds })],
+				metricRows: [],
+				loading: false,
+				failed: false,
+				onRetry: () => {},
+				policyGroups: [
+					{ id: TEAM, name: 'PII — Acme · abcdef01', isTeamGroup: true },
+					{ id: ELSEWHERE, name: 'Legal hold', isTeamGroup: false }
+				],
+				enforceTargets: [],
+				mayAct: false,
+				mayManagePolicy: true,
+				teamGroupId: TEAM
+			},
+			context: new Map([['i18n', i18n]])
+		});
+		screen.getByText(label).click();
+		await new Promise((r) => setTimeout(r, 0));
+	};
+
+	const confirm = async (label: string) => {
+		const button = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === label && b.closest('[role="dialog"]')
+		);
+		button!.click();
+		await new Promise((r) => setTimeout(r, 0));
+	};
+
+	it('⚠️ never claims masking stopped when another group still enforces it', async () => {
+		/**
+		 * The defect this pins is a SELF-CONTRADICTION inside one interaction: the
+		 * dialog says "they will stay masked", the owner confirms, and the toast
+		 * announces that masking is no longer enforced.
+		 *
+		 * The admin keeps the effect wording, and correctly — they are only offered
+		 * `Remove` when exactly one group carries the policy, so for them the
+		 * effect really is what changed.
+		 */
+		vi.mocked(removeUserFromGroup).mockResolvedValue({} as never);
+		await openFor([TEAM, ELSEWHERE], 'Remove from team policy');
+		await fireEvent.input(document.querySelector('#pii-policy-reason')!, {
+			target: { value: 'left the project' }
+		});
+		await confirm('Remove from team policy');
+
+		expect(toast.success).toHaveBeenCalledWith("Ana is no longer in your team's policy.");
+		expect(toast.success).not.toHaveBeenCalledWith(
+			'PII masking is no longer enforced for this user.'
+		);
+	});
+
+	it('reports the addition as membership too', async () => {
+		vi.mocked(addUserToGroup).mockResolvedValue({} as never);
+		await openFor([ELSEWHERE], 'Add to team policy');
+		await confirm('Add to team policy');
+
+		expect(toast.success).toHaveBeenCalledWith("Ana is now in your team's policy.");
 	});
 });
 

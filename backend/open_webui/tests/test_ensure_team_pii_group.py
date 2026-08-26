@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 sys.modules.setdefault("stripe", MagicMock())
@@ -135,6 +135,60 @@ async def test_permissions_carry_exactly_one_key(env):
     gid = await ensure_team_pii_group(TEAM)
     assert (await _group(session, gid)).permissions == TEAM_PII_GROUP_PERMISSIONS
     assert list(TEAM_PII_GROUP_PERMISSIONS) == ["chat"]
+
+
+@pytest.mark.asyncio
+async def test_the_loser_of_a_race_deletes_its_group_and_returns_the_winner(env):
+    """⚠️ The `UNIQUE` index does NOT decide this race, and an earlier shape
+    believed it did.
+
+    `uq_teams_group_id` is unique ACROSS rows. Two callers racing here write the
+    SAME team row with DIFFERENT group ids, which violates nothing: the second
+    `UPDATE` simply overwrites the first, no `IntegrityError` is ever raised, and
+    the loser's group survives as an orphan.
+
+    An orphan is not cosmetic. It carries the masking permission and nothing
+    else, and nothing points at it — so `team_group_kind` calls it an ordinary
+    group and the administrator's `Enforce` list offers it as a destination,
+    reopening the door that list was narrowed to close.
+
+    The competitor here commits between this call's read and its write, which is
+    exactly the window three concurrent dashboard routes open on a first load.
+    """
+    session, _ = env
+    from open_webui.models.groups import Groups
+
+    now = int(time.time())
+    real_insert = Groups.insert_new_group
+
+    async def insert_then_lose(*args, **kwargs):
+        group = await real_insert(*args, **kwargs)
+        session.add(
+            Group(
+                id="winner",
+                user_id="",
+                name="winner",
+                description="",
+                data={},
+                meta=None,
+                permissions=TEAM_PII_GROUP_PERMISSIONS,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await session.execute(update(Team).where(Team.id == TEAM).values(group_id="winner"))
+        await session.commit()
+        return group
+
+    with patch.object(Groups, "insert_new_group", insert_then_lose):
+        gid = await ensure_team_pii_group(TEAM)
+
+    assert gid == "winner"
+    # ⚠️ The load-bearing assertion. Returning the winner's id was already true
+    # of the shape this replaced; what was NOT true is that the loser's group
+    # stops existing.
+    remaining = (await session.execute(select(Group.id))).scalars().all()
+    assert remaining == ["winner"]
 
 
 @pytest.mark.asyncio

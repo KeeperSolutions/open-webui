@@ -461,6 +461,11 @@ def test_an_empty_seeded_group_still_gets_every_team_a_group(conn):
 
     The seeded group there has no members, so the whole moving half of this
     migration has nobody to act on and only the creating half runs.
+
+    ⚠️ And NOBODY is enrolled. This is the load-bearing half of the assertion:
+    an earlier shape added every team member to the team's group here, which on
+    exactly this instance would have newly enforced masking on every member of
+    every team — while each audit row said masking was unchanged.
     """
     conn.execute(text("DELETE FROM group_member WHERE group_id = :g"), {"g": SOURCE})
     conn.commit()
@@ -469,8 +474,33 @@ def test_an_empty_seeded_group_still_gets_every_team_a_group(conn):
 
     assert _team_group(conn, TEAM_A) and _team_group(conn, TEAM_B)
     assert _members(conn, SOURCE) == set()
+    assert _members(conn, _team_group(conn, TEAM_A)) == set()
+    assert _members(conn, _team_group(conn, TEAM_B)) == set()
     assert _audit(conn, event_type="member_removed") == []
-    assert _audit(conn, event_type="member_added") != []
+    assert _audit(conn, event_type="member_added") == []
+
+
+def test_a_team_member_the_seeded_group_does_not_mask_is_left_alone(conn):
+    """The mixed case, which is the one a real instance is actually in.
+
+    One member of the team is masked by the seeded group and one is not. The
+    first is moved; the second is not touched, and gets no audit row of any
+    kind — this table records transitions, and nothing happened to them.
+    """
+    conn.execute(
+        text("DELETE FROM group_member WHERE group_id = :g AND user_id = :u"),
+        {"g": SOURCE, "u": A2},
+    )
+    conn.commit()
+
+    _upgrade(conn)
+
+    assert _members(conn, _team_group(conn, TEAM_A)) == {A1}
+    assert len(_audit(conn, event_type="member_added", user_id=A1)) == 1
+    assert len(_audit(conn, event_type="member_removed", user_id=A1)) == 1
+    # ⚠️ The load-bearing half: no row of ANY kind for the member who was not
+    # masked. A test that only counted A1's rows would pass with A2 enrolled.
+    assert _audit(conn, user_id=A2) == []
 
 
 def test_a_missing_seeded_group_is_not_an_error(conn):
@@ -486,8 +516,11 @@ def test_a_missing_seeded_group_is_not_an_error(conn):
     _upgrade(conn)
 
     assert _team_group(conn, TEAM_A) and _team_group(conn, TEAM_B)
-    assert _members(conn, _team_group(conn, TEAM_A)) == {A1, A2}
+    # Empty, and for the same reason as above: with no seeded group there is
+    # nobody it masks, so there is nobody to move.
+    assert _members(conn, _team_group(conn, TEAM_A)) == set()
     assert _audit(conn, event_type="member_removed") == []
+    assert _audit(conn, event_type="member_added") == []
 
 
 def test_a_team_with_no_members_still_gets_a_group(conn):

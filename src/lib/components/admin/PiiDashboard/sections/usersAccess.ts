@@ -58,11 +58,31 @@ export type GroupRecord = {
 /** The one key that carries the policy. Spelled once. */
 const MASKING_PATH = ['chat', 'pii_masking_enforced'] as const;
 
+/**
+ * Is a stored permission leaf switched ON.
+ *
+ * ⚠️ TRUTHY, not `=== true`, and that is a deliberate match to the server rather
+ * than looseness. The one implementation that decides a permission is
+ * `has_permission_for_groups`, which ends in `bool(permissions)`
+ * (`utils/access_control/__init__.py:94`), and `group_enforces_pii_masking` ends
+ * the same way (`utils/pii_policy.py:34`). `GroupForm.permissions` is a bare
+ * `Optional[dict]` with no validation of its leaves, so a group carrying `1` or
+ * a non-empty string is a state the API accepts and the server acts on.
+ *
+ * Reading it more strictly here does not make the screen safer, it makes it
+ * WRONG in the dangerous direction: such a group would grant a capability while
+ * being counted as granting nothing, and `Enforce` — an action worded as
+ * protection — would hand that capability over.
+ */
+function granted(value: unknown): boolean {
+	return Boolean(value);
+}
+
 /** Does this group carry the policy at all. */
 export function enforcesMasking(permissions: GroupRecord['permissions']): boolean {
 	const chat = (permissions ?? {})[MASKING_PATH[0]];
 	return (
-		typeof chat === 'object' && chat !== null && (chat as PermissionTree)[MASKING_PATH[1]] === true
+		typeof chat === 'object' && chat !== null && granted((chat as PermissionTree)[MASKING_PATH[1]])
 	);
 }
 
@@ -70,9 +90,11 @@ export function enforcesMasking(permissions: GroupRecord['permissions']): boolea
 function grantedPaths(permissions: GroupRecord['permissions'], prefix = ''): string[] {
 	const out: string[] = [];
 	for (const [key, value] of Object.entries(permissions ?? {})) {
-		if (value === true) out.push(prefix + key);
-		else if (typeof value === 'object' && value !== null)
+		// Objects are branches, not leaves: recurse instead of counting them, the
+		// same way the server walks the dotted key one level at a time.
+		if (typeof value === 'object' && value !== null)
 			out.push(...grantedPaths(value as PermissionTree, `${prefix}${key}.`));
+		else if (granted(value)) out.push(prefix + key);
 	}
 	return out;
 }
@@ -86,12 +108,15 @@ function grantedPaths(permissions: GroupRecord['permissions'], prefix = ''): str
  * the code interpreter or anyone else's data. A group that grants more is still
  * a perfectly good group; it is just the wrong destination for THIS action.
  *
- * Only `true` counts. A permission set to `false` grants nothing, and the stored
- * tree is full of them.
+ * Anything TRUTHY counts, matching the server — see `granted`. A permission set
+ * to `false` grants nothing, and the stored tree is full of them; one set to `1`
+ * grants everything `true` would.
  */
 export function grantsOnlyMasking(permissions: GroupRecord['permissions']): boolean {
-	const granted = grantedPaths(permissions);
-	return granted.length === 1 && granted[0] === MASKING_PATH.join('.');
+	// Named `paths`, not `granted`: the module now has a `granted()` predicate and
+	// a local of the same name would shadow it inside this function.
+	const paths = grantedPaths(permissions);
+	return paths.length === 1 && paths[0] === MASKING_PATH.join('.');
 }
 
 /**

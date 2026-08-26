@@ -20,7 +20,6 @@ import logging
 import time
 from typing import Literal, NamedTuple, Optional
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -225,15 +224,16 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
     affordable. There is deliberately no cache: a remembered "it exists" outlives
     the group it remembers, and the saving is two SELECTs.
 
-    Idempotent, including against itself: two concurrent callers may race, and the
-    `UNIQUE` index on `teams.group_id` decides. The loser re-reads and returns the
-    winner's group rather than raising — a race is a normal outcome here, not an
-    error.
+    Idempotent, including against itself: two concurrent callers may race, and a
+    CONDITIONAL update decides — not the `UNIQUE` index, which cannot see this
+    race at all (see the comment on the write). The loser deletes the group it
+    made and returns the winner's rather than raising: a race is a normal outcome
+    here, not an error.
     """
     from open_webui.internal.db import get_async_db_context
-    from open_webui.models.billing import Team, Teams
+    from open_webui.models.billing import Team
     from open_webui.models.groups import Group, GroupForm, Groups
-    from sqlalchemy import select
+    from sqlalchemy import delete, select, update
 
     async with get_async_db_context(db) as session:
         result = await session.execute(select(Team).filter(Team.id == team_id))
@@ -241,6 +241,11 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
 
         if team is None:
             return None
+
+        # ⚠️ Remembered so the write below can be conditional on it. Either
+        # `None`, or an id that resolves to nothing — both are states this
+        # function replaces, and both must be what it checks it is replacing.
+        observed_group_id = team.group_id
 
         if team.group_id:
             existing = await session.execute(select(Group.id).filter(Group.id == team.group_id))
@@ -273,13 +278,49 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
     if group is None:
         return None
 
-    try:
-        await Teams.update(team_id, group_id=group.id, db=db)
-    except IntegrityError:
-        # Another caller won the race. Its group is the answer; ours is an orphan
-        # nothing points at, which `team_group_kind` correctly classifies as not a
-        # team group.
+    # ⚠️ CONDITIONAL on the state this function read, and that is the whole
+    # protection.
+    #
+    # `uq_teams_group_id` does NOT arbitrate this race, however much it looks
+    # like it should: it is unique ACROSS rows, and two callers racing here write
+    # the SAME team row with DIFFERENT group ids. Neither violates it. An
+    # unconditional `UPDATE` therefore never raises — the last write simply wins,
+    # and the loser's group survives as an orphan.
+    #
+    # An orphan is not harmless. It carries the masking permission and nothing
+    # else, and `teams.group_id` does not point at it, so `team_group_kind` calls
+    # it an ordinary group and it appears in the administrator's `Enforce` list
+    # as a destination — reopening the door that list was narrowed to close. And
+    # the race is reachable by ordinary use: the dashboard resolves the same
+    # scope on three routes, so one first load of a team with no group issues
+    # three of these concurrently.
+    async with get_async_db_context(db) as session:
+        result = await session.execute(
+            update(Team)
+            .where(
+                Team.id == team_id,
+                Team.group_id.is_(None)
+                if observed_group_id is None
+                else Team.group_id == observed_group_id,
+            )
+            # `updated_at` by hand: this replaces a `Teams.update` call, which
+            # stamped it, and `rename_team_pii_group` right below stamps its own
+            # write the same way. A row that changed without saying so is the
+            # kind of small dishonesty that costs somebody an afternoon later.
+            .values(group_id=group.id, updated_at=int(time.time()))
+        )
+        won = result.rowcount == 1
+        await session.commit()
+
+    if not won:
+        # Somebody else linked their group first. Ours is the orphan described
+        # above, so it is deleted rather than left behind. It was created empty
+        # moments ago and nothing points at it, so there is nothing to migrate
+        # and nobody to unmask.
         log.info('team_groups: lost the race to create the group for team %s', team_id)
+        async with get_async_db_context(db) as session:
+            await session.execute(delete(Group).where(Group.id == group.id))
+            await session.commit()
 
     async with get_async_db_context(db) as session:
         result = await session.execute(select(Team.group_id).filter(Team.id == team_id))
