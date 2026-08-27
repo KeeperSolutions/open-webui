@@ -605,6 +605,23 @@
 						<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
 							{$i18n.t("Your team is on a shared usage plan. Each member's activity is tracked individually.")}
 						</p>
+						<!--
+							The owner's way in to the team dashboard. It lives here because this
+							page already knows the answer to "am I an owner, and of which team":
+							`GET /billing/team` returns a `team_id` and 404s for everyone else, so
+							no new endpoint is needed.
+
+							⚠️ A link, not a guard. Typing the address reaches the same screen, and
+							every check that matters is on the routes it calls.
+						-->
+						{#if teamStatus?.team_id}
+							<a
+								href="/team/{teamStatus.team_id}/pii-dashboard"
+								class="text-xs mt-2 inline-block underline text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
+							>
+								{$i18n.t('View PII dashboard for this team')}
+							</a>
+						{/if}
 					</div>
 					<div class="flex items-center gap-2 shrink-0">
 						{#if (status.seat_used ?? 0) < (status.seat_limit ?? 0)}

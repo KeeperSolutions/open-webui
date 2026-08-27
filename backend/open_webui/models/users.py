@@ -191,6 +191,21 @@ class UserGroupIdsModel(UserModel):
     # `pii_masking_enforced` is True means the instance-wide default is the
     # source, which no membership change can undo.
     pii_policy_group_ids: list[str] = []
+    #: Would this person still be masked with the addressed team's policy group
+    #: taken away.
+    #:
+    #: ⚠️ Computed on the SERVER so a non-admin never needs the ids to work it
+    #: out. `pii_policy_group_ids` names other people's groups, and a group id is
+    #: one call to `GET /groups/id/{id}/info` away from that group's NAME — a
+    #: route that is `get_verified_user` and checks no membership. Handing a team
+    #: owner the ids therefore hands them the names, and the whole point of the
+    #: owner's screen is that it names no group. So for a non-admin the two id
+    #: lists are narrowed and this boolean carries the answer instead.
+    #:
+    #: ⚠️ It consults the instance-wide default, unlike `pii_policy_group_ids`.
+    #: The question is "will they still be masked afterwards", and a person the
+    #: instance masks by default will be — with no group anywhere to say so.
+    masked_by_other_policy: bool = False
 
 
 class UserModelResponse(UserModel):
@@ -205,6 +220,26 @@ class UserListResponse(BaseModel):
 class UserGroupIdsListResponse(BaseModel):
     users: list[UserGroupIdsModel]
     total: int
+    #: The addressed team's own policy group, when the request was team-scoped.
+    #:
+    #: ⚠️ ONE id, and only the viewer's own team's. It is what lets section 4 say
+    #: "masked by team policy" instead of "masked somewhere else"; no other group
+    #: id travels with it, so no other group's identity can leak through this
+    #: field. `None` on the instance-wide view and on a team with no group yet —
+    #: both mean "there is no team policy to attribute masking to".
+    team_group_id: Optional[str] = None
+
+    #: Whether this viewer may change who is in that policy group.
+    #:
+    #: ⚠️ Computed on the server, never derived from the address on the client.
+    #: An address selects a SCOPE; it does not confer a permission, and the
+    #: frontend has no way to check ownership. Reporting a permission the server
+    #: worked out keeps that rule intact and gives the route guard and the screen
+    #: one source.
+    #:
+    #: ⚠️ NOT the same as `mayAct` on the frontend, which is the administrator
+    #: flag and also unlocks the link to the admin user screen.
+    may_manage_team_policy: bool = False
 
 
 class UserStatus(BaseModel):

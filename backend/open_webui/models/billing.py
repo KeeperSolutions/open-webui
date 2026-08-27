@@ -197,6 +197,10 @@ class Team(Base):
     stripe_payment_method_id = Column(Text, nullable=True)
 
     subscription_status = Column(Text, nullable=True)
+    # The team's own PII policy group. Nullable and UNIQUE: nullable because a team
+    # may not have one yet, UNIQUE because two teams pointing at one group would
+    # make "the team's own group" ambiguous — see `utils/team_groups.py`.
+    group_id = Column(Text, unique=True, nullable=True)
     seat_limit = Column(Integer, nullable=False, default=5)
     # How many subscription credits this plan includes per month (display only; authoritative value is in credit_balances)
     monthly_credits = Column(Integer, nullable=False, default=0)
@@ -218,6 +222,10 @@ class TeamModel(BaseModel):
     stripe_payment_method_id: Optional[str] = None
 
     subscription_status: Optional[str] = None
+    # ⚠️ Optional all the way out to the edge. A team without a group is a normal
+    # state, not an error — narrowing this type is how a caller starts assuming
+    # otherwise.
+    group_id: Optional[str] = None
     seat_limit: int = 5
     monthly_credits: int = 0
 
@@ -367,6 +375,32 @@ class TeamMembersTable:
             result = await db.execute(select(TeamMember).filter_by(user_id=user_id))
             row = result.scalars().first()
             return TeamMemberModel.model_validate(row) if row else None
+
+    async def members_among(
+        self, team_id: str, user_ids: list[str], db: Optional[AsyncSession] = None
+    ) -> set:
+        """Which of these people are in this team. One query, whatever the count.
+
+        Written for the authorisation guard, which has to answer "are ALL of these
+        my team's members" for a whole request body. `get_by_team_id` would load
+        the team and let the caller intersect in Python — correct, but it makes
+        the cost depend on the team's size rather than on the request's, and the
+        guard runs before every membership change.
+
+        Hits `uq_team_members_team_user`, so it is an index lookup rather than a
+        scan. Returns a set because the caller subtracts it; an empty input list
+        returns an empty set without touching the database.
+        """
+        if not user_ids:
+            return set()
+
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(TeamMember.user_id).filter(
+                    TeamMember.team_id == team_id, TeamMember.user_id.in_(user_ids)
+                )
+            )
+            return {row for (row,) in result.all()}
 
     async def remove(self, team_id: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         async with get_async_db_context(db) as db:

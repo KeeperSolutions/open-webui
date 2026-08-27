@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
+import { getAllUsers } from '$lib/apis/users';
 import { createDirectoryLoader, type DirectoryFetcher } from './directoryLoader';
+
+vi.mock('$lib/apis/users', () => ({ getAllUsers: vi.fn() }));
 
 const USERS = [
 	{ id: 'id-1', email: 'a@x.com', name: 'Ana' },
@@ -174,5 +177,36 @@ describe('createDirectoryLoader', () => {
 
 		expect(get(loader).users).toEqual([]);
 		expect(get(loader).failed).toBe(false);
+	});
+});
+/**
+ * ⚠️ The propagation test below mocks the API MODULE, not the fetcher.
+ *
+ * `teamId` is bound inside the DEFAULT fetcher, so a test that injects its own
+ * fetcher never sees it — such a test would pass green while the id was being
+ * dropped on the way to the request. That is precisely the bug worth catching, so
+ * the assertion has to sit on the API wrapper itself.
+ *
+ * Every other test in this file supplies its own fetcher and therefore never
+ * reaches the mock.
+ */
+
+describe('createDirectoryLoader — team id propagation', () => {
+	const api = vi.mocked(getAllUsers);
+
+	beforeEach(() => {
+		api.mockReset();
+		api.mockResolvedValue({ users: [] });
+	});
+
+	it('hands the team id to the API', async () => {
+		await createDirectoryLoader(undefined, 'T1').load();
+		expect(api).toHaveBeenCalledTimes(1);
+		expect(api.mock.calls[0][2]).toBe('T1');
+	});
+
+	it('hands null when the screen is instance-wide', async () => {
+		await createDirectoryLoader().load();
+		expect(api.mock.calls[0][2]).toBeNull();
 	});
 });

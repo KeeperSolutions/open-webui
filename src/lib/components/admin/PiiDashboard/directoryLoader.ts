@@ -30,9 +30,14 @@ const INITIAL: DirectoryState = {
 	errorDetail: null
 };
 
-const defaultFetcher: DirectoryFetcher = (signal) => getAllUsers(localStorage.token, signal);
+/** ⚠️ `teamId` last, default fetcher built here - see `metricsLoader.ts`. */
+export function createDirectoryLoader(
+	fetcher?: DirectoryFetcher,
+	teamId: string | null = null
+): DirectoryLoader {
+	const fetchDirectory: DirectoryFetcher =
+		fetcher ?? ((signal) => getAllUsers(localStorage.token, signal, teamId));
 
-export function createDirectoryLoader(fetcher: DirectoryFetcher = defaultFetcher): DirectoryLoader {
 	const { subscribe, update } = writable<DirectoryState>({ ...INITIAL });
 
 	let inFlight: AbortController | null = null;
@@ -52,7 +57,7 @@ export function createDirectoryLoader(fetcher: DirectoryFetcher = defaultFetcher
 		update((s) => ({ ...s, loading: true, failed: false, errorDetail: null }));
 
 		try {
-			const res = await fetcher(controller.signal);
+			const res = await fetchDirectory(controller.signal);
 			if (controller.signal.aborted) return;
 
 			// A directory that answers with nothing is an empty directory, not a

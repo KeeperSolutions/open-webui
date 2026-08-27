@@ -40,6 +40,8 @@
 	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
 	import CreditCard from '$lib/components/icons/CreditCard.svelte';
+	import ChartBar from '$lib/components/icons/ChartBar.svelte';
+	import { loadOwnedTeamId, ownedTeamId } from './ownedTeam';
 
 	const i18n = getContext('i18n');
 
@@ -97,6 +99,14 @@
 		// Fetch usage info when dropdown opens, if user has permission
 		if (state && ($config?.features?.enable_public_active_users_count || role === 'admin')) {
 			getUsageInfo();
+		}
+
+		// ⚠️ On OPEN, not on mount. The menu is in the sidebar of every page, so a
+		// mount-time fetch would put a request on every navigation for a question
+		// only this menu asks. `loadOwnedTeamId` answers once per session, so
+		// reopening the menu costs nothing.
+		if (state && ($config?.features?.enable_billing ?? false)) {
+			loadOwnedTeamId(localStorage.token);
 		}
 	};
 </script>
@@ -379,6 +389,35 @@
 						<CreditCard className="size-5" strokeWidth="1.5" />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Billing')}</div>
+				</button>
+			{/if}
+
+			<!--
+				The team owner's way to their own PII dashboard. Until now it existed
+				at exactly one place — a link on `/billing` — while the admin reaches
+				theirs from the nav on every admin page.
+
+				⚠️ Gated on OWNING a team, not on being in one. The page refuses a
+				member anyway (`resolve_dashboard_scope`), so an entry shown to every
+				member would be a menu item that leads to a refusal.
+			-->
+			{#if $ownedTeamId}
+				<button
+					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
+					type="button"
+					on:click={async () => {
+						show = false;
+						if ($mobile) {
+							await tick();
+							showSidebar.set(false);
+						}
+						goto(`/team/${$ownedTeamId}/pii-dashboard`);
+					}}
+				>
+					<div class=" self-center mr-3">
+						<ChartBar className="size-5" />
+					</div>
+					<div class=" self-center truncate">{$i18n.t('Team PII Dashboard')}</div>
 				</button>
 			{/if}
 

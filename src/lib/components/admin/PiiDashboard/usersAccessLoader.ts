@@ -4,6 +4,9 @@ import { getGroups } from '$lib/apis/groups';
 import { describeLoadError } from './sections/costAnalytics';
 import {
 	policyGroupsOf,
+	enforceTargetsOf,
+	broadPolicyGroupCount,
+	teamOnlyPolicyGroupCount,
 	type AccessUser,
 	type GroupRecord,
 	type PolicyGroup
@@ -36,13 +39,42 @@ export type UsersAccessState = {
 	 * action would land in different groups with nothing recording why.
 	 */
 	policyGroups: PolicyGroup[];
+	/** The subset that may be an enforce destination — team groups excluded. */
+	enforceTargets: PolicyGroup[];
+	/** Enforcing groups excluded because they belong to a team — see the empty state. */
+	teamOnlyPolicyGroups: number;
+	/** Enforcing groups excluded for granting more than masking — see the empty state. */
+	broadPolicyGroups: number;
+	/** The addressed team's own policy group, or `null` — see `rowActionFor`. */
+	teamGroupId: string | null;
+	/** Whether the viewer may change who is in that group. Server-computed. */
+	mayManagePolicy: boolean;
 	truncatedUsers: Truncation | null;
 	loading: boolean;
 	failed: boolean;
 	errorDetail: string | null;
 };
 
-export type UsersPage = { users: AccessUser[]; total: number };
+export type UsersPage = {
+	users: AccessUser[];
+	total: number;
+	/**
+	 * The addressed team's own policy group, straight from `GET /users/`.
+	 *
+	 * Snake case because it is the API's field, not ours — the same reason `users`
+	 * and `total` are named the way they are. `null`/absent on the instance-wide
+	 * view and on a team that has no group yet.
+	 */
+	team_group_id?: string | null;
+	/**
+	 * Whether this viewer may change who is in that group, per `GET /users/`.
+	 *
+	 * ⚠️ A permission the SERVER worked out, not one derived here. The frontend
+	 * cannot check who owns a team, and level A is written so that an address
+	 * cannot be mistaken for a permission.
+	 */
+	may_manage_team_policy?: boolean;
+};
 
 /**
  * One page each. Injectable so pagination, truncation and abort can be driven
@@ -60,14 +92,16 @@ export type UsersAccessLoader = Readable<UsersAccessState> & {
 const INITIAL: UsersAccessState = {
 	users: [],
 	policyGroups: [],
+	enforceTargets: [],
+	teamOnlyPolicyGroups: 0,
+	broadPolicyGroups: 0,
+	teamGroupId: null,
+	mayManagePolicy: false,
 	truncatedUsers: null,
 	loading: true,
 	failed: false,
 	errorDetail: null
 };
-
-const defaultUsersFetcher: UsersFetcher = (page, signal) =>
-	getUsers(localStorage.token, undefined, undefined, undefined, page, signal);
 
 const defaultGroupsFetcher: GroupsFetcher = () => getGroups(localStorage.token);
 
@@ -76,10 +110,23 @@ const ABORTED = Symbol('aborted');
 
 type Collected<T> = { items: T[]; truncated: Truncation | null };
 
+/**
+ * ⚠️ `teamId` last, default users fetcher built here - see `metricsLoader.ts`.
+ *
+ * The GROUPS fetcher deliberately does not take it: `GET /groups/` already returns
+ * only the groups the caller belongs to, and level A has no team-to-group bridge to
+ * scope it by. Passing a team id there would suggest a scoping that does not exist.
+ */
 export function createUsersAccessLoader(
-	usersFetcher: UsersFetcher = defaultUsersFetcher,
-	groupsFetcher: GroupsFetcher = defaultGroupsFetcher
+	usersFetcher?: UsersFetcher,
+	groupsFetcher: GroupsFetcher = defaultGroupsFetcher,
+	teamId: string | null = null
 ): UsersAccessLoader {
+	const fetchUsers: UsersFetcher =
+		usersFetcher ??
+		((page, signal) =>
+			getUsers(localStorage.token, undefined, undefined, undefined, page, signal, teamId));
+
 	const { subscribe, update } = writable<UsersAccessState>({ ...INITIAL });
 
 	let inFlight: AbortController | null = null;
@@ -93,6 +140,11 @@ export function createUsersAccessLoader(
 			// compliance table silently listing 3 of 7 pages asserts something untrue.
 			users: [],
 			policyGroups: [],
+			enforceTargets: [],
+			teamOnlyPolicyGroups: 0,
+			broadPolicyGroups: 0,
+			teamGroupId: null,
+			mayManagePolicy: false,
 			truncatedUsers: null
 		}));
 
@@ -143,9 +195,22 @@ export function createUsersAccessLoader(
 		update((s) => ({ ...s, loading: true, failed: false, errorDetail: null }));
 
 		try {
+			// Read from the first page only. Every page of a scoped read carries the
+			// same value, and taking it from the last would mean an aborted run
+			// could leave it unset while the rows were already published.
+			let teamGroupId: string | null = null;
+			let mayManagePolicy = false;
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
-					const res = await usersFetcher(page, signal);
+					const res = await fetchUsers(page, signal);
+					if (res && page === 1) {
+						// Both are properties of the SCOPE, not of the page — the server
+						// computes them without looking at `page`, and a test on page 2
+						// pins that. Read here for the reason above: taking them from the
+						// last page would let an aborted run publish rows without them.
+						teamGroupId = res.team_group_id ?? null;
+						mayManagePolicy = res.may_manage_team_policy === true;
+					}
 					return res ? { items: res.users, total: res.total } : null;
 				},
 				USERS_MAX,
@@ -172,6 +237,11 @@ export function createUsersAccessLoader(
 				...s,
 				users: usersResult.items,
 				policyGroups: policyGroupsOf(groups),
+				enforceTargets: enforceTargetsOf(groups),
+				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
+				broadPolicyGroups: broadPolicyGroupCount(groups),
+				teamGroupId,
+				mayManagePolicy,
 				truncatedUsers: usersResult.truncated,
 				failed: false,
 				errorDetail: null

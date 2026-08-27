@@ -9,6 +9,13 @@
 
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
+	/**
+	 * Names the SCOPE, not the viewer's rights — decision 2. An admin on a team
+	 * address is reading one team, so they get the team title too; calling this
+	 * off `mayAct` would put the permission back into a label that describes
+	 * which rows are on screen.
+	 */
+	export let teamId: string | null = null;
 	export let windowFrom = '';
 	export let windowTo = '';
 	/** The shown window belongs to the previous fetch; a newer one is in flight. */
@@ -19,7 +26,9 @@
 
 <div class="flex flex-wrap items-center justify-between gap-3 font-['Inter']">
 	<div class="text-lg font-bold leading-[1.55] text-pii-ink">
-		{$i18n.t('PII Protection — Admin Dashboard')}
+		{teamId
+			? $i18n.t('PII Protection — Team Dashboard')
+			: $i18n.t('PII Protection — Admin Dashboard')}
 	</div>
 
 	<div class="flex flex-wrap items-center justify-end gap-2">

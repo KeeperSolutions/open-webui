@@ -41,10 +41,27 @@ const INITIAL: MetricsState = {
 	errorDetail: null
 };
 
-const defaultFetcher: MetricsFetcher = (period, days, signal) =>
-	getLangfuseMetrics(localStorage.token, period, days, signal);
+/**
+ * ⚠️ `teamId` is the LAST parameter, behind the fetcher, and the default fetcher is
+ * built here rather than at module scope so it can close over it.
+ *
+ * Behind the fetcher because every existing call passes one positionally
+ * (`createMetricsLoader(vi.fn())`); a leading `teamId` would shift all of them
+ * silently. The fetcher TYPE is unchanged for the same reason.
+ *
+ * A consequence worth naming: an INJECTED fetcher never sees `teamId`, so a test
+ * that supplies its own fetcher cannot prove the id reaches the API. That proof
+ * has to mock the API module instead - see the propagation test below this file.
+ */
+export function createMetricsLoader(
+	fetcher?: MetricsFetcher,
+	teamId: string | null = null
+): MetricsLoader {
+	const fetchPeriod: MetricsFetcher =
+		fetcher ??
+		((period, days, signal) =>
+			getLangfuseMetrics(localStorage.token, period, days, signal, teamId));
 
-export function createMetricsLoader(fetcher: MetricsFetcher = defaultFetcher): MetricsLoader {
 	const { subscribe, update } = writable<MetricsState>({ ...INITIAL });
 
 	let inFlight: AbortController | null = null;
@@ -72,7 +89,7 @@ export function createMetricsLoader(fetcher: MetricsFetcher = defaultFetcher): M
 
 		try {
 			const { period: p, days } = toLangfuseParams(period, customDays);
-			const res = await fetcher(p, days, controller.signal);
+			const res = await fetchPeriod(p, days, controller.signal);
 			if (controller.signal.aborted) return;
 
 			// The client resolves to null when the request never produced a body it

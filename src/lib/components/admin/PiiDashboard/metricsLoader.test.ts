@@ -1,7 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import type { MetricsResponse } from '$lib/apis/langfuse';
+import { getLangfuseMetrics } from '$lib/apis/langfuse';
 import { createMetricsLoader, type MetricsFetcher } from './metricsLoader';
+
+vi.mock('$lib/apis/langfuse', () => ({ getLangfuseMetrics: vi.fn() }));
 
 const response = (from: string, to: string, models: string[] = ['gpt-4']): MetricsResponse => ({
 	from,
@@ -217,5 +220,36 @@ describe('createMetricsLoader', () => {
 		// A destroyed loader publishes nothing further.
 		expect(get(loader).windowFrom).toBe('');
 		expect(get(loader).loading).toBe(true);
+	});
+});
+/**
+ * ⚠️ The propagation test below mocks the API MODULE, not the fetcher.
+ *
+ * `teamId` is bound inside the DEFAULT fetcher, so a test that injects its own
+ * fetcher never sees it — such a test would pass green while the id was being
+ * dropped on the way to the request. That is precisely the bug worth catching, so
+ * the assertion has to sit on the API wrapper itself.
+ *
+ * Every other test in this file supplies its own fetcher and therefore never
+ * reaches the mock.
+ */
+
+describe('createMetricsLoader — team id propagation', () => {
+	const api = vi.mocked(getLangfuseMetrics);
+
+	beforeEach(() => {
+		api.mockReset();
+		api.mockResolvedValue(response('FROM', 'TO'));
+	});
+
+	it('hands the team id to the API', async () => {
+		await createMetricsLoader(undefined, 'T1').load('week', 7);
+		expect(api).toHaveBeenCalledTimes(1);
+		expect(api.mock.calls[0][4]).toBe('T1');
+	});
+
+	it('hands null when the screen is instance-wide', async () => {
+		await createMetricsLoader().load('week', 7);
+		expect(api.mock.calls[0][4]).toBeNull();
 	});
 });
