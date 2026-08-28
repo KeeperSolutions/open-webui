@@ -34,7 +34,6 @@ from open_webui.env import (
     WEBUI_NAME,
     log,
 )
-<<<<<<< HEAD
 from open_webui.internal.config import (
     STATE as _state,
 )
@@ -44,6 +43,11 @@ from open_webui.internal.config import (
 )
 
 # ── Persistent configuration layer ──────────────────────────────────────────
+# Fork keeps its own blob-based ConfigVar/AppConfig layer. Upstream v0.11.0
+# replaced this with a per-key `open_webui.models.config.Config` async store
+# (`await Config.get('dotted.key')`); we deliberately do NOT adopt it here —
+# it would shadow this `Config` symbol and break all ~2k `app.state.config.X`
+# call sites. See md-docs/upgrade-0.9.6-to-0.11.0.md, Risk #1.
 from open_webui.internal.config import (  # noqa: F401
     ConfigTable as Config,
 )
@@ -99,19 +103,6 @@ async def async_reset_config():
 
 def get_config_value(config_path: str):
     return _state.read(config_path)
-=======
-from open_webui.models.config import Config
-
-
-async def seed_registered_defaults():
-    await Config.rename_prefix('rag.web', 'web')
-    await Config.repair_flattened_dict_configs()
-    await Config.seed_defaults(DEFAULT_CONFIG)
-
-
-async def async_reset_config():
-    await Config.clear()
->>>>>>> v0.11.0
 
 
 class EndpointFilter(logging.Filter):
@@ -146,7 +137,6 @@ if ENABLE_DB_MIGRATIONS:
     run_migrations()
 
 
-<<<<<<< HEAD
 # Migrate legacy config.json → database on first run
 if os.path.exists(f'{DATA_DIR}/config.json'):
     with open(f'{DATA_DIR}/config.json', 'r') as _f:
@@ -163,17 +153,6 @@ CONFIG_DATA = _initialize_config(
     enable_oauth_persistent=ENABLE_OAUTH_PERSISTENT_CONFIG,
 )
 
-=======
-async def import_legacy_config_json():
-    """Migrate legacy config.json → database on first run."""
-    if not os.path.exists(f'{DATA_DIR}/config.json'):
-        return
-    with open(f'{DATA_DIR}/config.json', 'r') as _f:
-        await Config.upsert(json.load(_f))
-    os.rename(f'{DATA_DIR}/config.json', f'{DATA_DIR}/old_config.json')
-
-
->>>>>>> v0.11.0
 ####################################
 # Static DIR
 ####################################
@@ -311,29 +290,21 @@ if CUSTOM_NAME:
 # DIRECT CONNECTIONS
 ####################################
 
-<<<<<<< HEAD
 ENABLE_DIRECT_CONNECTIONS = ConfigVar(
     'ENABLE_DIRECT_CONNECTIONS',
     'direct.enable',
     os.getenv('ENABLE_DIRECT_CONNECTIONS', 'False').lower() == 'true',
 )
-=======
-ENABLE_DIRECT_CONNECTIONS = os.getenv('ENABLE_DIRECT_CONNECTIONS', 'False').lower() == 'true'
->>>>>>> v0.11.0
 
 ####################################
 # OLLAMA_BASE_URL
 ####################################
 
-<<<<<<< HEAD
 ENABLE_OLLAMA_API = ConfigVar(
     'ENABLE_OLLAMA_API',
     'ollama.enable',
     os.getenv('ENABLE_OLLAMA_API', 'True').lower() == 'true',
 )
-=======
-ENABLE_OLLAMA_API = os.getenv('ENABLE_OLLAMA_API', 'True').lower() == 'true'
->>>>>>> v0.11.0
 
 OLLAMA_API_BASE_URL = os.getenv('OLLAMA_API_BASE_URL', 'http://localhost:11434/api')
 
@@ -396,44 +367,38 @@ OLLAMA_BASE_URLS = os.getenv('OLLAMA_BASE_URLS', '')
 OLLAMA_BASE_URLS = OLLAMA_BASE_URLS if OLLAMA_BASE_URLS != '' else OLLAMA_BASE_URL
 
 OLLAMA_BASE_URLS = [url.strip() for url in OLLAMA_BASE_URLS.split(';')]
-<<<<<<< HEAD
 OLLAMA_BASE_URLS = ConfigVar('OLLAMA_BASE_URLS', 'ollama.base_urls', OLLAMA_BASE_URLS)
 
-OLLAMA_API_CONFIGS = ConfigVar(
-    'OLLAMA_API_CONFIGS',
-    'ollama.api_configs',
-    {},
-)
-=======
-OLLAMA_BASE_URLS = OLLAMA_BASE_URLS
-
-OLLAMA_API_CONFIGS = {}
-_ollama_api_configs = os.getenv('OLLAMA_API_CONFIGS', '')
-if _ollama_api_configs:
+# v0.11.0 added env-var JSON parsing + validation for *_API_CONFIGS; folded
+# into the ConfigVar default so DB persistence still wraps it.
+_ollama_api_configs = {}
+_ollama_api_configs_raw = os.getenv('OLLAMA_API_CONFIGS', '')
+if _ollama_api_configs_raw:
     try:
-        parsed = json.loads(_ollama_api_configs)
+        parsed = json.loads(_ollama_api_configs_raw)
         if isinstance(parsed, dict):
-            OLLAMA_API_CONFIGS = parsed
+            _ollama_api_configs = parsed
         else:
             log.warning('OLLAMA_API_CONFIGS must be a JSON object, ignoring')
     except (json.JSONDecodeError, TypeError):
         log.warning('OLLAMA_API_CONFIGS is not valid JSON, ignoring')
->>>>>>> v0.11.0
+
+OLLAMA_API_CONFIGS = ConfigVar(
+    'OLLAMA_API_CONFIGS',
+    'ollama.api_configs',
+    _ollama_api_configs,
+)
 
 ####################################
 # OPENAI_API
 ####################################
 
 
-<<<<<<< HEAD
 ENABLE_OPENAI_API = ConfigVar(
     'ENABLE_OPENAI_API',
     'openai.enable',
     os.getenv('ENABLE_OPENAI_API', 'True').lower() == 'true',
 )
-=======
-ENABLE_OPENAI_API = os.getenv('ENABLE_OPENAI_API', 'True').lower() == 'true'
->>>>>>> v0.11.0
 
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
@@ -453,11 +418,7 @@ OPENAI_API_KEYS = os.getenv('OPENAI_API_KEYS', '')
 OPENAI_API_KEYS = OPENAI_API_KEYS if OPENAI_API_KEYS != '' else OPENAI_API_KEY
 
 OPENAI_API_KEYS = [url.strip() for url in OPENAI_API_KEYS.split(';')]
-<<<<<<< HEAD
 OPENAI_API_KEYS = ConfigVar('OPENAI_API_KEYS', 'openai.api_keys', OPENAI_API_KEYS)
-=======
-OPENAI_API_KEYS = OPENAI_API_KEYS
->>>>>>> v0.11.0
 
 OPENAI_API_BASE_URLS = os.getenv('OPENAI_API_BASE_URLS', '')
 OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS if OPENAI_API_BASE_URLS != '' else OPENAI_API_BASE_URL
@@ -465,29 +426,25 @@ OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS if OPENAI_API_BASE_URLS != '' else O
 OPENAI_API_BASE_URLS = [
     url.strip() if url != '' else 'https://api.openai.com/v1' for url in OPENAI_API_BASE_URLS.split(';')
 ]
-<<<<<<< HEAD
 OPENAI_API_BASE_URLS = ConfigVar('OPENAI_API_BASE_URLS', 'openai.api_base_urls', OPENAI_API_BASE_URLS)
 
-OPENAI_API_CONFIGS = ConfigVar(
-    'OPENAI_API_CONFIGS',
-    'openai.api_configs',
-    {},
-)
-=======
-OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
-
-OPENAI_API_CONFIGS = {}
-_openai_api_configs = os.getenv('OPENAI_API_CONFIGS', '')
-if _openai_api_configs:
+_openai_api_configs = {}
+_openai_api_configs_raw = os.getenv('OPENAI_API_CONFIGS', '')
+if _openai_api_configs_raw:
     try:
-        parsed = json.loads(_openai_api_configs)
+        parsed = json.loads(_openai_api_configs_raw)
         if isinstance(parsed, dict):
-            OPENAI_API_CONFIGS = parsed
+            _openai_api_configs = parsed
         else:
             log.warning('OPENAI_API_CONFIGS must be a JSON object, ignoring')
     except (json.JSONDecodeError, TypeError):
         log.warning('OPENAI_API_CONFIGS is not valid JSON, ignoring')
->>>>>>> v0.11.0
+
+OPENAI_API_CONFIGS = ConfigVar(
+    'OPENAI_API_CONFIGS',
+    'openai.api_configs',
+    _openai_api_configs,
+)
 
 # Get the actual OpenAI API key based on the base URL
 OPENAI_API_KEY = ''
@@ -502,15 +459,11 @@ OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
 # MODELS
 ####################################
 
-<<<<<<< HEAD
 ENABLE_BASE_MODELS_CACHE = ConfigVar(
     'ENABLE_BASE_MODELS_CACHE',
     'models.base_models_cache',
     os.getenv('ENABLE_BASE_MODELS_CACHE', 'False').lower() == 'true',
 )
-=======
-ENABLE_BASE_MODELS_CACHE = os.getenv('ENABLE_BASE_MODELS_CACHE', 'False').lower() == 'true'
->>>>>>> v0.11.0
 
 
 ####################################
@@ -524,18 +477,14 @@ except Exception as e:
     tool_server_connections = []
 
 
-<<<<<<< HEAD
 TOOL_SERVER_CONNECTIONS = ConfigVar(
     'TOOL_SERVER_CONNECTIONS',
     'tool_server.connections',
     tool_server_connections,
 )
-=======
-TOOL_SERVER_CONNECTIONS = tool_server_connections
 
-OAUTH_CLIENT_TIMEOUT = os.getenv('OAUTH_CLIENT_TIMEOUT', '')
->>>>>>> v0.11.0
-
+# v0.11.0 introduced OAUTH_CLIENT_TIMEOUT here as a plain env read; the fork
+# already exposes it as a ConfigVar, kept below.
 OAUTH_CLIENT_TIMEOUT = ConfigVar(
     'OAUTH_CLIENT_TIMEOUT',
     'oauth.client.timeout',
