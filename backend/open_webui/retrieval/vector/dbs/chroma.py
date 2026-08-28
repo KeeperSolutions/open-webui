@@ -3,6 +3,10 @@ from typing import Optional
 
 import chromadb
 from chromadb import Settings
+<<<<<<< HEAD
+=======
+from chromadb.errors import NotFoundError
+>>>>>>> v0.11.0
 from chromadb.utils.batch_utils import create_batches
 from open_webui.config import (
     CHROMA_CLIENT_AUTH_CREDENTIALS,
@@ -56,9 +60,11 @@ class ChromaClient(VectorDBBase):
             )
 
     def has_collection(self, collection_name: str) -> bool:
-        # Check if the collection exists based on the collection name.
-        collection_names = self.client.list_collections()
-        return collection_name in collection_names
+        try:
+            self.client.get_collection(name=collection_name)
+            return True
+        except NotFoundError:
+            return False
 
     def delete_collection(self, collection_name: str):
         # Delete the collection based on the collection name.

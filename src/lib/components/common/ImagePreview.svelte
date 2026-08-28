@@ -71,6 +71,7 @@
 
 			<div>
 				<button
+					aria-label={$i18n.t('Download')}
 					class=" p-5 z-999"
 					aria-label={$i18n.t('Download')}
 					on:click={() => {

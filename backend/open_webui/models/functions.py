@@ -7,7 +7,12 @@ import time
 
 # local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
+<<<<<<< HEAD
 from open_webui.models.users import UserModel, UserResponse, Users
+=======
+from open_webui.models.users import User, UserResponse, Users, UserSettings
+from open_webui.utils.valves import decrypt_valves, encrypt_valves
+>>>>>>> v0.11.0
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Boolean, Column, Index, String, Text, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +46,7 @@ class FunctionMeta(BaseModel):
 
 class FunctionModel(BaseModel):
     id: str
-    user_id: str
+    user_id: str | None = None  # may be null for legacy/malformed records
     name: str
     type: str
     content: str
@@ -57,7 +62,7 @@ class FunctionModel(BaseModel):
 # --- form / schema definitions ---
 class FunctionWithValvesModel(BaseModel):
     id: str
-    user_id: str
+    user_id: str | None = None  # may be null for legacy/malformed records
     name: str
     type: str
     content: str
@@ -78,7 +83,7 @@ class FunctionWithValvesModel(BaseModel):
 
 class FunctionResponse(BaseModel):
     id: str
-    user_id: str
+    user_id: str | None = None  # may be null for legacy/malformed records
     type: str
     name: str
     meta: FunctionMeta
@@ -128,7 +133,10 @@ class FunctionsTable:
                 result = Function(**function.model_dump())
                 db.add(result)
                 await db.commit()
+<<<<<<< HEAD
                 await db.refresh(result)
+=======
+>>>>>>> v0.11.0
                 if result:
                     return FunctionModel.model_validate(result)
                 else:
@@ -143,7 +151,8 @@ class FunctionsTable:
         functions: list[FunctionWithValvesModel],
         db: AsyncSession | None = None,
     ) -> list[FunctionWithValvesModel]:
-        # Synchronize functions for a user by updating existing ones, inserting new ones, and removing those that are no longer present.
+        # Synchronize functions by updating existing ones, inserting new ones,
+        # and removing those that are no longer present.
         try:
             async with get_async_db_context(db) as db:
                 # Get existing functions
@@ -156,7 +165,13 @@ class FunctionsTable:
 
                 # Update or insert functions
                 for func in functions:
+                    func_data = func.model_dump()
+                    func_data['valves'] = encrypt_valves(func_data['valves']) if func_data.get('valves') else None
+                    func_data['user_id'] = user_id
+                    func_data['updated_at'] = int(time.time())
+
                     if func.id in existing_ids:
+<<<<<<< HEAD
                         await db.execute(
                             update(Function)
                             .filter_by(id=func.id)
@@ -166,14 +181,11 @@ class FunctionsTable:
                                 updated_at=int(time.time()),
                             )
                         )
+=======
+                        await db.execute(update(Function).filter_by(id=func.id).values(**func_data))
+>>>>>>> v0.11.0
                     else:
-                        new_func = Function(
-                            **{
-                                **func.model_dump(),
-                                'user_id': user_id,
-                                'updated_at': int(time.time()),
-                            }
-                        )
+                        new_func = Function(**func_data)
                         db.add(new_func)
 
                 # Remove functions that are no longer present
@@ -227,7 +239,15 @@ class FunctionsTable:
             functions = result.scalars().all()
 
             if include_valves:
-                return [FunctionWithValvesModel.model_validate(function) for function in functions]
+                return [
+                    FunctionWithValvesModel.model_validate(
+                        {
+                            **FunctionModel.model_validate(function).model_dump(),
+                            'valves': decrypt_valves(function.valves),
+                        }
+                    )
+                    for function in functions
+                ]
             else:
                 return [FunctionModel.model_validate(function) for function in functions]
 
@@ -274,6 +294,7 @@ class FunctionsTable:
             result = await db.execute(select(Function).filter_by(type='filter', is_active=True, is_global=True))
             return [FunctionModel.model_validate(function) for function in result.scalars().all()]
 
+<<<<<<< HEAD
     async def get_global_action_functions(self, db: AsyncSession | None = None) -> list[FunctionModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Function).filter_by(type='action', is_active=True, is_global=True))
@@ -284,6 +305,30 @@ class FunctionsTable:
             try:
                 function = await db.get(Function, id)
                 return function.valves if function.valves else {}
+=======
+    async def get_active_function_ids_by_type(
+        self, type: str, db: AsyncSession | None = None
+    ) -> list[tuple[str, bool]]:
+        """Return (id, is_global) for active functions without fetching plugin source."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Function.id, Function.is_global).filter_by(type=type, is_active=True))
+            return [(id, bool(is_global)) for id, is_global in result.all()]
+
+    async def get_active_filter_ids(self, db: AsyncSession | None = None) -> list[tuple[str, bool]]:
+        """Return (id, is_global) for active filters without fetching plugin source."""
+        return await self.get_active_function_ids_by_type('filter', db=db)
+
+    async def get_global_action_functions(self, db: AsyncSession | None = None) -> list[FunctionModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Function).filter_by(type='action', is_active=True, is_global=True))
+            return [FunctionModel.model_validate(function) for function in result.scalars().all()]
+
+    async def get_function_valves_by_id(self, id: str, db: AsyncSession | None = None) -> dict | None:
+        async with get_async_db_context(db) as db:
+            try:
+                result = await db.execute(select(Function.valves).filter_by(id=id))
+                return decrypt_valves(result.scalar_one_or_none())
+>>>>>>> v0.11.0
             except Exception as e:
                 log.exception(f'Error getting function valves by id {id}: {e}')
                 return None
@@ -299,8 +344,12 @@ class FunctionsTable:
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(Function.id, Function.valves).filter(Function.id.in_(ids)))
+<<<<<<< HEAD
                 functions = result.all()
                 return {f.id: (f.valves if f.valves else {}) for f in functions}
+=======
+                return {id: decrypt_valves(valves) for id, valves in result.all()}
+>>>>>>> v0.11.0
         except Exception as e:
             log.exception(f'Error batch-fetching function valves: {e}')
             return {}
@@ -311,10 +360,16 @@ class FunctionsTable:
         async with get_async_db_context(db) as db:
             try:
                 function = await db.get(Function, id)
+<<<<<<< HEAD
                 function.valves = valves
                 function.updated_at = int(time.time())
                 await db.commit()
                 await db.refresh(function)
+=======
+                function.valves = encrypt_valves(valves)
+                function.updated_at = int(time.time())
+                await db.commit()
+>>>>>>> v0.11.0
                 return FunctionModel.model_validate(function)
             except Exception:
                 return None
@@ -334,7 +389,10 @@ class FunctionsTable:
 
                     function.updated_at = int(time.time())
                     await db.commit()
+<<<<<<< HEAD
                     await db.refresh(function)
+=======
+>>>>>>> v0.11.0
                     return FunctionModel.model_validate(function)
                 else:
                     return None
@@ -346,8 +404,16 @@ class FunctionsTable:
         self, id: str, user_id: str, db: AsyncSession | None = None
     ) -> dict | None:
         try:
+<<<<<<< HEAD
             user = await Users.get_user_by_id(user_id, db=db)
             user_settings = user.settings.model_dump() if user.settings else {}
+=======
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(User.settings).filter_by(id=user_id))
+                settings = result.scalar_one_or_none()
+
+            user_settings = UserSettings(**settings).model_dump() if settings else {}
+>>>>>>> v0.11.0
 
             # Check if user has "functions" and "valves" settings
             if 'functions' not in user_settings:
@@ -355,8 +421,8 @@ class FunctionsTable:
             if 'valves' not in user_settings['functions']:
                 user_settings['functions']['valves'] = {}
 
-            return user_settings['functions']['valves'].get(id, {})
-        except Exception as e:
+            return decrypt_valves(user_settings['functions']['valves'].get(id))
+        except Exception:
             log.exception(f'Error getting user values by id {id} and user id {user_id}')
             return None
 
@@ -373,12 +439,12 @@ class FunctionsTable:
             if 'valves' not in user_settings['functions']:
                 user_settings['functions']['valves'] = {}
 
-            user_settings['functions']['valves'][id] = valves
+            user_settings['functions']['valves'][id] = encrypt_valves(valves)
 
             # Update the user settings in the database
             await Users.update_user_by_id(user_id, {'settings': user_settings}, db=db)
 
-            return user_settings['functions']['valves'][id]
+            return valves
         except Exception as e:
             log.exception(f'Error updating user valves by id {id} and user_id {user_id}: {e}')
             return None

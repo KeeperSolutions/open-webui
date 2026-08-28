@@ -1,12 +1,18 @@
 <script>
 	import { onMount } from 'svelte';
-	import { functions } from '$lib/stores';
+	import { config, functions } from '$lib/stores';
+	import { goto } from '$app/navigation';
 
 	import { getFunctions } from '$lib/apis/functions';
 	import { getSessionUser } from '$lib/apis/auths';
 	import Functions from '$lib/components/admin/Functions.svelte';
 
 	onMount(async () => {
+		if (!$config?.features?.enable_plugins) {
+			await goto('/admin', { replaceState: true });
+			return;
+		}
+
 		await Promise.all([
 			(async () => {
 				// First attempt to load functions

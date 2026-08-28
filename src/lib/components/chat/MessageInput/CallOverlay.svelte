@@ -929,6 +929,7 @@
 					<div class=" absolute top-4 md:top-8 left-4">
 						<button
 							type="button"
+							aria-label={$i18n.t('Stop camera')}
 							class="p-1.5 text-white cursor-pointer backdrop-blur-xl bg-black/10 rounded-full"
 							aria-label={$i18n.t('Stop Camera')}
 							on:click={() => {
@@ -961,7 +962,11 @@
 					}
 				}}
 			>
+<<<<<<< HEAD
 				<div class="line-clamp-1 text-sm font-medium">
+=======
+				<div class="line-clamp-1 text-sm font-normal">
+>>>>>>> v0.11.0
 					{#if loading}
 						{$i18n.t('Thinking...')}
 					{:else if muted}
@@ -986,8 +991,16 @@
 							await startVideoStream();
 						}}
 					>
+<<<<<<< HEAD
 						<button class="p-3 rounded-full bg-gray-50 dark:bg-gray-900" type="button" aria-label={$i18n.t('Switch Camera')}>
 
+=======
+						<button
+							aria-label={$i18n.t('Switch camera')}
+							class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
+							type="button"
+						>
+>>>>>>> v0.11.0
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								viewBox="0 0 20 20"
@@ -1005,6 +1018,10 @@
 				{:else}
 					<Tooltip content={$i18n.t('Camera')}>
 						<button
+<<<<<<< HEAD
+=======
+							aria-label={$i18n.t('Camera')}
+>>>>>>> v0.11.0
 							class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 							type="button"
 							aria-label={$i18n.t('Camera')}
@@ -1091,8 +1108,13 @@
 				</Tooltip>
 
 				<button
+<<<<<<< HEAD
 					class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 					aria-label={$i18n.t('End Call')}
+=======
+					aria-label={$i18n.t('End call')}
+					class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
+>>>>>>> v0.11.0
 					on:click={async () => {
 						await stopAudioStream();
 						await stopVideoStream();

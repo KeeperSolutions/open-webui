@@ -4,6 +4,7 @@ import base64
 import io
 import logging
 import time
+<<<<<<< HEAD
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,6 +13,22 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
+=======
+from collections import Counter
+from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.internal.db import get_async_session
+from open_webui.models.auths import Auths
+from open_webui.models.config import Config
+from open_webui.models.chat_messages import ChatMessages
+from open_webui.models.chats import Chats
+>>>>>>> v0.11.0
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
@@ -31,6 +48,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
 from open_webui.socket.main import disconnect_user_sessions
+<<<<<<< HEAD
 from open_webui.utils.access_control import (
     get_permissions,
     has_permission,
@@ -38,13 +56,21 @@ from open_webui.utils.access_control import (
 )
 from open_webui.config import PII_MASKING_ENFORCED_PERMISSION
 from open_webui.utils.pii_policy import group_enforces_pii_masking
+=======
+from open_webui.utils.access_control import get_permissions, has_permission
+>>>>>>> v0.11.0
 from open_webui.utils.auth import (
     get_admin_user,
     get_password_hash,
     get_verified_user,
     validate_password,
 )
+<<<<<<< HEAD
 from pydantic import BaseModel, ConfigDict
+=======
+from open_webui.utils.chat_variables import ChatVariablesError, normalize_user_variables, validate_user_variables
+from pydantic import BaseModel, ConfigDict, Field
+>>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -62,12 +88,25 @@ router = APIRouter()
 PAGE_ITEM_COUNT = 30
 
 
+<<<<<<< HEAD
 def _list_filter(
     query: Optional[str] = None,
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
 ) -> dict:
     """The filter dict `GET /users/` builds, in one place.
+=======
+@router.get('/', response_model=UserGroupIdsListResponse)
+async def get_users(
+    query: str | None = None,
+    order_by: str | None = None,
+    direction: str | None = None,
+    page: int | None = 1,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    limit = PAGE_ITEM_COUNT
+>>>>>>> v0.11.0
 
     Shared with `/locate` so a position can never be measured under a different
     ordering than the page it is meant to index into.
@@ -89,6 +128,7 @@ def _list_filter(
     filter['direction'] = direction
     return filter
 
+<<<<<<< HEAD
 
 @router.get('/', response_model=UserGroupIdsListResponse)
 async def get_users(
@@ -107,6 +147,8 @@ async def get_users(
 
     filter = _list_filter(query=query, order_by=order_by, direction=direction)
 
+=======
+>>>>>>> v0.11.0
     result = await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
     users = result['users']
@@ -115,12 +157,15 @@ async def get_users(
     # Fetch groups for all users in a single query to avoid N+1
     user_ids = [user.id for user in users]
     user_groups = await Groups.get_groups_by_member_ids(user_ids, db=db)
+<<<<<<< HEAD
 
     # The team PII policy, resolved from the groups ALREADY fetched above — zero
     # additional queries. `has_permission_for_groups` is the same
     # function `has_permission` delegates to, so this cannot drift from the
     # enforcement path.
     default_permissions = request.app.state.config.USER_PERMISSIONS
+=======
+>>>>>>> v0.11.0
 
     return {
         'users': [
@@ -240,7 +285,11 @@ async def get_user_permissisions(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+<<<<<<< HEAD
     user_permissions = await get_permissions(user.id, request.app.state.config.USER_PERMISSIONS, db=db)
+=======
+    user_permissions = await get_permissions(user.id, await Config.get('user.permissions'), db=db)
+>>>>>>> v0.11.0
 
     return user_permissions
 
@@ -260,6 +309,8 @@ class WorkspacePermissions(BaseModel):
     prompts_export: bool = False
     tools_import: bool = False
     tools_export: bool = False
+    skills_import: bool = False
+    skills_export: bool = False
 
 
 class SharingPermissions(BaseModel):
@@ -275,15 +326,22 @@ class SharingPermissions(BaseModel):
     public_skills: bool = False
     notes: bool = False
     public_notes: bool = True
+<<<<<<< HEAD
+=======
+    folders: bool = False
+>>>>>>> v0.11.0
     public_chats: bool = False
     public_calendars: bool = False
 
 
 class AccessGrantsPermissions(BaseModel):
     allow_users: bool = True
+    allow_groups: bool = True
 
 
 class ChatPermissions(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     controls: bool = True
     valves: bool = True
     system_prompt: bool = True
@@ -298,6 +356,7 @@ class ChatPermissions(BaseModel):
     edit: bool = True
     share: bool = True
     export: bool = True
+    import_: bool = Field(default=True, alias='import')
     stt: bool = True
     tts: bool = True
     call: bool = True
@@ -322,6 +381,10 @@ class FeaturesPermissions(BaseModel):
     memories: bool = True
     automations: bool = False
     calendar: bool = True
+<<<<<<< HEAD
+=======
+    webhooks: bool = False
+>>>>>>> v0.11.0
 
 
 class SettingsPermissions(BaseModel):
@@ -337,22 +400,168 @@ class UserPermissions(BaseModel):
     settings: SettingsPermissions
 
 
+class UserUsageTotals(BaseModel):
+    lifetime_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    peak_daily_tokens: int = 0
+    longest_chat_seconds: int = 0
+    current_streak: int = 0
+    longest_streak: int = 0
+    total_chats: int = 0
+    active_days: int = 0
+    models_used: int = 0
+    messages: int = 0
+    user_messages: int = 0
+    assistant_messages: int = 0
+
+
+class UserUsageHeatmapEntry(BaseModel):
+    date: str
+    messages: int = 0
+    chats: int = 0
+    tokens: int = 0
+    models: dict[str, int] = Field(default_factory=dict)
+
+
+class UserUsageModelEntry(BaseModel):
+    model_id: str
+    messages: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+class UserUsageToolEntry(BaseModel):
+    name: str
+    count: int
+
+
+class UserUsageInsights(BaseModel):
+    most_used_model: Optional[str] = None
+    average_tokens_per_chat: float = 0
+    average_messages_per_active_day: float = 0
+    user_message_share: float = 0
+    assistant_message_share: float = 0
+
+
+class UserUsagePeriod(BaseModel):
+    start_date: int
+    end_date: int
+    days: int
+
+
+class UserUsageResponse(BaseModel):
+    totals: UserUsageTotals
+    heatmap: list[UserUsageHeatmapEntry]
+    weekly_heatmap: list[UserUsageHeatmapEntry]
+    cumulative_heatmap: list[UserUsageHeatmapEntry]
+    insights: UserUsageInsights
+    top_models: list[UserUsageModelEntry]
+    top_tools: list[UserUsageToolEntry] = []
+    period: UserUsagePeriod
+
+
+def _week_start(date: datetime) -> datetime:
+    return date - timedelta(days=date.weekday())
+
+
+def _build_weekly_heatmap(heatmap: list[dict]) -> list[dict]:
+    weeks: dict[str, dict] = {}
+    for day in heatmap:
+        week = _week_start(datetime.strptime(day['date'], '%Y-%m-%d')).strftime('%Y-%m-%d')
+        entry = weeks.setdefault(week, {'date': week, 'messages': 0, 'chats': 0, 'tokens': 0, 'models': Counter()})
+        entry['messages'] += day.get('messages', 0)
+        entry['chats'] += day.get('chats', 0)
+        entry['tokens'] += day.get('tokens', 0)
+        entry['models'].update(day.get('models', {}))
+
+    return [
+        {
+            **weeks[key],
+            'models': dict(weeks[key]['models']),
+        }
+        for key in sorted(weeks)
+    ]
+
+
+def _build_cumulative_heatmap(heatmap: list[dict]) -> list[dict]:
+    totals = {'messages': 0, 'chats': 0, 'tokens': 0}
+    models: Counter[str] = Counter()
+    cumulative = []
+    for day in heatmap:
+        totals['messages'] += day.get('messages', 0)
+        totals['chats'] += day.get('chats', 0)
+        totals['tokens'] += day.get('tokens', 0)
+        models.update(day.get('models', {}))
+        cumulative.append(
+            {
+                'date': day['date'],
+                **totals,
+                'models': dict(models),
+            }
+        )
+    return cumulative
+
+
+def _calculate_streaks(heatmap: list[dict]) -> dict[str, int]:
+    longest = 0
+    current_run = 0
+    for day in heatmap:
+        if day.get('messages', 0) > 0:
+            current_run += 1
+            longest = max(longest, current_run)
+        else:
+            current_run = 0
+
+    current = 0
+    for day in reversed(heatmap):
+        if day.get('messages', 0) <= 0:
+            break
+        current += 1
+
+    return {'current': current, 'longest': longest}
+
+
 @router.get('/default/permissions', response_model=UserPermissions)
 async def get_default_user_permissions(request: Request, user=Depends(get_admin_user)):
+    user_permissions = await Config.get('user.permissions')
     return {
-        'workspace': WorkspacePermissions(**request.app.state.config.USER_PERMISSIONS.get('workspace', {})),
-        'sharing': SharingPermissions(**request.app.state.config.USER_PERMISSIONS.get('sharing', {})),
-        'access_grants': AccessGrantsPermissions(**request.app.state.config.USER_PERMISSIONS.get('access_grants', {})),
-        'chat': ChatPermissions(**request.app.state.config.USER_PERMISSIONS.get('chat', {})),
-        'features': FeaturesPermissions(**request.app.state.config.USER_PERMISSIONS.get('features', {})),
-        'settings': SettingsPermissions(**request.app.state.config.USER_PERMISSIONS.get('settings', {})),
+        'workspace': WorkspacePermissions(**user_permissions.get('workspace', {})),
+        'sharing': SharingPermissions(**user_permissions.get('sharing', {})),
+        'access_grants': AccessGrantsPermissions(**user_permissions.get('access_grants', {})),
+        'chat': ChatPermissions(**user_permissions.get('chat', {})),
+        'features': FeaturesPermissions(**user_permissions.get('features', {})),
+        'settings': SettingsPermissions(**user_permissions.get('settings', {})),
     }
 
 
 @router.post('/default/permissions')
 async def update_default_user_permissions(request: Request, form_data: UserPermissions, user=Depends(get_admin_user)):
-    request.app.state.config.USER_PERMISSIONS = form_data.model_dump()
-    return request.app.state.config.USER_PERMISSIONS
+    user_permissions = form_data.model_dump(by_alias=True)
+    await Config.upsert({'user.permissions': user_permissions})
+    await publish_event(
+        request,
+        EVENTS.USER_PERMISSIONS_UPDATED,
+        actor=user,
+        subject_id='user.permissions',
+        subject_type='config',
+    )
+    return user_permissions
+
+
+@router.get('/default/permissions/defaults', response_model=UserPermissions)
+async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
+    from open_webui.config import DEFAULT_USER_PERMISSIONS
+
+    return {
+        'workspace': WorkspacePermissions(**DEFAULT_USER_PERMISSIONS.get('workspace', {})),
+        'sharing': SharingPermissions(**DEFAULT_USER_PERMISSIONS.get('sharing', {})),
+        'access_grants': AccessGrantsPermissions(**DEFAULT_USER_PERMISSIONS.get('access_grants', {})),
+        'chat': ChatPermissions(**DEFAULT_USER_PERMISSIONS.get('chat', {})),
+        'features': FeaturesPermissions(**DEFAULT_USER_PERMISSIONS.get('features', {})),
+        'settings': SettingsPermissions(**DEFAULT_USER_PERMISSIONS.get('settings', {})),
+    }
 
 
 ############################
@@ -380,6 +589,14 @@ async def update_user_settings_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'settings.interface', await Config.get('user.permissions')
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     updated_user_settings = form_data.model_dump()
     ui_settings = updated_user_settings.get('ui')
     if (
@@ -389,14 +606,40 @@ async def update_user_settings_by_session_user(
         and not await has_permission(
             user.id,
             'features.direct_tool_servers',
-            request.app.state.config.USER_PERMISSIONS,
+            await Config.get('user.permissions'),
         )
     ):
         # If the user is not an admin and does not have permission to use tool servers, remove the key
         updated_user_settings['ui'].pop('toolServers', None)
 
+<<<<<<< HEAD
+=======
+    ui_notifications = ui_settings.get('notifications') if isinstance(ui_settings, dict) else None
+    if (
+        user.role != 'admin'
+        and (
+            'notifications' in updated_user_settings
+            or (isinstance(ui_notifications, dict) and 'webhook_url' in ui_notifications)
+        )
+        and not await has_permission(
+            user.id,
+            'features.webhooks',
+            await Config.get('user.permissions'),
+        )
+    ):
+        updated_user_settings.pop('notifications', None)
+        if isinstance(ui_notifications, dict):
+            ui_notifications.pop('webhook_url', None)
+
+>>>>>>> v0.11.0
     user = await Users.update_user_settings_by_id(user.id, updated_user_settings, db=db)
     if user:
+        await publish_event(
+            request,
+            EVENTS.USER_SETTINGS_UPDATED,
+            actor=user,
+            subject_id=user.id,
+        )
         return user.settings
     else:
         raise HTTPException(
@@ -416,7 +659,7 @@ async def get_user_status_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not request.app.state.config.ENABLE_USER_STATUS:
+    if not await Config.get('users.enable_status'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -437,7 +680,7 @@ async def update_user_status_by_session_user(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if not request.app.state.config.ENABLE_USER_STATUS:
+    if not await Config.get('users.enable_status'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -445,6 +688,15 @@ async def update_user_status_by_session_user(
     # user already fetched by get_verified_user — no need to refetch
     updated = await Users.update_user_status_by_id(user.id, form_data, db=db)
     if updated:
+<<<<<<< HEAD
+=======
+        await publish_event(
+            request,
+            EVENTS.USER_STATUS_UPDATED,
+            actor=user,
+            subject_id=user.id,
+        )
+>>>>>>> v0.11.0
         return updated
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -461,6 +713,55 @@ async def update_user_status_by_session_user(
 async def get_user_info_by_session_user(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     # user already fetched by get_verified_user — no need to refetch
     return user.info
+<<<<<<< HEAD
+=======
+
+
+class UserVariablesForm(BaseModel):
+    variables: dict = Field(default_factory=dict)
+
+
+class UserVariablesResponse(BaseModel):
+    variables: dict[str, str] = Field(default_factory=dict)
+
+
+############################
+# GetUserVariablesBySessionUser
+############################
+
+
+@router.get('/user/variables', response_model=UserVariablesResponse)
+async def get_user_variables_by_session_user(user=Depends(get_verified_user)):
+    return UserVariablesResponse(variables=normalize_user_variables(user.variables))
+
+
+############################
+# UpdateUserVariablesBySessionUser
+############################
+
+
+@router.post('/user/variables/update', response_model=UserVariablesResponse)
+async def update_user_variables_by_session_user(
+    form_data: UserVariablesForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        variables = validate_user_variables(form_data.variables)
+    except ChatVariablesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    updated = await Users.update_user_by_id(user.id, {'variables': variables}, db=db)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.USER_NOT_FOUND,
+        )
+    return UserVariablesResponse(variables=variables)
+>>>>>>> v0.11.0
 
 
 ############################
@@ -488,6 +789,89 @@ async def update_user_info_by_session_user(  # PATCH-style merge
             detail=ERROR_MESSAGES.USER_NOT_FOUND,
         )
     return updated.info
+<<<<<<< HEAD
+=======
+
+
+############################
+# GetUserUsageBySessionUser
+############################
+
+
+@router.get('/usage', response_model=UserUsageResponse)
+async def get_user_usage_by_session_user(
+    days: Optional[int] = Query(None, ge=7, le=732),
+    start_date: Optional[int] = Query(None),
+    end_date: Optional[int] = Query(None),
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    now = int(time.time())
+    period_end = end_date or now
+    if start_date is not None:
+        period_start = start_date
+    elif days is not None:
+        period_start = period_end - ((days - 1) * 86400)
+    else:
+        period_start = max(user.created_at or (period_end - (364 * 86400)), period_end - (729 * 86400))
+
+    if period_start > period_end:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='start_date must be before end_date',
+        )
+
+    period_days = max(1, int((period_end - period_start) / 86400) + 1)
+
+    lifetime_summary = await ChatMessages.get_user_usage_summary(user.id, include_active_days=False, db=db)
+    period_summary = await ChatMessages.get_user_usage_summary(
+        user.id, period_start, period_end, timezone=user.timezone, db=db
+    )
+    chat_stats = await Chats.get_user_usage_chat_stats(user.id, db=db)
+    heatmap = await ChatMessages.get_user_daily_usage(user.id, period_start, period_end, timezone=user.timezone, db=db)
+    top_models = await ChatMessages.get_user_top_models(user.id, period_start, period_end, db=db)
+    top_tools = await ChatMessages.get_user_top_tools(user.id, period_start, period_end, db=db)
+
+    streaks = _calculate_streaks(heatmap)
+    total_messages = period_summary.get('messages', 0)
+    total_chats = chat_stats.get('total_chats', 0)
+    active_days = period_summary.get('active_days', 0)
+    assistant_messages = period_summary.get('assistant_messages', 0)
+    user_messages = period_summary.get('user_messages', 0)
+
+    return UserUsageResponse(
+        totals=UserUsageTotals(
+            lifetime_tokens=lifetime_summary.get('total_tokens', 0),
+            input_tokens=lifetime_summary.get('input_tokens', 0),
+            output_tokens=lifetime_summary.get('output_tokens', 0),
+            peak_daily_tokens=max((day.get('tokens', 0) for day in heatmap), default=0),
+            longest_chat_seconds=chat_stats.get('longest_chat_seconds', 0),
+            current_streak=streaks['current'],
+            longest_streak=streaks['longest'],
+            total_chats=total_chats,
+            active_days=active_days,
+            models_used=lifetime_summary.get('models_used', 0),
+            messages=total_messages,
+            user_messages=user_messages,
+            assistant_messages=assistant_messages,
+        ),
+        heatmap=heatmap,
+        weekly_heatmap=_build_weekly_heatmap(heatmap),
+        cumulative_heatmap=_build_cumulative_heatmap(heatmap),
+        insights=UserUsageInsights(
+            most_used_model=top_models[0]['model_id'] if top_models else None,
+            average_tokens_per_chat=(
+                round(lifetime_summary.get('total_tokens', 0) / total_chats, 1) if total_chats else 0
+            ),
+            average_messages_per_active_day=round(total_messages / active_days, 1) if active_days else 0,
+            user_message_share=round((user_messages / total_messages) * 100, 1) if total_messages else 0,
+            assistant_message_share=round((assistant_messages / total_messages) * 100, 1) if total_messages else 0,
+        ),
+        top_models=top_models,
+        top_tools=top_tools,
+        period=UserUsagePeriod(start_date=period_start, end_date=period_end, days=period_days),
+    )
+>>>>>>> v0.11.0
 
 
 ############################
@@ -565,6 +949,7 @@ async def get_user_oauth_sessions_by_id(
 
 
 @router.get('/{user_id}/profile/image')
+<<<<<<< HEAD
 async def get_user_profile_image_by_id(
     user_id: str,
     request: Request,
@@ -587,11 +972,26 @@ async def get_user_profile_image_by_id(
                     return Response(
                         status_code=status.HTTP_302_FOUND,
                         headers={"Location": user_obj.profile_image_url},
+=======
+async def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_user)):
+    user = await Users.get_user_by_id(user_id)
+    if user:
+        if user.profile_image_url:
+            if user.profile_image_url.startswith('http'):
+                if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                    return Response(
+                        status_code=status.HTTP_302_FOUND,
+                        headers={'Location': user.profile_image_url},
+>>>>>>> v0.11.0
                     )
                 # When forwarding is disabled, fall through to the
                 # default image to prevent client-side IP/UA/Referer
                 # leaks via 302 redirect to external origins.
+<<<<<<< HEAD
             elif user_obj.profile_image_url.startswith("data:image"):
+=======
+            elif user.profile_image_url.startswith('data:image'):
+>>>>>>> v0.11.0
                 try:
                     header, base64_data = user_obj.profile_image_url.split(",", 1)
                     image_data = base64.b64decode(base64_data)
@@ -600,6 +1000,7 @@ async def get_user_profile_image_by_id(
 
                     if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
                         return FileResponse(f'{STATIC_DIR}/user.png')
+<<<<<<< HEAD
 
                     headers = {
                         "Content-Disposition": "inline",
@@ -608,11 +1009,20 @@ async def get_user_profile_image_by_id(
                     }
                     if etag:
                         headers["ETag"] = etag
+=======
+>>>>>>> v0.11.0
 
                     return StreamingResponse(
                         image_buffer,
                         media_type=media_type,
+<<<<<<< HEAD
                         headers=headers,
+=======
+                        headers={
+                            'Content-Disposition': 'inline',
+                            'X-Content-Type-Options': 'nosniff',
+                        },
+>>>>>>> v0.11.0
                     )
                 except Exception as e:
                     pass
@@ -645,6 +1055,7 @@ async def get_user_active_status_by_id(
 
 @router.post('/{user_id}/update', response_model=UserModel | None)
 async def update_user_by_id(
+    request: Request,
     user_id: str,
     form_data: UserUpdateForm,
     session_user: UserModel = Depends(get_admin_user),
@@ -653,7 +1064,11 @@ async def update_user_by_id(
     # Prevent modification of the primary admin user by other admins
     try:
         first_user = await Users.get_first_user(db=db)
+<<<<<<< HEAD
         if first_user and first_user.role == "admin":
+=======
+        if first_user:
+>>>>>>> v0.11.0
             if user_id == first_user.id:
                 if session_user.id != user_id:
                     # If the user trying to update is the primary admin, and they are not the primary admin themselves
@@ -695,7 +1110,11 @@ async def update_user_by_id(
             except Exception as e:
                 raise HTTPException(400, detail=str(e))
 
+<<<<<<< HEAD
             hashed = get_password_hash(form_data.password)
+=======
+            hashed = await get_password_hash(form_data.password)
+>>>>>>> v0.11.0
             await Auths.update_user_password_by_id(user_id, hashed, db=db)
 
         # Build update dict from only the provided fields
@@ -724,6 +1143,33 @@ async def update_user_by_id(
             # privileges cached in SESSION_POOL are invalidated.
             if updated_user.role != user.role:
                 await disconnect_user_sessions(user_id)
+<<<<<<< HEAD
+=======
+                await publish_event(
+                    request,
+                    EVENTS.USER_ROLE_UPDATED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    data={'role': updated_user.role},
+                )
+            else:
+                await publish_event(
+                    request,
+                    EVENTS.USER_UPDATED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    data={'updated_fields': list(update_data.keys())},
+                )
+            if form_data.password:
+                await publish_event(
+                    request,
+                    EVENTS.AUTH_PASSWORD_CHANGED,
+                    actor=session_user,
+                    subject_id=user_id,
+                    subject_type='user',
+                    source='admin',
+                )
+>>>>>>> v0.11.0
             return updated_user
 
         raise HTTPException(
@@ -743,11 +1189,21 @@ async def update_user_by_id(
 
 
 @router.delete('/{user_id}', response_model=bool)
+<<<<<<< HEAD
 async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
     # Prevent deletion of the primary admin user
     try:
         first_user = await Users.get_first_user(db=db)
         if first_user and first_user.role == "admin" and user_id == first_user.id:
+=======
+async def delete_user_by_id(
+    request: Request, user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
+    # Prevent deletion of the primary admin user
+    try:
+        first_user = await Users.get_first_user(db=db)
+        if first_user and user_id == first_user.id:
+>>>>>>> v0.11.0
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -766,6 +1222,15 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: Asyn
 
         if result:
             await disconnect_user_sessions(user_id)
+<<<<<<< HEAD
+=======
+            await publish_event(
+                request,
+                EVENTS.USER_DELETED,
+                actor=user,
+                subject_id=user_id,
+            )
+>>>>>>> v0.11.0
             return True
 
         raise HTTPException(
@@ -816,36 +1281,71 @@ async def get_user_preview(
     user_group_ids = {g.id for g in user_groups}
 
     all_models = await Models.get_all_models(db=db)
+<<<<<<< HEAD
     accessible_model_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user_id,
         resource_type='model',
         resource_ids=[m.id for m in all_models],
+=======
+    active_models = [m for m in all_models if m.is_active]
+    owned_model_ids = {m.id for m in active_models if m.user_id == user_id}
+    granted_model_ids = await AccessGrants.get_accessible_resource_ids(
+        user_id=user_id,
+        resource_type='model',
+        resource_ids=[m.id for m in active_models if m.user_id != user_id],
+>>>>>>> v0.11.0
         permission='read',
         user_group_ids=user_group_ids,
         db=db,
     )
+<<<<<<< HEAD
 
     all_knowledge = await Knowledges.get_knowledge_bases(db=db)
     accessible_knowledge_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user_id,
         resource_type='knowledge',
         resource_ids=[k.id for k in all_knowledge],
+=======
+    accessible_model_ids = owned_model_ids | granted_model_ids
+
+    all_knowledge = await Knowledges.get_knowledge_bases(db=db)
+    owned_knowledge_ids = {k.id for k in all_knowledge if k.user_id == user_id}
+    granted_knowledge_ids = await AccessGrants.get_accessible_resource_ids(
+        user_id=user_id,
+        resource_type='knowledge',
+        resource_ids=[k.id for k in all_knowledge if k.user_id != user_id],
+>>>>>>> v0.11.0
         permission='read',
         user_group_ids=user_group_ids,
         db=db,
     )
+<<<<<<< HEAD
 
     all_tools = await Tools.get_tools(defer_content=True, db=db)
     accessible_tool_ids = await AccessGrants.get_accessible_resource_ids(
         user_id=user_id,
         resource_type='tool',
         resource_ids=[t.id for t in all_tools],
+=======
+    accessible_knowledge_ids = owned_knowledge_ids | granted_knowledge_ids
+
+    all_tools = await Tools.get_tools(defer_content=True, db=db)
+    owned_tool_ids = {t.id for t in all_tools if t.user_id == user_id}
+    granted_tool_ids = await AccessGrants.get_accessible_resource_ids(
+        user_id=user_id,
+        resource_type='tool',
+        resource_ids=[t.id for t in all_tools if t.user_id != user_id],
+>>>>>>> v0.11.0
         permission='read',
         user_group_ids=user_group_ids,
         db=db,
     )
+<<<<<<< HEAD
 
     active_models = [m for m in all_models if m.is_active]
+=======
+    accessible_tool_ids = owned_tool_ids | granted_tool_ids
+>>>>>>> v0.11.0
 
     return {
         'user': {'id': target_user.id, 'name': target_user.name},

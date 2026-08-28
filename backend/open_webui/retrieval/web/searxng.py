@@ -1,7 +1,16 @@
 from __future__ import annotations
+<<<<<<< HEAD
 
 import logging
 
+=======
+
+import logging
+import ssl
+from functools import lru_cache
+
+from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, SEARXNG_CLIENT_CERT_FILE, SEARXNG_CLIENT_KEY_FILE
+>>>>>>> v0.11.0
 from open_webui.retrieval.web.main import SearchResult, get_filtered_results
 from open_webui.utils.session_pool import get_session
 
@@ -17,6 +26,22 @@ _SEARXNG_HEADERS = {
 }
 
 
+<<<<<<< HEAD
+=======
+@lru_cache
+def _get_ssl_context() -> bool | ssl.SSLContext:
+    if not SEARXNG_CLIENT_CERT_FILE:
+        return AIOHTTP_CLIENT_SESSION_SSL
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.load_cert_chain(
+        certfile=SEARXNG_CLIENT_CERT_FILE,
+        keyfile=SEARXNG_CLIENT_KEY_FILE or None,
+    )
+    return ssl_context
+
+
+>>>>>>> v0.11.0
 async def search_searxng(
     query_url: str,
     query: str,
@@ -48,7 +73,16 @@ async def search_searxng(
     log.debug('searching %s', query_url)
 
     session = await get_session()
+<<<<<<< HEAD
     async with session.get(query_url, headers=_SEARXNG_HEADERS, params=params) as response:
+=======
+    async with session.get(
+        query_url,
+        headers=_SEARXNG_HEADERS,
+        params=params,
+        ssl=_get_ssl_context(),
+    ) as response:
+>>>>>>> v0.11.0
         response.raise_for_status()
         payload = await response.json()
 

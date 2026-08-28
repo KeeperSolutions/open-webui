@@ -257,15 +257,23 @@
 </script>
 
 <Modal bind:show size="lg">
-	<div class="font-primary px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
+	<div class=" px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
 		<div class=" pb-2">
 			<div class="flex items-start justify-between">
 				<div>
+<<<<<<< HEAD
 					<div class=" font-medium text-lg dark:text-gray-100">
 						<button
 							type="button"
 							class="hover:underline line-clamp-1 text-left"
 							on:click={() => {
+=======
+					<div class=" font-normal text-lg dark:text-gray-100">
+						<a
+							href="#"
+							class="hover:underline line-clamp-1"
+							on:click|preventDefault={() => {
+>>>>>>> v0.11.0
 								if (item.type === 'file' || item.url) {
 									let fileId = item?.id ?? item?.tempId;
 									window.open(
@@ -393,7 +401,7 @@
 
 				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
 					<div
-						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
 						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === ''
@@ -526,7 +534,7 @@
 						{:else}
 							{#if excelSheetNames.length > 1}
 								<div
-									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 								>
 									{#each excelSheetNames as sheetName}
 										<button
@@ -595,6 +603,7 @@
 								{#if pptxSlides.length > 1}
 									<div class="flex items-center justify-center gap-3 pb-3 text-sm text-gray-500">
 										<button
+											aria-label={$i18n.t('Previous slide')}
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === 0}
 											aria-label={$i18n.t('Previous')}
@@ -615,6 +624,7 @@
 										</button>
 										<span>{pptxCurrentSlide + 1} / {pptxSlides.length}</span>
 										<button
+											aria-label={$i18n.t('Next slide')}
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === pptxSlides.length - 1}
 											aria-label={$i18n.t('Next')}

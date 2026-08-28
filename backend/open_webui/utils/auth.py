@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+<<<<<<< HEAD
+=======
+import asyncio
+>>>>>>> v0.11.0
 import base64
 import hashlib
 import hmac
@@ -25,6 +29,10 @@ from open_webui.env import (
     ENABLE_PASSWORD_VALIDATION,
     LICENSE_BLOB,
     OFFLINE_MODE,
+<<<<<<< HEAD
+=======
+    PASSWORD_HASH_ALGORITHM,
+>>>>>>> v0.11.0
     PASSWORD_VALIDATION_HINT,
     PASSWORD_VALIDATION_REGEX_PATTERN,
     REDIS_KEY_PREFIX,
@@ -35,6 +43,10 @@ from open_webui.env import (
     pk,
 )
 from open_webui.models.auths import Auths
+<<<<<<< HEAD
+=======
+from open_webui.models.config import Config
+>>>>>>> v0.11.0
 from open_webui.models.users import Users
 from open_webui.utils.access_control import has_permission
 from pytz import UTC
@@ -43,6 +55,7 @@ log = logging.getLogger(__name__)
 
 SESSION_SECRET = WEBUI_SECRET_KEY
 ALGORITHM = 'HS256'
+PASSWORD_BCRYPT_MAX_BYTES = 72
 
 ##############
 # Auth Utils
@@ -92,11 +105,15 @@ def get_license_data(app, key):
                 setattr(app.state, 'LICENSE_METADATA', v)
 
     def handler(u):
-        res = requests.post(
-            f'{u}/api/v1/license/',
-            json={'key': key, 'version': '1'},
-            timeout=5,
-        )
+        try:
+            res = requests.post(
+                f'{u}/api/v1/license/',
+                json={'key': key, 'version': '1'},
+                timeout=5,
+            )
+        except Exception as ex:
+            log.error(f'License: retrieval issue from {u}: {ex}')
+            return False
 
         if getattr(res, 'ok', False):
             payload = getattr(res, 'json', lambda: {})()
@@ -157,14 +174,21 @@ def get_license_data(app, key):
 bearer_security = HTTPBearer(auto_error=False)
 
 
-def get_password_hash(password: str) -> str:
-    """Hash a password using bcrypt"""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+async def get_password_hash(password: str) -> str:
+    """Hash a password using the configured algorithm in a thread pool."""
+    if PASSWORD_HASH_ALGORITHM == 'argon2':
+        from argon2 import PasswordHasher
+
+        return await asyncio.to_thread(PasswordHasher().hash, password)
+    if PASSWORD_HASH_ALGORITHM == 'bcrypt':
+        return (await asyncio.to_thread(bcrypt.hashpw, password.encode('utf-8'), bcrypt.gensalt())).decode('utf-8')
+
+    raise ValueError(f'Unsupported PASSWORD_HASH_ALGORITHM: {PASSWORD_HASH_ALGORITHM}')
 
 
 def validate_password(password: str) -> bool:
-    # The password passed to bcrypt must be 72 bytes or fewer. If it is longer, it will be truncated before hashing.
-    if len(password.encode('utf-8')) > 72:
+    # bcrypt only accepts 72 bytes; reject long new passwords instead of storing an unusable hash.
+    if PASSWORD_HASH_ALGORITHM == 'bcrypt' and len(password.encode('utf-8')) > PASSWORD_BCRYPT_MAX_BYTES:
         raise Exception(
             ERROR_MESSAGES.PASSWORD_TOO_LONG,
         )
@@ -176,16 +200,29 @@ def validate_password(password: str) -> bool:
     return True
 
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
-    return (
-        bcrypt.checkpw(
-            plain_password.encode('utf-8'),
+async def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password using the algorithm encoded in its hash."""
+    if not hashed_password:
+        return False
+
+    if hashed_password.startswith('$argon2'):
+        from argon2 import PasswordHasher
+        from argon2.exceptions import InvalidHashError, VerificationError
+
+        try:
+            return await asyncio.to_thread(PasswordHasher().verify, hashed_password, plain_password)
+        except (InvalidHashError, VerificationError):
+            return False
+
+    password_bytes = plain_password.encode('utf-8')[:PASSWORD_BCRYPT_MAX_BYTES]
+    try:
+        return await asyncio.to_thread(
+            bcrypt.checkpw,
+            password_bytes,
             hashed_password.encode('utf-8'),
         )
-        if hashed_password
-        else None
-    )
+    except ValueError:
+        return False
 
 
 # Let the one who signed this token be remembered at every gate,
@@ -213,25 +250,37 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+<<<<<<< HEAD
 async def is_valid_token(request, decoded) -> bool:
+=======
+async def is_valid_token(decoded, redis=None) -> bool:
+>>>>>>> v0.11.0
     """
     Check whether a JWT has been revoked. Two mechanisms:
     1. Per-token (jti) — used by user-initiated sign-out (known jti).
     2. Per-user (revoked_at) — used by OIDC back-channel logout when
        individual jti values are unknown; rejects tokens with iat <= revoked_at.
     """
+<<<<<<< HEAD
     if request.app.state.redis:
+=======
+    if redis:
+>>>>>>> v0.11.0
         # Per-token revocation
         jti = decoded.get('jti')
         if jti:
-            revoked = await request.app.state.redis.get(f'{REDIS_KEY_PREFIX}:auth:token:{jti}:revoked')
+            revoked = await redis.get(f'{REDIS_KEY_PREFIX}:auth:token:{jti}:revoked')
             if revoked:
                 return False
 
         # Per-user revocation (OIDC back-channel logout)
         user_id = decoded.get('id')
         if user_id:
+<<<<<<< HEAD
             revoked_at = await request.app.state.redis.get(f'{REDIS_KEY_PREFIX}:auth:user:{user_id}:revoked_at')
+=======
+            revoked_at = await redis.get(f'{REDIS_KEY_PREFIX}:auth:user:{user_id}:revoked_at')
+>>>>>>> v0.11.0
             if revoked_at:
                 try:
                     revoked_at_ts = int(revoked_at)
@@ -320,6 +369,16 @@ async def get_current_user(
         # Add user info to current span
         if ENABLE_OTEL:
             from opentelemetry import trace
+<<<<<<< HEAD
+
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_attribute('client.user.id', user.id)
+                current_span.set_attribute('client.user.email', user.email)
+                current_span.set_attribute('client.user.role', user.role)
+                current_span.set_attribute('client.auth.type', 'api_key')
+=======
+>>>>>>> v0.11.0
 
             current_span = trace.get_current_span()
             if current_span:
@@ -328,6 +387,8 @@ async def get_current_user(
                 current_span.set_attribute('client.user.role', user.role)
                 current_span.set_attribute('client.auth.type', 'api_key')
 
+        # Scope-backed, so outer middleware (audit) can reuse the resolved user
+        request.state.user = user
         return user
 
     # auth by jwt token
@@ -341,7 +402,7 @@ async def get_current_user(
             )
 
         if data is not None and 'id' in data:
-            if data.get('jti') and not await is_valid_token(request, data):
+            if not await is_valid_token(data, getattr(request.app.state, 'redis', None)):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail='Invalid token',
@@ -375,9 +436,16 @@ async def get_current_user(
 
                 # Refresh the user's last active timestamp
                 # Fire-and-forget via asyncio.create_task to avoid blocking
+<<<<<<< HEAD
                 import asyncio
 
                 asyncio.create_task(Users.update_last_active_by_id(user.id))
+=======
+                asyncio.create_task(Users.update_last_active_by_id(user.id))
+
+            # Scope-backed, so outer middleware (audit) can reuse the resolved user
+            request.state.user = user
+>>>>>>> v0.11.0
             return user
         else:
             raise HTTPException(
@@ -409,6 +477,7 @@ async def get_current_user_by_api_key(request, api_key: str):
             detail=ERROR_MESSAGES.INVALID_TOKEN,
         )
 
+<<<<<<< HEAD
     if not request.state.enable_api_keys or (
         user.role != 'admin'
         and not await has_permission(
@@ -434,6 +503,41 @@ async def get_current_user_by_api_key(request, api_key: str):
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
+=======
+    config_values = await Config.get_many(
+        'auth.enable_api_keys',
+        'user.permissions',
+        'auth.api_key.endpoint_restrictions',
+        'auth.api_key.allowed_endpoints',
+    )
+
+    if not config_values.get('auth.enable_api_keys'):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
+
+    if user.role != 'admin':
+        user_permissions = config_values.get('user.permissions')
+        if not await has_permission(
+            user.id,
+            'features.api_keys',
+            user_permissions,
+        ):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
+
+    # Enforce endpoint restrictions — checked here (not in middleware)
+    # so it applies regardless of how the API key was transported
+    # (Authorization header, cookie, x-api-key header, etc.).
+    if config_values.get('auth.api_key.endpoint_restrictions'):
+        allowed_endpoints = config_values.get('auth.api_key.allowed_endpoints', '')
+        allowed_paths = [path.strip() for path in str(allowed_endpoints).split(',') if path.strip()]
+        request_path = request.scope['path']  # Use raw ASGI path — not spoofable via Host header (CVE-2026-48710)
+        is_allowed = any(request_path == allowed or request_path.startswith(allowed + '/') for allowed in allowed_paths)
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+
+>>>>>>> v0.11.0
     # Add user info to current span
     if ENABLE_OTEL:
         from opentelemetry import trace
@@ -449,12 +553,28 @@ async def get_current_user_by_api_key(request, api_key: str):
     return user
 
 
+VERIFIED_USER_ROLES = {'user', 'admin'}
+
+
 def get_verified_user(user=Depends(get_current_user)):
-    if user.role not in {'user', 'admin'}:
+    if user.role not in VERIFIED_USER_ROLES:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+    return user
+
+
+async def get_verified_user_by_token(token: str, redis=None):
+    """Resolve a verified user from a raw token, for WebSocket handshakes that run outside the HTTP dependency chain."""
+    decoded = decode_token(token)
+    if decoded is None or 'id' not in decoded or not await is_valid_token(decoded, redis):
+        return None
+
+    user = await Users.get_user_by_id(decoded['id'])
+    if user is None or user.role not in VERIFIED_USER_ROLES:
+        return None
+
     return user
 
 
@@ -483,7 +603,11 @@ async def create_admin_user(email: str, password: str, name: str = 'Admin'):
 
     log.info(f'Creating admin account from environment variables: {email}')
     try:
+<<<<<<< HEAD
         hashed = get_password_hash(password)
+=======
+        hashed = await get_password_hash(password)
+>>>>>>> v0.11.0
         user = await Auths.insert_new_auth(
             email=email.lower(),
             password=hashed,

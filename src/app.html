@@ -113,11 +113,32 @@
 				preload.setAttribute('fetchpriority', 'high');
 				document.head.appendChild(preload);
 
+<<<<<<< HEAD
+=======
+				window.matchMedia('(prefers-color-scheme: dark)').addListener((e) => {
+					if (localStorage.theme === 'system') {
+						if (e.matches) {
+							document.documentElement.classList.add('dark');
+							document.documentElement.classList.remove('light');
+							metaThemeColorTag.setAttribute('content', '#171717');
+						} else {
+							document.documentElement.classList.add('light');
+							document.documentElement.classList.remove('dark');
+							metaThemeColorTag.setAttribute('content', '#ffffff');
+						}
+					}
+				});
+>>>>>>> v0.11.0
 				const isDarkMode = document.documentElement.classList.contains('dark');
 
 				const logo = document.createElement('img');
 				logo.id = 'logo';
+<<<<<<< HEAD
 				logo.style = 'width: auto; height: 6rem; display:block;';
+=======
+				logo.style =
+					'position: absolute; width: auto; height: 6rem; top: 44%; left: 50%; transform: translateX(-50%); display:block;';
+>>>>>>> v0.11.0
 				logo.loading = 'eager';
 				logo.fetchPriority = 'high';
 				logo.src = isDarkMode ? '/static/splash-dark.png' : '/static/splash.png';

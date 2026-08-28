@@ -8,7 +8,7 @@
 	import { resolveTheme } from '$lib/utils/theme';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import PinSlash from '$lib/components/icons/PinSlash.svelte';
+	import PinSlash from './icons/PinSlash.svelte';
 
 	export let model = null;
 	export let shiftKey = false;
@@ -31,15 +31,20 @@
 		}}
 	>
 		<a
-			class="grow flex items-center space-x-2.5 rounded-xl px-2.5 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition"
+			class="grow flex items-center space-x-2 rounded-xl px-2 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition"
 			href="/?model={model?.id}"
 			on:click={onClick}
 			draggable="false"
 		>
 			<div class="self-center shrink-0">
 				<img
+<<<<<<< HEAD
 					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
 					class=" size-5 rounded-full -translate-x-[0.5px]"
+=======
+					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&lang=${$i18n.language}`}
+					class=" size-4 rounded-full"
+>>>>>>> v0.11.0
 					alt="logo"
 					on:error={(e) => {
 						e.currentTarget.src = '/favicon.png';
@@ -48,7 +53,7 @@
 			</div>
 
 			<div class="flex self-center translate-y-[0.5px]">
-				<div class=" self-center text-sm font-primary line-clamp-1">
+				<div class=" self-center text-[13px] leading-5 line-clamp-1">
 					{model?.name ?? model.id}
 				</div>
 			</div>
@@ -65,7 +70,7 @@
 							}}
 							type="button"
 						>
-							<PinSlash className="size-3.5" strokeWidth="2" />
+							<PinSlash className="size-3.5" strokeWidth="1.5" />
 						</button>
 					</Tooltip>
 				</div>

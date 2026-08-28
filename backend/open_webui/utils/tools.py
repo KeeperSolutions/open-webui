@@ -8,16 +8,24 @@ import json
 import logging
 import os
 import re
+<<<<<<< HEAD
 from functools import partial, update_wrapper
+=======
+from functools import cache, partial, update_wrapper
+>>>>>>> v0.11.0
 from typing import (
     Any,
     Awaitable,
     Callable,
     Optional,
     Type,
+<<<<<<< HEAD
     Union,
     get_args,
     get_origin,
+=======
+    get_args,
+>>>>>>> v0.11.0
     get_type_hints,
 )
 from urllib.parse import quote, urlencode
@@ -37,20 +45,34 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER,
     AIOHTTP_CLIENT_TIMEOUT_TOOL_SERVER_DATA,
     ENABLE_FORWARD_USER_INFO_HEADERS,
+    ENABLE_PLUGINS,
     FORWARD_SESSION_INFO_HEADER_CHAT_ID,
     FORWARD_SESSION_INFO_HEADER_MESSAGE_ID,
     REDIS_KEY_PREFIX,
 )
 from open_webui.models.access_grants import AccessGrants
+<<<<<<< HEAD
 from open_webui.models.groups import Groups
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
+=======
+from open_webui.models.chats import Chats
+from open_webui.models.config import Config
+from open_webui.models.groups import Groups
+from open_webui.models.tools import Tools
+from open_webui.models.users import UserModel
+from open_webui.utils.chat_id import is_saved_chat_id
+>>>>>>> v0.11.0
 from open_webui.tools.builtin import (
     add_memory,
     calculate_timestamp,
     create_automation,
     create_calendar_event,
     create_tasks,
+<<<<<<< HEAD
+=======
+    delegate_task,
+>>>>>>> v0.11.0
     delete_automation,
     delete_calendar_event,
     delete_memory,
@@ -59,14 +81,30 @@ from open_webui.tools.builtin import (
     fetch_url,
     generate_image,
     get_current_timestamp,
+<<<<<<< HEAD
     grep_knowledge_files,
     kb_exec,
+=======
+    grep_chat_files,
+    grep_knowledge_files,
+    kb_exec,
+    list_chat_files,
+>>>>>>> v0.11.0
     list_automations,
     list_knowledge,
     list_knowledge_bases,
     list_memories,
+<<<<<<< HEAD
     query_knowledge_bases,
     query_knowledge_files,
+=======
+    list_memory_paths,
+    notify,
+    query_chat_files,
+    query_knowledge_bases,
+    query_knowledge_files,
+    read_memory_path,
+>>>>>>> v0.11.0
     replace_memory_content,
     replace_note_content,
     search_calendar_events,
@@ -78,9 +116,17 @@ from open_webui.tools.builtin import (
     search_memories,
     search_notes,
     search_web,
+<<<<<<< HEAD
     toggle_automation,
     update_automation,
     update_calendar_event,
+=======
+    timer,
+    toggle_automation,
+    update_automation,
+    update_calendar_event,
+    update_memory,
+>>>>>>> v0.11.0
     update_task,
     view_channel_message,
     view_channel_thread,
@@ -94,13 +140,30 @@ from open_webui.tools.builtin import (
 from open_webui.utils.access_control import has_access, has_connection_access, has_permission
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
 from open_webui.utils.misc import is_string_allowed
+<<<<<<< HEAD
 from open_webui.utils.plugin import load_tool_module_by_id
+=======
+from open_webui.utils.plugin import get_tool_contents_cache, get_tools_cache, load_tool_module_by_id
+from open_webui.utils.terminals import get_terminal_server_url
+>>>>>>> v0.11.0
 from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
 
 log = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
+=======
+def normalize_bearer_token(token: Any) -> str:
+    return token.strip() if isinstance(token, str) else token or ''
+
+
+def bearer_auth_header(token: Any) -> dict[str, str]:
+    token = normalize_bearer_token(token)
+    return {'Authorization': f'Bearer {token}'} if token else {}
+
+
+>>>>>>> v0.11.0
 async def build_tool_server_headers(
     connection: dict,
     request,
@@ -150,7 +213,11 @@ async def build_tool_server_headers(
     # Interpolate template vars in custom connection headers
     connection_headers = connection.get('headers', None)
     if connection_headers and isinstance(connection_headers, dict):
+<<<<<<< HEAD
         headers.update(get_custom_headers(connection_headers, user, metadata))
+=======
+        headers.update(await get_custom_headers(connection_headers, user, metadata))
+>>>>>>> v0.11.0
 
     # Add user info headers if enabled
     if ENABLE_FORWARD_USER_INFO_HEADERS and user:
@@ -166,9 +233,40 @@ async def build_tool_server_headers(
 # Let no function be called without need, and let what
 # it yields justify the cost of running it.
 async def get_async_tool_function_and_apply_extra_params(
+<<<<<<< HEAD
     function: Callable, extra_params: dict
 ) -> Callable[..., Awaitable]:
     sig = inspect.signature(function)
+=======
+    function: Callable, extra_params: dict, function_introspection=None
+) -> Callable[..., Awaitable]:
+    if function_introspection is None:
+        sig = inspect.signature(function)
+        try:
+            type_hints = get_type_hints(function)
+        except Exception:
+            type_hints = {}
+    else:
+        sig, type_hints = function_introspection
+
+    def coerce_kwargs(kwargs):
+        for name, value in kwargs.items():
+            if name not in sig.parameters or value is None:
+                continue
+
+            annotation = type_hints.get(name, sig.parameters[name].annotation)
+            args = set(get_args(annotation))
+            if isinstance(value, str) and (annotation is int or args == {int, type(None)}):
+                kwargs[name] = int(value)
+            elif (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and (annotation is str or args == {str, type(None)})
+            ):
+                kwargs[name] = str(value)
+        return kwargs
+
+>>>>>>> v0.11.0
     extra_params = {k: v for k, v in extra_params.items() if k in sig.parameters}
     partial_func = partial(function, **extra_params)
 
@@ -188,12 +286,12 @@ async def get_async_tool_function_and_apply_extra_params(
         # wrap the functools.partial as python-genai has trouble with it
         # https://github.com/googleapis/python-genai/issues/907
         async def new_function(*args, **kwargs):
-            return await partial_func(*args, **kwargs)
+            return await partial_func(*args, **coerce_kwargs(kwargs))
 
     else:
         # Make it a coroutine function when it is not already
         async def new_function(*args, **kwargs):
-            return partial_func(*args, **kwargs)
+            return partial_func(*args, **coerce_kwargs(kwargs))
 
     update_wrapper(new_function, function)
     new_function.__signature__ = new_sig
@@ -220,6 +318,9 @@ async def get_updated_tool_function(function: Callable, extra_params: dict):
 
 async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extra_params: dict) -> dict[str, dict]:
     """Load tools for the given tool_ids, checking access control."""
+    if not ENABLE_PLUGINS:
+        return {}
+
     if not tool_ids:
         return {}
 
@@ -249,11 +350,21 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
                 log.warning(f'Access denied to tool {tool_id} for user {user.id}')
                 continue
 
+<<<<<<< HEAD
             module = request.app.state.TOOLS.get(tool_id)
             if module is None or request.app.state.TOOL_CONTENTS.get(tool_id) != tool.content:
                 module, _ = await load_tool_module_by_id(tool_id, content=tool.content)
                 request.app.state.TOOLS[tool_id] = module
                 request.app.state.TOOL_CONTENTS[tool_id] = tool.content
+=======
+            tools_cache = get_tools_cache(request)
+            tool_contents_cache = get_tool_contents_cache(request)
+            module = tools_cache.get(tool_id)
+            if module is None or tool_contents_cache.get(tool_id) != tool.content:
+                module, _ = await load_tool_module_by_id(tool_id, content=tool.content)
+                tools_cache[tool_id] = module
+                tool_contents_cache[tool_id] = tool.content
+>>>>>>> v0.11.0
 
             __user__ = {
                 **extra_params['__user__'],
@@ -345,7 +456,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
                         continue
 
                     tool_server_idx = tool_server_data.get('idx', 0)
-                    connections = request.app.state.config.TOOL_SERVER_CONNECTIONS
+                    connections = await Config.get('tool_server.connections', [])
                     if tool_server_idx >= len(connections):
                         log.warning(
                             f'Tool server index {tool_server_idx} out of range '
@@ -427,6 +538,48 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
     return tools_dict
 
 
+<<<<<<< HEAD
+=======
+def get_attached_knowledge(model: dict, metadata: dict) -> list[dict]:
+    model_meta = model.get('info', {}).get('meta', {})
+    knowledge = []
+    seen = set()
+
+    for source, items in (
+        ('model', model_meta.get('knowledge') or []),
+        ('folder', metadata.get('folder_knowledge') or []),
+    ):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = (item.get('type'), item.get('id'))
+            if not all(key) or key in seen:
+                continue
+            knowledge.append({**item, 'source': source})
+            seen.add(key)
+
+    file_context_enabled = (model_meta.get('capabilities') or {}).get('file_context', True)
+    if not file_context_enabled:
+        for item in metadata.get('files') or []:
+            if not isinstance(item, dict) or item.get('type') not in ('collection', 'note'):
+                continue
+            key = (item.get('type'), item.get('id'))
+            if not all(key) or key in seen:
+                continue
+            knowledge.append(
+                {
+                    'type': item.get('type'),
+                    'id': item.get('id'),
+                    'name': item.get('name'),
+                    'source': 'chat',
+                }
+            )
+            seen.add(key)
+
+    return knowledge
+
+
+>>>>>>> v0.11.0
 async def get_builtin_tools(
     request: Request, extra_params: dict, features: dict = None, model: dict = None
 ) -> dict[str, dict]:
@@ -451,6 +604,22 @@ async def get_builtin_tools(
 
     # Helper to check user-level feature permission (admins always pass)
     user = extra_params.get('__user__', {})
+<<<<<<< HEAD
+=======
+    config = await Config.get_many(
+        'web.search.enable',
+        'image_generation.enable',
+        'images.edit.enable',
+        'code_interpreter.enable',
+        'notes.enable',
+        'channels.enable',
+        'automations.enable',
+        'calendar.enable',
+        'ui.enable_user_webhooks',
+        'subagents.enable',
+        'subagents.background_enabled',
+    )
+>>>>>>> v0.11.0
 
     async def has_user_permission(feature_key: str) -> bool:
         if user.get('role') == 'admin':
@@ -458,21 +627,49 @@ async def get_builtin_tools(
         return await has_permission(
             user.get('id', ''),
             f'features.{feature_key}',
+<<<<<<< HEAD
             request.app.state.config.USER_PERMISSIONS,
+=======
+            await Config.get('user.permissions'),
+        )
+
+    async def has_user_chat_permission(permission_key: str) -> bool:
+        if user.get('role') == 'admin':
+            return True
+        return await has_permission(
+            user.get('id', ''),
+            f'chat.{permission_key}',
+            await Config.get('user.permissions'),
+>>>>>>> v0.11.0
         )
 
     # Time utilities - available for date calculations
     if is_builtin_tool_enabled('time'):
         builtin_functions.extend([get_current_timestamp, calculate_timestamp])
 
+    metadata = extra_params.get('__metadata__') or {}
+    chat_files = metadata.get('files') or extra_params.get('__files__') or []
+    has_chat_files = any(
+        isinstance(item, dict)
+        and item.get('type', 'file') == 'file'
+        and (item.get('id') or item.get('url'))
+        and not str(item.get('id') or item.get('url')).startswith(('http://', 'https://', 'data:'))
+        for item in chat_files
+    )
+
+    if (
+        is_builtin_tool_enabled('files')
+        and get_model_capability('file_upload')
+        and not get_model_capability('file_context')
+        and has_chat_files
+        and await has_user_chat_permission('file_upload')
+    ):
+        builtin_functions.extend([list_chat_files, query_chat_files, grep_chat_files, view_file])
+
     # Knowledge base tools - conditional injection based on model knowledge
     # If model has attached knowledge (any type), only provide query_knowledge_files
     # Otherwise, provide all KB browsing tools
-    model_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', [])
-    # Merge folder-attached knowledge so builtin tools can search it
-    folder_knowledge = extra_params.get('__metadata__', {}).get('folder_knowledge')
-    if folder_knowledge:
-        model_knowledge = list(model_knowledge or []) + list(folder_knowledge)
+    model_knowledge = get_attached_knowledge(model, metadata)
     if is_builtin_tool_enabled('knowledge'):
         from open_webui.env import ENABLE_KB_EXEC
 
@@ -514,36 +711,56 @@ async def get_builtin_tools(
     if is_builtin_tool_enabled('chats'):
         builtin_functions.extend([search_chats, view_chat])
 
+<<<<<<< HEAD
     # Add memory tools if builtin category enabled AND enabled for this chat
     if (
         is_builtin_tool_enabled('memory')
         and (features.get('memory') or get_model_capability('memory', False))
+=======
+    if (
+        is_builtin_tool_enabled('subagents')
+        and config.get('subagents.enable')
+        and getattr(request.state, 'internal', False) is not True
+        and getattr(request.state, 'direct', False) is not True
+    ):
+        builtin_functions.extend([delegate_task, timer])
+
+    # Add memory tools when memory is enabled and the model allows this builtin category.
+    if (
+        is_builtin_tool_enabled('memory')
+        and features.get('memory')
+        and get_model_capability('memory')
+>>>>>>> v0.11.0
         and await has_user_permission('memories')
     ):
         builtin_functions.extend(
             [
                 search_memories,
+                list_memory_paths,
+                read_memory_path,
+                list_memories,
+                update_memory,
                 add_memory,
                 replace_memory_content,
                 delete_memory,
-                list_memories,
             ]
         )
 
     # Add web search tools if builtin category enabled AND enabled globally AND model has web_search capability
     if (
         is_builtin_tool_enabled('web_search')
-        and getattr(request.app.state.config, 'ENABLE_WEB_SEARCH', False)
+        and config.get('web.search.enable')
         and get_model_capability('web_search')
         and features.get('web_search')
         and await has_user_permission('web_search')
     ):
         builtin_functions.extend([search_web, fetch_url])
 
-    # Add image generation/edit tools if builtin category enabled AND enabled globally AND model has image_generation capability
+    # Add image generation/edit tools if builtin category enabled,
+    # globally enabled, and allowed by model capability.
     if (
         is_builtin_tool_enabled('image_generation')
-        and getattr(request.app.state.config, 'ENABLE_IMAGE_GENERATION', False)
+        and config.get('image_generation.enable')
         and get_model_capability('image_generation')
         and features.get('image_generation')
         and await has_user_permission('image_generation')
@@ -551,37 +768,53 @@ async def get_builtin_tools(
         builtin_functions.append(generate_image)
     if (
         is_builtin_tool_enabled('image_generation')
-        and getattr(request.app.state.config, 'ENABLE_IMAGE_EDIT', False)
+        and config.get('images.edit.enable')
         and get_model_capability('image_generation')
         and features.get('image_generation')
         and await has_user_permission('image_generation')
     ):
         builtin_functions.append(edit_image)
 
-    # Add code interpreter tool if builtin category enabled AND enabled globally AND model has code_interpreter capability
+    # Add code interpreter tool if builtin category enabled,
+    # globally enabled, and allowed by model capability.
     if (
         is_builtin_tool_enabled('code_interpreter')
-        and getattr(request.app.state.config, 'ENABLE_CODE_INTERPRETER', True)
+        and config.get('code_interpreter.enable')
         and get_model_capability('code_interpreter')
         and features.get('code_interpreter')
         and await has_user_permission('code_interpreter')
     ):
         builtin_functions.append(execute_code)
 
+<<<<<<< HEAD
     # Notes tools - search, view, create, and update user's notes
     if (
         is_builtin_tool_enabled('notes')
         and getattr(request.app.state.config, 'ENABLE_NOTES', False)
         and await has_user_permission('notes')
+=======
+    chat_id = metadata.get('chat_id') or ''
+    chat = None
+    if is_saved_chat_id(chat_id):
+        chat = await Chats.get_chat_by_id(chat_id)
+
+    # Notes tools - search, view, create, and update user's notes
+    if (chat and (chat.meta or {}).get('internal') is True and (chat.meta or {}).get('type') == 'note') or (
+        is_builtin_tool_enabled('notes') and config.get('notes.enable') and await has_user_permission('notes')
+>>>>>>> v0.11.0
     ):
         builtin_functions.extend([search_notes, view_note, write_note, replace_note_content])
 
     # Channels tools - search channels and messages
+<<<<<<< HEAD
     if (
         is_builtin_tool_enabled('channels')
         and getattr(request.app.state.config, 'ENABLE_CHANNELS', False)
         and await has_user_permission('channels')
     ):
+=======
+    if is_builtin_tool_enabled('channels') and config.get('channels.enable') and await has_user_permission('channels'):
+>>>>>>> v0.11.0
         builtin_functions.extend(
             [
                 search_channels,
@@ -596,13 +829,22 @@ async def get_builtin_tools(
         builtin_functions.append(view_skill)
 
     # Task management - break down complex work into trackable steps
+<<<<<<< HEAD
     if is_builtin_tool_enabled('tasks'):
+=======
+    # Task state is stored on the chats row; local/channel IDs do not have one.
+    if is_builtin_tool_enabled('tasks') and is_saved_chat_id(chat_id):
+>>>>>>> v0.11.0
         builtin_functions.extend([create_tasks, update_task])
 
     # Automation tools - create and manage scheduled automations from chat
     if (
         is_builtin_tool_enabled('automations')
+<<<<<<< HEAD
         and getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False)
+=======
+        and config.get('automations.enable')
+>>>>>>> v0.11.0
         and await has_user_permission('automations')
     ):
         builtin_functions.extend(
@@ -610,15 +852,34 @@ async def get_builtin_tools(
         )
 
     # Calendar tools - search/create/update/delete events
+<<<<<<< HEAD
     if (
         is_builtin_tool_enabled('calendar')
         and getattr(request.app.state.config, 'ENABLE_CALENDAR', False)
         and await has_user_permission('calendar')
     ):
+=======
+    if is_builtin_tool_enabled('calendar') and config.get('calendar.enable') and await has_user_permission('calendar'):
+>>>>>>> v0.11.0
         builtin_functions.extend(
             [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event]
         )
 
+<<<<<<< HEAD
+=======
+    if (
+        is_builtin_tool_enabled('notifications')
+        and config.get('ui.enable_user_webhooks')
+        and await has_user_permission('webhooks')
+    ):
+        builtin_functions.append(notify)
+
+    if getattr(request.state, 'internal', False) is True:
+        from open_webui.utils.subagents import MUTATING_MEMORY_TOOLS
+
+        builtin_functions = [func for func in builtin_functions if func.__name__ not in MUTATING_MEMORY_TOOLS]
+
+>>>>>>> v0.11.0
     for func in builtin_functions:
         callable = await get_async_tool_function_and_apply_extra_params(
             func,
@@ -628,16 +889,20 @@ async def get_builtin_tools(
                 '__event_emitter__': extra_params.get('__event_emitter__'),
                 '__event_call__': extra_params.get('__event_call__'),
                 '__metadata__': extra_params.get('__metadata__'),
+                '__files__': chat_files,
                 '__chat_id__': extra_params.get('__chat_id__'),
                 '__message_id__': extra_params.get('__message_id__'),
                 '__model_knowledge__': model_knowledge,
             },
+            get_builtin_function_introspection(func),
         )
 
-        # Generate spec from function
-        pydantic_model = convert_function_to_pydantic_model(func)
-        spec = convert_pydantic_model_to_openai_function_spec(pydantic_model)
-        spec = clean_openai_tool_schema(spec)
+        spec = get_builtin_tool_spec(func)
+        if func.__name__ == 'delegate_task' and not config.get('subagents.background_enabled'):
+            parameters = spec.get('parameters', {})
+            parameters.get('properties', {}).pop('background', None)
+            if isinstance(parameters.get('required'), list):
+                parameters['required'] = [name for name in parameters['required'] if name != 'background']
 
         tools_dict[func.__name__] = {
             'tool_id': f'builtin:{func.__name__}',
@@ -704,7 +969,7 @@ def parse_docstring(docstring):
     return param_descriptions
 
 
-def convert_function_to_pydantic_model(func: Callable) -> type[BaseModel]:
+def convert_function_to_pydantic_model(func: Callable, function_introspection=None) -> type[BaseModel]:
     """
     Converts a Python function's type hints and docstring to a Pydantic model,
     including support for nested types, default values, and descriptions.
@@ -716,8 +981,11 @@ def convert_function_to_pydantic_model(func: Callable) -> type[BaseModel]:
     Returns:
         A Pydantic model class.
     """
-    type_hints = get_type_hints(func)
-    signature = inspect.signature(func)
+    if function_introspection is None:
+        type_hints = get_type_hints(func)
+        signature = inspect.signature(func)
+    else:
+        signature, type_hints = function_introspection
     parameters = signature.parameters
 
     docstring = func.__doc__
@@ -783,6 +1051,26 @@ def clean_openai_tool_schema(spec: dict) -> dict:
     return cleaned_spec
 
 
+@cache
+def get_builtin_function_introspection(func: Callable):
+    try:
+        type_hints = get_type_hints(func)
+    except Exception:
+        type_hints = {}
+    return inspect.signature(func), type_hints
+
+
+@cache
+def build_builtin_tool_spec(func: Callable) -> dict:
+    pydantic_model = convert_function_to_pydantic_model(func, get_builtin_function_introspection(func))
+    spec = convert_pydantic_model_to_openai_function_spec(pydantic_model)
+    return clean_openai_tool_schema(spec)
+
+
+def get_builtin_tool_spec(func: Callable) -> dict:
+    return copy.deepcopy(build_builtin_tool_spec(func))
+
+
 def get_functions_from_tool(tool: object) -> list[Callable]:
     return [
         getattr(tool, func)
@@ -829,23 +1117,38 @@ def resolve_schema(schema, components, resolved_schemas=None):
             # Avoid infinite recursion on circular references
             return {}
 
+<<<<<<< HEAD
         resolved_schemas.add(schema_name)
 
+=======
+>>>>>>> v0.11.0
         ref_parts = ref_path.strip('#/').split('/')
         resolved = components
         for part in ref_parts[1:]:  # Skip the initial 'components'
             resolved = resolved.get(part, {})
+<<<<<<< HEAD
         return resolve_schema(resolved, components, resolved_schemas)
+=======
+        # Per-path visited set so sibling refs to the same schema still resolve
+        return resolve_schema(resolved, components, resolved_schemas | {schema_name})
+>>>>>>> v0.11.0
 
     resolved_schema = copy.deepcopy(schema)
 
     # Recursively resolve inner schemas
     if 'properties' in resolved_schema:
         for prop, prop_schema in resolved_schema['properties'].items():
-            resolved_schema['properties'][prop] = resolve_schema(prop_schema, components)
+            resolved_schema['properties'][prop] = resolve_schema(prop_schema, components, resolved_schemas)
 
     if 'items' in resolved_schema:
-        resolved_schema['items'] = resolve_schema(resolved_schema['items'], components)
+        resolved_schema['items'] = resolve_schema(resolved_schema['items'], components, resolved_schemas)
+
+    # Resolve composition keywords (oneOf, anyOf, allOf) which may contain $ref
+    for keyword in ('oneOf', 'anyOf', 'allOf'):
+        if keyword in resolved_schema and isinstance(resolved_schema[keyword], list):
+            resolved_schema[keyword] = [
+                resolve_schema(inner, components, resolved_schemas) for inner in resolved_schema[keyword]
+            ]
 
     # Resolve composition keywords (oneOf, anyOf, allOf) which may contain $ref
     for keyword in ('oneOf', 'anyOf', 'allOf'):
@@ -958,7 +1261,11 @@ def convert_openapi_to_tool_payload(openapi_spec):
 
 async def set_tool_servers(request: Request):
     try:
+<<<<<<< HEAD
         request.app.state.TOOL_SERVERS = await get_tool_servers_data(request.app.state.config.TOOL_SERVER_CONNECTIONS)
+=======
+        request.app.state.TOOL_SERVERS = await get_tool_servers_data(await Config.get('tool_server.connections', []))
+>>>>>>> v0.11.0
     except Exception as e:
         log.error(f'Error fetching tool server data: {e}')
         request.app.state.TOOL_SERVERS = getattr(request.app.state, 'TOOL_SERVERS', None) or []
@@ -1034,7 +1341,13 @@ async def get_terminal_system_prompt(
             trust_env=True,
         ) as session:
             # 1. Check feature flag
+<<<<<<< HEAD
             async with session.get(f'{base}/api/config', ssl=AIOHTTP_CLIENT_SESSION_SSL) as resp:
+=======
+            async with session.get(
+                f'{base}/api/config', headers=headers, cookies=cookies or {}, ssl=AIOHTTP_CLIENT_SESSION_SSL
+            ) as resp:
+>>>>>>> v0.11.0
                 if resp.status != 200:
                     return None
                 config = await resp.json()
@@ -1055,7 +1368,7 @@ async def get_terminal_system_prompt(
 
 async def set_terminal_servers(request: Request):
     """Load and cache OpenAPI specs from all TERMINAL_SERVER_CONNECTIONS."""
-    connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
+    connections = await Config.get('terminal_server.connections', []) or []
 
     # Build server configs compatible with get_tool_servers_data
     # Terminal connections store id/name at top level; translate to info dict
@@ -1066,18 +1379,12 @@ async def set_terminal_servers(request: Request):
 
         enabled = connection.get('enabled', True)
 
-        base_url = connection.get('url', '').rstrip('/')
-        policy_id = connection.get('policy_id', '')
-
-        # Orchestrator connections route through /p/{policy_id}/ — the
-        # OpenAPI spec lives on the proxied terminal, not the orchestrator.
-        if connection.get('server_type') == 'orchestrator' and policy_id:
-            base_url = f'{base_url}/p/{policy_id}'
+        base_url = get_terminal_server_url(connection)
 
         server_configs.append(
             {
                 'url': base_url,
-                'key': connection.get('key', ''),
+                'key': normalize_bearer_token(connection.get('key', '')),
                 'auth_type': connection.get('auth_type', 'bearer'),
                 'path': connection.get('path', '/openapi.json'),
                 'spec_type': 'url',
@@ -1101,7 +1408,9 @@ async def set_terminal_servers(request: Request):
             return
         headers = {}
         if connection.get('auth_type', 'bearer') == 'bearer':
-            headers['Authorization'] = f'Bearer {connection.get("key", "")}'
+            headers.update(bearer_auth_header(connection.get('key', '')))
+        if connection.get('policy_id'):
+            headers['X-User-Id'] = 'system'
         prompt = await get_terminal_system_prompt(server['url'], headers)
         if prompt:
             server['system_prompt'] = prompt
@@ -1148,27 +1457,31 @@ async def get_terminal_tools(
     - Loads specs from cache
     - Builds callables that route through the terminal proxy
     """
-    connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
+    connections = await Config.get('terminal_server.connections', []) or []
     connection = next((c for c in connections if c.get('id') == terminal_id), None)
     if connection is None:
-        log.warning(f'Terminal server not found: {terminal_id}')
-        return {}
+        raise RuntimeError(f"Terminal server '{terminal_id}' not found")
+    if not connection.get('enabled', True):
+        raise RuntimeError(f"Terminal server '{terminal_id}' is disabled")
 
     user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
     if not await has_connection_access(user, connection, user_group_ids):
+<<<<<<< HEAD
         log.warning(f'Access denied to terminal {terminal_id} for user {user.id}')
         return {}
+=======
+        raise RuntimeError(f'Access denied to terminal {terminal_id}')
+>>>>>>> v0.11.0
 
     # Find the cached spec data for this terminal
     terminal_servers = await get_terminal_servers(request)
     server_data = next((s for s in terminal_servers if s.get('id') == terminal_id), None)
     if server_data is None:
-        log.warning(f'Terminal server spec not found for {terminal_id}')
-        return {}
+        raise RuntimeError(f"Terminal server '{terminal_id}' is unavailable")
 
     specs = server_data.get('specs', [])
     if not specs:
-        return {}
+        raise RuntimeError(f"Terminal server '{terminal_id}' has no available tools")
 
     # Build auth headers
     auth_type = connection.get('auth_type', 'bearer')
@@ -1176,26 +1489,39 @@ async def get_terminal_tools(
     headers = {'Content-Type': 'application/json', 'X-User-Id': user.id}
 
     if auth_type == 'bearer':
-        headers['Authorization'] = f'Bearer {connection.get("key", "")}'
+        headers.update(bearer_auth_header(connection.get('key', '')))
     elif auth_type == 'session':
         cookies = request.cookies
-        headers['Authorization'] = f'Bearer {request.state.token.credentials}'
+        headers.update(bearer_auth_header(request.state.token.credentials))
     elif auth_type == 'system_oauth':
         cookies = request.cookies
         oauth_token = extra_params.get('__oauth_token__', None)
         if oauth_token:
-            headers['Authorization'] = f'Bearer {oauth_token.get("access_token", "")}'
+            headers.update(bearer_auth_header(oauth_token.get('access_token', '')))
     # auth_type == "none": no Authorization header
 
+<<<<<<< HEAD
     system_prompt = server_data.get('system_prompt')
 
+=======
+>>>>>>> v0.11.0
     # Use chat_id as the per-session key for cwd tracking
     metadata = extra_params.get('__metadata__', {})
     session_id = metadata.get('chat_id')
     if session_id:
         headers['X-Session-Id'] = session_id
 
+<<<<<<< HEAD
     terminal_cwd = await get_terminal_cwd(connection.get('url', ''), headers, cookies)
+=======
+    # Fetch live with the user's credentials so prompt changes apply without a restart
+    terminal_cwd, system_prompt = await asyncio.gather(
+        get_terminal_cwd(server_data['url'], headers, cookies),
+        get_terminal_system_prompt(server_data['url'], headers, cookies),
+    )
+    if not system_prompt:
+        system_prompt = server_data.get('system_prompt')
+>>>>>>> v0.11.0
 
     tools_dict = {}
     for spec in specs:

@@ -30,9 +30,28 @@
 	onMount(async () => {
 		renderToString = await getKatexRenderer();
 	});
+
+	// Cache rendered HTML — only re-compute when content, displayMode, or renderToString changes,
+	// not on every parent re-render during streaming
+	let renderedHTML: string = '';
+	$: if (renderToString) {
+		try {
+			renderedHTML = renderToString(content, { displayMode, throwOnError: false });
+		} catch {
+			// throwOnError only suppresses ParseError; RangeError on deep nesting escapes, so escape the fallback (never {@html} raw source)
+			renderedHTML = content
+				.replaceAll('&', '&amp;')
+				.replaceAll('<', '&lt;')
+				.replaceAll('>', '&gt;');
+		}
+	}
 </script>
 
+<<<<<<< HEAD
 {#if renderToString}
+=======
+{#if renderToString && renderedHTML}
+>>>>>>> v0.11.0
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<svelte:element
@@ -43,6 +62,10 @@
 			toast.success($i18n.t('Copied to clipboard'));
 		}}
 	>
+<<<<<<< HEAD
 		{@html renderToString(content, { displayMode, throwOnError: false })}
+=======
+		{@html renderedHTML}
+>>>>>>> v0.11.0
 	</svelte:element>
 {/if}

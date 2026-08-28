@@ -4,6 +4,7 @@
 	import Sortable from 'sortablejs';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import {
 		user,
 		chats,
@@ -14,11 +15,13 @@
 		showSidebar,
 		showSearch,
 		mobile,
-		showArchivedChats,
 		pinnedChats,
 		pinnedNotes,
+<<<<<<< HEAD
 		scrollPaginationEnabled,
 		currentChatPage,
+=======
+>>>>>>> v0.11.0
 		temporaryChatEnabled,
 		channels,
 		socket,
@@ -27,21 +30,36 @@
 		models,
 		selectedFolder,
 		WEBUI_NAME,
+<<<<<<< HEAD
 		billingStatus,
 		sidebarWidth,
 		activeChatIds
 	} from '$lib/stores';
 	import { onMount, getContext, tick } from 'svelte';
+=======
+		sidebarWidth
+	} from '$lib/stores';
+	import {
+		loadNextChatListPage,
+		refreshChatList,
+		registerFolderRefreshHandler,
+		setAllChatsRead,
+		setChatActive,
+		setChatReadAt
+	} from '$lib/stores/chatList';
+	import { onMount, getContext, tick, onDestroy } from 'svelte';
+>>>>>>> v0.11.0
 
 	const i18n = getContext('i18n');
 
+	$: canImportChats = $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true);
+
 	import {
-		getChatList,
 		getAllTags,
-		getPinnedChatList,
 		toggleChatPinnedStatusById,
 		getChatById,
 		updateChatFolderIdById,
+<<<<<<< HEAD
 		importChat
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
@@ -49,30 +67,61 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { checkActiveChats } from '$lib/apis/tasks';
 	import { getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
+=======
+		importChats,
+		deleteAllChats,
+		getChatListBySearchText,
+		markChatsRead
+	} from '$lib/apis/chats';
+	import {
+		createNewFolder,
+		getFolders,
+		getSharedFolders,
+		updateFolderParentIdById
+	} from '$lib/apis/folders';
+	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
+	import { updateUserSettings } from '$lib/apis/users';
+>>>>>>> v0.11.0
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
-	import ArchivedChatsModal from './ArchivedChatsModal.svelte';
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Loader from '../common/Loader.svelte';
 	import Folder from '../common/Folder.svelte';
+	import SidebarSection from './Sidebar/Section.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Folders from './Sidebar/Folders.svelte';
+	import SharedFolderItem from './Sidebar/SharedFolderItem.svelte';
 	import { getChannels, createNewChannel } from '$lib/apis/channels';
 	import { getMyUsage, type MyUsage } from '$lib/apis/billing';
 	import ChannelModal from './Sidebar/ChannelModal.svelte';
 	import ChannelItem from './Sidebar/ChannelItem.svelte';
-	import PencilSquare from '../icons/PencilSquare.svelte';
-	import Search from '../icons/Search.svelte';
 	import SearchModal from './SearchModal.svelte';
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
-	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
+<<<<<<< HEAD
 	import Note from '../icons/Note.svelte';
 	import Code from '../icons/Code.svelte';
 	import { slide } from 'svelte/transition';
+=======
+	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
+	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
+	import ClockIcon from './Sidebar/icons/Clock.svelte';
+	import CodeIcon from './Sidebar/icons/Code.svelte';
+	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
+	import NotesIcon from './Sidebar/icons/Notes.svelte';
+	import SearchIcon from './Sidebar/icons/Search.svelte';
+	import Sidebar from '../icons/Sidebar.svelte';
+	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
+	import { slide } from 'svelte/transition';
+	import HotkeyHint from '../common/HotkeyHint.svelte';
+	import Dropdown from '../common/Dropdown.svelte';
+	import DropdownMenu from '../common/DropdownMenu.svelte';
+	import CheckIcon from '../icons/Check.svelte';
+	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
+>>>>>>> v0.11.0
 
 	const BREAKPOINT = 768;
 	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
@@ -83,7 +132,18 @@
 	let shiftKey = false;
 
 	let selectedChatId = null;
+<<<<<<< HEAD
 	let showPinnedChat = true;
+=======
+
+	// Keep the optimistic sidebar highlight in sync with the active chat. Leaving the
+	// chat view (e.g. navigating to an admin page) clears chatId, and programmatic
+	// navigation such as cloning moves chatId to a different chat — in both cases the
+	// previously-selected item must not stay highlighted. The optimistic on-click
+	// highlight is preserved because a click sets selectedChatId without changing
+	// chatId, so this reactive only re-runs once chatId catches up to the same value.
+	$: selectedChatId = $chatId || null;
+>>>>>>> v0.11.0
 
 	let showCreateChannel = false;
 
@@ -121,6 +181,7 @@
 
 	// Pagination variables
 	let chatListLoading = false;
+	let chatListReady = false;
 	let allChatsLoaded = false;
 
 	let showCreateFolderModal = false;
@@ -131,12 +192,28 @@
 	let showPinnedNotes = false;
 	let showChannels = false;
 	let showFolders = false;
+	let showSharedFolders = false;
+	let showChatsMenu = false;
 
 	let folders = {};
-	let folderRegistry = {};
+	let folderRegistry: Record<
+		string,
+		{
+			setFolderItems?: () => unknown;
+			upsertChat?: (chat: Record<string, unknown>) => unknown;
+			setChatActive?: (chatId: string, active: boolean) => boolean;
+			setChatReadAt?: (chatId: string, lastReadAt: number) => boolean;
+			setAllChatsRead?: () => unknown;
+		}
+	> = {};
 
 	let newFolderId = null;
 
+<<<<<<< HEAD
+=======
+	let sharedFolders: any[] = [];
+
+>>>>>>> v0.11.0
 	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
 
 	const isMenuItemVisible = (id) => {
@@ -183,6 +260,29 @@
 		return items[id];
 	};
 
+<<<<<<< HEAD
+=======
+	const menuItemPathPrefixes = {
+		notes: '/notes',
+		workspace: '/workspace',
+		calendar: '/calendar',
+		automations: '/automations',
+		playground: '/playground'
+	};
+
+	const getActiveMenuItemId = (pathname) => {
+		for (const [id, pathPrefix] of Object.entries(menuItemPathPrefixes)) {
+			if (pathname === pathPrefix || pathname.startsWith(`${pathPrefix}/`)) {
+				return id;
+			}
+		}
+
+		return null;
+	};
+
+	$: activeMenuItemId = getActiveMenuItemId($page.url.pathname);
+
+>>>>>>> v0.11.0
 	const initPinnedMenuSortable = () => {
 		const el = document.getElementById('pinned-menu-items-list');
 		if (el && !$mobile) {
@@ -245,6 +345,31 @@
 				});
 			}
 		}
+
+		// Merge shared folders into the same structure
+		try {
+			sharedFolders = await getSharedFolders(localStorage.token);
+		} catch (e) {
+			sharedFolders = [];
+		}
+
+		for (const sf of sharedFolders) {
+			if (folders[sf.id]) continue; // Already owned by user
+			folders[sf.id] = { ...sf, shared: true };
+		}
+
+		// Build parent-child relationships for shared folders
+		for (const sf of sharedFolders) {
+			if (folders[sf.id]?.shared && sf.parent_id && folders[sf.parent_id]) {
+				folders[sf.parent_id].childrenIds = folders[sf.parent_id].childrenIds
+					? [...new Set([...folders[sf.parent_id].childrenIds, sf.id])]
+					: [sf.id];
+			}
+		}
+	};
+
+	const initSharedFolders = async () => {
+		await initFolders();
 	};
 
 	const createFolder = async ({ name, data, parent_id }) => {
@@ -307,11 +432,19 @@
 
 	const initChatList = async () => {
 		// Reset pagination variables
+<<<<<<< HEAD
 		currentChatPage.set(1);
 		allChatsLoaded = false;
+=======
+		console.log('initChatList');
+		allChatsLoaded = false;
+		chatListReady = false;
+>>>>>>> v0.11.0
 
 		initFolders();
+		initSharedFolders();
 		await Promise.all([
+<<<<<<< HEAD
 			await (async () => {
 				const _tags = await getAllTags(localStorage.token);
 				tags.set(_tags);
@@ -329,32 +462,105 @@
 			await (async () => {
 				const _chats = await getChatList(localStorage.token, $currentChatPage);
 				await chats.set(_chats);
+=======
+			(async () => {
+				console.log('Init tags');
+				const _tags = await getAllTags(localStorage.token);
+				tags.set(_tags);
+			})(),
+			(async () => {
+				if (
+					$config?.features?.enable_notes &&
+					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+				) {
+					console.log('Init pinned notes');
+					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
+					pinnedNotes.set(_pinnedNotes);
+				}
+			})(),
+			(async () => {
+				console.log('Init chat list');
+				await refreshChatRows();
+>>>>>>> v0.11.0
 			})()
 		]);
+	};
 
-		// Enable pagination
-		scrollPaginationEnabled.set(true);
+	const refreshChatRows = async () => {
+		const result = await refreshChatList(localStorage.token, { refreshPinned: true });
+		if (result.accepted) {
+			await initFolders();
+			await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+			allChatsLoaded = result.allLoaded;
+			chatListReady = true;
+		}
 	};
 
 	const loadMoreChats = async () => {
 		chatListLoading = true;
 
-		currentChatPage.set($currentChatPage + 1);
-
-		let newChatList = [];
-
-		newChatList = await getChatList(localStorage.token, $currentChatPage);
-
-		// once the bottom of the list has been reached (no results) there is no need to continue querying
-		allChatsLoaded = newChatList.length === 0;
-		const existingIds = new Set(($chats ?? []).map((c) => c.id));
-		const uniqueNewChats = newChatList.filter((c) => !existingIds.has(c.id));
-		await chats.set([...($chats ? $chats : []), ...uniqueNewChats]);
+		const result = await loadNextChatListPage(localStorage.token);
+		allChatsLoaded = result.allLoaded;
 
 		chatListLoading = false;
 	};
 
+	const applyFolderUnreadCounts = (folderUnreadCounts: Record<string, number>) => {
+		folders = Object.fromEntries(
+			Object.entries(folders).map(([id, folder]) => [
+				id,
+				id in folderUnreadCounts ? { ...folder, unread_count: folderUnreadCounts[id] } : folder
+			])
+		);
+		_folders.update((folderList) =>
+			folderList.map((folder) =>
+				folder.id in folderUnreadCounts
+					? { ...folder, unread_count: folderUnreadCounts[folder.id] }
+					: folder
+			)
+		);
+	};
+
+	const applyChatReadState = (data) => {
+		if (data?.folder_unread_counts) {
+			applyFolderUnreadCounts(data.folder_unread_counts);
+		}
+
+		if (data?.chat_id && typeof data?.last_read_at === 'number') {
+			setChatReadAt(data.chat_id, data.last_read_at);
+			for (const folder of Object.values(folderRegistry)) {
+				folder?.setChatReadAt?.(data.chat_id, data.last_read_at);
+			}
+		}
+	};
+
+	const markAllChatsReadHandler = async () => {
+		const res = await markChatsRead(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!res) return;
+
+		showChatsMenu = false;
+		if (res.folder_unread_counts) {
+			applyFolderUnreadCounts(res.folder_unread_counts);
+		}
+		setAllChatsRead();
+		for (const folder of Object.values(folderRegistry)) {
+			folder?.setAllChatsRead?.();
+		}
+	};
+
 	const importChatHandler = async (items, pinned = false, folderId = null) => {
+<<<<<<< HEAD
+=======
+		if (!canImportChats) {
+			toast.error($i18n.t('Access prohibited'));
+			return;
+		}
+
+		console.log('importChatHandler', items, pinned, folderId);
+>>>>>>> v0.11.0
 		for (const item of items) {
 			if (item.chat) {
 				await importChat(
@@ -487,7 +693,7 @@
 		isResizing = true;
 
 		startClientX = e.clientX;
-		startWidth = $sidebarWidth ?? 260;
+		startWidth = $sidebarWidth ?? 245;
 
 		document.body.style.userSelect = 'none';
 	};
@@ -508,6 +714,7 @@
 		document.documentElement.style.setProperty('--sidebar-width', `${newSidebarWidth}px`);
 	};
 
+<<<<<<< HEAD
 	const RESIZE_KEY_STEP = 20;
 
 	const resizeKeyHandler = (e: KeyboardEvent) => {
@@ -530,6 +737,9 @@
 		usagePollingInterval = setInterval(loadMyUsage, pollIntervalMs);
 		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
+=======
+	onMount(async () => {
+>>>>>>> v0.11.0
 		try {
 			const width = Number(localStorage.getItem('sidebarWidth'));
 			if (!Number.isNaN(width) && width >= MIN_WIDTH && width <= MAX_WIDTH) {
@@ -582,17 +792,6 @@
 				if (value) {
 					await initChannels();
 					await initChatList();
-
-					// Check which chats have active tasks
-					const allChatIds = [...$chats.map((c) => c.id), ...$pinnedChats.map((c) => c.id)];
-					if (allChatIds.length > 0) {
-						try {
-							const res = await checkActiveChats(localStorage.token, allChatIds);
-							activeChatIds.set(new Set(res.active_chat_ids || []));
-						} catch (e) {
-							console.debug('Failed to check active chats:', e);
-						}
-					}
 				}
 			})
 		];
@@ -615,6 +814,22 @@
 
 		const socketInstance = $socket;
 		socketInstance?.on('events', chatActiveEventHandler);
+		socketInstance?.on('connect', refreshChatRows);
+
+		const unregisterFolderRefreshHandler = registerFolderRefreshHandler((folderId, chat) => {
+			if (folderId) {
+				if (chat) {
+					return folderRegistry[folderId]?.upsertChat?.(chat);
+				}
+
+				return folderRegistry[folderId]?.setFolderItems?.();
+			}
+
+			return Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+		});
+
+		await tick();
+		initPinnedMenuSortable();
 
 		await tick();
 		initPinnedMenuSortable();
@@ -641,28 +856,70 @@
 			if (usageRetryTimer) clearTimeout(usageRetryTimer);
 
 			socketInstance?.off('events', chatActiveEventHandler);
+			socketInstance?.off('connect', refreshChatRows);
+
+			unregisterFolderRefreshHandler();
 		};
 	});
 
 	// Handler for chat events (defined outside onMount for proper cleanup)
+<<<<<<< HEAD
 	const chatActiveEventHandler = (event: {
+=======
+	const chatActiveEventHandler = async (event: {
+>>>>>>> v0.11.0
 		chat_id: string;
 		message_id: string;
-		data: { type: string; data: any };
+		data: {
+			type: string;
+			data: {
+				active?: boolean;
+				folder_id?: string | null;
+				last_read_at?: number;
+				folder_unread_counts?: Record<string, number>;
+			};
+		};
 	}) => {
 		if (event.data?.type === 'chat:active') {
-			const { active } = event.data.data;
-			activeChatIds.update((ids) => {
-				const newSet = new Set(ids);
-				if (active) {
-					newSet.add(event.chat_id);
-				} else {
-					newSet.delete(event.chat_id);
+			const eventData = event.data.data ?? {};
+			const active = eventData.active ?? false;
+			const found = setChatActive(event.chat_id, active);
+			let foundInFolder = false;
+			for (const folder of Object.values(folderRegistry)) {
+				foundInFolder = folder?.setChatActive?.(event.chat_id, active) || foundInFolder;
+			}
+			if (!foundInFolder && active && eventData.folder_id) {
+				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+			}
+			if (!found && active) {
+				await refreshChatRows();
+			}
+		} else if (event.data?.type === 'chat:list') {
+			const eventData = event.data.data ?? {};
+			const folderUnreadCounts = eventData.folder_unread_counts;
+			if (folderUnreadCounts) {
+				applyFolderUnreadCounts(folderUnreadCounts);
+			}
+
+			if (typeof eventData.last_read_at === 'number') {
+				setChatReadAt(event.chat_id, eventData.last_read_at);
+				for (const folder of Object.values(folderRegistry)) {
+					folder?.setChatReadAt?.(event.chat_id, eventData.last_read_at);
 				}
+<<<<<<< HEAD
 				return newSet;
 			});
 		} else if (event.data?.type === 'chat:list') {
 			initChatList();
+=======
+				return;
+			}
+
+			await refreshChatRows();
+			if (eventData.folder_id) {
+				await folderRegistry[eventData.folder_id]?.setFolderItems?.();
+			}
+>>>>>>> v0.11.0
 		}
 	};
 
@@ -698,19 +955,6 @@
 
 	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
-
-<ArchivedChatsModal
-	bind:show={$showArchivedChats}
-	onUpdate={async () => {
-		await initChatList();
-	}}
-	onDelete={(id) => {
-		if ($chatId === id) {
-			goto('/');
-			chatId.set('');
-		}
-	}}
-/>
 
 <ChannelModal
 	bind:show={showCreateChannel}
@@ -801,8 +1045,14 @@
 
 {#if !$mobile && !$showSidebar}
 	<div
+<<<<<<< HEAD
 		class=" py-2 px-1.5 flex flex-col justify-between text-black dark:text-white hover:bg-gray-50/50 dark:hover:bg-gray-950/50 h-full border-e border-gray-50 dark:border-gray-850 z-10 transition-all"
+=======
+		class=" w-[42px] shrink-0 py-1 px-1 flex flex-col justify-between text-gray-700 dark:text-gray-300 hover:bg-gray-50/30 dark:hover:bg-gray-800/30 h-full z-10 transition-all border-e-[0.5px] border-gray-50 dark:border-gray-850/30"
+>>>>>>> v0.11.0
 		id="sidebar"
+		role="navigation"
+		aria-label={$i18n.t('Chat history')}
 	>
 		<button
 			class="flex flex-col flex-1 {isWindows ? 'cursor-pointer' : 'cursor-[e-resize]'}"
@@ -810,37 +1060,54 @@
 				showSidebar.set(!$showSidebar);
 			}}
 		>
-			<div class="pb-1.5">
+			<div class="pb-1">
 				<Tooltip
 					content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					placement="right"
 				>
 					<button
-						class="flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {isWindows
+						class="flex size-8.5 items-center justify-center transition group {isWindows
 							? 'cursor-pointer'
 							: 'cursor-[e-resize]'}"
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
-						<div class=" self-center flex items-center justify-center size-9">
+						<div
+							class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+						>
 							<img
+<<<<<<< HEAD
 								crossorigin="anonymous"
 								src="/hubgate/hubgate-logomark.svg"
 								class="sidebar-new-chat-icon size-6 group-hover:hidden"
 								alt="Hubgate"
+=======
+								src="{WEBUI_BASE_URL}/static/favicon.png"
+								class="sidebar-new-chat-icon size-5 rounded-full group-hover:hidden"
+								alt=""
+>>>>>>> v0.11.0
 							/>
 
-							<Sidebar className="size-5 hidden group-hover:flex" />
+							<Sidebar className="size-4 hidden group-hover:flex" />
 						</div>
 					</button>
 				</Tooltip>
 			</div>
 
+<<<<<<< HEAD
 			<div>
 				<div class="">
 					<Tooltip content={$i18n.t('New Chat')} placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 							href="/chat"
+=======
+			<div class="-gap-0.5">
+				<div class="">
+					<Tooltip content={$i18n.t('New Chat')} placement="right">
+						<a
+							class=" cursor-pointer flex size-8 items-center justify-center transition group"
+							href="/"
+>>>>>>> v0.11.0
 							draggable="false"
 							on:click={async (e) => {
 								e.stopImmediatePropagation();
@@ -851,8 +1118,10 @@
 							}}
 							aria-label={$i18n.t('New Chat')}
 						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<PencilSquare className="size-4.5" />
+							<div
+								class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+							>
+								<EditPencilIcon className="size-4" strokeWidth="1.5" />
 							</div>
 						</a>
 					</Tooltip>
@@ -861,7 +1130,7 @@
 				<div class="">
 					<Tooltip content={$i18n.t('Search')} placement="right">
 						<button
-							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+							class=" cursor-pointer flex size-8 items-center justify-center transition group"
 							on:click={(e) => {
 								e.stopImmediatePropagation();
 								e.preventDefault();
@@ -871,8 +1140,10 @@
 							draggable="false"
 							aria-label={$i18n.t('Search')}
 						>
-							<div class=" self-center flex items-center justify-center size-9">
-								<Search className="size-4.5" />
+							<div
+								class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+							>
+								<SearchIcon className="size-4" strokeWidth="1.5" />
 							</div>
 						</button>
 					</Tooltip>
@@ -884,7 +1155,11 @@
 						<div class="">
 							<Tooltip content={$i18n.t(meta.label)} placement="right">
 								<a
+<<<<<<< HEAD
 									class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+=======
+									class=" cursor-pointer flex size-8 items-center justify-center transition group"
+>>>>>>> v0.11.0
 									href={meta.href}
 									on:click={async (e) => {
 										e.stopImmediatePropagation();
@@ -895,6 +1170,7 @@
 									draggable="false"
 									aria-label={$i18n.t(meta.label)}
 								>
+<<<<<<< HEAD
 									<div class=" self-center flex items-center justify-center size-9">
 										{#if itemId === 'notes'}
 											<Note className="size-4.5" />
@@ -945,6 +1221,26 @@
 											</svg>
 										{:else if itemId === 'playground'}
 											<Code className="size-4.5" />
+=======
+									<div
+										class=" self-center flex size-[30px] items-center justify-center rounded-lg transition {itemId ===
+										activeMenuItemId
+											? ($settings?.highContrastMode ?? false)
+												? 'bg-black/[0.035] dark:bg-white/[0.06]'
+												: 'bg-black/[0.035] dark:bg-white/[0.045]'
+											: 'group-hover:bg-gray-50 dark:group-hover:bg-gray-900'}"
+									>
+										{#if itemId === 'notes'}
+											<NotesIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'workspace'}
+											<WorkspaceIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'automations'}
+											<ClockIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'calendar'}
+											<CalendarIcon className="size-4" strokeWidth="1.5" />
+										{:else if itemId === 'playground'}
+											<CodeIcon className="size-4" strokeWidth="1.5" />
+>>>>>>> v0.11.0
 										{/if}
 									</div>
 								</a>
@@ -957,6 +1253,7 @@
 
 		<div>
 			<div>
+<<<<<<< HEAD
 				<div class=" py-0.5">
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
@@ -978,6 +1275,22 @@
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
+=======
+				<div class=" flex justify-center items-center">
+					{#if $user !== undefined && $user !== null}
+						<UserMenu role={$user?.role} profile={$config?.features?.enable_user_status ?? true}>
+							<button
+								type="button"
+								class=" cursor-pointer flex size-8.5 items-center justify-center transition group"
+								aria-label={$i18n.t('User menu')}
+							>
+								<div
+									class="self-center relative flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+								>
+									<img
+										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
+										class="size-5.5 object-cover rounded-full"
+>>>>>>> v0.11.0
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
@@ -1007,31 +1320,42 @@
 	<div
 		bind:this={navElement}
 		id="sidebar"
+		role="navigation"
+		aria-label={$i18n.t('Chat history')}
 		class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
 			? 'bg-gray-50 dark:bg-gray-950 z-50'
 			: ' bg-transparent z-0 '} {$isApp
 			? `ml-[4.5rem] md:ml-0 `
-			: ' transition-all duration-300 '} shrink-0 text-gray-900 dark:text-gray-200 text-sm fixed top-0 left-0 overflow-x-hidden
+			: ' transition-all duration-300 '} shrink-0 text-gray-700 dark:text-gray-300 text-[13px] leading-5 fixed top-0 left-0 overflow-x-hidden
         "
 		transition:slide={{ duration: 250, axis: 'x' }}
 		data-state={$showSidebar}
 	>
 		<div
-			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 {$showSidebar
+			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 border-e border-gray-50 dark:border-gray-850/30 {$showSidebar
 				? ''
 				: 'invisible'}"
 		>
 			<div
+<<<<<<< HEAD
 				class="sidebar px-2 pt-2 pb-1.5 flex justify-between space-x-1 text-gray-600 dark:text-gray-400 sticky top-0 z-10 -mb-3"
 			>
 				<a
 					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition no-drag-region"
 					href="/chat"
+=======
+				class="sidebar px-1 pt-1.5 pb-1 flex justify-between space-x-1 text-gray-600 dark:text-gray-400 sticky top-0 z-10 -mb-2"
+			>
+				<a
+					class="flex items-center rounded-xl size-8.5 h-full justify-center hover:bg-gray-50 dark:hover:bg-gray-900 transition no-drag-region"
+					href="/"
+>>>>>>> v0.11.0
 					draggable="false"
 					on:click={newChatHandler}
 				>
 					<img
 						crossorigin="anonymous"
+<<<<<<< HEAD
 						src="/hubgate/hubgate-logomark.svg"
 						class="sidebar-new-chat-icon size-6"
 						alt="Hubgate"
@@ -1039,9 +1363,18 @@
 				</a>
 
 				<a href="/chat" class="flex flex-1 px-0.5" on:click={newChatHandler}>
+=======
+						src="{WEBUI_BASE_URL}/static/favicon.png"
+						class="sidebar-new-chat-icon size-5 rounded-full"
+						alt=""
+					/>
+				</a>
+
+				<a href="/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
+>>>>>>> v0.11.0
 					<div
 						id="sidebar-webui-name"
-						class=" self-center font-medium text-gray-850 dark:text-white font-primary"
+						class=" self-center font-normal text-gray-700 dark:text-gray-200"
 					>
 						{$WEBUI_NAME}
 					</div>
@@ -1051,7 +1384,7 @@
 					placement="bottom"
 				>
 					<button
-						class="flex rounded-xl size-8.5 justify-center items-center hover:bg-gray-100/50 dark:hover:bg-gray-850/50 transition {isWindows
+						class="flex size-[30px] justify-center items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition {isWindows
 							? 'cursor-pointer'
 							: 'cursor-[w-resize]'}"
 						on:click={() => {
@@ -1059,8 +1392,8 @@
 						}}
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
-						<div class=" self-center p-1.5">
-							<Sidebar />
+						<div class=" self-center">
+							<Sidebar className="size-4" />
 						</div>
 					</button>
 				</Tooltip>
@@ -1073,7 +1406,7 @@
 			</div>
 
 			<div
-				class="relative flex flex-col flex-1 overflow-y-auto scrollbar-hidden pt-3 pb-3"
+				class="relative flex flex-col flex-1 overflow-y-auto scrollbar-hidden pt-2.5 pb-2.5"
 				on:scroll={(e) => {
 					if (e.target.scrollTop === 0) {
 						scrollTop = 0;
@@ -1082,42 +1415,68 @@
 					}
 				}}
 			>
+<<<<<<< HEAD
 				<div class="pb-1.5">
 					<div class="px-[7px] flex justify-center text-gray-800 dark:text-gray-200">
 						<a
 							id="sidebar-new-chat-button"
 							class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
 							href="/chat"
+=======
+				<div class="pb-1">
+					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
+						<a
+							id="sidebar-new-chat-button"
+							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+							href="/"
+>>>>>>> v0.11.0
 							draggable="false"
 							on:click={newChatHandler}
 							aria-label={$i18n.t('New Chat')}
 						>
-							<div class="self-center">
-								<PencilSquare className=" size-4.5" strokeWidth="2" />
+							<div class="self-center flex size-4 shrink-0 items-center justify-center">
+								<EditPencilIcon className=" size-4" strokeWidth="1.5" />
 							</div>
 
+<<<<<<< HEAD
 							<div class="flex self-center translate-y-[0.5px]">
 								<div class=" self-center text-sm font-primary">{$i18n.t('New Chat')}</div>
+=======
+							<div class="flex flex-1 self-center translate-y-[0.5px]">
+								<div class=" self-center text-[13px] leading-5">{$i18n.t('New Chat')}</div>
+>>>>>>> v0.11.0
 							</div>
 						</a>
 					</div>
 
+<<<<<<< HEAD
 					<div class="px-[7px] flex justify-center text-gray-800 dark:text-gray-200">
 						<button
 							id="sidebar-search-button"
 							class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+=======
+					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
+						<button
+							id="sidebar-search-button"
+							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+>>>>>>> v0.11.0
 							on:click={() => {
 								showSearch.set(true);
 							}}
 							draggable="false"
 							aria-label={$i18n.t('Search')}
 						>
-							<div class="self-center">
-								<Search strokeWidth="2" className="size-4.5" />
+							<div class="self-center flex size-4 shrink-0 items-center justify-center">
+								<SearchIcon strokeWidth="1.5" className="size-4" />
 							</div>
 
+<<<<<<< HEAD
 							<div class="flex self-center translate-y-[0.5px]">
 								<div class=" self-center text-sm font-primary">{$i18n.t('Search')}</div>
+=======
+							<div class="flex flex-1 self-center translate-y-[0.5px]">
+								<div class=" self-center text-[13px] leading-5">{$i18n.t('Search')}</div>
+>>>>>>> v0.11.0
 							</div>
 						</button>
 					</div>
@@ -1127,17 +1486,31 @@
 							{@const meta = getMenuItemMeta(itemId)}
 							{#if meta && isMenuItemVisible(itemId)}
 								<div
+<<<<<<< HEAD
 									class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200"
+=======
+									class="px-1 flex justify-center text-gray-700 dark:text-gray-300"
+>>>>>>> v0.11.0
 									data-id={itemId}
 								>
 									<a
 										id="sidebar-{itemId}-button"
+<<<<<<< HEAD
 										class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+=======
+										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 transition {itemId ===
+										activeMenuItemId
+											? ($settings?.highContrastMode ?? false)
+												? 'bg-black/[0.035] dark:bg-white/[0.06]'
+												: 'bg-black/[0.035] dark:bg-white/[0.045]'
+											: 'hover:bg-gray-50 dark:hover:bg-gray-900'}"
+>>>>>>> v0.11.0
 										href={meta.href}
 										on:click={itemClickHandler}
 										draggable="false"
 										aria-label={$i18n.t(meta.label)}
 									>
+<<<<<<< HEAD
 										<div class="self-center">
 											{#if itemId === 'notes'}
 												<Note className="size-4.5" strokeWidth="2" />
@@ -1188,11 +1561,28 @@
 												</svg>
 											{:else if itemId === 'playground'}
 												<Code className="size-4.5" strokeWidth="2" />
+=======
+										<div class="self-center flex size-4 shrink-0 items-center justify-center">
+											{#if itemId === 'notes'}
+												<NotesIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'workspace'}
+												<WorkspaceIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'automations'}
+												<ClockIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'calendar'}
+												<CalendarIcon className="size-4" strokeWidth="1.5" />
+											{:else if itemId === 'playground'}
+												<CodeIcon className="size-4" strokeWidth="1.5" />
+>>>>>>> v0.11.0
 											{/if}
 										</div>
 
 										<div class="flex self-center translate-y-[0.5px]">
+<<<<<<< HEAD
 											<div class=" self-center text-sm font-primary">{$i18n.t(meta.label)}</div>
+=======
+											<div class=" self-center text-[13px] leading-5">{$i18n.t(meta.label)}</div>
+>>>>>>> v0.11.0
 										</div>
 									</a>
 								</div>
@@ -1201,6 +1591,7 @@
 					</div>
 				</div>
 
+<<<<<<< HEAD
 				{#if ($models ?? []).length > 0 && ($settings?.pinnedModels ?? []).length > 0}
 					<PinnedModelList bind:selectedChatId {shiftKey} />
 				{/if}
@@ -1212,6 +1603,14 @@
 						className="px-2 mt-0.5"
 						name={$i18n.t('Notes')}
 						chevron={false}
+=======
+				{#if ($models ?? []).length > 0 && (($settings?.pinnedModels ?? []).length > 0 || $config?.default_pinned_models)}
+					<SidebarSection
+						id="sidebar-models"
+						bind:open={showPinnedModels}
+						className="mt-0.5"
+						name={$i18n.t('Models')}
+>>>>>>> v0.11.0
 						dragAndDrop={false}
 						onAdd={async () => {
 							const note = await createNoteHandler('New Note');
@@ -1221,6 +1620,7 @@
 						}}
 						onAddLabel={$i18n.t('New Note')}
 					>
+<<<<<<< HEAD
 						<div class="mt-0.5 pb-1.5">
 							{#each $pinnedNotes as note (note.id)}
 								<a
@@ -1272,8 +1672,37 @@
 				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
 					<Folder
 						className="px-2 mt-0.5"
+=======
+						<PinnedModelList bind:selectedChatId {shiftKey} />
+					</SidebarSection>
+				{/if}
+
+				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
+					<SidebarSection
+						id="sidebar-pinned-notes"
+						bind:open={showPinnedNotes}
+						className="mt-0.5"
+						name={$i18n.t('Notes')}
+						dragAndDrop={false}
+						onAdd={async () => {
+							const note = await createNoteHandler('New Note');
+							if (note) {
+								goto(`/notes/${note.id}`);
+							}
+						}}
+						onAddLabel={$i18n.t('New Note')}
+					>
+						<PinnedNoteList bind:selectedChatId />
+					</SidebarSection>
+				{/if}
+
+				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
+					<SidebarSection
+						id="sidebar-channels"
+						bind:open={showChannels}
+						className="mt-0.5"
+>>>>>>> v0.11.0
 						name={$i18n.t('Channels')}
-						chevron={false}
 						dragAndDrop={false}
 						onAdd={async () => {
 							if ($user?.role === 'admin') {
@@ -1294,14 +1723,21 @@
 								}}
 							/>
 						{/each}
-					</Folder>
+					</SidebarSection>
 				{/if}
 
+<<<<<<< HEAD
 				{#if folders}
 					<Folder
 						className="px-2 mt-0.5"
+=======
+				{#if $config?.features?.enable_folders && ($user?.role === 'admin' || ($user?.permissions?.features?.folders ?? true))}
+					<SidebarSection
+						id="sidebar-folders"
+						bind:open={showFolders}
+						className="mt-0.5"
+>>>>>>> v0.11.0
 						name={$i18n.t('Folders')}
-						chevron={false}
 						onAdd={() => {
 							showCreateFolderModal = true;
 						}}
@@ -1331,6 +1767,7 @@
 							bind:folderRegistry
 							{folders}
 							{shiftKey}
+							onFolderUnreadCounts={applyFolderUnreadCounts}
 							onDelete={(folderId) => {
 								selectedFolder.set(null);
 								initChatList();
@@ -1346,13 +1783,18 @@
 								initChatList();
 							}}
 						/>
-					</Folder>
+					</SidebarSection>
 				{/if}
 
+<<<<<<< HEAD
 				<Folder
 					className="px-2 mt-0.5"
+=======
+				<SidebarSection
+					id="sidebar-chats"
+					className="mt-0.5"
+>>>>>>> v0.11.0
 					name={$i18n.t('Chats')}
-					chevron={false}
 					on:change={async (e) => {
 						// Only clear selectedFolder, don't navigate away from current chat
 						if ($selectedFolder !== null) {
@@ -1370,6 +1812,7 @@
 								return null;
 							});
 							if (!chat && item) {
+<<<<<<< HEAD
 								chat = await importChat(
 									localStorage.token,
 									item.chat,
@@ -1379,6 +1822,23 @@
 									item?.created_at ?? null,
 									item?.updated_at ?? null
 								);
+=======
+								if (!canImportChats) {
+									toast.error($i18n.t('Access prohibited'));
+									return;
+								}
+
+								chat = await importChats(localStorage.token, [
+									{
+										chat: item.chat,
+										meta: item?.meta ?? {},
+										pinned: false,
+										folder_id: null,
+										created_at: item?.created_at ?? null,
+										updated_at: item?.updated_at ?? null
+									}
+								]);
+>>>>>>> v0.11.0
 							}
 
 							if (chat) {
@@ -1417,6 +1877,33 @@
 						}
 					}}
 				>
+					<svelte:fragment slot="action">
+						<Dropdown bind:show={showChatsMenu} align="end">
+							<Tooltip content={$i18n.t('More')}>
+								<button
+									type="button"
+									class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
+									aria-label={$i18n.t('More')}
+									on:pointerup|stopPropagation
+								>
+									<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+								</button>
+							</Tooltip>
+
+							<div slot="content">
+								<DropdownMenu className="min-w-[170px]">
+									<button
+										class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+										on:click={markAllChatsReadHandler}
+									>
+										<CheckIcon className="size-3.5" />
+										<div class="flex items-center">{$i18n.t('Mark all as read')}</div>
+									</button>
+								</DropdownMenu>
+							</div>
+						</Dropdown>
+					</svelte:fragment>
+
 					{#if $pinnedChats.length > 0}
 						<div class="flex flex-col space-y-1 rounded-xl">
 							<Folder
@@ -1431,6 +1918,7 @@
 								on:drop={async (e) => {
 									const { type, id, item } = e.detail;
 
+<<<<<<< HEAD
 									if (type === 'chat') {
 										let chat = await getChatById(localStorage.token, id).catch((error) => {
 											return null;
@@ -1445,6 +1933,49 @@
 												item?.created_at ?? null,
 												item?.updated_at ?? null
 											);
+=======
+										if (type === 'chat') {
+											let chat = await getChatById(localStorage.token, id).catch((error) => {
+												return null;
+											});
+											if (!chat && item) {
+												if (!canImportChats) {
+													toast.error($i18n.t('Access prohibited'));
+													return;
+												}
+
+												chat = await importChats(localStorage.token, [
+													{
+														chat: item.chat,
+														meta: item?.meta ?? {},
+														pinned: false,
+														folder_id: null,
+														created_at: item?.created_at ?? null,
+														updated_at: item?.updated_at ?? null
+													}
+												]);
+											}
+
+											if (chat) {
+												console.log(chat);
+												if (chat.folder_id) {
+													const res = await updateChatFolderIdById(
+														localStorage.token,
+														chat.id,
+														null
+													).catch((error) => {
+														toast.error(`${error}`);
+														return null;
+													});
+												}
+
+												if (!chat.pinned) {
+													const res = await toggleChatPinnedStatusById(localStorage.token, chat.id);
+												}
+
+												initChatList();
+											}
+>>>>>>> v0.11.0
 										}
 
 										if (chat) {
@@ -1472,6 +2003,7 @@
 								<div
 									class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-900 dark:text-gray-200"
 								>
+<<<<<<< HEAD
 									{#each $pinnedChats as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
 										<ChatItem
 											className=""
@@ -1499,6 +2031,41 @@
 									{/each}
 								</div>
 							</Folder>
+=======
+									<div
+										class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900 text-gray-700 dark:text-gray-300"
+									>
+										{#each $pinnedChats as chat, idx (`pinned-chat-${chat?.id ?? idx}`)}
+											<ChatItem
+												className=""
+												id={chat.id}
+												title={chat.title}
+												createdAt={chat.created_at}
+												updatedAt={chat.updated_at}
+												lastReadAt={chat.last_read_at}
+												active={chat.active ?? false}
+												{shiftKey}
+												selected={selectedChatId === chat.id}
+												on:select={() => {
+													selectedChatId = chat.id;
+												}}
+												on:unselect={() => {
+													selectedChatId = null;
+												}}
+												on:change={async () => {
+													initChatList();
+												}}
+												onReadStateChange={applyChatReadState}
+												on:tag={(e) => {
+													const { type, name } = e.detail;
+													tagEventHandler(type, name, chat.id);
+												}}
+											/>
+										{/each}
+									</div>
+								</Folder>
+							</div>
+>>>>>>> v0.11.0
 						</div>
 					{/if}
 
@@ -1508,10 +2075,10 @@
 								{#each $chats as chat, idx (`chat-${chat?.id ?? idx}`)}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 										<div
-											class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-medium {idx ===
+											class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
 											0
 												? ''
-												: 'pt-5'} pb-1.5"
+												: 'pt-4'} pb-1"
 										>
 											{$i18n.t(chat.time_range)}
 											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
@@ -1542,6 +2109,10 @@
 										createdAt={chat.created_at}
 										updatedAt={chat.updated_at}
 										lastReadAt={chat.last_read_at}
+<<<<<<< HEAD
+=======
+										active={chat.active ?? false}
+>>>>>>> v0.11.0
 										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
@@ -1553,6 +2124,7 @@
 										on:change={async () => {
 											initChatList();
 										}}
+										onReadStateChange={applyChatReadState}
 										on:tag={(e) => {
 											const { type, name } = e.detail;
 											tagEventHandler(type, name, chat.id);
@@ -1560,7 +2132,7 @@
 									/>
 								{/each}
 
-								{#if $scrollPaginationEnabled && !allChatsLoaded}
+								{#if chatListReady && !allChatsLoaded}
 									<Loader
 										on:visible={(e) => {
 											if (!chatListLoading) {
@@ -1586,28 +2158,23 @@
 							{/if}
 						</div>
 					</div>
-				</Folder>
+				</SidebarSection>
 			</div>
 
-			<div class="px-1.5 pt-1.5 pb-2 sticky bottom-0 z-10 -mt-3 sidebar">
+			<div class="px-1 pt-1 pb-1.5 sticky bottom-0 z-10 -mt-2 sidebar">
 				<div
 					class=" sidebar-bg-gradient-to-t bg-linear-to-t from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mt-6"
 				></div>
-				<div class="flex flex-col font-primary">
+				<div class="flex flex-col">
 					{#if $user !== undefined && $user !== null}
 						<UserMenu
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
-							showActiveUsers={false}
 							className="w-[calc(var(--sidebar-width)-1rem)]"
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
 						>
 							<button
 								type="button"
+<<<<<<< HEAD
 								class=" flex items-center rounded-2xl py-2 px-1.5 w-full hover:bg-gray-100/50 dark:hover:bg-gray-900/50 transition"
 								aria-label={$i18n.t('User menu')}
 							>
@@ -1615,6 +2182,15 @@
 									<img
 										src={$user?.profile_image_url}
 										class=" size-6 object-cover rounded-full"
+=======
+								class=" flex items-center rounded-xl py-1.5 px-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-900 transition"
+								aria-label={$i18n.t('User menu')}
+							>
+								<div class=" self-center mr-3 relative flex-shrink-0">
+									<img
+										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
+										class="size-5.5 object-cover rounded-full"
+>>>>>>> v0.11.0
 										alt={$i18n.t('Open User Profile Menu')}
 										aria-label={$i18n.t('Open User Profile Menu')}
 									/>
@@ -1631,6 +2207,7 @@
 										</div>
 									{/if}
 								</div>
+<<<<<<< HEAD
 								<div class="flex flex-col flex-1 min-w-0">
 									<div class="flex font-medium truncate">{$user?.name}</div>
 
@@ -1676,6 +2253,9 @@
 										</div>
 									{/if}
 								</div>
+=======
+								<div class=" self-center font-normal truncate">{$user?.name}</div>
+>>>>>>> v0.11.0
 							</button>
 						</UserMenu>
 					{/if}

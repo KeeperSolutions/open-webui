@@ -133,6 +133,12 @@ class ModelHistoryEntry(BaseModel):
     lost: int
 
 
+class ModelHistoryCounts(BaseModel):
+    date: str
+    won: int = 0
+    lost: int = 0
+
+
 class ModelHistoryResponse(BaseModel):
     model_id: str
     history: list[ModelHistoryEntry]
@@ -159,7 +165,10 @@ class FeedbackTable:
                 result = Feedback(**feedback.model_dump())
                 db.add(result)
                 await db.commit()
+<<<<<<< HEAD
                 await db.refresh(result)
+=======
+>>>>>>> v0.11.0
                 if result:
                     return FeedbackModel.model_validate(result)
                 else:
@@ -216,12 +225,22 @@ class FeedbackTable:
     ) -> FeedbackListResponse:
         async with get_async_db_context(db) as db:
             stmt = select(Feedback, User).join(User, Feedback.user_id == User.id)
+<<<<<<< HEAD
+=======
+            count_stmt = select(func.count(Feedback.id)).select_from(Feedback).join(User, Feedback.user_id == User.id)
+>>>>>>> v0.11.0
 
             if filter:
                 # Apply model_id filter (exact match)
                 model_id = filter.get('model_id')
                 if model_id:
+<<<<<<< HEAD
                     stmt = stmt.filter(Feedback.data['model_id'].as_string() == model_id)
+=======
+                    model_id_filter = Feedback.data['model_id'].as_string() == model_id
+                    stmt = stmt.filter(model_id_filter)
+                    count_stmt = count_stmt.filter(model_id_filter)
+>>>>>>> v0.11.0
 
                 order_by = filter.get('order_by')
                 direction = filter.get('direction')
@@ -250,9 +269,15 @@ class FeedbackTable:
             else:
                 stmt = stmt.order_by(Feedback.created_at.desc())
 
+<<<<<<< HEAD
             # Count BEFORE pagination
             count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
+=======
+            # Count before pagination without wrapping the ordered item query.
+            count_result = await db.execute(count_stmt)
+            total = count_result.scalar() or 0
+>>>>>>> v0.11.0
 
             if skip:
                 stmt = stmt.offset(skip)
@@ -375,6 +400,7 @@ class FeedbackTable:
 
         return result
 
+<<<<<<< HEAD
     async def get_feedbacks_by_type(self, type: str, db: Optional[AsyncSession] = None) -> list[FeedbackModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(Feedback).filter_by(type=type).order_by(Feedback.updated_at.desc()))
@@ -395,6 +421,67 @@ class FeedbackTable:
                 .order_by(Feedback.updated_at.desc())
             )
 
+=======
+    async def get_model_feedback_counts_by_day(
+        self,
+        model_id: str,
+        start_date: Optional[int] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> list[ModelHistoryCounts]:
+        """Get aggregated feedback counts per day for a model, preserving all matching days."""
+        from collections import defaultdict
+        from datetime import datetime
+
+        async with get_async_db_context(db) as db:
+            stmt = select(Feedback.created_at, Feedback.data).filter(Feedback.data['model_id'].as_string() == model_id)
+            if start_date is not None:
+                stmt = stmt.filter(Feedback.created_at >= start_date)
+
+            result = await db.execute(stmt.order_by(Feedback.created_at.asc()))
+            rows = result.all()
+
+        daily_counts = defaultdict(lambda: {'won': 0, 'lost': 0})
+
+        for created_at, data in rows:
+            if not data:
+                continue
+
+            rating_str = str(data.get('rating', ''))
+            if rating_str not in ('1', '-1'):
+                continue
+
+            date_str = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
+            if rating_str == '1':
+                daily_counts[date_str]['won'] += 1
+            else:
+                daily_counts[date_str]['lost'] += 1
+
+        return [
+            ModelHistoryCounts(date=date_str, won=counts['won'], lost=counts['lost'])
+            for date_str, counts in sorted(daily_counts.items())
+        ]
+
+    async def get_feedbacks_by_type(self, type: str, db: Optional[AsyncSession] = None) -> list[FeedbackModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Feedback).filter_by(type=type).order_by(Feedback.updated_at.desc()))
+            return [FeedbackModel.model_validate(feedback) for feedback in result.scalars().all()]
+
+    async def get_feedbacks_by_user_id(
+        self,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 30,
+        db: Optional[AsyncSession] = None,
+    ) -> FeedbackListResponse:
+        async with get_async_db_context(db) as db:
+            stmt = (
+                select(Feedback, User)
+                .join(User, Feedback.user_id == User.id)
+                .filter(Feedback.user_id == user_id)
+                .order_by(Feedback.updated_at.desc())
+            )
+
+>>>>>>> v0.11.0
             count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
 

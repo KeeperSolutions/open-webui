@@ -43,6 +43,11 @@ jobs:
 
       - name: Production build
         run: npm run build
+<<<<<<< HEAD
+=======
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+>>>>>>> v0.11.0
 
   # ── Vitest unit tests ────────────────────────────────────────────────────
   unit-tests:

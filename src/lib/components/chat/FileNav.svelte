@@ -25,7 +25,9 @@
 		deleteEntry,
 		moveEntry,
 		setCwd,
-		type FileEntry
+		type FileEntry,
+		type TerminalFileRoot,
+		type TerminalCwd
 	} from '$lib/apis/terminal';
 	import { isCodeFile } from '$lib/utils/codeHighlight';
 	import Folder from '../icons/Folder.svelte';
@@ -88,6 +90,7 @@
 
 	// ── Directory state ──────────────────────────────────────────────────
 	let currentPath = savedPath;
+	let fileRoot: TerminalFileRoot | null = null;
 	let entries: FileEntry[] = [];
 	let loading = false;
 	let error: string | null = null;
@@ -245,6 +248,7 @@
 		return url ? { url, key } : null;
 	};
 
+<<<<<<< HEAD
 	// Discovers server features and the terminal's cwd for a newly-selected
 	// terminal or a chat switch. Defined as a plain function (not inline in
 	// the `$:` block below) so the `savedPath = dir` write — which targets a
@@ -267,6 +271,8 @@
 		loadDir(dir);
 	};
 
+=======
+>>>>>>> v0.11.0
 	// Detect terminal or chat changes — the explicit store references ensure
 	// Svelte re-runs this block when any of them update.
 	// The `mounted` flag prevents the initial run from racing with onMount.
@@ -282,7 +288,11 @@
 		const oldChatId = prevChatId;
 		if (chatChanged) prevChatId = chatId;
 
+<<<<<<< HEAD
 		const terminalChanged = !!terminal && terminal.url !== prevTerminalUrl;
+=======
+		const terminalChanged = terminal && terminal.url !== prevTerminalUrl;
+>>>>>>> v0.11.0
 		if (terminalChanged) prevTerminalUrl = terminal.url;
 
 		if (mounted && terminal) {
@@ -296,7 +306,19 @@
 				loading = true;
 				error = null;
 				entries = [];
+<<<<<<< HEAD
 				onTerminalChanged(terminal, terminalChanged);
+=======
+				(async () => {
+					if (terminalChanged) {
+						const config = await getTerminalConfig(terminal.url, terminal.key);
+						terminalEnabled = config?.features?.terminal !== false;
+					}
+
+					savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
+					loadDir(savedPath);
+				})();
+>>>>>>> v0.11.0
 			}
 		}
 	}
@@ -316,7 +338,52 @@
 	/** Normalize Windows backslashes to forward slashes. */
 	const normalizePath = (p: string) => p.replace(/\\/g, '/');
 
+	const asDirectoryPath = (path: string) => {
+		const normalized = normalizePath(path || '/');
+		return normalized.endsWith('/') ? normalized : `${normalized}/`;
+	};
+
+	const setFileRoot = (root?: TerminalFileRoot) => {
+		fileRoot = root?.path
+			? {
+					path: asDirectoryPath(root.path),
+					label: root.label || 'Home'
+				}
+			: null;
+	};
+
+	const isInsideFileRoot = (path: string) => {
+		if (!fileRoot) return true;
+		const directory = asDirectoryPath(path);
+		return directory === fileRoot.path || directory.startsWith(fileRoot.path);
+	};
+
+	const clampToFileRoot = (path: string) => {
+		if (!fileRoot) return asDirectoryPath(path);
+		return isInsideFileRoot(path) ? asDirectoryPath(path) : fileRoot.path;
+	};
+
+	const applyCwd = (cwd: TerminalCwd | null) => {
+		setFileRoot(cwd?.root);
+		const path = cwd?.cwd ? asDirectoryPath(cwd.cwd) : (fileRoot?.path ?? '/');
+		return clampToFileRoot(path);
+	};
+
 	const buildBreadcrumbs = (path: string) => {
+		if (fileRoot) {
+			const directory = clampToFileRoot(path);
+			const relative = directory === fileRoot.path ? '' : directory.slice(fileRoot.path.length);
+			const parts = relative.split('/').filter(Boolean);
+			return parts.reduce(
+				(acc, part) => {
+					const prev = acc[acc.length - 1];
+					acc.push({ label: part, path: `${prev.path}${part}/` });
+					return acc;
+				},
+				[{ label: fileRoot.label, path: fileRoot.path }]
+			);
+		}
+
 		const parts = path.split('/').filter(Boolean);
 		const isDrive = /^[A-Za-z]:$/.test(parts[0] ?? '');
 		const root = isDrive ? { label: parts[0], path: `${parts[0]}/` } : { label: '/', path: '/' };
@@ -359,6 +426,7 @@
 	const loadDir = async (path: string) => {
 		const terminal = selectedTerminal;
 		if (!terminal) return;
+		const directory = clampToFileRoot(path);
 
 		loading = true;
 		error = null;
@@ -366,15 +434,23 @@
 		previewPort = null;
 		clearFilePreview();
 		clearSelection();
-		currentPath = path;
-		savedPath = path;
-		pushNavHistory(path);
+		currentPath = directory;
+		savedPath = directory;
+		pushNavHistory(directory);
 
+<<<<<<< HEAD
 		const result = await listFiles(terminal.url, terminal.key, path, chatId ?? undefined);
 		loading = false;
 
 		// Set working directory on the terminal server (fire-and-forget)
 		setCwd(terminal.url, terminal.key, path, chatId ?? undefined);
+=======
+		const result = await listFiles(terminal.url, terminal.key, directory, chatId ?? undefined);
+		loading = false;
+
+		// Set working directory on the terminal server (fire-and-forget)
+		setCwd(terminal.url, terminal.key, directory, chatId ?? undefined);
+>>>>>>> v0.11.0
 
 		if (result === null) {
 			error =
@@ -486,10 +562,13 @@
 		fileLoading = false;
 	};
 
+	let downloading = false;
+
 	const downloadFile = async (path: string) => {
 		const terminal = selectedTerminal;
-		if (!terminal) return;
+		if (!terminal || downloading) return;
 
+<<<<<<< HEAD
 		// Directories end with '/' — download as ZIP archive
 		const isDir = path.endsWith('/');
 		const result = isDir
@@ -502,6 +581,30 @@
 		a.download = result.filename;
 		a.click();
 		URL.revokeObjectURL(url);
+=======
+		downloading = true;
+		const toastId = toast.loading($i18n.t('Preparing download...'));
+		try {
+			// Directories end with '/', downloaded as a ZIP archive
+			const isDir = path.endsWith('/');
+			const result = isDir
+				? await archiveFromTerminal(terminal.url, terminal.key, [path.replace(/\/$/, '')])
+				: await downloadFileBlob(terminal.url, terminal.key, path, chatId ?? undefined);
+			if (!result) {
+				toast.error($i18n.t('Download failed'));
+				return;
+			}
+			const url = URL.createObjectURL(result.blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = result.filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		} finally {
+			toast.dismiss(toastId);
+			downloading = false;
+		}
+>>>>>>> v0.11.0
 	};
 
 	// ── Drag-and-drop upload ─────────────────────────────────────────────
@@ -750,7 +853,7 @@
 
 	const bulkDownload = async () => {
 		const terminal = selectedTerminal;
-		if (!terminal) return;
+		if (!terminal || downloading) return;
 
 		const paths = [...selectedEntries].map((p) => p.replace(/\/$/, ''));
 		if (paths.length === 0) return;
@@ -761,15 +864,25 @@
 			return;
 		}
 
-		// Archive everything into a single ZIP
-		const result = await archiveFromTerminal(terminal.url, terminal.key, paths);
-		if (!result) return;
-		const url = URL.createObjectURL(result.blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = result.filename;
-		a.click();
-		URL.revokeObjectURL(url);
+		downloading = true;
+		const toastId = toast.loading($i18n.t('Preparing download...'));
+		try {
+			// Archive everything into a single ZIP
+			const result = await archiveFromTerminal(terminal.url, terminal.key, paths);
+			if (!result) {
+				toast.error($i18n.t('Download failed'));
+				return;
+			}
+			const url = URL.createObjectURL(result.blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = result.filename;
+			a.click();
+			URL.revokeObjectURL(url);
+		} finally {
+			toast.dismiss(toastId);
+			downloading = false;
+		}
 	};
 
 	// Escape to clear selection
@@ -788,9 +901,8 @@
 	};
 
 	// ── Lifecycle ────────────────────────────────────────────────────────
-	onMount(async () => {
+	onMount(() => {
 		const terminal = getTerminal();
-		if (!terminal) return;
 
 		let handledDisplayFile = false;
 
@@ -799,6 +911,10 @@
 			handledDisplayFile = true;
 			showFileNavPath.set(null);
 			filePath = normalizePath(filePath);
+			if (!isInsideFileRoot(filePath)) {
+				await loadDir(fileRoot?.path ?? '/');
+				return;
+			}
 
 			const lastSlash = filePath.lastIndexOf('/');
 			const dir = lastSlash > 0 ? filePath.substring(0, lastSlash + 1) : '/';
@@ -821,6 +937,10 @@
 			if (!filePath || !selectedTerminal) return;
 			showFileNavDir.set(null);
 			filePath = normalizePath(filePath);
+			if (!isInsideFileRoot(filePath)) {
+				await loadDir(fileRoot?.path ?? '/');
+				return;
+			}
 
 			const lastSlash = filePath.lastIndexOf('/');
 			const dir = lastSlash > 0 ? filePath.substring(0, lastSlash + 1) : '/';
@@ -837,9 +957,10 @@
 			}
 		});
 
-		if (!handledDisplayFile) {
+		if (!handledDisplayFile && terminal) {
 			loading = true;
 
+<<<<<<< HEAD
 			// Discover server features on initial mount
 			const config = await getTerminalConfig(terminal.url, terminal.key);
 			terminalEnabled = config?.features?.terminal !== false;
@@ -851,6 +972,20 @@
 				if (cwd) savedPath = cwd.endsWith('/') ? cwd : cwd + '/';
 			}
 			loadDir(savedPath);
+=======
+			void (async () => {
+				// Discover server features on initial mount
+				const config = await getTerminalConfig(terminal.url, terminal.key);
+				terminalEnabled = config?.features?.terminal !== false;
+
+				if (chatId || savedPath === '/') {
+					// Fetch session-specific cwd from the server (or global default for new chats)
+					savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
+				}
+				savedPath = clampToFileRoot(savedPath);
+				loadDir(savedPath);
+			})();
+>>>>>>> v0.11.0
 		}
 
 		mounted = true;
@@ -1323,7 +1458,7 @@
 						<Spinner className="size-4" />
 						{$i18n.t('Uploading...')}
 					</div>
-				{:else if loading}
+				{:else if loading || ($selectedTerminalId && $terminalServers === null)}
 					<div class="flex justify-center pt-8"><Spinner className="size-4" /></div>
 				{:else if error}
 					<div class="p-4 text-xs">{error}</div>
@@ -1339,7 +1474,7 @@
 					</div>
 				{/if}
 
-				{#if !loading && !error && !uploading}
+				{#if !loading && !error && !uploading && !($selectedTerminalId && $terminalServers === null)}
 					{#if creatingFolder}
 						<div class="flex items-center gap-2 px-3 py-1.5">
 							<Folder className="size-4 shrink-0 text-blue-400 dark:text-blue-300" />
@@ -1456,7 +1591,7 @@
 							clip-rule="evenodd"
 						/>
 					</svg>
-					<span class="font-medium">{$i18n.t('Terminal')}</span>
+					<span class="font-normal">{$i18n.t('Terminal')}</span>
 
 					{#if terminalExpanded}
 						<div

@@ -22,11 +22,17 @@
 	export let selectedModelIdx: number = -1;
 	export let item: any = {};
 	export let index: number = -1;
-	export let value: string = '';
+	export let value: string | null = '';
+	export let selectedValues: string[] = [];
+	export let compareEnabled = false;
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
 	export let deleteModelHandler: (model: any) => void = () => {};
+<<<<<<< HEAD
+=======
+	export let selectionOnly = false;
+>>>>>>> v0.11.0
 
 	export let onClick: () => void = () => {};
 
@@ -42,6 +48,7 @@
 	};
 
 	let showMenu = false;
+<<<<<<< HEAD
 
 	// Resolve theme to 'light' or 'dark' for API call
 	$: resolvedTheme = resolveTheme($theme);
@@ -74,23 +81,34 @@
 		}
 		return (item?.model?.info?.meta?.description ?? '').trim();
 	})();
+=======
+	$: isSelected = compareEnabled ? selectedValues.includes(item.value) : value === item.value;
+>>>>>>> v0.11.0
 </script>
 
 <button
 	aria-roledescription="model-item"
 	role="option"
-	aria-selected={value === item.value}
+	aria-selected={isSelected}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
+<<<<<<< HEAD
 	class="flex group/item w-full text-left select-none items-center rounded-xl px-3 py-2 outline-hidden transition-all duration-75 hover:bg-hg-bg-muted dark:hover:bg-gray-800 cursor-pointer data-highlighted:bg-muted {index ===
 	selectedModelIdx
 		? 'bg-hg-bg-muted dark:bg-gray-800 group-hover:bg-transparent'
 		: ''}"
+=======
+	class="group/item flex h-8 w-full cursor-pointer select-none items-center rounded-xl px-2 text-left text-[13px] font-normal text-gray-700 outline-hidden transition-colors duration-75 hover:bg-gray-50/40 dark:text-gray-100 dark:hover:bg-gray-800/40 {index ===
+		selectedModelIdx && !compareEnabled
+		? 'bg-gray-50/70 dark:bg-gray-800/60'
+		: ''} {isSelected ? 'bg-gray-50/70 dark:bg-gray-800/60' : ''}"
+>>>>>>> v0.11.0
 	data-arrow-selected={index === selectedModelIdx}
 	data-value={item.value}
 	on:click={() => {
 		onClick();
 	}}
 >
+<<<<<<< HEAD
 	<div class="flex flex-[1_0_0] items-center gap-2 min-w-px">
 		<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
 			<img
@@ -116,6 +134,49 @@
 			{/if}
 
 			<div class="shrink-0 flex items-center gap-2">
+=======
+	<div class="flex flex-1 flex-col gap-1.5 overflow-hidden">
+		<!-- {#if (item?.model?.tags ?? []).length > 0}
+			<div
+				class="flex gap-0.5 self-center items-start h-full w-full translate-y-[0.5px] overflow-x-auto scrollbar-none"
+			>
+				{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
+					<Tooltip content={tag.name} className="flex-shrink-0">
+						<div
+							class=" text-xs font-normal px-1 rounded-sm uppercase bg-gray-500/20 text-gray-700 dark:text-gray-200"
+						>
+							{tag.name}
+						</div>
+					</Tooltip>
+				{/each}
+			</div>
+		{/if} -->
+
+		<div class="flex items-center gap-2 overflow-hidden">
+			<div class="flex items-center min-w-fit">
+				<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
+					<img
+						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&lang=${$i18n.language}`}
+						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
+						class="flex size-4 items-center rounded-full"
+						loading="lazy"
+						on:error={(e) => {
+							e.currentTarget.src = '/favicon.png';
+						}}
+					/>
+				</Tooltip>
+			</div>
+
+			<div class="flex min-w-0 items-center">
+				<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
+					<div class="line-clamp-1">
+						{item.label}
+					</div>
+				</Tooltip>
+			</div>
+
+			<div class="flex shrink-0 items-center gap-1.5">
+>>>>>>> v0.11.0
 				{#if item.model.owned_by === 'ollama'}
 					{#if (item.model.ollama?.details?.parameter_size ?? '') !== ''}
 						<div class="flex items-center translate-y-[0.5px]">
@@ -131,7 +192,7 @@
 								}`}
 								className="self-end"
 							>
-								<span class=" text-xs font-medium text-gray-600 dark:text-gray-400 line-clamp-1"
+								<span class="line-clamp-1 text-[11px] font-normal text-gray-500 dark:text-gray-400"
 									>{item.model.ollama?.details?.parameter_size ?? ''}</span
 								>
 							</Tooltip>
@@ -140,7 +201,11 @@
 				{/if}
 
 				{#if item.model.loaded}
+<<<<<<< HEAD
 					<div class="flex items-center translate-y-[0.5px] px-0.5">
+=======
+					<div class="flex items-center px-0.5">
+>>>>>>> v0.11.0
 						<Tooltip
 							content={item.model.ollama?.expires_at &&
 							new Date(item.model.ollama?.expires_at * 1000) > new Date()
@@ -151,11 +216,19 @@
 							className="self-end"
 						>
 							<div class=" flex items-center">
+<<<<<<< HEAD
 								<span class="relative flex size-2">
 									<span
 										class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
 									/>
 									<span class="relative inline-flex rounded-full size-2 bg-green-500" />
+=======
+								<span class="relative flex size-1.5">
+									<span
+										class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
+									/>
+									<span class="relative inline-flex size-1.5 rounded-full bg-green-500" />
+>>>>>>> v0.11.0
 								</span>
 							</div>
 						</Tooltip>
@@ -170,7 +243,7 @@
 							<div slot="tooltip" id="tags-{item.model.id}">
 								{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
 									<Tooltip content={tag.name} className="flex-shrink-0">
-										<div class=" text-xs font-medium rounded-sm uppercase text-white">
+										<div class=" text-xs font-normal rounded-sm uppercase text-white">
 											{tag.name}
 										</div>
 									</Tooltip>
@@ -253,8 +326,13 @@
 		</div>
 	</div>
 
+<<<<<<< HEAD
 	<div class="ml-auto pl-2 pr-1 flex items-center gap-1.5 shrink-0">
 		{#if $user?.role === 'admin' && item.model.loaded}
+=======
+	<div class="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+		{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
+>>>>>>> v0.11.0
 			<Tooltip
 				content={`${$i18n.t('Eject')}`}
 				className="shrink-0 group-hover/item:opacity-100 opacity-0"
@@ -273,6 +351,7 @@
 			</Tooltip>
 		{/if}
 
+<<<<<<< HEAD
 		{#if value === item.value}
 			<div class="shrink-0">
 				<Check className="size-5 text-hg-blue dark:text-gray-400" />
@@ -300,5 +379,36 @@
 				<EllipsisVertical className="size-5 text-hg-text-tertiary dark:text-gray-500" />
 			</button>
 		</ModelItemMenu>
+=======
+		{#if !selectionOnly}
+			<ModelItemMenu
+				bind:show={showMenu}
+				model={item.model}
+				{pinModelHandler}
+				{deleteModelHandler}
+				copyLinkHandler={() => {
+					copyLinkHandler(item.model);
+				}}
+			>
+				<button
+					aria-label={`${$i18n.t('More Options')}`}
+					class="flex"
+					on:click={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						showMenu = !showMenu;
+					}}
+				>
+					<EllipsisHorizontal />
+				</button>
+			</ModelItemMenu>
+		{/if}
+
+		{#if isSelected}
+			<div>
+				<Check className="size-3" />
+			</div>
+		{/if}
+>>>>>>> v0.11.0
 	</div>
 </button>

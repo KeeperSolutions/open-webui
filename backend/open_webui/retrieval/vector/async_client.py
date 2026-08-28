@@ -82,6 +82,13 @@ class AsyncVectorDBClient:
         (e.g. already inside a worker thread)."""
         return self._sync
 
+<<<<<<< HEAD
+=======
+    @property
+    def supports_hybrid_search(self) -> bool:
+        return type(self._sync).hybrid_search is not VectorDBBase.hybrid_search
+
+>>>>>>> v0.11.0
     async def has_collection(self, collection_name: str) -> bool:
         return await asyncio.to_thread(self._sync.has_collection, collection_name)
 
@@ -103,6 +110,28 @@ class AsyncVectorDBClient:
     ) -> Optional[SearchResult]:
         return await asyncio.to_thread(self._sync.search, collection_name, vectors, filter, limit)
 
+<<<<<<< HEAD
+=======
+    async def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        vectors: List[List[Union[float, int]]],
+        filter: Optional[Dict] = None,
+        limit: int = 10,
+        hybrid_bm25_weight: float = 0.5,
+    ) -> Optional[SearchResult]:
+        return await asyncio.to_thread(
+            self._sync.hybrid_search,
+            collection_name,
+            query,
+            vectors,
+            filter,
+            limit,
+            hybrid_bm25_weight,
+        )
+
+>>>>>>> v0.11.0
     async def query(
         self,
         collection_name: str,

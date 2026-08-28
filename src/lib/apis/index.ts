@@ -163,7 +163,14 @@ export const getModels = async (
 		// Remove duplicates
 		const modelsMap = {};
 		for (const model of models) {
-			modelsMap[model.id] = model;
+			const existing = modelsMap[model.id];
+			modelsMap[model.id] = existing
+				? {
+						...existing,
+						...model,
+						info: existing.info ?? model.info
+					}
+				: model;
 		}
 
 		models = Object.values(modelsMap);
@@ -1575,10 +1582,37 @@ export const getVersionUpdates = async (token: string) => {
 	return res;
 };
 
+<<<<<<< HEAD
 export const getWebhookUrl = async (token: string) => {
+=======
+export type EventCatalogItem = {
+	event: string;
+	description: string;
+	message: string;
+};
+
+export type EventWebhookTarget = {
+	type: 'user' | 'group';
+	id: string;
+};
+
+export type EventWebhook = {
+	id: string;
+	name: string;
+	url: string;
+	enabled: boolean;
+	events: string[];
+	targets: EventWebhookTarget[] | null;
+	created_at?: number;
+	updated_at?: number;
+};
+
+export const getEvents = async (
+	token: string
+): Promise<{ schema: string; events: EventCatalogItem[] }> => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
+	const res = await fetch(`${WEBUI_BASE_URL}/api/events`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
@@ -1599,21 +1633,18 @@ export const getWebhookUrl = async (token: string) => {
 		throw error;
 	}
 
-	return res.url;
+	return res;
 };
 
-export const updateWebhookUrl = async (token: string, url: string) => {
+export const getEventWebhooks = async (token: string): Promise<EventWebhook[]> => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_BASE_URL}/api/webhook`, {
-		method: 'POST',
+	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks`, {
+		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({
-			url: url
-		})
+		}
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -1629,9 +1660,103 @@ export const updateWebhookUrl = async (token: string, url: string) => {
 		throw error;
 	}
 
-	return res.url;
+	return res;
 };
 
+export const createEventWebhook = async (
+	token: string,
+	webhook: Partial<EventWebhook>
+): Promise<EventWebhook> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(webhook)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateEventWebhook = async (
+	token: string,
+	id: string,
+	webhook: Partial<EventWebhook>
+): Promise<EventWebhook> => {
+>>>>>>> v0.11.0
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks/${id}`, {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify(webhook)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+<<<<<<< HEAD
+=======
+export const deleteEventWebhook = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks/${id}`, {
+		method: 'DELETE',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+>>>>>>> v0.11.0
 export interface ModelConfig {
 	id: string;
 	name: string;

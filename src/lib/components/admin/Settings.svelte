@@ -8,6 +8,7 @@
 	import { getBackendConfig } from '$lib/apis';
 	import Database from './Settings/Database.svelte';
 
+	import Authentication from './Settings/Authentication.svelte';
 	import General from './Settings/General.svelte';
 	import Pipelines from './Settings/Pipelines.svelte';
 	import Audio from './Settings/Audio.svelte';
@@ -19,15 +20,15 @@
 	import WebSearch from './Settings/WebSearch.svelte';
 
 	import Evaluations from './Settings/Evaluations.svelte';
+	import Analytics from './Analytics.svelte';
 	import CodeExecution from './Settings/CodeExecution.svelte';
 	import Providers from './Settings/Providers.svelte';
 	import ModelClasses from './Settings/ModelClasses.svelte';
 	import Integrations from './Settings/Integrations.svelte';
+	import Subagents from './Settings/Subagents.svelte';
 
-	import ChartBar from '../icons/ChartBar.svelte';
-	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
 	import Search from '../icons/Search.svelte';
-	import XMark from '../icons/XMark.svelte';
+	import AdminTabIcon from './Settings/AdminTabIcon.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -39,11 +40,17 @@
 		const tabFromPath = pathParts[pathParts.length - 1];
 		selectedTab = [
 			'general',
+			'authentication',
 			'connections',
 			'models',
+<<<<<<< HEAD
 			'providers',
 			'model-classes',
+=======
+			'subagents',
+>>>>>>> v0.11.0
 			'evaluations',
+			'analytics',
 			'integrations',
 			'documents',
 			'web',
@@ -99,6 +106,24 @@
 			]
 		},
 		{
+			id: 'authentication',
+			title: 'Authentication',
+			route: '/admin/settings/authentication',
+			keywords: [
+				'authentication',
+				'auth',
+				'login',
+				'signup',
+				'ldap',
+				'oauth',
+				'oidc',
+				'sso',
+				'roles',
+				'groups',
+				'identity'
+			]
+		},
+		{
 			id: 'connections',
 			title: 'Connections',
 			route: '/admin/settings/connections',
@@ -130,6 +155,7 @@
 			]
 		},
 		{
+<<<<<<< HEAD
 			id: 'providers',
 			title: 'Providers',
 			route: '/admin/settings/providers',
@@ -151,6 +177,12 @@
 			title: 'Model Classes',
 			route: '/admin/settings/model-classes',
 			keywords: ['model', 'class', 'classes', 'order', 'credit', 'tier']
+=======
+			id: 'subagents',
+			title: 'Sub-agents',
+			route: '/admin/settings/subagents',
+			keywords: ['sub-agents', 'subagents', 'delegation', 'background', 'agents']
+>>>>>>> v0.11.0
 		},
 		{
 			id: 'evaluations',
@@ -159,10 +191,30 @@
 			keywords: ['evaluations', 'feedback', 'rating', 'arena', 'leaderboard', 'preference']
 		},
 		{
+			id: 'analytics',
+			title: 'Analytics',
+			route: '/admin/settings/analytics',
+			keywords: ['analytics', 'usage', 'stats', 'dashboard', 'models', 'users', 'messages']
+		},
+		{
 			id: 'integrations',
 			title: 'Integrations',
 			route: '/admin/settings/integrations',
-			keywords: ['tools', 'integrations', 'plugins', 'extensions', 'functions', 'openapi', 'server']
+			keywords: [
+				'tools',
+				'integrations',
+				'plugins',
+				'extensions',
+				'functions',
+				'openapi',
+				'server',
+				'knowledge',
+				'vector db',
+				'qdrant',
+				'rag',
+				'retrieval',
+				'sources'
+			]
 		},
 		{
 			id: 'documents',
@@ -276,6 +328,10 @@
 	const setFilteredSettings = () => {
 		filteredSettings = allSettings.filter((tab) => {
 			const searchTerm = search.toLowerCase().trim();
+			if (tab.id === 'analytics' && !($config?.features.enable_admin_analytics ?? true)) {
+				return false;
+			}
+
 			return (
 				search === '' ||
 				tab.title.toLowerCase().includes(searchTerm) ||
@@ -293,6 +349,13 @@
 			setFilteredSettings();
 		}, 100);
 	};
+
+	const tabButtonClass = (active) =>
+		`flex items-center gap-1.5 h-7 px-2 lg:w-full shrink-0 rounded-lg text-xs text-left transition-colors duration-75 select-none ${
+			active
+				? 'font-medium text-gray-900 dark:text-white bg-gray-100 dark:bg-white/6'
+				: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+		}`;
 
 	onMount(() => {
 		const containerElement = document.getElementById('admin-settings-tabs-container');
@@ -312,28 +375,24 @@
 	});
 </script>
 
-<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
-	<div
+<div class="flex flex-col lg:flex-row w-full h-full min-h-0 pb-2">
+	<nav
 		id="admin-settings-tabs-container"
-		class="tabs mx-[16px] lg:mx-0 lg:px-[16px] flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+		class="shrink-0 min-w-0 lg:min-h-0 flex lg:block border-b lg:border-b-0 lg:border-r border-gray-100/30 dark:border-white/[0.02] lg:w-[15rem]"
 	>
 		<div
+<<<<<<< HEAD
 			class="hidden lg:flex w-full rounded-full px-2.5 gap-2 bg-gray-100/80 dark:bg-gray-850/80 backdrop-blur-2xl my-1 -mx-1 mt-1.5"
 			id="settings-search"
+=======
+			class="tabs flex min-w-0 flex-1 overflow-x-auto lg:overflow-x-hidden lg:overflow-y-auto lg:flex-col p-1 lg:pt-4 gap-px"
+>>>>>>> v0.11.0
 		>
-			<div class="self-center rounded-l-xl bg-transparent">
-				<Search className="size-3.5" strokeWidth="1.5" />
-			</div>
-			<label class="sr-only" for="search-input-settings-modal">{$i18n.t('Search')}</label>
-			<input
-				class="w-full py-1 text-sm bg-transparent dark:text-gray-300 outline-hidden"
-				bind:value={search}
-				id="search-input-settings-modal"
-				on:input={searchDebounceHandler}
-				placeholder={$i18n.t('Search')}
-			/>
-		</div>
+			<span class="hidden lg:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mb-1">
+				{$i18n.t('Admin')}
+			</span>
 
+<<<<<<< HEAD
 		<!-- {$i18n.t('General')} -->
 		<!-- {$i18n.t('Connections')} -->
 		<!-- {$i18n.t('Models')} -->
@@ -547,20 +606,56 @@
 							/>
 						</svg>
 					{/if}
+=======
+			<div
+				class="hidden lg:flex items-center gap-1.5 h-7 px-2 lg:w-full shrink-0 rounded-lg text-xs bg-gray-50/70 dark:bg-white/[0.03] mb-2"
+				id="settings-search"
+			>
+				<div class="self-center rounded-l-xl bg-transparent">
+					<Search className="size-3.5" strokeWidth="1.5" />
+>>>>>>> v0.11.0
 				</div>
-				<div class=" self-center">{$i18n.t(tab.title)}</div>
-			</a>
-		{/each}
-	</div>
+				<label class="sr-only" for="search-input-admin-settings">{$i18n.t('Search')}</label>
+				<input
+					class="w-full py-1 text-xs bg-transparent dark:text-gray-300 outline-hidden"
+					bind:value={search}
+					id="search-input-admin-settings"
+					on:input={searchDebounceHandler}
+					placeholder={$i18n.t('Search')}
+				/>
+			</div>
 
-	<div
-		class="flex-1 mt-3 lg:mt-1 px-[16px] lg:pr-[16px] lg:pl-0 overflow-y-scroll scrollbar-hidden"
-	>
-		{#if selectedTab === 'general'}
-			<General
-				saveHandler={async () => {
-					toast.success($i18n.t('Settings saved successfully!'));
+			<!-- {$i18n.t('General')} -->
+			<!-- {$i18n.t('Authentication')} -->
+			<!-- {$i18n.t('Connections')} -->
+			<!-- {$i18n.t('Models')} -->
+			<!-- {$i18n.t('Sub-agents')} -->
+			<!-- {$i18n.t('Evaluations')} -->
+			<!-- {$i18n.t('Analytics')} -->
+			<!-- {$i18n.t('Integrations')} -->
+			<!-- {$i18n.t('Documents')} -->
+			<!-- {$i18n.t('Web Search')} -->
+			<!-- {$i18n.t('Code Execution')} -->
+			<!-- {$i18n.t('Interface')} -->
+			<!-- {$i18n.t('Audio')} -->
+			<!-- {$i18n.t('Images')} -->
+			<!-- {$i18n.t('Pipelines')} -->
+			<!-- {$i18n.t('Database')} -->
+			{#each filteredSettings as tab (tab.id)}
+				<a
+					id={tab.id}
+					href={tab.route}
+					draggable="false"
+					class={tabButtonClass(selectedTab === tab.id)}
+				>
+					<AdminTabIcon id={tab.id} className="size-3.5" strokeWidth="2" />
+					<div class="self-center truncate">{$i18n.t(tab.title)}</div>
+				</a>
+			{/each}
+		</div>
+	</nav>
 
+<<<<<<< HEAD
 					await tick();
 					await config.set(await getBackendConfig());
 				}}
@@ -585,59 +680,97 @@
 			<Documents
 				on:save={async () => {
 					toast.success($i18n.t('Settings saved successfully!'));
+=======
+	<div class="flex-1 min-h-0 p-4 lg:px-5 flex flex-col">
+		<div class="w-full h-full min-h-0 flex flex-col">
+			<div class="flex-1 min-h-0 overflow-hidden">
+				{#if selectedTab === 'general'}
+					<General
+						saveHandler={async () => {
+							toast.success($i18n.t('Settings saved successfully!'));
+>>>>>>> v0.11.0
 
-					await tick();
-					await config.set(await getBackendConfig());
-				}}
-			/>
-		{:else if selectedTab === 'web'}
-			<WebSearch
-				saveHandler={async () => {
-					toast.success($i18n.t('Settings saved successfully!'));
+							await tick();
+							await config.set(await getBackendConfig());
+						}}
+					/>
+				{:else if selectedTab === 'authentication'}
+					<Authentication />
+				{:else if selectedTab === 'connections'}
+					<Connections
+						on:save={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'models'}
+					<Models />
+				{:else if selectedTab === 'subagents'}
+					<Subagents />
+				{:else if selectedTab === 'evaluations'}
+					<Evaluations />
+				{:else if selectedTab === 'analytics'}
+					<Analytics />
+				{:else if selectedTab === 'integrations'}
+					<Integrations />
+				{:else if selectedTab === 'documents'}
+					<Documents
+						on:save={async () => {
+							toast.success($i18n.t('Settings saved successfully!'));
 
-					await tick();
-					await config.set(await getBackendConfig());
-				}}
-			/>
-		{:else if selectedTab === 'code-execution'}
-			<CodeExecution
-				saveHandler={async () => {
-					toast.success($i18n.t('Settings saved successfully!'));
+							await tick();
+							await config.set(await getBackendConfig());
+						}}
+					/>
+				{:else if selectedTab === 'web'}
+					<WebSearch
+						saveHandler={async () => {
+							toast.success($i18n.t('Settings saved successfully!'));
 
-					await tick();
-					await config.set(await getBackendConfig());
-				}}
-			/>
-		{:else if selectedTab === 'interface'}
-			<Interface
-				on:save={() => {
-					toast.success($i18n.t('Settings saved successfully!'));
-				}}
-			/>
-		{:else if selectedTab === 'audio'}
-			<Audio
-				saveHandler={() => {
-					toast.success($i18n.t('Settings saved successfully!'));
-				}}
-			/>
-		{:else if selectedTab === 'images'}
-			<Images
-				on:save={() => {
-					toast.success($i18n.t('Settings saved successfully!'));
-				}}
-			/>
-		{:else if selectedTab === 'db'}
-			<Database
-				saveHandler={() => {
-					toast.success($i18n.t('Settings saved successfully!'));
-				}}
-			/>
-		{:else if selectedTab === 'pipelines'}
-			<Pipelines
-				saveHandler={() => {
-					toast.success($i18n.t('Settings saved successfully!'));
-				}}
-			/>
-		{/if}
+							await tick();
+							await config.set(await getBackendConfig());
+						}}
+					/>
+				{:else if selectedTab === 'code-execution'}
+					<CodeExecution
+						saveHandler={async () => {
+							toast.success($i18n.t('Settings saved successfully!'));
+
+							await tick();
+							await config.set(await getBackendConfig());
+						}}
+					/>
+				{:else if selectedTab === 'interface'}
+					<Interface
+						on:save={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'audio'}
+					<Audio
+						saveHandler={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'images'}
+					<Images
+						on:save={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'db'}
+					<Database
+						saveHandler={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{:else if selectedTab === 'pipelines'}
+					<Pipelines
+						saveHandler={() => {
+							toast.success($i18n.t('Settings saved successfully!'));
+						}}
+					/>
+				{/if}
+			</div>
+		</div>
 	</div>
 </div>

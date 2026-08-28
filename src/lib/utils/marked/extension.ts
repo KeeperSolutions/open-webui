@@ -61,6 +61,24 @@ function detailsTokenizer(src: string) {
 
 function detailsStart(src: string) {
 	return src.match(/^<details[\s>]/) ? 0 : -1;
+<<<<<<< HEAD
+=======
+}
+
+function lheadingTokenizer(this: any, src: string): any {
+	const cap = this.rules.block.lheading.exec(src);
+	const detailsIndex = cap?.[1]?.search(/\n<details[\s>]/) ?? -1;
+	if (!cap || detailsIndex === -1) return false;
+
+	const raw = cap[1].slice(0, detailsIndex + 1);
+	const text = raw.slice(0, -1);
+	return {
+		type: 'paragraph',
+		raw,
+		text,
+		tokens: this.lexer.inline(text)
+	};
+>>>>>>> v0.11.0
 }
 
 function detailsRenderer(token: any) {
@@ -89,6 +107,9 @@ function detailsExtension() {
 
 export default function (options = {}) {
 	return {
-		extensions: [detailsExtension(options)]
+		tokenizer: {
+			lheading: lheadingTokenizer as any
+		},
+		extensions: [detailsExtension()]
 	};
 }

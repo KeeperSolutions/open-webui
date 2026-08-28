@@ -172,7 +172,11 @@
 						<div class="flex justify-start px-0.5 mb-0.5">
 							<span
 								class="text-xs w-6 h-6 flex items-center justify-center rounded-full
+<<<<<<< HEAD
 								{isToday(day) ? 'bg-hg-blue text-white' : 'text-gray-500 dark:text-gray-400'}"
+=======
+								{isToday(day) ? 'bg-blue-500 text-white' : 'text-gray-500 dark:text-gray-400'}"
+>>>>>>> v0.11.0
 							>
 								{day.getDate()}
 							</span>
@@ -225,7 +229,11 @@
 										class="text-sm mt-0.5 w-7 h-7 flex items-center justify-center mx-auto rounded-full {isToday(
 											day
 										)
+<<<<<<< HEAD
 											? 'bg-hg-blue text-white'
+=======
+											? 'bg-blue-500 text-white'
+>>>>>>> v0.11.0
 											: ''}"
 									>
 										{day.getDate()}

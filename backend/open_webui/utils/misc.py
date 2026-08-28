@@ -17,6 +17,7 @@ import mimeparse
 from open_webui.env import CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE
 
 log = logging.getLogger(__name__)
+SURROGATE_RE = re.compile('[\ud800-\udfff]')
 
 
 def deep_update(d, u):
@@ -28,18 +29,26 @@ def deep_update(d, u):
     return d
 
 
+def _strip_filter_entry(entry):
+    # Compose list-form env syntax passes surrounding quotes through verbatim
+    return (entry or '').strip().strip('"\'').strip()
+
+
 def get_allow_block_lists(filter_list):
     allow_list = []
     block_list = []
 
-    if filter_list:
-        for d in filter_list:
-            if d.startswith('!'):
-                # Domains starting with "!" → blocked
-                block_list.append(d[1:].strip())
-            else:
-                # Domains starting without "!" → allowed
-                allow_list.append(d.strip())
+    for raw_entry in filter_list or []:
+        entry = _strip_filter_entry(raw_entry)
+        is_blocked = entry.startswith('!')
+        if is_blocked:
+            entry = _strip_filter_entry(entry[1:])
+        if not entry:
+            continue
+        if is_blocked:
+            block_list.append(entry)
+        else:
+            allow_list.append(entry)
 
     return allow_list, block_list
 
@@ -64,6 +73,44 @@ def is_string_allowed(string: Union[str, Sequence[str]], filter_list: list[str |
 
     # Block list always removes matches
     if any(s.endswith(blocked) for s in strings for blocked in block_list):
+        return False
+
+    return True
+
+
+def _host_matches_pattern(host: str, pattern: str) -> bool:
+    """Match a hostname against a filter entry on DNS label boundaries.
+
+    `pattern` matches `host` when equal or a parent domain of it, so `corp.com`
+    matches `api.corp.com` but not `evilcorp.com`, and an IP literal matches only
+    itself. Avoids the raw-suffix confusion of a plain endswith.
+    """
+    host = (host or '').strip().lower().rstrip('.')
+    pattern = (pattern or '').strip().lower().rstrip('.')
+    if not host or not pattern:
+        return False
+    return host == pattern or host.endswith('.' + pattern)
+
+
+def is_host_allowed(host: Union[str, Sequence[str]], filter_list: list[str | None] = None) -> bool:
+    """Allow/block a hostname (or list of hostnames / resolved IPs) against a
+    WEB_FETCH_FILTER_LIST-style filter, matching on label boundaries.
+
+    Pass a parsed hostname, never a full URL: matching against a URL lets a path
+    component defeat the filter (e.g. ``https://blocked.example/x`` ends with ``/x``,
+    not the blocked host). Entries prefixed with ``!`` are blocked; the rest form an allowlist.
+    """
+    if not filter_list:
+        return True
+
+    allow_list, block_list = get_allow_block_lists(filter_list)
+    hosts = [host] if isinstance(host, str) else list(host or [])
+
+    if allow_list:
+        if not any(_host_matches_pattern(h, allowed) for h in hosts for allowed in allow_list):
+            return False
+
+    if any(_host_matches_pattern(h, blocked) for h in hosts for blocked in block_list):
         return False
 
     return True
@@ -121,6 +168,7 @@ def get_last_user_message_item(messages: list[dict]) -> dict | None:
 
 
 def get_content_from_message(message: dict) -> str | None:
+<<<<<<< HEAD
     if isinstance(message.get('content'), list):
         for item in message['content']:
             if item['type'] == 'text':
@@ -130,6 +178,42 @@ def get_content_from_message(message: dict) -> str | None:
     return None
 
 
+=======
+    content = message.get('content')
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                return item.get('text')
+    elif content:
+        return content
+
+    output_text = get_output_text(message.get('output'))
+    return output_text or (content if isinstance(content, str) else None)
+
+
+def get_output_text(output: list | None) -> str:
+    if not isinstance(output, list):
+        return ''
+
+    texts = []
+    for item in output:
+        if not isinstance(item, dict) or item.get('type') != 'message':
+            continue
+
+        parts = item.get('content') or []
+        if not isinstance(parts, list):
+            continue
+
+        text = ''.join(
+            str(part.get('text')) for part in parts if isinstance(part, dict) and part.get('text') is not None
+        )
+        if text.strip():
+            texts.append(text)
+
+    return '\n'.join(texts)
+
+
+>>>>>>> v0.11.0
 def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
     """Drop unpaired tool_use / tool_result from a reconstructed conversation.
 
@@ -174,7 +258,11 @@ def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
 
         # All tool_calls were orphans — keep the message only if it
         # carries meaningful text or reasoning content.
+<<<<<<< HEAD
         content = message.get('content', '')
+=======
+        content = get_content_from_message(message) or ''
+>>>>>>> v0.11.0
         has_meaningful_content = content.strip() if isinstance(content, str) else content
         if has_meaningful_content or message.get('reasoning_content'):
             reconciled_messages.append({key: value for key, value in message.items() if key != 'tool_calls'})
@@ -186,6 +274,10 @@ def convert_output_to_messages(
     output: list,
     raw: bool = False,
     reasoning_format: str | None = None,
+<<<<<<< HEAD
+=======
+    flatten_tool_images: bool = False,
+>>>>>>> v0.11.0
 ) -> list[dict]:
     """
     Convert OR-aligned output items to OpenAI Chat Completion-format messages.
@@ -204,6 +296,11 @@ def convert_output_to_messages(
               (for Ollama, which expects reasoning as tagged content).
             - ``'reasoning_content'``: set as ``reasoning_content`` top-level field
               (for llama.cpp, which routes it via the chat template).
+<<<<<<< HEAD
+=======
+        flatten_tool_images: Move tool output images into a following user
+            message for Chat Completions providers.
+>>>>>>> v0.11.0
     """
     if not output or not isinstance(output, list):
         return []
@@ -212,10 +309,22 @@ def convert_output_to_messages(
     pending_tool_calls = []
     pending_content = []
     pending_reasoning = []  # Only populated when reasoning_format == 'reasoning_content'
+<<<<<<< HEAD
 
     def flush_pending():
         nonlocal pending_content, pending_tool_calls, pending_reasoning
         if not pending_content and not pending_tool_calls and not pending_reasoning:
+=======
+    pending_reasoning_details = []
+    pending_tool_image_urls = []
+    function_call_ids = {
+        item.get('call_id') for item in output if item.get('type') == 'function_call' and item.get('call_id')
+    }
+
+    def flush_pending():
+        nonlocal pending_content, pending_tool_calls, pending_reasoning, pending_reasoning_details
+        if not pending_content and not pending_tool_calls and not pending_reasoning and not pending_reasoning_details:
+>>>>>>> v0.11.0
             return
 
         message = {
@@ -227,13 +336,44 @@ def convert_output_to_messages(
         if pending_reasoning:
             message['reasoning_content'] = '\n'.join(pending_reasoning)
 
+<<<<<<< HEAD
+=======
+        if pending_reasoning_details:
+            message['reasoning_details'] = pending_reasoning_details
+
+>>>>>>> v0.11.0
         messages.append(message)
         pending_content = []
         pending_tool_calls = []
         pending_reasoning = []
+<<<<<<< HEAD
+=======
+        pending_reasoning_details = []
+
+    def flush_tool_images():
+        nonlocal pending_tool_image_urls
+        if not pending_tool_image_urls:
+            return
+
+        messages.append(
+            {
+                'role': 'user',
+                'content': [
+                    {
+                        'type': 'text',
+                        'text': 'Here are the images from the tool results above. Please analyze them.',
+                    },
+                    *[{'type': 'image_url', 'image_url': {'url': url}} for url in pending_tool_image_urls],
+                ],
+            }
+        )
+        pending_tool_image_urls = []
+>>>>>>> v0.11.0
 
     for item in output:
         item_type = item.get('type', '')
+        if item_type != 'function_call_output':
+            flush_tool_images()
 
         if item_type == 'message':
             # Extract text from output_text content parts
@@ -279,8 +419,17 @@ def convert_output_to_messages(
                     if url:
                         image_urls.append(url)
 
-            if image_urls:
-                # Multimodal tool content with image(s)
+            if flatten_tool_images:
+                messages.append(
+                    {
+                        'role': 'tool',
+                        'tool_call_id': item.get('call_id', ''),
+                        'content': content,
+                    }
+                )
+                if item.get('call_id') in function_call_ids:
+                    pending_tool_image_urls.extend(image_urls)
+            elif image_urls:
                 messages.append(
                     {
                         'role': 'tool',
@@ -301,7 +450,12 @@ def convert_output_to_messages(
                 )
 
         elif item_type == 'reasoning':
+<<<<<<< HEAD
             if not reasoning_format:
+=======
+            reasoning_details = item.get('reasoning_details') if raw else None
+            if not reasoning_format and not reasoning_details:
+>>>>>>> v0.11.0
                 continue
 
             reasoning_text = ''
@@ -321,6 +475,14 @@ def convert_output_to_messages(
                 elif reasoning_format == 'reasoning_content':
                     # llama.cpp: collect for reasoning_content field
                     pending_reasoning.append(reasoning_text)
+<<<<<<< HEAD
+=======
+
+            if reasoning_details:
+                pending_reasoning_details.extend(
+                    reasoning_details if isinstance(reasoning_details, list) else [reasoning_details]
+                )
+>>>>>>> v0.11.0
 
         elif item_type == 'open_webui:code_interpreter':
             # Always include code interpreter content so the LLM knows
@@ -346,6 +508,7 @@ def convert_output_to_messages(
             pass
 
     # Flush remaining content/tool_calls
+    flush_tool_images()
     flush_pending()
 
     return reconcile_tool_pairs(messages)
@@ -542,9 +705,9 @@ def strip_empty_content_blocks(messages: list[dict]) -> list[dict]:
     return messages
 
 
-def openai_chat_message_template(model: str):
+def openai_chat_message_template(model: str, message_id: str | None = None):
     return {
-        'id': f'{model}-{str(uuid.uuid4())}',
+        'id': message_id if message_id else f'{model}-{str(uuid.uuid4())}',
         'created': int(time.time()),
         'model': model,
         'choices': [{'index': 0, 'logprobs': None, 'finish_reason': None}],
@@ -557,8 +720,12 @@ def openai_chat_chunk_message_template(
     reasoning_content: str | None = None,
     tool_calls: list[dict | None] = None,
     usage: dict | None = None,
+<<<<<<< HEAD
+=======
+    message_id: str | None = None,
+>>>>>>> v0.11.0
 ) -> dict:
-    template = openai_chat_message_template(model)
+    template = openai_chat_message_template(model, message_id)
     template['object'] = 'chat.completion.chunk'
 
     template['choices'][0]['index'] = 0
@@ -666,6 +833,7 @@ def sanitize_text_for_db(text: str) -> str:
     """Remove null bytes and invalid UTF-8 surrogates from text for PostgreSQL storage."""
     if not isinstance(text, str):
         return text
+<<<<<<< HEAD
     # Fast path: skip work when there are no null bytes (the common case)
     if '\x00' not in text:
         return text
@@ -678,6 +846,12 @@ def sanitize_text_for_db(text: str) -> str:
     except (UnicodeEncodeError, UnicodeDecodeError):
         pass
     return text
+=======
+    # Fast path: skip work when there are no null bytes or surrogate code points.
+    if '\x00' not in text and not SURROGATE_RE.search(text):
+        return text
+    return SURROGATE_RE.sub('', text.replace('\x00', ''))
+>>>>>>> v0.11.0
 
 
 def _strip_null_bytes_deep(obj):
@@ -685,7 +859,14 @@ def _strip_null_bytes_deep(obj):
     if isinstance(obj, str):
         return sanitize_text_for_db(obj)
     elif isinstance(obj, dict):
+<<<<<<< HEAD
         return {k: _strip_null_bytes_deep(v) for k, v in obj.items()}
+=======
+        cleaned = {}
+        for k, v in obj.items():
+            cleaned[sanitize_text_for_db(k) if isinstance(k, str) else k] = _strip_null_bytes_deep(v)
+        return cleaned
+>>>>>>> v0.11.0
     elif isinstance(obj, list):
         return [_strip_null_bytes_deep(v) for v in obj]
     return obj
@@ -695,12 +876,17 @@ def sanitize_data_for_db(obj):
     """Recursively sanitize all strings in a data structure for database storage.
 
     Performs a fast pre-check: serializes the structure once and scans for
+<<<<<<< HEAD
     null bytes.  If none are found (the overwhelmingly common case), the
+=======
+    null bytes or invalid UTF-8 surrogates. If none are found, the
+>>>>>>> v0.11.0
     original object is returned immediately, skipping the expensive
     recursive walk.
     """
     if isinstance(obj, str):
         return sanitize_text_for_db(obj)
+<<<<<<< HEAD
     # Fast path: check for null bytes in the serialized form.
     # json.dumps is implemented in C and much faster than a Python-level
     # recursive walk over every leaf string.
@@ -708,6 +894,17 @@ def sanitize_data_for_db(obj):
         if '\\u0000' not in json.dumps(obj, ensure_ascii=False):
             return obj
     except (TypeError, ValueError):
+=======
+    # Fast path: check for null bytes and surrogate code points in the serialized form.
+    # json.dumps is implemented in C and much faster than a Python-level
+    # recursive walk over every leaf string.
+    try:
+        serialized = json.dumps(obj, ensure_ascii=False)
+        if '\\u0000' not in serialized:
+            serialized.encode('utf-8')
+            return obj
+    except (TypeError, ValueError, UnicodeEncodeError):
+>>>>>>> v0.11.0
         pass
     return _strip_null_bytes_deep(obj)
 

@@ -42,9 +42,9 @@ export const isStaging = () => PUBLIC_DEPLOY_ENVIRONMENT === 'staging';
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const formatNumber = (num: number): string => {
-	return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-		num
-	);
+	return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+		.format(num)
+		.toLowerCase();
 };
 
 function escapeRegExp(string: string): string {
@@ -211,23 +211,26 @@ export const convertMessagesToHistory = (messages) => {
 	let messageId = null;
 
 	for (const message of messages) {
-		messageId = uuidv4();
-
-		if (parentMessageId !== null) {
-			history.messages[parentMessageId].childrenIds = [
-				...history.messages[parentMessageId].childrenIds,
-				messageId
-			];
-		}
+		messageId = message?.id ?? uuidv4();
+		const parentId = message?.parentId ?? parentMessageId;
 
 		history.messages[messageId] = {
 			...message,
 			id: messageId,
-			parentId: parentMessageId,
+			parentId,
 			childrenIds: []
 		};
 
 		parentMessageId = messageId;
+	}
+
+	for (const message of Object.values(history.messages)) {
+		if (message.parentId && history.messages[message.parentId]) {
+			history.messages[message.parentId].childrenIds = [
+				...history.messages[message.parentId].childrenIds,
+				message.id
+			];
+		}
 	}
 
 	history.currentId = messageId;
@@ -262,6 +265,26 @@ export const sanitizeHistory = (history) => {
 		}
 	}
 
+<<<<<<< HEAD
+=======
+	// Recover currentId before role reconstruction can make a malformed node
+	// look valid.
+	const currentMessage = history.messages?.[history.currentId];
+	if (!currentMessage?.id || !currentMessage?.role) {
+		let latestLeafId = null;
+		let latestTimestamp = -1;
+
+		for (const [id, message] of Object.entries(history.messages)) {
+			if (message.childrenIds.length === 0 && (message.timestamp ?? 0) > latestTimestamp) {
+				latestLeafId = id;
+				latestTimestamp = message.timestamp ?? 0;
+			}
+		}
+
+		history.currentId = latestLeafId ?? Object.keys(history.messages)[0] ?? null;
+	}
+
+>>>>>>> v0.11.0
 	// Reconstruct missing parentId and role
 	for (const [id, message] of Object.entries(history.messages)) {
 		// Well-formed: has role and explicit parentId (null is valid for root)
@@ -288,6 +311,7 @@ export const sanitizeHistory = (history) => {
 	for (const message of Object.values(history.messages)) {
 		message.childrenIds = message.childrenIds.filter((childId) => history.messages[childId]);
 	}
+<<<<<<< HEAD
 
 	// Recover currentId if it points to a missing or incomplete node
 	const currentMessage = history.messages?.[history.currentId];
@@ -302,6 +326,8 @@ export const sanitizeHistory = (history) => {
 		}
 		history.currentId = latestLeafId ?? Object.keys(history.messages)[0] ?? null;
 	}
+=======
+>>>>>>> v0.11.0
 };
 
 export const getGravatarURL = (email) => {
@@ -497,6 +523,29 @@ export const formatDate = (inputDate) => {
 		return `{{LOCALIZED_DATE}} at {{LOCALIZED_TIME}}`;
 	}
 };
+
+const messageTimestampDate = (inputDate) => {
+	const date = new Date(inputDate < 1_000_000_000_000 ? inputDate * 1000 : inputDate);
+	return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const formatMessageTimestamp = (inputDate) =>
+	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+		month: 'short',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	}) ?? '';
+
+export const formatMessageTimestampFull = (inputDate) =>
+	messageTimestampDate(inputDate)?.toLocaleString(undefined, {
+		weekday: 'long',
+		year: 'numeric',
+		month: 'long',
+		day: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	}) ?? '';
 
 export const copyToClipboard = async (text, html = null, formatted = false) => {
 	if (formatted) {
@@ -1935,7 +1984,8 @@ export const initMermaid = async () => {
 	mermaid.initialize({
 		startOnLoad: false, // Should be false when using render API
 		theme: document.documentElement.classList.contains('dark') ? 'dark' : 'default',
-		securityLevel: 'loose'
+		securityLevel: 'loose',
+		htmlLabels: false
 	});
 	return mermaid;
 };
@@ -1943,6 +1993,7 @@ export const initMermaid = async () => {
 const cleanupMermaidTempElements = (id: string) => {
 	if (typeof document === 'undefined') {
 		return;
+<<<<<<< HEAD
 	}
 
 	document.getElementById(id)?.remove();
@@ -2005,17 +2056,108 @@ export const renderMermaidDiagram = async (
 		// Mermaid can leave temporary d*/i* wrappers on error paths.
 		cleanupMermaidTempElements(id);
 	}
+=======
+	}
+
+	document.getElementById(id)?.remove();
+	document.getElementById(`d${id}`)?.remove();
+	document.getElementById(`i${id}`)?.remove();
+>>>>>>> v0.11.0
 };
 
-export const renderVegaVisualization = async (spec: string, i18n?: any) => {
+// Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
+// HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
+export const sanitizeSvg = (svg: string): string =>
+	DOMPurify.sanitize(svg, {
+		USE_PROFILES: { svg: true, svgFilters: true },
+		WHOLE_DOCUMENT: false,
+		ADD_TAGS: ['style', 'foreignObject'],
+		ADD_ATTR: [
+			'class',
+			'style',
+			'id',
+			'data-*',
+			'viewBox',
+			'preserveAspectRatio',
+			'markerWidth',
+			'markerHeight',
+			'markerUnits',
+			'refX',
+			'refY',
+			'orient',
+			'href',
+			'xlink:href',
+			'dominant-baseline',
+			'text-anchor',
+			'clipPathUnits',
+			'filterUnits',
+			'patternUnits',
+			'patternContentUnits',
+			'maskUnits',
+			'role',
+			'aria-label',
+			'aria-labelledby',
+			'aria-hidden',
+			'tabindex'
+		],
+		SANITIZE_DOM: true
+	});
+
+export const renderMermaidDiagram = async (
+	mermaid: typeof import('mermaid').default,
+	code: string,
+	renderId?: string
+) => {
+	const id = renderId ?? `mermaid-${uuidv4()}`;
+	try {
+		const parseResult = await mermaid.parse(code, { suppressErrors: false });
+		if (parseResult) {
+			const { svg } = await mermaid.render(id, code);
+			return sanitizeSvg(svg);
+		}
+		return '';
+	} finally {
+		// Mermaid can leave temporary d*/i* wrappers on error paths.
+		cleanupMermaidTempElements(id);
+	}
+};
+
+export const renderVegaVisualization = async (spec: string, lang: string = '', i18n?: any) => {
 	const vega = await import('vega');
 	const parsedSpec = JSON.parse(spec);
+	const hasVegaLiteKeys =
+		'mark' in parsedSpec ||
+		'encoding' in parsedSpec ||
+		'layer' in parsedSpec ||
+		'hconcat' in parsedSpec ||
+		'vconcat' in parsedSpec ||
+		'repeat' in parsedSpec ||
+		'facet' in parsedSpec;
+	const isVegaLite =
+		lang === 'vega-lite' ||
+		(parsedSpec.$schema && parsedSpec.$schema.includes('vega-lite')) ||
+		hasVegaLiteKeys;
 	let vegaSpec = parsedSpec;
-	if (parsedSpec.$schema && parsedSpec.$schema.includes('vega-lite')) {
+	if (isVegaLite) {
 		const vegaLite = await import('vega-lite');
 		vegaSpec = vegaLite.compile(parsedSpec).spec;
 	}
-	const view = new vega.View(vega.parse(vegaSpec), { renderer: 'none' });
+	// Specs come from untrusted chat content: block external loads via data.url (loader.load)
+	// and image mark hrefs emitted into the SVG (loader.sanitize).
+	const loader = vega.loader();
+	loader.load = async () => {
+		throw new Error('External resource loading is disabled for rendered visualizations');
+	};
+	const sanitize = loader.sanitize.bind(loader);
+	loader.sanitize = async (uri: string, options: any) => {
+		// Resolve with the browser's URL parser so encoding tricks match what it would fetch
+		const resolved = new URL(uri, document.baseURI);
+		if (resolved.protocol !== 'data:' && resolved.origin !== location.origin) {
+			throw new Error('External resource loading is disabled for rendered visualizations');
+		}
+		return sanitize(uri, options);
+	};
+	const view = new vega.View(vega.parse(vegaSpec), { loader, renderer: 'none' });
 	const svg = await view.toSVG();
 	return svg;
 };

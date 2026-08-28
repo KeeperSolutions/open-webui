@@ -28,10 +28,17 @@ def build_firecrawl_url(base_url: str | None, path: str) -> str:
 
 
 def build_firecrawl_headers(api_key: str | None) -> dict[str, str]:
+<<<<<<< HEAD
     return {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {api_key or ""}',
     }
+=======
+    headers = {'Content-Type': 'application/json'}
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+    return headers
+>>>>>>> v0.11.0
 
 
 def get_firecrawl_timeout_seconds(timeout: Any) -> float | None:

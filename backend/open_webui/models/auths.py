@@ -6,19 +6,40 @@ import logging
 import uuid
 from typing import Optional
 
+<<<<<<< HEAD
+=======
+import bcrypt
+>>>>>>> v0.11.0
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel, UserProfileImageResponse, Users
 from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, field_validator
 from sqlalchemy import Boolean, Column, String, Text, delete, select, update
+<<<<<<< HEAD
+=======
+from sqlalchemy.exc import IntegrityError
+>>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
+<<<<<<< HEAD
+=======
+# Pre-computed hash verified on signin paths that lack a real credential
+# (unknown user, inactive account) so response timing cannot reveal
+# whether an account exists (CWE-208).
+PLACEHOLDER_HASH = bcrypt.hashpw(b'placeholder', bcrypt.gensalt()).decode('utf-8')
+>>>>>>> v0.11.0
 
 class Auth(Base):  # credential ↔ user linkage
     """Maps a user ID to an email/password pair with an active flag."""
 
+<<<<<<< HEAD
+=======
+class Auth(Base):  # credential ↔ user linkage
+    """Maps a user ID to an email/password pair with an active flag."""
+
+>>>>>>> v0.11.0
     __tablename__ = 'auth'
 
     id = Column(String, primary_key=True, unique=True)  # mirrors User.id
@@ -118,6 +139,7 @@ class AuthsTable:
             )
             session.add(credential)
 
+<<<<<<< HEAD
             created_user = await Users.insert_new_user(
                 new_id,
                 name,
@@ -130,6 +152,22 @@ class AuthsTable:
             # persist both records and reload generated defaults
             await session.commit()
             await session.refresh(credential)
+=======
+            try:
+                created_user = await Users.insert_new_user(
+                    new_id,
+                    name,
+                    email,
+                    profile_image_url,
+                    role,
+                    oauth=oauth,
+                    db=session,
+                )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                raise
+>>>>>>> v0.11.0
             return created_user if credential and created_user else None
 
     async def authenticate_user(
@@ -142,13 +180,23 @@ class AuthsTable:
         log.info('authenticate_user: %s', email)
         resolved = await Users.get_user_by_email(email, db=db)
         if not resolved:
+<<<<<<< HEAD
+=======
+            await verify_password(PLACEHOLDER_HASH)
+>>>>>>> v0.11.0
             return
         # load the credential row and verify the password hash
         async with get_async_db_context(db) as session:
             credential = await session.get(Auth, resolved.id)
             if not credential or not credential.active:
+<<<<<<< HEAD
                 return
             if not verify_password(credential.password):
+=======
+                await verify_password(PLACEHOLDER_HASH)
+                return
+            if not await verify_password(credential.password):
+>>>>>>> v0.11.0
                 return
             return resolved
 

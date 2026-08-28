@@ -9,7 +9,11 @@
 <img
 	aria-hidden="true"
 	src={safeImageUrl(src)}
+<<<<<<< HEAD
 	class=" {className} object-cover rounded-full"
+=======
+	class=" {className} object-cover rounded-2xl"
+>>>>>>> v0.11.0
 	alt="profile"
 	draggable="false"
 	loading="lazy"
