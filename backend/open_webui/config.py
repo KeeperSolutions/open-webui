@@ -497,7 +497,6 @@ OAUTH_CLIENT_TIMEOUT = ConfigVar(
 
 terminal_server_connections = json.loads(os.getenv('TERMINAL_SERVER_CONNECTIONS', '[]'))
 
-<<<<<<< HEAD
 TERMINAL_SERVER_CONNECTIONS = ConfigVar(
     'TERMINAL_SERVER_CONNECTIONS',
     'terminal_server.connections',
@@ -1480,20 +1479,10 @@ Your task is to synthesize these responses into a single, high-quality response.
 
 Responses from models: {{responses}}"""
 
-=======
-TERMINAL_SERVER_CONNECTIONS = terminal_server_connections
-
-try:
-    TERMINAL_PROXY_HEADERS = json.loads(os.getenv('TERMINAL_PROXY_HEADERS', '{}'))
-except Exception:
-    TERMINAL_PROXY_HEADERS = {}
->>>>>>> v0.11.0
-
 ####################################
 # Code Interpreter
 ####################################
 
-<<<<<<< HEAD
 ENABLE_CODE_EXECUTION = ConfigVar(
     'ENABLE_CODE_EXECUTION',
     'code_execution.enable',
@@ -1548,6 +1537,22 @@ ENABLE_MEMORIES = ConfigVar(
     'memories.enable',
     os.getenv('ENABLE_MEMORIES', 'True').lower() == 'true',
 )
+
+# v0.11.0 memory-system additions. The fork's routers/auths.py ADMIN_CONFIG_KEYS
+# already expects ENABLE_MEMORY_SYSTEM_CONTEXT to be admin-configurable, so it
+# gets a ConfigVar. The background-review knobs below are upstream plumbing for
+# a feature the fork hasn't adopted yet — kept as plain env reads for now (same
+# treatment as AUTOMATION_AUTH_TOKEN_EXPIRES_IN); give them ConfigVars and wire
+# them into auths.py if/when the background-review feature is merged.
+ENABLE_MEMORY_SYSTEM_CONTEXT = ConfigVar(
+    'ENABLE_MEMORY_SYSTEM_CONTEXT',
+    'memories.system_context.enable',
+    os.getenv('ENABLE_MEMORY_SYSTEM_CONTEXT', 'True').lower() == 'true',
+)
+ENABLE_MEMORY_BACKGROUND_REVIEW = os.getenv('ENABLE_MEMORY_BACKGROUND_REVIEW', 'False').lower() == 'true'
+MEMORIES_REVIEW_INTERVAL_TURNS = int(os.getenv('MEMORIES_REVIEW_INTERVAL_TURNS', '10'))
+MEMORIES_USER_CHAR_LIMIT = int(os.getenv('MEMORIES_USER_CHAR_LIMIT', '2000'))
+MEMORIES_CONTEXT_CHAR_LIMIT = int(os.getenv('MEMORIES_CONTEXT_CHAR_LIMIT', '2000'))
 
 CODE_INTERPRETER_ENGINE = ConfigVar(
     'CODE_INTERPRETER_ENGINE',
@@ -1604,59 +1609,6 @@ CODE_INTERPRETER_JUPYTER_TIMEOUT = ConfigVar(
             os.getenv('CODE_EXECUTION_JUPYTER_TIMEOUT', '60'),
         )
     ),
-=======
-ENABLE_CODE_EXECUTION = os.getenv('ENABLE_CODE_EXECUTION', 'True').lower() == 'true'
-
-CODE_EXECUTION_ENGINE = os.getenv('CODE_EXECUTION_ENGINE', 'pyodide')
-
-CODE_EXECUTION_JUPYTER_URL = os.getenv('CODE_EXECUTION_JUPYTER_URL', '')
-
-CODE_EXECUTION_JUPYTER_AUTH = os.getenv('CODE_EXECUTION_JUPYTER_AUTH', '')
-
-CODE_EXECUTION_JUPYTER_AUTH_TOKEN = os.getenv('CODE_EXECUTION_JUPYTER_AUTH_TOKEN', '')
-
-
-CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = os.getenv('CODE_EXECUTION_JUPYTER_AUTH_PASSWORD', '')
-
-CODE_EXECUTION_JUPYTER_TIMEOUT = int(os.getenv('CODE_EXECUTION_JUPYTER_TIMEOUT', '60'))
-
-ENABLE_CODE_INTERPRETER = os.getenv('ENABLE_CODE_INTERPRETER', 'True').lower() == 'true'
-
-ENABLE_MEMORIES = os.getenv('ENABLE_MEMORIES', 'True').lower() == 'true'
-ENABLE_MEMORY_SYSTEM_CONTEXT = os.getenv('ENABLE_MEMORY_SYSTEM_CONTEXT', 'True').lower() == 'true'
-ENABLE_MEMORY_BACKGROUND_REVIEW = os.getenv('ENABLE_MEMORY_BACKGROUND_REVIEW', 'False').lower() == 'true'
-MEMORIES_REVIEW_INTERVAL_TURNS = int(os.getenv('MEMORIES_REVIEW_INTERVAL_TURNS', '10'))
-MEMORIES_USER_CHAR_LIMIT = int(os.getenv('MEMORIES_USER_CHAR_LIMIT', '2000'))
-MEMORIES_CONTEXT_CHAR_LIMIT = int(os.getenv('MEMORIES_CONTEXT_CHAR_LIMIT', '2000'))
-
-CODE_INTERPRETER_ENGINE = os.getenv('CODE_INTERPRETER_ENGINE', 'pyodide')
-
-CODE_INTERPRETER_PROMPT_TEMPLATE = os.getenv('CODE_INTERPRETER_PROMPT_TEMPLATE', '')
-
-CODE_INTERPRETER_JUPYTER_URL = os.getenv('CODE_INTERPRETER_JUPYTER_URL', os.getenv('CODE_EXECUTION_JUPYTER_URL', ''))
-
-CODE_INTERPRETER_JUPYTER_AUTH = os.getenv(
-    'CODE_INTERPRETER_JUPYTER_AUTH',
-    os.getenv('CODE_EXECUTION_JUPYTER_AUTH', ''),
-)
-
-CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = os.getenv(
-    'CODE_INTERPRETER_JUPYTER_AUTH_TOKEN',
-    os.getenv('CODE_EXECUTION_JUPYTER_AUTH_TOKEN', ''),
-)
-
-
-CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = os.getenv(
-    'CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD',
-    os.getenv('CODE_EXECUTION_JUPYTER_AUTH_PASSWORD', ''),
-)
-
-CODE_INTERPRETER_JUPYTER_TIMEOUT = int(
-    os.getenv(
-        'CODE_INTERPRETER_JUPYTER_TIMEOUT',
-        os.getenv('CODE_EXECUTION_JUPYTER_TIMEOUT', '60'),
-    )
->>>>>>> v0.11.0
 )
 
 CODE_INTERPRETER_BLOCKED_MODULES = [
