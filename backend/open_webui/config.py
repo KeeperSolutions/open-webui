@@ -1988,7 +1988,6 @@ VALKEY_HNSW_EF_RUNTIME = int(os.getenv('VALKEY_HNSW_EF_RUNTIME', '10'))
 
 
 # If configured, Google Drive will be available as an upload option.
-<<<<<<< HEAD
 ENABLE_GOOGLE_DRIVE_INTEGRATION = ConfigVar(
     'ENABLE_GOOGLE_DRIVE_INTEGRATION',
     'google_drive.enable',
@@ -2042,6 +2041,24 @@ CONTENT_EXTRACTION_ENGINE = ConfigVar(
     'CONTENT_EXTRACTION_ENGINE',
     'rag.CONTENT_EXTRACTION_ENGINE',
     os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower(),
+)
+
+# v0.11.0 addition — parsed list of MIME types the content-extraction engine
+# is allowed to handle for media. routers/retrieval.py already treats this as
+# admin-editable (ADMIN mapping + config assignment), so it gets a ConfigVar.
+_content_extraction_media_mime_types = os.getenv('CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES')
+CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES = ConfigVar(
+    'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES',
+    'rag.content_extraction.supported_media_mime_types',
+    (
+        [
+            mime_type.strip()
+            for mime_type in _content_extraction_media_mime_types.split(',')
+            if mime_type.strip()
+        ]
+        if _content_extraction_media_mime_types is not None
+        else None
+    ),
 )
 
 DATALAB_MARKER_API_KEY = ConfigVar(
@@ -2133,73 +2150,6 @@ MINERU_API_KEY = ConfigVar(
     'rag.mineru_api_key',
     os.getenv('MINERU_API_KEY', ''),
 )
-=======
-ENABLE_GOOGLE_DRIVE_INTEGRATION = os.getenv('ENABLE_GOOGLE_DRIVE_INTEGRATION', 'False').lower() == 'true'
-
-GOOGLE_DRIVE_CLIENT_ID = os.getenv('GOOGLE_DRIVE_CLIENT_ID', '')
-
-GOOGLE_DRIVE_API_KEY = os.getenv('GOOGLE_DRIVE_API_KEY', '')
-
-ENABLE_ONEDRIVE_INTEGRATION = os.getenv('ENABLE_ONEDRIVE_INTEGRATION', 'False').lower() == 'true'
-
-
-ONEDRIVE_CLIENT_ID = os.getenv('ONEDRIVE_CLIENT_ID', '')
-ONEDRIVE_CLIENT_ID_PERSONAL = os.getenv('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID)
-ONEDRIVE_CLIENT_ID_BUSINESS = os.getenv('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID)
-
-ENABLE_ONEDRIVE_PERSONAL = os.getenv('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true' and bool(
-    ONEDRIVE_CLIENT_ID_PERSONAL
-)
-ENABLE_ONEDRIVE_BUSINESS = os.getenv('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true' and bool(
-    ONEDRIVE_CLIENT_ID_BUSINESS
-)
-
-ONEDRIVE_SHAREPOINT_URL = os.getenv('ONEDRIVE_SHAREPOINT_URL', '')
-
-ONEDRIVE_SHAREPOINT_TENANT_ID = os.getenv('ONEDRIVE_SHAREPOINT_TENANT_ID', '')
-
-# RAG Content Extraction
-CONTENT_EXTRACTION_ENGINE = os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower()
-
-content_extraction_supported_media_mime_types = os.getenv('CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES')
-CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES = (
-    [mime_type.strip() for mime_type in content_extraction_supported_media_mime_types.split(',') if mime_type.strip()]
-    if content_extraction_supported_media_mime_types is not None
-    else None
-)
-
-DATALAB_MARKER_API_KEY = os.getenv('DATALAB_MARKER_API_KEY', '')
-
-DATALAB_MARKER_API_BASE_URL = os.getenv('DATALAB_MARKER_API_BASE_URL', '')
-
-DATALAB_MARKER_ADDITIONAL_CONFIG = os.getenv('DATALAB_MARKER_ADDITIONAL_CONFIG', '')
-
-DATALAB_MARKER_USE_LLM = os.getenv('DATALAB_MARKER_USE_LLM', 'false').lower() == 'true'
-
-DATALAB_MARKER_SKIP_CACHE = os.getenv('DATALAB_MARKER_SKIP_CACHE', 'false').lower() == 'true'
-
-DATALAB_MARKER_FORCE_OCR = os.getenv('DATALAB_MARKER_FORCE_OCR', 'false').lower() == 'true'
-
-DATALAB_MARKER_PAGINATE = os.getenv('DATALAB_MARKER_PAGINATE', 'false').lower() == 'true'
-
-DATALAB_MARKER_STRIP_EXISTING_OCR = os.getenv('DATALAB_MARKER_STRIP_EXISTING_OCR', 'false').lower() == 'true'
-
-DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = (
-    os.getenv('DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION', 'false').lower() == 'true'
-)
-
-DATALAB_MARKER_FORMAT_LINES = os.getenv('DATALAB_MARKER_FORMAT_LINES', 'false').lower() == 'true'
-
-DATALAB_MARKER_OUTPUT_FORMAT = os.getenv('DATALAB_MARKER_OUTPUT_FORMAT', 'markdown')
-
-MINERU_API_MODE = os.getenv('MINERU_API_MODE', 'local')
-
-MINERU_API_URL = os.getenv('MINERU_API_URL', 'http://localhost:8000')
-
-MINERU_API_TIMEOUT = os.getenv('MINERU_API_TIMEOUT', '300')
-
-MINERU_API_KEY = os.getenv('MINERU_API_KEY', '')
->>>>>>> v0.11.0
 
 mineru_params = os.getenv('MINERU_PARAMS', '')
 try:
@@ -2207,7 +2157,6 @@ try:
 except json.JSONDecodeError:
     mineru_params = {}
 
-<<<<<<< HEAD
 MINERU_PARAMS = ConfigVar(
     'MINERU_PARAMS',
     'rag.mineru_params',
@@ -2232,6 +2181,23 @@ EXTERNAL_DOCUMENT_LOADER_API_KEY = ConfigVar(
     os.getenv('EXTERNAL_DOCUMENT_LOADER_API_KEY', ''),
 )
 
+# v0.11.0 addition — JSON dict of headers forwarded to the external document
+# loader. Consumed by retrieval/loaders/main.py + retrieval/utils.py and
+# admin-editable via routers/retrieval.py, so it gets a ConfigVar.
+_external_document_loader_headers = os.getenv('EXTERNAL_DOCUMENT_LOADER_HEADERS', '')
+try:
+    _external_document_loader_headers = json.loads(_external_document_loader_headers)
+except json.JSONDecodeError:
+    _external_document_loader_headers = {}
+if not isinstance(_external_document_loader_headers, dict):
+    _external_document_loader_headers = {}
+
+EXTERNAL_DOCUMENT_LOADER_HEADERS = ConfigVar(
+    'EXTERNAL_DOCUMENT_LOADER_HEADERS',
+    'rag.external_document_loader_headers',
+    _external_document_loader_headers,
+)
+
 TIKA_SERVER_URL = ConfigVar(
     'TIKA_SERVER_URL',
     'rag.tika_server_url',
@@ -2249,31 +2215,6 @@ DOCLING_API_KEY = ConfigVar(
     'rag.docling_api_key',
     os.getenv('DOCLING_API_KEY', ''),
 )
-=======
-MINERU_PARAMS = mineru_params
-
-MINERU_FILE_EXTENSIONS = [ext.strip() for ext in os.getenv('MINERU_FILE_EXTENSIONS', 'pdf').split(',') if ext.strip()]
-
-EXTERNAL_DOCUMENT_LOADER_URL = os.getenv('EXTERNAL_DOCUMENT_LOADER_URL', '')
-
-EXTERNAL_DOCUMENT_LOADER_API_KEY = os.getenv('EXTERNAL_DOCUMENT_LOADER_API_KEY', '')
-
-external_document_loader_headers = os.getenv('EXTERNAL_DOCUMENT_LOADER_HEADERS', '')
-try:
-    external_document_loader_headers = json.loads(external_document_loader_headers)
-except json.JSONDecodeError:
-    external_document_loader_headers = {}
-if not isinstance(external_document_loader_headers, dict):
-    external_document_loader_headers = {}
-
-EXTERNAL_DOCUMENT_LOADER_HEADERS = external_document_loader_headers
-
-TIKA_SERVER_URL = os.getenv('TIKA_SERVER_URL', 'http://tika:9998')
-
-DOCLING_SERVER_URL = os.getenv('DOCLING_SERVER_URL', 'http://docling:5001')
-
-DOCLING_API_KEY = os.getenv('DOCLING_API_KEY', '')
->>>>>>> v0.11.0
 
 docling_params = os.getenv('DOCLING_PARAMS', '')
 try:
@@ -2281,7 +2222,6 @@ try:
 except json.JSONDecodeError:
     docling_params = {}
 
-<<<<<<< HEAD
 DOCLING_PARAMS = ConfigVar(
     'DOCLING_PARAMS',
     'rag.docling_params',
@@ -2316,6 +2256,13 @@ MISTRAL_OCR_API_KEY = ConfigVar(
     'MISTRAL_OCR_API_KEY',
     'rag.mistral_ocr_api_key',
     os.getenv('MISTRAL_OCR_API_KEY', ''),
+)
+
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+MISTRAL_OCR_USE_BASE64 = ConfigVar(
+    'MISTRAL_OCR_USE_BASE64',
+    'rag.mistral_ocr_use_base64',
+    os.getenv('MISTRAL_OCR_USE_BASE64', 'False').lower() == 'true',
 )
 
 PADDLEOCR_VL_BASE_URL = ConfigVar(
@@ -2384,6 +2331,10 @@ RAG_FILE_MAX_SIZE = ConfigVar(
     (int(os.getenv('RAG_FILE_MAX_SIZE')) if os.getenv('RAG_FILE_MAX_SIZE') else None),
 )
 
+# v0.11.0 addition — imported as a plain int by models/knowledge.py for a
+# SQL func.substr() cap; a static tuning constant, not admin-editable.
+RAG_FILE_CONTENT_SEARCH_MAX_CHARS = int(os.getenv('RAG_FILE_CONTENT_SEARCH_MAX_CHARS', str(64 * 1024 * 1024)))
+
 FILE_IMAGE_COMPRESSION_WIDTH = ConfigVar(
     'FILE_IMAGE_COMPRESSION_WIDTH',
     'file.image_compression_width',
@@ -2427,78 +2378,19 @@ RAG_EMBEDDING_MODEL = ConfigVar(
     os.getenv('RAG_EMBEDDING_MODEL', 'sentence-transformers/all-MiniLM-L6-v2'),
 )
 log.info(f'Embedding model set: {RAG_EMBEDDING_MODEL.value}')
-=======
-DOCLING_PARAMS = docling_params
 
-DOCUMENT_INTELLIGENCE_ENDPOINT = os.getenv('DOCUMENT_INTELLIGENCE_ENDPOINT', '')
-
-DOCUMENT_INTELLIGENCE_KEY = os.getenv('DOCUMENT_INTELLIGENCE_KEY', '')
-
-DOCUMENT_INTELLIGENCE_MODEL = os.getenv('DOCUMENT_INTELLIGENCE_MODEL', 'prebuilt-layout')
-
-MISTRAL_OCR_API_BASE_URL = os.getenv('MISTRAL_OCR_API_BASE_URL', 'https://api.mistral.ai/v1')
-
-MISTRAL_OCR_API_KEY = os.getenv('MISTRAL_OCR_API_KEY', '')
-
-MISTRAL_OCR_USE_BASE64 = os.getenv('MISTRAL_OCR_USE_BASE64', 'False').lower() == 'true'
-
-PADDLEOCR_VL_BASE_URL = os.getenv('PADDLEOCR_VL_BASE_URL', 'http://localhost:8080')
-
-PADDLEOCR_VL_TOKEN = os.getenv('PADDLEOCR_VL_TOKEN', '')
-
-BYPASS_EMBEDDING_AND_RETRIEVAL = os.getenv('BYPASS_EMBEDDING_AND_RETRIEVAL', 'False').lower() == 'true'
-
-
-RAG_TOP_K = int(os.getenv('RAG_TOP_K', '3'))
-RAG_TOP_K_RERANKER = int(os.getenv('RAG_TOP_K_RERANKER', '3'))
-RAG_RELEVANCE_THRESHOLD = float(os.getenv('RAG_RELEVANCE_THRESHOLD', '0.0'))
-RAG_HYBRID_BM25_WEIGHT = float(os.getenv('RAG_HYBRID_BM25_WEIGHT', '0.5'))
-
-ENABLE_RAG_HYBRID_SEARCH = os.getenv('ENABLE_RAG_HYBRID_SEARCH', '').lower() == 'true'
-
-ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
-    os.getenv('ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS', 'False').lower() == 'true'
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+RAG_TOKENIZER_MODEL = ConfigVar(
+    'RAG_TOKENIZER_MODEL',
+    'rag.tokenizer_model',
+    os.getenv('RAG_TOKENIZER_MODEL', ''),
 )
-
-RAG_FULL_CONTEXT = os.getenv('RAG_FULL_CONTEXT', 'False').lower() == 'true'
-
-RAG_FILE_MAX_COUNT = int(os.getenv('RAG_FILE_MAX_COUNT')) if os.getenv('RAG_FILE_MAX_COUNT') else None
-
-RAG_FILE_MAX_SIZE = int(os.getenv('RAG_FILE_MAX_SIZE')) if os.getenv('RAG_FILE_MAX_SIZE') else None
-
-RAG_FILE_CONTENT_SEARCH_MAX_CHARS = int(os.getenv('RAG_FILE_CONTENT_SEARCH_MAX_CHARS', str(64 * 1024 * 1024)))
-
-FILE_IMAGE_COMPRESSION_WIDTH = (
-    int(os.getenv('FILE_IMAGE_COMPRESSION_WIDTH')) if os.getenv('FILE_IMAGE_COMPRESSION_WIDTH') else None
-)
-
-FILE_IMAGE_COMPRESSION_HEIGHT = (
-    int(os.getenv('FILE_IMAGE_COMPRESSION_HEIGHT')) if os.getenv('FILE_IMAGE_COMPRESSION_HEIGHT') else None
-)
-
-
-RAG_ALLOWED_FILE_EXTENSIONS = [
-    ext.strip() for ext in os.getenv('RAG_ALLOWED_FILE_EXTENSIONS', '').split(',') if ext.strip()
-]
-
-RAG_EMBEDDING_ENGINE = os.getenv('RAG_EMBEDDING_ENGINE', '')
-
-PDF_EXTRACT_IMAGES = os.getenv('PDF_EXTRACT_IMAGES', 'False').lower() == 'true'
-
-PDF_LOADER_MODE = os.getenv('PDF_LOADER_MODE', 'page')
-
-RAG_EMBEDDING_MODEL = os.getenv('RAG_EMBEDDING_MODEL', 'sentence-transformers/all-MiniLM-L6-v2')
-log.info(f'Embedding model set: {RAG_EMBEDDING_MODEL}')
-
-RAG_TOKENIZER_MODEL = os.getenv('RAG_TOKENIZER_MODEL', '')
->>>>>>> v0.11.0
 
 RAG_EMBEDDING_MODEL_AUTO_UPDATE = (
     not OFFLINE_MODE and os.getenv('RAG_EMBEDDING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
 )
 
 RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-<<<<<<< HEAD
 
 RAG_EMBEDDING_BATCH_SIZE = ConfigVar(
     'RAG_EMBEDDING_BATCH_SIZE',
@@ -2537,28 +2429,6 @@ RAG_RERANKING_MODEL = ConfigVar(
 )
 if RAG_RERANKING_MODEL.value != '':
     log.info(f'Reranking model set: {RAG_RERANKING_MODEL.value}')
-=======
-
-RAG_EMBEDDING_BATCH_SIZE = int(
-    os.getenv('RAG_EMBEDDING_BATCH_SIZE') or os.getenv('RAG_EMBEDDING_OPENAI_BATCH_SIZE', '1')
-)
-
-ENABLE_ASYNC_EMBEDDING = os.getenv('ENABLE_ASYNC_EMBEDDING', 'True').lower() == 'true'
-
-RAG_EMBEDDING_CONCURRENT_REQUESTS = int(os.getenv('RAG_EMBEDDING_CONCURRENT_REQUESTS', '0'))
-
-RAG_EMBEDDING_QUERY_PREFIX = os.getenv('RAG_EMBEDDING_QUERY_PREFIX', None)
-
-RAG_EMBEDDING_CONTENT_PREFIX = os.getenv('RAG_EMBEDDING_CONTENT_PREFIX', None)
-
-RAG_EMBEDDING_PREFIX_FIELD_NAME = os.getenv('RAG_EMBEDDING_PREFIX_FIELD_NAME', None)
-
-RAG_RERANKING_ENGINE = os.getenv('RAG_RERANKING_ENGINE', '')
-
-RAG_RERANKING_MODEL = os.getenv('RAG_RERANKING_MODEL', '')
-if RAG_RERANKING_MODEL != '':
-    log.info(f'Reranking model set: {RAG_RERANKING_MODEL}')
->>>>>>> v0.11.0
 
 
 RAG_RERANKING_MODEL_AUTO_UPDATE = (
@@ -2566,7 +2436,6 @@ RAG_RERANKING_MODEL_AUTO_UPDATE = (
 )
 
 RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = os.getenv('RAG_RERANKING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
-<<<<<<< HEAD
 
 RAG_RERANKING_BATCH_SIZE = ConfigVar(
     'RAG_RERANKING_BATCH_SIZE',
@@ -2627,32 +2496,6 @@ CHUNK_OVERLAP = ConfigVar(
     'rag.chunk_overlap',
     int(os.getenv('CHUNK_OVERLAP', '100')),
 )
-=======
-
-RAG_RERANKING_BATCH_SIZE = int(os.getenv('RAG_RERANKING_BATCH_SIZE', '32'))
-
-RAG_EXTERNAL_RERANKER_URL = os.getenv('RAG_EXTERNAL_RERANKER_URL', '')
-
-RAG_EXTERNAL_RERANKER_API_KEY = os.getenv('RAG_EXTERNAL_RERANKER_API_KEY', '')
-
-RAG_EXTERNAL_RERANKER_TIMEOUT = os.getenv('RAG_EXTERNAL_RERANKER_TIMEOUT', '')
-
-
-RAG_TEXT_SPLITTER = os.getenv('RAG_TEXT_SPLITTER', '')
-
-ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = os.getenv('ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER', 'True').lower() == 'true'
-
-
-TIKTOKEN_CACHE_DIR = os.getenv('TIKTOKEN_CACHE_DIR', f'{CACHE_DIR}/tiktoken')
-TIKTOKEN_ENCODING_NAME = os.getenv('TIKTOKEN_ENCODING_NAME', 'cl100k_base')
-
-
-CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '1000'))
-
-CHUNK_MIN_SIZE_TARGET = int(os.getenv('CHUNK_MIN_SIZE_TARGET', '0'))
-
-CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '100'))
->>>>>>> v0.11.0
 
 DEFAULT_RAG_TEMPLATE = """### Task:
 Respond to the user query using the provided context, incorporating inline citations in the format [id] **only when the <source> tag includes an explicit id attribute** (e.g., <source id="1">).
@@ -2680,7 +2523,6 @@ Provide a clear and direct response to the user's query, including inline citati
 </context>
 """
 
-<<<<<<< HEAD
 RAG_TEMPLATE = ConfigVar(
     'RAG_TEMPLATE',
     'rag.template',
@@ -2725,20 +2567,6 @@ RAG_OLLAMA_API_KEY = ConfigVar(
     'rag.ollama.key',
     os.getenv('RAG_OLLAMA_API_KEY', ''),
 )
-=======
-RAG_TEMPLATE = os.getenv('RAG_TEMPLATE', DEFAULT_RAG_TEMPLATE)
-
-RAG_OPENAI_API_BASE_URL = os.getenv('RAG_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-RAG_OPENAI_API_KEY = os.getenv('RAG_OPENAI_API_KEY', OPENAI_API_KEY)
-
-RAG_AZURE_OPENAI_BASE_URL = os.getenv('RAG_AZURE_OPENAI_BASE_URL', '')
-RAG_AZURE_OPENAI_API_KEY = os.getenv('RAG_AZURE_OPENAI_API_KEY', '')
-RAG_AZURE_OPENAI_API_VERSION = os.getenv('RAG_AZURE_OPENAI_API_VERSION', '')
-
-RAG_OLLAMA_BASE_URL = os.getenv('RAG_OLLAMA_BASE_URL', OLLAMA_BASE_URL)
-
-RAG_OLLAMA_API_KEY = os.getenv('RAG_OLLAMA_API_KEY', '')
->>>>>>> v0.11.0
 
 
 ENABLE_LOCAL_WEB_FETCH = (
@@ -2769,7 +2597,6 @@ else:
 WEB_FETCH_FILTER_LIST = list(set(DEFAULT_WEB_FETCH_FILTER_LIST + web_fetch_filter_list))
 
 
-<<<<<<< HEAD
 YOUTUBE_LOADER_LANGUAGE = ConfigVar(
     'YOUTUBE_LOADER_LANGUAGE',
     'rag.youtube_loader_language',
@@ -2781,11 +2608,6 @@ YOUTUBE_LOADER_PROXY_URL = ConfigVar(
     'rag.youtube_loader_proxy_url',
     os.getenv('YOUTUBE_LOADER_PROXY_URL', ''),
 )
-=======
-YOUTUBE_LOADER_LANGUAGE = os.getenv('YOUTUBE_LOADER_LANGUAGE', 'en').split(',')
-
-YOUTUBE_LOADER_PROXY_URL = os.getenv('YOUTUBE_LOADER_PROXY_URL', '')
->>>>>>> v0.11.0
 
 
 ####################################
