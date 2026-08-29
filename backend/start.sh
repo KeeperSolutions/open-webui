@@ -30,10 +30,7 @@ fi
 # ── Secret key setup ─────────────────────────────────────────────────────────
 
 KEY_FILE="${WEBUI_SECRET_KEY_FILE:-.webui_secret_key}"
-<<<<<<< HEAD
-=======
 WEBUI_SECRET_KEY_LENGTH="${WEBUI_SECRET_KEY_LENGTH:-24}"
->>>>>>> v0.11.0
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 
@@ -42,15 +39,11 @@ if [[ -z "${WEBUI_SECRET_KEY:-}" && -z "${WEBUI_JWT_SECRET_KEY:-}" ]]; then
 
   if [[ ! -f "$KEY_FILE" ]]; then
     echo "Generating new WEBUI_SECRET_KEY..."
-<<<<<<< HEAD
-    head -c 12 /dev/random | base64 > "$KEY_FILE"
-=======
     if ! [[ "$WEBUI_SECRET_KEY_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
       echo "WEBUI_SECRET_KEY_LENGTH must be a positive integer." >&2
       exit 1
     fi
     head -c "$WEBUI_SECRET_KEY_LENGTH" /dev/random | base64 > "$KEY_FILE"
->>>>>>> v0.11.0
   fi
 
   echo "Loading WEBUI_SECRET_KEY from ${KEY_FILE}"
@@ -106,7 +99,6 @@ fi
 PYTHON_CMD=$(command -v python3 || command -v python)
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
-<<<<<<< HEAD
 # ── Database migrations ──────────────────────────────────────────────────────
 
 # Run pending Peewee + Alembic migrations once, in the order the app expects
@@ -148,14 +140,6 @@ else
   ARGS=(--workers "$UVICORN_WORKERS")
 fi
 
-=======
-if [[ "$#" -gt 0 ]]; then
-  ARGS=("$@")
-else
-  ARGS=(--workers "$UVICORN_WORKERS")
-fi
-
->>>>>>> v0.11.0
 exec env WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-}" \
   "$PYTHON_CMD" -m uvicorn open_webui.main:app \
     --host "$HOST" \

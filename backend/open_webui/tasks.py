@@ -2,15 +2,8 @@
 import asyncio
 import json
 import logging
-<<<<<<< HEAD
-from typing import Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import Request
-=======
-from uuid import uuid4
-
->>>>>>> v0.11.0
 from redis.asyncio import Redis
 
 from open_webui.env import REDIS_KEY_PREFIX

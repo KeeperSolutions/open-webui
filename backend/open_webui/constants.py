@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-<<<<<<< HEAD
-=======
 import errno
->>>>>>> v0.11.0
 from enum import Enum
 
 

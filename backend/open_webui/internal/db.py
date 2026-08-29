@@ -5,18 +5,12 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager, contextmanager
-<<<<<<< HEAD
-=======
 from datetime import datetime, timedelta, timezone
->>>>>>> v0.11.0
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from open_webui.env import (
-<<<<<<< HEAD
-=======
     DATABASE_ENABLE_IAM_TOKEN_AUTH,
->>>>>>> v0.11.0
     DATABASE_ENABLE_SESSION_SHARING,
     DATABASE_ENABLE_SQLITE_WAL,
     DATABASE_POOL_MAX_OVERFLOW,
@@ -31,21 +25,11 @@ from open_webui.env import (
     DATABASE_SQLITE_PRAGMA_SYNCHRONOUS,
     DATABASE_SQLITE_PRAGMA_TEMP_STORE,
     DATABASE_URL,
-<<<<<<< HEAD
-)
-from sqlalchemy import Dialect, MetaData, create_engine, event, types
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Session, declarative_base, scoped_session, sessionmaker
-=======
-    ENABLE_DB_MIGRATIONS,
-    OPEN_WEBUI_DIR,
 )
 from sqlalchemy import Dialect, MetaData, create_engine, event, types
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, scoped_session, sessionmaker
->>>>>>> v0.11.0
+from sqlalchemy.orm import Session, declarative_base, scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
 from sqlalchemy.sql.type_api import _T
 from typing_extensions import Self
@@ -142,7 +126,6 @@ class JSONField(types.TypeDecorator):  # TEXT-backed JSON storage
     """
 
     impl = types.UnicodeText
-<<<<<<< HEAD
     cache_ok = True
 
     def process_bind_param(self, value: _T | None, dialect: Dialect) -> Any:
@@ -196,18 +179,6 @@ class EncryptedJSONField(types.TypeDecorator):
 
     def copy(self, **kw: Any) -> Self:
         return EncryptedJSONField()
-=======
-    cache_ok = True
-
-    def process_bind_param(self, value: _T | None, dialect: Dialect) -> Any:
-        return json.dumps(value) if value is not None else None
-
-    def process_result_value(self, value: _T | None, dialect: Dialect) -> Any:
-        return json.loads(value) if value is not None else None
-
-    def copy(self, **kwargs: Any) -> Self:
-        return JSONField(length=self.impl.length)
->>>>>>> v0.11.0
 
 
 # Normalize SSL params from the URL once; the sync engine needs them
@@ -218,34 +189,6 @@ _url_without_ssl, _ssl_dict = extract_ssl_params_from_url(DATABASE_URL)
 SQLALCHEMY_DATABASE_URL = reattach_ssl_params_to_url(_url_without_ssl, _ssl_dict) if _ssl_dict else DATABASE_URL
 
 
-<<<<<<< HEAD
-def _make_async_url(url: str) -> str:
-    """Convert a sync database URL to its async driver equivalent.
-
-    The async engine uses psycopg (v3) which speaks libpq natively,
-    so all standard connection-string parameters (``sslmode``,
-    ``options``, ``target_session_attrs``, etc.) are passed through
-    without any translation.
-    """
-    if url.startswith('sqlite+sqlcipher://'):
-        raise ValueError(
-            'sqlite+sqlcipher:// URLs are not supported with async engine. '
-            'Use standard sqlite:// or postgresql:// instead.'
-        )
-    if url.startswith('sqlite:///') or url.startswith('sqlite://'):
-        return url.replace('sqlite://', 'sqlite+aiosqlite://', 1)
-    # psycopg v3 — auto-selects async mode with create_async_engine
-    if url.startswith('postgresql+psycopg2://'):
-        return url.replace('postgresql+psycopg2://', 'postgresql+psycopg://', 1)
-    if url.startswith('postgresql://'):
-        return url.replace('postgresql://', 'postgresql+psycopg://', 1)
-    if url.startswith('postgres://'):
-        return url.replace('postgres://', 'postgresql+psycopg://', 1)
-    # For other dialects, return as-is and let SQLAlchemy handle it
-    return url
-
-
-=======
 class RDSIAMTokenAuth:
     _refresh_after = timedelta(minutes=14)
 
@@ -329,7 +272,6 @@ def _make_async_url(url: str) -> str:
     return url
 
 
->>>>>>> v0.11.0
 # ============================================================
 # SYNC ENGINE (used only for: startup migrations, config loading,
 #              Alembic, peewee migration, health checks)
@@ -428,10 +370,7 @@ else:
 
 enable_iam_token_auth(engine)
 
-<<<<<<< HEAD
-=======
 
->>>>>>> v0.11.0
 # Sync session — used ONLY for startup config loading (config.py runs at import time)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 metadata_obj = MetaData(schema=DATABASE_SCHEMA)
@@ -471,11 +410,8 @@ if sys.platform == 'win32' and _is_postgres_url(DATABASE_URL):
 
 if 'sqlite' in ASYNC_SQLALCHEMY_DATABASE_URL:
     # Generous default — async coroutines + no session sharing = high connection demand.
-<<<<<<< HEAD
-=======
     # No pool_pre_ping: a local SQLite file cannot drop connections, and the
     # ping costs a worker-thread hop plus a SELECT 1 on every checkout.
->>>>>>> v0.11.0
     _sqlite_pool_size = DATABASE_POOL_SIZE if isinstance(DATABASE_POOL_SIZE, int) and DATABASE_POOL_SIZE > 0 else 512
     async_engine = create_async_engine(
         ASYNC_SQLALCHEMY_DATABASE_URL,
@@ -483,10 +419,6 @@ if 'sqlite' in ASYNC_SQLALCHEMY_DATABASE_URL:
         pool_size=_sqlite_pool_size,
         pool_timeout=DATABASE_POOL_TIMEOUT,
         pool_recycle=DATABASE_POOL_RECYCLE,
-<<<<<<< HEAD
-        pool_pre_ping=True,
-=======
->>>>>>> v0.11.0
     )
 
     @event.listens_for(async_engine.sync_engine, 'connect')
@@ -515,11 +447,8 @@ else:
             pool_pre_ping=True,
         )
 
-<<<<<<< HEAD
-=======
 enable_iam_token_auth(async_engine)
 
->>>>>>> v0.11.0
 
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,
