@@ -772,6 +772,33 @@ USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS = (
     os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS', 'True').lower() == 'true'
 )
 
+# v0.11.0 additions
+USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS = (
+    os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS', 'True').lower() == 'true'
+)
+
+USER_PERMISSIONS_FOLDERS_ALLOW_SHARING = (
+    os.getenv('USER_PERMISSIONS_FOLDERS_ALLOW_SHARING', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING = (
+    os.getenv('USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_CHAT_IMPORT = os.getenv('USER_PERMISSIONS_CHAT_IMPORT', 'True').lower() == 'true'
+
+USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
+    os.getenv('USER_PERMISSIONS_FEATURES_USER_WEBHOOKS', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT', 'False').lower() == 'true'
+)
+
 
 USER_PERMISSIONS_CHAT_CONTROLS = os.getenv('USER_PERMISSIONS_CHAT_CONTROLS', 'True').lower() == 'true'
 
@@ -892,6 +919,8 @@ DEFAULT_USER_PERMISSIONS = {
         'prompts_export': USER_PERMISSIONS_WORKSPACE_PROMPTS_EXPORT,
         'tools_import': USER_PERMISSIONS_WORKSPACE_TOOLS_IMPORT,
         'tools_export': USER_PERMISSIONS_WORKSPACE_TOOLS_EXPORT,
+        'skills_import': USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT,
+        'skills_export': USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT,
     },
     'sharing': {
         'models': USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING,
@@ -906,11 +935,14 @@ DEFAULT_USER_PERMISSIONS = {
         'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
         'notes': USER_PERMISSIONS_NOTES_ALLOW_SHARING,
         'public_notes': USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING,
+        'folders': USER_PERMISSIONS_FOLDERS_ALLOW_SHARING,
         'public_chats': USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING,
+        'open_chats': USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING,
         'public_calendars': USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING,
     },
     'access_grants': {
         'allow_users': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS,
+        'allow_groups': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS,
     },
     'chat': {
         'controls': USER_PERMISSIONS_CHAT_CONTROLS,
@@ -927,6 +959,7 @@ DEFAULT_USER_PERMISSIONS = {
         'edit': USER_PERMISSIONS_CHAT_EDIT,
         'share': USER_PERMISSIONS_CHAT_SHARE,
         'export': USER_PERMISSIONS_CHAT_EXPORT,
+        'import': USER_PERMISSIONS_CHAT_IMPORT,
         'stt': USER_PERMISSIONS_CHAT_STT,
         'tts': USER_PERMISSIONS_CHAT_TTS,
         'call': USER_PERMISSIONS_CHAT_CALL,
@@ -942,6 +975,7 @@ DEFAULT_USER_PERMISSIONS = {
         'folders': USER_PERMISSIONS_FEATURES_FOLDERS,
         'channels': USER_PERMISSIONS_FEATURES_CHANNELS,
         'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
+        'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
         # Chat features
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
@@ -979,6 +1013,14 @@ ENABLE_CHANNELS = ConfigVar(
     os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true',
 )
 
+# v0.11.0 addition — admin-editable via routers/auths.py (validated against
+# {'thread', 'channel'}).
+CHANNEL_MODEL_RESPONSE_MODE = ConfigVar(
+    'CHANNEL_MODEL_RESPONSE_MODE',
+    'channels.model_response_mode',
+    os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread'),
+)
+
 ENABLE_CALENDAR = ConfigVar(
     'ENABLE_CALENDAR',
     'calendar.enable',
@@ -1001,6 +1043,56 @@ AUTOMATION_MIN_INTERVAL = ConfigVar(
     'AUTOMATION_MIN_INTERVAL',
     'automations.min_interval',
     os.getenv('AUTOMATION_MIN_INTERVAL', ''),
+)
+
+# v0.11.0 addition — token-auth expiry for automation runs. Previously read
+# via a direct os.getenv in utils/automations.py (see 2026-08-25 runbook
+# entry); now a proper ConfigVar matching its AUTOMATION_* siblings.
+# FOLLOW-UP: update utils/automations.py to read
+# request.app.state.config.AUTOMATION_AUTH_TOKEN_EXPIRES_IN instead of
+# os.getenv('AUTOMATION_AUTH_TOKEN_EXPIRES_IN', '1h').
+AUTOMATION_AUTH_TOKEN_EXPIRES_IN = ConfigVar(
+    'AUTOMATION_AUTH_TOKEN_EXPIRES_IN',
+    'automations.auth_token_expires_in',
+    os.getenv('AUTOMATION_AUTH_TOKEN_EXPIRES_IN', '1h'),
+)
+
+# v0.11.0 — subagents feature. Admin-editable via routers/configs.py
+# (keys under subagents.*).
+ENABLE_SUBAGENTS = ConfigVar(
+    'ENABLE_SUBAGENTS',
+    'subagents.enable',
+    os.getenv('ENABLE_SUBAGENTS', 'False').lower() == 'true',
+)
+SUBAGENTS_BACKGROUND_ENABLED = ConfigVar(
+    'SUBAGENTS_BACKGROUND_ENABLED',
+    'subagents.background_enabled',
+    os.getenv('SUBAGENTS_BACKGROUND_ENABLED', 'False').lower() == 'true',
+)
+SUBAGENTS_MAX_CONCURRENT = ConfigVar(
+    'SUBAGENTS_MAX_CONCURRENT',
+    'subagents.max_concurrent',
+    int(os.getenv('SUBAGENTS_MAX_CONCURRENT', '20')),
+)
+SUBAGENTS_MAX_ASYNC = ConfigVar(
+    'SUBAGENTS_MAX_ASYNC',
+    'subagents.max_async',
+    int(os.getenv('SUBAGENTS_MAX_ASYNC', '20')),
+)
+SUBAGENTS_MAX_ITERATIONS = ConfigVar(
+    'SUBAGENTS_MAX_ITERATIONS',
+    'subagents.max_iterations',
+    int(os.getenv('SUBAGENTS_MAX_ITERATIONS', '30')),
+)
+SUBAGENTS_MAX_OUTPUT = ConfigVar(
+    'SUBAGENTS_MAX_OUTPUT',
+    'subagents.max_output',
+    int(os.getenv('SUBAGENTS_MAX_OUTPUT', '30000')),
+)
+SUBAGENTS_SYSTEM_PROMPT = ConfigVar(
+    'SUBAGENTS_SYSTEM_PROMPT',
+    'subagents.system_prompt',
+    os.getenv('SUBAGENTS_SYSTEM_PROMPT', ''),
 )
 
 ENABLE_NOTES = ConfigVar(
@@ -1172,6 +1264,48 @@ TASK_MODEL_EXTERNAL = ConfigVar(
     'TASK_MODEL_EXTERNAL',
     'task.model.external',
     os.getenv('TASK_MODEL_EXTERNAL', ''),
+)
+
+# v0.11.0 — context-compaction feature. Admin-editable via routers/chats.py
+# (keys under chat.context_compaction.*). The default prompt lives in
+# utils/context_compaction.py (DEFAULT_CONTEXT_COMPACTION_PROMPT), used when
+# the template is blank — so no DEFAULT_CONTEXT_COMPACTION_PROMPT_TEMPLATE
+# constant here, matching upstream.
+ENABLE_CONTEXT_COMPACTION = ConfigVar(
+    'ENABLE_CONTEXT_COMPACTION',
+    'chat.context_compaction.enable',
+    os.getenv('ENABLE_CONTEXT_COMPACTION', 'False').lower() == 'true',
+)
+
+CONTEXT_COMPACTION_MODEL = ConfigVar(
+    'CONTEXT_COMPACTION_MODEL',
+    'chat.context_compaction.model',
+    os.getenv('CONTEXT_COMPACTION_MODEL', ''),
+)
+
+CONTEXT_COMPACTION_TOKEN_THRESHOLD = ConfigVar(
+    'CONTEXT_COMPACTION_TOKEN_THRESHOLD',
+    'chat.context_compaction.token_threshold',
+    int(os.getenv('CONTEXT_COMPACTION_TOKEN_THRESHOLD', '80000')),
+)
+
+_context_compaction_token_cap = os.getenv('CONTEXT_COMPACTION_TOKEN_CAP')
+CONTEXT_COMPACTION_TOKEN_CAP = ConfigVar(
+    'CONTEXT_COMPACTION_TOKEN_CAP',
+    'chat.context_compaction.token_cap',
+    int(_context_compaction_token_cap) if _context_compaction_token_cap else None,
+)
+
+CONTEXT_COMPACTION_RETENTION_PERCENTAGE = ConfigVar(
+    'CONTEXT_COMPACTION_RETENTION_PERCENTAGE',
+    'chat.context_compaction.retention_percentage',
+    min(50, max(10, int(os.getenv('CONTEXT_COMPACTION_RETENTION_PERCENTAGE', '40')))),
+)
+
+CONTEXT_COMPACTION_PROMPT_TEMPLATE = ConfigVar(
+    'CONTEXT_COMPACTION_PROMPT_TEMPLATE',
+    'chat.context_compaction.prompt_template',
+    os.getenv('CONTEXT_COMPACTION_PROMPT_TEMPLATE', ''),
 )
 
 TITLE_GENERATION_PROMPT_TEMPLATE = ConfigVar(
@@ -3570,7 +3704,6 @@ try:
 except json.JSONDecodeError:
     audio_tts_openai_params = {}
 
-<<<<<<< HEAD
 AUDIO_TTS_OPENAI_PARAMS = ConfigVar(
     'AUDIO_TTS_OPENAI_PARAMS',
     'audio.tts.openai.params',
@@ -3639,835 +3772,6 @@ AUDIO_TTS_MISTRAL_API_BASE_URL = ConfigVar(
     os.getenv('AUDIO_TTS_MISTRAL_API_BASE_URL', 'https://api.mistral.ai/v1'),
 )
 
-=======
-AUDIO_TTS_OPENAI_PARAMS = audio_tts_openai_params
-
-
-AUDIO_TTS_API_KEY = os.getenv('AUDIO_TTS_API_KEY', '')
-
-AUDIO_TTS_ENGINE = os.getenv('AUDIO_TTS_ENGINE', '')
-
-
-AUDIO_TTS_MODEL = os.getenv('AUDIO_TTS_MODEL', 'tts-1')
-
-AUDIO_TTS_VOICE = os.getenv('AUDIO_TTS_VOICE', 'alloy')
-
-AUDIO_TTS_SPLIT_ON = os.getenv('AUDIO_TTS_SPLIT_ON', 'punctuation')
-
-AUDIO_TTS_AZURE_SPEECH_REGION = os.getenv('AUDIO_TTS_AZURE_SPEECH_REGION', '')
-
-AUDIO_TTS_AZURE_SPEECH_BASE_URL = os.getenv('AUDIO_TTS_AZURE_SPEECH_BASE_URL', '')
-
-AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = os.getenv(
-    'AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT', 'audio-24khz-160kbitrate-mono-mp3'
-)
-
-AUDIO_TTS_MISTRAL_API_KEY = os.getenv('AUDIO_TTS_MISTRAL_API_KEY', '')
-
-AUDIO_TTS_MISTRAL_API_BASE_URL = os.getenv('AUDIO_TTS_MISTRAL_API_BASE_URL', 'https://api.mistral.ai/v1')
-
-####################################
-# WEBUI
-####################################
-
-
-WEBUI_URL = os.getenv('WEBUI_URL', '')
-
-
-ENABLE_SIGNUP = False if not WEBUI_AUTH else os.getenv('ENABLE_SIGNUP', 'True').lower() == 'true'
-
-ENABLE_LOGIN_FORM = os.getenv('ENABLE_LOGIN_FORM', 'True').lower() == 'true'
-
-ENABLE_PASSWORD_CHANGE_FORM = os.getenv('ENABLE_PASSWORD_CHANGE_FORM', 'True').lower() == 'true'
-
-ENABLE_PASSWORD_AUTH = os.getenv('ENABLE_PASSWORD_AUTH', 'True').lower() == 'true'
-
-DEFAULT_LOCALE = os.getenv('DEFAULT_LOCALE', '')
-
-DEFAULT_MODELS = os.getenv('DEFAULT_MODELS', None)
-
-DEFAULT_PINNED_MODELS = os.getenv('DEFAULT_PINNED_MODELS', None)
-
-try:
-    default_prompt_suggestions = json.loads(os.getenv('DEFAULT_PROMPT_SUGGESTIONS', '[]'))
-except Exception as e:
-    log.exception(f'Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}')
-    default_prompt_suggestions = []
-if default_prompt_suggestions == []:
-    default_prompt_suggestions = [
-        {
-            'title': ['Help me study', 'vocabulary for a college entrance exam'],
-            'content': "Help me study vocabulary: write a sentence for me to fill in the blank, and I'll try to pick the correct option.",
-        },
-        {
-            'title': ['Give me ideas', "for what to do with my kids' art"],
-            'content': "What are 5 creative things I could do with my kids' art? I don't want to throw them away, but it's also so much clutter.",
-        },
-        {
-            'title': ['Tell me a fun fact', 'about the Roman Empire'],
-            'content': 'Tell me a random fun fact about the Roman Empire',
-        },
-        {
-            'title': ['Show me a code snippet', "of a website's sticky header"],
-            'content': "Show me a code snippet of a website's sticky header in CSS and JavaScript.",
-        },
-        {
-            'title': [
-                'Explain options trading',
-                "if I'm familiar with buying and selling stocks",
-            ],
-            'content': "Explain options trading in simple terms if I'm familiar with buying and selling stocks.",
-        },
-        {
-            'title': ['Overcome procrastination', 'give me tips'],
-            'content': 'Could you start by asking me about instances when I procrastinate the most and then give me some suggestions to overcome it?',
-        },
-    ]
-
-DEFAULT_PROMPT_SUGGESTIONS = default_prompt_suggestions
-
-try:
-    model_order_list = json.loads(os.getenv('MODEL_ORDER_LIST', '[]'))
-except Exception as e:
-    log.exception(f'Error loading MODEL_ORDER_LIST: {e}')
-    model_order_list = []
-
-MODEL_ORDER_LIST = model_order_list
-
-try:
-    default_model_metadata = json.loads(os.getenv('DEFAULT_MODEL_METADATA', '{}'))
-except Exception as e:
-    log.exception(f'Error loading DEFAULT_MODEL_METADATA: {e}')
-    default_model_metadata = {}
-
-DEFAULT_MODEL_METADATA = default_model_metadata
-
-try:
-    default_model_params = json.loads(os.getenv('DEFAULT_MODEL_PARAMS', '{}'))
-except Exception as e:
-    log.exception(f'Error loading DEFAULT_MODEL_PARAMS: {e}')
-    default_model_params = {}
-
-DEFAULT_MODEL_PARAMS = default_model_params
-
-DEFAULT_USER_ROLE = os.getenv('DEFAULT_USER_ROLE', 'pending')
-
-DEFAULT_GROUP_ID = os.getenv('DEFAULT_GROUP_ID', '')
-
-PENDING_USER_OVERLAY_TITLE = os.getenv('PENDING_USER_OVERLAY_TITLE', '')
-
-PENDING_USER_OVERLAY_CONTENT = os.getenv('PENDING_USER_OVERLAY_CONTENT', '')
-
-
-RESPONSE_WATERMARK = os.getenv('RESPONSE_WATERMARK', '')
-
-IFRAME_CSP = os.getenv('IFRAME_CSP', '')
-
-USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_MODELS_IMPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_MODELS_IMPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_MODELS_EXPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_MODELS_EXPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_PROMPTS_IMPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_IMPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_PROMPTS_EXPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_EXPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_IMPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_IMPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_EXPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_EXPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT', 'False').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_NOTES_ALLOW_SHARING = os.getenv('USER_PERMISSIONS_NOTES_ALLOW_SHARING', 'False').lower() == 'true'
-
-USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_FOLDERS_ALLOW_SHARING = os.getenv('USER_PERMISSIONS_FOLDERS_ALLOW_SHARING', 'False').lower() == 'true'
-
-
-USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS = (
-    os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS', 'True').lower() == 'true'
-)
-USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS = (
-    os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS', 'True').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_CHAT_CONTROLS = os.getenv('USER_PERMISSIONS_CHAT_CONTROLS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_VALVES = os.getenv('USER_PERMISSIONS_CHAT_VALVES', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_SYSTEM_PROMPT = os.getenv('USER_PERMISSIONS_CHAT_SYSTEM_PROMPT', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_PARAMS = os.getenv('USER_PERMISSIONS_CHAT_PARAMS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_FILE_UPLOAD = os.getenv('USER_PERMISSIONS_CHAT_FILE_UPLOAD', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_WEB_UPLOAD = os.getenv('USER_PERMISSIONS_CHAT_WEB_UPLOAD', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_DELETE = os.getenv('USER_PERMISSIONS_CHAT_DELETE', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_DELETE_MESSAGE = os.getenv('USER_PERMISSIONS_CHAT_DELETE_MESSAGE', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_CONTINUE_RESPONSE = os.getenv('USER_PERMISSIONS_CHAT_CONTINUE_RESPONSE', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_REGENERATE_RESPONSE = (
-    os.getenv('USER_PERMISSIONS_CHAT_REGENERATE_RESPONSE', 'True').lower() == 'true'
-)
-
-USER_PERMISSIONS_CHAT_RATE_RESPONSE = os.getenv('USER_PERMISSIONS_CHAT_RATE_RESPONSE', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_EDIT = os.getenv('USER_PERMISSIONS_CHAT_EDIT', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_SHARE = os.getenv('USER_PERMISSIONS_CHAT_SHARE', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING = (
-    os.getenv('USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_CHAT_EXPORT = os.getenv('USER_PERMISSIONS_CHAT_EXPORT', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_IMPORT = os.getenv('USER_PERMISSIONS_CHAT_IMPORT', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_STT = os.getenv('USER_PERMISSIONS_CHAT_STT', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_TTS = os.getenv('USER_PERMISSIONS_CHAT_TTS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_CALL = os.getenv('USER_PERMISSIONS_CHAT_CALL', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_MULTIPLE_MODELS = os.getenv('USER_PERMISSIONS_CHAT_MULTIPLE_MODELS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_TEMPORARY = os.getenv('USER_PERMISSIONS_CHAT_TEMPORARY', 'True').lower() == 'true'
-
-USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED = (
-    os.getenv('USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED', 'False').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS = (
-    os.getenv('USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_FEATURES_WEB_SEARCH = os.getenv('USER_PERMISSIONS_FEATURES_WEB_SEARCH', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_IMAGE_GENERATION = (
-    os.getenv('USER_PERMISSIONS_FEATURES_IMAGE_GENERATION', 'True').lower() == 'true'
-)
-
-USER_PERMISSIONS_FEATURES_CODE_INTERPRETER = (
-    os.getenv('USER_PERMISSIONS_FEATURES_CODE_INTERPRETER', 'True').lower() == 'true'
-)
-
-USER_PERMISSIONS_FEATURES_FOLDERS = os.getenv('USER_PERMISSIONS_FEATURES_FOLDERS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_NOTES = os.getenv('USER_PERMISSIONS_FEATURES_NOTES', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_CHANNELS = os.getenv('USER_PERMISSIONS_FEATURES_CHANNELS', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_API_KEYS = os.getenv('USER_PERMISSIONS_FEATURES_API_KEYS', 'False').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_MEMORIES = os.getenv('USER_PERMISSIONS_FEATURES_MEMORIES', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_AUTOMATIONS = os.getenv('USER_PERMISSIONS_FEATURES_AUTOMATIONS', 'False').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_CALENDAR = os.getenv('USER_PERMISSIONS_FEATURES_CALENDAR', 'True').lower() == 'true'
-
-USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
-    os.getenv('USER_PERMISSIONS_FEATURES_USER_WEBHOOKS', 'False').lower() == 'true'
-)
-
-
-USER_PERMISSIONS_SETTINGS_INTERFACE = os.getenv('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
-
-
-DEFAULT_USER_PERMISSIONS = {
-    'workspace': {
-        'models': USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS,
-        'knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS,
-        'prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS,
-        'tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS,
-        'skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS,
-        'models_import': USER_PERMISSIONS_WORKSPACE_MODELS_IMPORT,
-        'models_export': USER_PERMISSIONS_WORKSPACE_MODELS_EXPORT,
-        'prompts_import': USER_PERMISSIONS_WORKSPACE_PROMPTS_IMPORT,
-        'prompts_export': USER_PERMISSIONS_WORKSPACE_PROMPTS_EXPORT,
-        'tools_import': USER_PERMISSIONS_WORKSPACE_TOOLS_IMPORT,
-        'tools_export': USER_PERMISSIONS_WORKSPACE_TOOLS_EXPORT,
-        'skills_import': USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT,
-        'skills_export': USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT,
-    },
-    'sharing': {
-        'models': USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING,
-        'public_models': USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING,
-        'knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING,
-        'public_knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING,
-        'prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING,
-        'public_prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING,
-        'tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING,
-        'public_tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING,
-        'skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING,
-        'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
-        'notes': USER_PERMISSIONS_NOTES_ALLOW_SHARING,
-        'public_notes': USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING,
-        'folders': USER_PERMISSIONS_FOLDERS_ALLOW_SHARING,
-        'public_chats': USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING,
-        'open_chats': USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING,
-        'public_calendars': USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING,
-    },
-    'access_grants': {
-        'allow_users': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS,
-        'allow_groups': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS,
-    },
-    'chat': {
-        'controls': USER_PERMISSIONS_CHAT_CONTROLS,
-        'valves': USER_PERMISSIONS_CHAT_VALVES,
-        'system_prompt': USER_PERMISSIONS_CHAT_SYSTEM_PROMPT,
-        'params': USER_PERMISSIONS_CHAT_PARAMS,
-        'file_upload': USER_PERMISSIONS_CHAT_FILE_UPLOAD,
-        'web_upload': USER_PERMISSIONS_CHAT_WEB_UPLOAD,
-        'delete': USER_PERMISSIONS_CHAT_DELETE,
-        'delete_message': USER_PERMISSIONS_CHAT_DELETE_MESSAGE,
-        'continue_response': USER_PERMISSIONS_CHAT_CONTINUE_RESPONSE,
-        'regenerate_response': USER_PERMISSIONS_CHAT_REGENERATE_RESPONSE,
-        'rate_response': USER_PERMISSIONS_CHAT_RATE_RESPONSE,
-        'edit': USER_PERMISSIONS_CHAT_EDIT,
-        'share': USER_PERMISSIONS_CHAT_SHARE,
-        'export': USER_PERMISSIONS_CHAT_EXPORT,
-        'import': USER_PERMISSIONS_CHAT_IMPORT,
-        'stt': USER_PERMISSIONS_CHAT_STT,
-        'tts': USER_PERMISSIONS_CHAT_TTS,
-        'call': USER_PERMISSIONS_CHAT_CALL,
-        'multiple_models': USER_PERMISSIONS_CHAT_MULTIPLE_MODELS,
-        'temporary': USER_PERMISSIONS_CHAT_TEMPORARY,
-        'temporary_enforced': USER_PERMISSIONS_CHAT_TEMPORARY_ENFORCED,
-    },
-    'features': {
-        # General features
-        'api_keys': USER_PERMISSIONS_FEATURES_API_KEYS,
-        'notes': USER_PERMISSIONS_FEATURES_NOTES,
-        'folders': USER_PERMISSIONS_FEATURES_FOLDERS,
-        'channels': USER_PERMISSIONS_FEATURES_CHANNELS,
-        'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
-        # Chat features
-        'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
-        'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
-        'code_interpreter': USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
-        'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
-        'automations': USER_PERMISSIONS_FEATURES_AUTOMATIONS,
-        'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
-        'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
-    },
-    'settings': {
-        'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
-    },
-}
-
-USER_PERMISSIONS = DEFAULT_USER_PERMISSIONS
-
-ENABLE_FOLDERS = os.getenv('ENABLE_FOLDERS', 'True').lower() == 'true'
-
-FOLDER_MAX_FILE_COUNT = os.getenv('FOLDER_MAX_FILE_COUNT', '')
-
-ENABLE_CHANNELS = os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true'
-
-CHANNEL_MODEL_RESPONSE_MODE = os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread')
-
-ENABLE_CALENDAR = os.getenv('ENABLE_CALENDAR', 'True').lower() == 'true'
-
-ENABLE_AUTOMATIONS = os.getenv('ENABLE_AUTOMATIONS', 'True').lower() == 'true'
-
-ENABLE_SUBAGENTS = os.getenv('ENABLE_SUBAGENTS', 'False').lower() == 'true'
-SUBAGENTS_BACKGROUND_ENABLED = os.getenv('SUBAGENTS_BACKGROUND_ENABLED', 'False').lower() == 'true'
-SUBAGENTS_MAX_CONCURRENT = int(os.getenv('SUBAGENTS_MAX_CONCURRENT', '20'))
-SUBAGENTS_MAX_ASYNC = int(os.getenv('SUBAGENTS_MAX_ASYNC', '20'))
-SUBAGENTS_MAX_ITERATIONS = int(os.getenv('SUBAGENTS_MAX_ITERATIONS', '30'))
-SUBAGENTS_MAX_OUTPUT = int(os.getenv('SUBAGENTS_MAX_OUTPUT', '30000'))
-SUBAGENTS_SYSTEM_PROMPT = os.getenv('SUBAGENTS_SYSTEM_PROMPT', '')
-
-AUTOMATION_MAX_COUNT = os.getenv('AUTOMATION_MAX_COUNT', '')
-
-AUTOMATION_MIN_INTERVAL = os.getenv('AUTOMATION_MIN_INTERVAL', '')
-
-AUTOMATION_AUTH_TOKEN_EXPIRES_IN = os.getenv('AUTOMATION_AUTH_TOKEN_EXPIRES_IN', '1h')
-
-ENABLE_NOTES = os.getenv('ENABLE_NOTES', 'True').lower() == 'true'
-
-ENABLE_USER_STATUS = os.getenv('ENABLE_USER_STATUS', 'True').lower() == 'true'
-
-ENABLE_EVALUATION_ARENA_MODELS = os.getenv('ENABLE_EVALUATION_ARENA_MODELS', 'True').lower() == 'true'
-try:
-    evaluation_arena_models = json.loads(os.getenv('EVALUATION_ARENA_MODELS', '[]'))
-    if not isinstance(evaluation_arena_models, list) or not all(
-        isinstance(model, dict) for model in evaluation_arena_models
-    ):
-        raise ValueError('EVALUATION_ARENA_MODELS must be a JSON list of objects')
-except Exception as e:
-    log.exception(f'Error loading EVALUATION_ARENA_MODELS: {e}')
-    evaluation_arena_models = []
-
-EVALUATION_ARENA_MODELS = evaluation_arena_models
-
-DEFAULT_ARENA_MODEL = {
-    'id': 'arena-model',
-    'name': 'Arena Model',
-    'meta': {
-        'profile_image_url': '/favicon.png',
-        'description': 'Submit your questions to anonymous AI chatbots and vote on the best response.',
-        'model_ids': None,
-    },
-}
-
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', '')
-
-ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
-
-ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
-
-BYPASS_ADMIN_ACCESS_CONTROL = (
-    os.getenv(
-        'BYPASS_ADMIN_ACCESS_CONTROL',
-        os.getenv('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True'),
-    ).lower()
-    == 'true'
-)
-
-ENABLE_ADMIN_CHAT_ACCESS = os.getenv('ENABLE_ADMIN_CHAT_ACCESS', 'True').lower() == 'true'
-
-ENABLE_ADMIN_ANALYTICS = os.getenv('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
-
-ENABLE_COMMUNITY_SHARING = os.getenv('ENABLE_COMMUNITY_SHARING', 'True').lower() == 'true'
-
-ENABLE_MESSAGE_RATING = os.getenv('ENABLE_MESSAGE_RATING', 'True').lower() == 'true'
-
-ENABLE_USER_WEBHOOKS = os.getenv('ENABLE_USER_WEBHOOKS', 'False').lower() == 'true'
-
-# FastAPI / AnyIO settings
-THREAD_POOL_SIZE = os.getenv('THREAD_POOL_SIZE', None)
-
-if THREAD_POOL_SIZE is not None and isinstance(THREAD_POOL_SIZE, str):
-    try:
-        THREAD_POOL_SIZE = int(THREAD_POOL_SIZE)
-    except ValueError:
-        log.warning(f'THREAD_POOL_SIZE is not a valid integer: {THREAD_POOL_SIZE}. Defaulting to None.')
-        THREAD_POOL_SIZE = None
-
-
-def validate_cors_origin(origin):
-    parsed_url = urlparse(origin)
-
-    # Check if the scheme is either http or https, or a custom scheme
-    schemes = ['http', 'https'] + CORS_ALLOW_CUSTOM_SCHEME
-    if parsed_url.scheme not in schemes:
-        raise ValueError(
-            f"Invalid scheme in CORS_ALLOW_ORIGIN: '{origin}'. Only 'http' and 'https' and CORS_ALLOW_CUSTOM_SCHEME are allowed."
-        )
-
-    # Ensure that the netloc (domain + port) is present, indicating it's a valid URL
-    if not parsed_url.netloc:
-        raise ValueError(f"Invalid URL structure in CORS_ALLOW_ORIGIN: '{origin}'.")
-
-
-# For production, you should only need one host as
-# fastapi serves the svelte-kit built frontend and backend from the same host and port.
-# To test CORS_ALLOW_ORIGIN locally, you can set something like
-# CORS_ALLOW_ORIGIN=http://localhost:5173;http://localhost:8080
-# in your .env file depending on your frontend port, 5173 in this case.
-CORS_ALLOW_ORIGIN = os.getenv('CORS_ALLOW_ORIGIN', '*').split(';')
-
-# Allows custom URL schemes (e.g., app://) to be used as origins for CORS.
-# Useful for local development or desktop clients with schemes like app:// or other custom protocols.
-# Provide a semicolon-separated list of allowed schemes in the environment variable CORS_ALLOW_CUSTOM_SCHEMES.
-CORS_ALLOW_CUSTOM_SCHEME = os.getenv('CORS_ALLOW_CUSTOM_SCHEME', '').split(';')
-
-if CORS_ALLOW_ORIGIN == ['*']:
-    log.warning("\n\nWARNING: CORS_ALLOW_ORIGIN IS SET TO '*' - NOT RECOMMENDED FOR PRODUCTION DEPLOYMENTS.\n")
-else:
-    # You have to pick between a single wildcard or a list of origins.
-    # Doing both will result in CORS errors in the browser.
-    for origin in CORS_ALLOW_ORIGIN:
-        validate_cors_origin(origin)
-
-
-class BannerModel(BaseModel):
-    id: str
-    type: str
-    title: str | None = None
-    content: str
-    dismissible: bool
-    timestamp: int
-
-
-try:
-    banners = json.loads(os.getenv('WEBUI_BANNERS', '[]'))
-    banners = [BannerModel(**banner) for banner in banners]
-except Exception as e:
-    log.exception(f'Error loading WEBUI_BANNERS: {e}')
-    banners = []
-
-WEBUI_BANNERS = banners
-
-
-SHOW_ADMIN_DETAILS = os.getenv('SHOW_ADMIN_DETAILS', 'true').lower() == 'true'
-
-ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', None)
-
-
-####################################
-# TASKS
-####################################
-
-
-TASK_MODEL = os.getenv('TASK_MODEL', '')
-
-TASK_MODEL_EXTERNAL = os.getenv('TASK_MODEL_EXTERNAL', '')
-
-CONTEXT_COMPACTION_MODEL = os.getenv('CONTEXT_COMPACTION_MODEL', '')
-
-ENABLE_CONTEXT_COMPACTION = os.getenv('ENABLE_CONTEXT_COMPACTION', 'False').lower() == 'true'
-
-CONTEXT_COMPACTION_TOKEN_THRESHOLD = int(os.getenv('CONTEXT_COMPACTION_TOKEN_THRESHOLD', '80000'))
-
-_CONTEXT_COMPACTION_TOKEN_CAP = os.getenv('CONTEXT_COMPACTION_TOKEN_CAP')
-CONTEXT_COMPACTION_TOKEN_CAP = int(_CONTEXT_COMPACTION_TOKEN_CAP) if _CONTEXT_COMPACTION_TOKEN_CAP else None
-
-CONTEXT_COMPACTION_RETENTION_PERCENTAGE = min(
-    50, max(10, int(os.getenv('CONTEXT_COMPACTION_RETENTION_PERCENTAGE', '40')))
-)
-
-CONTEXT_COMPACTION_PROMPT_TEMPLATE = os.getenv('CONTEXT_COMPACTION_PROMPT_TEMPLATE', '')
-
-TITLE_GENERATION_PROMPT_TEMPLATE = os.getenv('TITLE_GENERATION_PROMPT_TEMPLATE', '')
-
-DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE = """### Task:
-Generate a concise title summarizing the chat history.
-### Guidelines:
-- The title should clearly represent the main theme or subject of the conversation.
-- Keep it short: 2-4 words is best.
-- Do not use emojis, quotation marks, or special formatting.
-- Write the title in the chat's primary language; default to English if multilingual.
-- Prioritize accuracy over creativity.
-- Your entire response must consist solely of the JSON object, without any introductory or concluding text.
-- The output must be a single, raw JSON object, without any markdown code fences or other encapsulating text.
-- Ensure no conversational text, affirmations, or explanations precede or follow the raw JSON output, as this will cause direct parsing failure.
-### Output:
-JSON format: { "title": "your concise title here" }
-### Examples:
-- { "title": "Stock Trends" },
-- { "title": "Chocolate Chip Cookies" },
-- { "title": "Music Streaming" },
-- { "title": "Remote Work" }
-### Chat History:
-<chat_history>
-{{MESSAGES:END:2}}
-</chat_history>"""
-
-TAGS_GENERATION_PROMPT_TEMPLATE = os.getenv('TAGS_GENERATION_PROMPT_TEMPLATE', '')
-
-DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE = """### Task:
-Generate 1-3 broad tags categorizing the main themes of the chat history, along with 1-3 more specific subtopic tags.
-
-### Guidelines:
-- Start with high-level domains (e.g. Science, Technology, Philosophy, Arts, Politics, Business, Health, Sports, Entertainment, Education)
-- Consider including relevant subfields/subdomains if they are strongly represented throughout the conversation
-- If content is too short (less than 3 messages) or too diverse, use only ["General"]
-- Use the chat's primary language; default to English if multilingual
-- Prioritize accuracy over specificity
-
-### Output:
-JSON format: { "tags": ["tag1", "tag2", "tag3"] }
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>"""
-
-IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = os.getenv('IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE', '')
-
-DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = """### Task:
-Generate a detailed prompt for am image generation task based on the given language and context. Describe the image as if you were explaining it to someone who cannot see it. Include relevant details, colors, shapes, and any other important elements.
-
-### Guidelines:
-- Be descriptive and detailed, focusing on the most important aspects of the image.
-- Avoid making assumptions or adding information not present in the image.
-- Use the chat's primary language; default to English if multilingual.
-- If the image is too complex, focus on the most prominent elements.
-
-### Output:
-Strictly return in JSON format:
-{
-    "prompt": "Your detailed description here."
-}
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>"""
-
-
-FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = os.getenv('FOLLOW_UP_GENERATION_PROMPT_TEMPLATE', '')
-
-DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = """### Task:
-Suggest 3-5 relevant follow-up questions or prompts that the user might naturally ask next in this conversation as a **user**, based on the chat history, to help continue or deepen the discussion.
-### Guidelines:
-- Write all follow-up questions from the user’s point of view, directed to the assistant.
-- Make questions concise, clear, and directly related to the discussed topic(s).
-- Only suggest follow-ups that make sense given the chat content and do not repeat what was already covered.
-- If the conversation is very short or not specific, suggest more general (but relevant) follow-ups the user might ask.
-- Use the conversation's primary language; default to English if multilingual.
-- Response must be a JSON object with a "follow_ups" key containing an array of strings, no extra text or formatting.
-### Output:
-JSON format: { "follow_ups": ["Question 1?", "Question 2?", "Question 3?"] }
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>"""
-
-ENABLE_FOLLOW_UP_GENERATION = os.getenv('ENABLE_FOLLOW_UP_GENERATION', 'True').lower() == 'true'
-
-ENABLE_TAGS_GENERATION = os.getenv('ENABLE_TAGS_GENERATION', 'True').lower() == 'true'
-
-ENABLE_TITLE_GENERATION = os.getenv('ENABLE_TITLE_GENERATION', 'True').lower() == 'true'
-
-
-ENABLE_SEARCH_QUERY_GENERATION = os.getenv('ENABLE_SEARCH_QUERY_GENERATION', 'True').lower() == 'true'
-
-ENABLE_RETRIEVAL_QUERY_GENERATION = os.getenv('ENABLE_RETRIEVAL_QUERY_GENERATION', 'True').lower() == 'true'
-
-
-QUERY_GENERATION_PROMPT_TEMPLATE = os.getenv('QUERY_GENERATION_PROMPT_TEMPLATE', '')
-
-DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE = """### Task:
-Analyze the chat history to determine the necessity of generating search queries, in the given language. By default, **prioritize generating 1-3 broad and relevant search queries** unless it is absolutely certain that no additional information is required. The aim is to retrieve comprehensive, updated, and valuable information even with minimal uncertainty. If no search is unequivocally needed, return an empty list.
-
-### Guidelines:
-- Respond **EXCLUSIVELY** with a JSON object. Any form of extra commentary, explanation, or additional text is strictly prohibited.
-- When generating search queries, respond in the format: { "queries": ["query1", "query2"] }, ensuring each query is distinct, concise, and relevant to the topic.
-- If and only if it is entirely certain that no useful results can be retrieved by a search, return: { "queries": [] }.
-- Err on the side of suggesting search queries if there is **any chance** they might provide useful or updated information.
-- Be concise and focused on composing high-quality search queries, avoiding unnecessary elaboration, commentary, or assumptions.
-- Today's date is: {{CURRENT_DATE}}.
-- Always prioritize providing actionable and broad queries that maximize informational coverage.
-
-### Output:
-Strictly return in JSON format: 
-{
-  "queries": ["query1", "query2"]
-}
-
-### Chat History:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>
-"""
-
-ENABLE_AUTOCOMPLETE_GENERATION = os.getenv('ENABLE_AUTOCOMPLETE_GENERATION', 'False').lower() == 'true'
-
-AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = int(os.getenv('AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH', '-1'))
-
-AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = os.getenv('AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE', '')
-
-
-DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = """### Task:
-You are an autocompletion system. Continue the text in `<text>` based on the **completion type** in `<type>` and the given language.  
-
-### **Instructions**:
-1. Analyze `<text>` for context and meaning.  
-2. Use `<type>` to guide your output:  
-   - **General**: Provide a natural, concise continuation.  
-   - **Search Query**: Complete as if generating a realistic search query.  
-3. Start as if you are directly continuing `<text>`. Do **not** repeat, paraphrase, or respond as a model. Simply complete the text.  
-4. Ensure the continuation:
-   - Flows naturally from `<text>`.  
-   - Avoids repetition, overexplaining, or unrelated ideas.  
-5. If unsure, return: `{ "text": "" }`.  
-
-### **Output Rules**:
-- Respond only in JSON format: `{ "text": "<your_completion>" }`.
-
-### **Examples**:
-#### Example 1:  
-Input:  
-<type>General</type>  
-<text>The sun was setting over the horizon, painting the sky</text>  
-Output:  
-{ "text": "with vibrant shades of orange and pink." }
-
-#### Example 2:  
-Input:  
-<type>Search Query</type>  
-<text>Top-rated restaurants in</text>  
-Output:  
-{ "text": "New York City for Italian cuisine." }  
-
----
-### Context:
-<chat_history>
-{{MESSAGES:END:6}}
-</chat_history>
-<type>{{TYPE}}</type>  
-<text>{{PROMPT}}</text>  
-#### Output:
-"""
-
-
-VOICE_MODE_PROMPT_TEMPLATE = os.getenv('VOICE_MODE_PROMPT_TEMPLATE', '')
-
-ENABLE_VOICE_MODE_PROMPT = os.getenv('ENABLE_VOICE_MODE_PROMPT', 'True').lower() == 'true'
-
-DEFAULT_VOICE_MODE_PROMPT_TEMPLATE = """You are a friendly, concise voice assistant.
-
-Everything you say will be spoken aloud.
-Keep responses short, clear, and natural.
-
-STYLE:
-- Use simple words and short sentences.
-- Sound warm and conversational.
-- Avoid long explanations, lists, or complex phrasing.
-
-BEHAVIOR:
-- Give the quickest helpful answer first.
-- Offer extra detail only if needed.
-- Ask for clarification only when necessary.
-
-VOICE OPTIMIZATION:
-- Break information into small, easy-to-hear chunks.
-- Avoid dense wording or anything that sounds like reading text.
-
-ERROR HANDLING:
-- If unsure, say so briefly and offer options.
-- If something is unsafe or impossible, decline kindly and suggest a safe alternative.
-
-Stay consistent, helpful, and easy to listen to."""
-
-TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = os.getenv('TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE', '')
-
-
-DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = """Available Tools: {{TOOLS}}
-
-Your task is to choose and return the correct tool(s) from the list of available tools based on the query. Follow these guidelines:
-
-- Return only the JSON object, without any additional text or explanation.
-
-- If no tools match the query, return an empty array: 
-   {
-     "tool_calls": []
-   }
-
-- If one or more tools match the query, construct a JSON response containing a "tool_calls" array with objects that include:
-   - "name": The tool's name.
-   - "parameters": A dictionary of required parameters and their corresponding values.
-
-The format for the JSON response is strictly:
-{
-  "tool_calls": [
-    {"name": "toolName1", "parameters": {"key1": "value1"}},
-    {"name": "toolName2", "parameters": {"key2": "value2"}}
-  ]
-}"""
-
-
-DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE = """Your task is to reflect the speaker's likely facial expression through a fitting emoji. Interpret emotions from the message and reflect their facial expression using fitting, diverse emojis (e.g., 😊, 😢, 😡, 😱).
-
-Message: ```{{prompt}}```"""
-
-DEFAULT_MOA_GENERATION_PROMPT_TEMPLATE = """You have been provided with a set of responses from various models to the latest user query: "{{prompt}}"
-
-Your task is to synthesize these responses into a single, high-quality response. It is crucial to critically evaluate the information provided in these responses, recognizing that some of it may be biased or incorrect. Your response should not simply replicate the given answers but should offer a refined, accurate, and comprehensive reply to the instruction. Ensure your response is well-structured, coherent, and adheres to the highest standards of accuracy and reliability.
-
-Responses from models: {{responses}}"""
-
-
->>>>>>> v0.11.0
 ####################################
 # Auth
 ####################################
