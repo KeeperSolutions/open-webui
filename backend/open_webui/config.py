@@ -3776,7 +3776,6 @@ AUDIO_TTS_MISTRAL_API_BASE_URL = ConfigVar(
 # Auth
 ####################################
 
-<<<<<<< HEAD
 ENABLE_API_KEYS = ConfigVar(
     'ENABLE_API_KEYS',
     'auth.enable_api_keys',
@@ -3786,16 +3785,10 @@ ENABLE_API_KEYS = ConfigVar(
 ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ConfigVar(
     'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
     'auth.api_key.endpoint_restrictions',
-=======
-ENABLE_API_KEYS = os.getenv('ENABLE_API_KEYS', 'False').lower() == 'true'
-
-ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = (
->>>>>>> v0.11.0
     os.getenv(
         'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS',
         os.getenv('ENABLE_API_KEY_ENDPOINT_RESTRICTIONS', 'False'),
     ).lower()
-<<<<<<< HEAD
     == 'true',
 )
 
@@ -3808,16 +3801,6 @@ API_KEYS_ALLOWED_ENDPOINTS = ConfigVar(
 JWT_EXPIRES_IN = ConfigVar('JWT_EXPIRES_IN', 'auth.jwt_expiry', os.getenv('JWT_EXPIRES_IN', '4w'))
 
 if JWT_EXPIRES_IN.value == '-1':
-=======
-    == 'true'
-)
-
-API_KEYS_ALLOWED_ENDPOINTS = os.getenv('API_KEYS_ALLOWED_ENDPOINTS', os.getenv('API_KEY_ALLOWED_ENDPOINTS', ''))
-
-JWT_EXPIRES_IN = os.getenv('JWT_EXPIRES_IN', '4w')
-
-if JWT_EXPIRES_IN == '-1':
->>>>>>> v0.11.0
     log.warning(
         "⚠️  SECURITY WARNING: JWT_EXPIRES_IN is set to '-1'\n"
         '    See: https://docs.openwebui.com/reference/env-configuration\n'
@@ -3827,7 +3810,15 @@ if JWT_EXPIRES_IN == '-1':
 # OAuth config
 ####################################
 
-<<<<<<< HEAD
+# v0.11.0 addition — master switch for OAuth/OIDC sign-in. Defaults enabled so
+# existing deployments with a provider configured keep working; admins can turn
+# it off without clearing provider settings. Admin-editable via routers/auths.py.
+ENABLE_OAUTH = ConfigVar(
+    'ENABLE_OAUTH',
+    'oauth.enable',
+    os.getenv('ENABLE_OAUTH', 'True').lower() == 'true',
+)
+
 ENABLE_OAUTH_SIGNUP = ConfigVar(
     'ENABLE_OAUTH_SIGNUP',
     'oauth.enable_signup',
@@ -3879,32 +3870,6 @@ GOOGLE_REDIRECT_URI = ConfigVar(
     'oauth.google.redirect_uri',
     os.getenv('GOOGLE_REDIRECT_URI', ''),
 )
-=======
-# Master switch for OAuth/OIDC sign-in. Defaults to enabled so existing
-# deployments that already have a provider configured keep working; admins can
-# turn it off to disable OAuth login without clearing their provider settings.
-ENABLE_OAUTH = os.getenv('ENABLE_OAUTH', 'True').lower() == 'true'
-
-ENABLE_OAUTH_SIGNUP = os.getenv('ENABLE_OAUTH_SIGNUP', 'False').lower() == 'true'
-
-OAUTH_AUTO_REDIRECT = os.getenv('OAUTH_AUTO_REDIRECT', 'False').lower() == 'true'
-
-OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = os.getenv('OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE', 'False').lower() == 'true'
-
-
-OAUTH_MERGE_ACCOUNTS_BY_EMAIL = os.getenv('OAUTH_MERGE_ACCOUNTS_BY_EMAIL', 'False').lower() == 'true'
-
-OAUTH_PROVIDERS = {}
-
-GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
-
-GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
-
-
-GOOGLE_OAUTH_SCOPE = os.getenv('GOOGLE_OAUTH_SCOPE', 'openid email profile')
-
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', '')
->>>>>>> v0.11.0
 
 GOOGLE_OAUTH_AUTHORIZE_PARAMS = {}
 _google_oauth_authorize_params = os.getenv('GOOGLE_OAUTH_AUTHORIZE_PARAMS', '')
@@ -3918,7 +3883,6 @@ if _google_oauth_authorize_params:
     except (json.JSONDecodeError, TypeError):
         log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
-<<<<<<< HEAD
 MICROSOFT_CLIENT_ID = ConfigVar(
     'MICROSOFT_CLIENT_ID',
     'oauth.microsoft.client_id',
@@ -4186,123 +4150,16 @@ OAUTH_UPDATE_EMAIL_ON_LOGIN = ConfigVar(
     'oauth.update_email_on_login',
     os.getenv('OAUTH_UPDATE_EMAIL_ON_LOGIN', 'False').lower() == 'true',
 )
-=======
-MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID', '')
-
-MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET', '')
-
-MICROSOFT_CLIENT_TENANT_ID = os.getenv('MICROSOFT_CLIENT_TENANT_ID', '')
-
-MICROSOFT_CLIENT_LOGIN_BASE_URL = os.getenv('MICROSOFT_CLIENT_LOGIN_BASE_URL', 'https://login.microsoftonline.com')
-
-MICROSOFT_CLIENT_PICTURE_URL = os.getenv(
-    'MICROSOFT_CLIENT_PICTURE_URL',
-    'https://graph.microsoft.com/v1.0/me/photo/$value',
-)
-
-
-MICROSOFT_OAUTH_SCOPE = os.getenv('MICROSOFT_OAUTH_SCOPE', 'openid email profile')
-
-MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', '')
-
-GITHUB_CLIENT_ID = os.getenv('GITHUB_CLIENT_ID', '')
-
-GITHUB_CLIENT_SECRET = os.getenv('GITHUB_CLIENT_SECRET', '')
-
-GITHUB_CLIENT_SCOPE = os.getenv('GITHUB_CLIENT_SCOPE', 'user:email')
-
-GITHUB_CLIENT_REDIRECT_URI = os.getenv('GITHUB_CLIENT_REDIRECT_URI', '')
-
-OAUTH_CLIENT_ID = os.getenv('OAUTH_CLIENT_ID', '')
-
-OAUTH_CLIENT_SECRET = os.getenv('OAUTH_CLIENT_SECRET', '')
-
-OPENID_PROVIDER_URL = os.getenv('OPENID_PROVIDER_URL', '')
-
-OPENID_END_SESSION_ENDPOINT = os.getenv('OPENID_END_SESSION_ENDPOINT', '')
-
-OPENID_REDIRECT_URI = os.getenv('OPENID_REDIRECT_URI', '')
-
-OAUTH_SCOPES = os.getenv('OAUTH_SCOPES', 'openid email profile')
-
-OAUTH_TIMEOUT = os.getenv('OAUTH_TIMEOUT', '')
-
-OAUTH_TOKEN_ENDPOINT_AUTH_METHOD = os.getenv('OAUTH_TOKEN_ENDPOINT_AUTH_METHOD', None)
-
-OAUTH_CODE_CHALLENGE_METHOD = os.getenv('OAUTH_CODE_CHALLENGE_METHOD', None)
-
-OAUTH_PROVIDER_NAME = os.getenv('OAUTH_PROVIDER_NAME', 'SSO')
-
-OAUTH_SUB_CLAIM = os.getenv('OAUTH_SUB_CLAIM', None)
-
-OAUTH_USERNAME_CLAIM = os.getenv('OAUTH_USERNAME_CLAIM', 'name')
-
-
-OAUTH_PICTURE_CLAIM = os.getenv('OAUTH_PICTURE_CLAIM', 'picture')
-
-OAUTH_EMAIL_CLAIM = os.getenv('OAUTH_EMAIL_CLAIM', 'email')
-
-OAUTH_GROUPS_CLAIM = os.getenv('OAUTH_GROUPS_CLAIM', os.getenv('OAUTH_GROUP_CLAIM', 'groups'))
-
-FEISHU_CLIENT_ID = os.getenv('FEISHU_CLIENT_ID', '')
-
-FEISHU_CLIENT_SECRET = os.getenv('FEISHU_CLIENT_SECRET', '')
-
-FEISHU_OAUTH_SCOPE = os.getenv('FEISHU_OAUTH_SCOPE', 'contact:user.base:readonly')
-
-FEISHU_REDIRECT_URI = os.getenv('FEISHU_REDIRECT_URI', '')
-
-ENABLE_OAUTH_ROLE_MANAGEMENT = os.getenv('ENABLE_OAUTH_ROLE_MANAGEMENT', 'False').lower() == 'true'
-
-ENABLE_OAUTH_GROUP_MANAGEMENT = os.getenv('ENABLE_OAUTH_GROUP_MANAGEMENT', 'False').lower() == 'true'
-
-ENABLE_OAUTH_GROUP_CREATION = os.getenv('ENABLE_OAUTH_GROUP_CREATION', 'False').lower() == 'true'
-
-
-oauth_group_default_share = os.getenv('OAUTH_GROUP_DEFAULT_SHARE', 'true').strip().lower()
-OAUTH_GROUP_DEFAULT_SHARE = 'members' if oauth_group_default_share == 'members' else oauth_group_default_share == 'true'
-
-
-OAUTH_BLOCKED_GROUPS = os.getenv('OAUTH_BLOCKED_GROUPS', '[]')
-
-OAUTH_GROUPS_SEPARATOR = os.getenv('OAUTH_GROUPS_SEPARATOR', ';')
-
-OAUTH_ROLES_CLAIM = os.getenv('OAUTH_ROLES_CLAIM', 'roles')
-
-OAUTH_ROLES_SEPARATOR = os.getenv('OAUTH_ROLES_SEPARATOR', ',')
-
-OAUTH_ALLOWED_ROLES = [
-    role.strip()
-    for role in os.getenv('OAUTH_ALLOWED_ROLES', f'user{OAUTH_ROLES_SEPARATOR}admin').split(OAUTH_ROLES_SEPARATOR)
-    if role
-]
-
-OAUTH_ADMIN_ROLES = [
-    role.strip() for role in os.getenv('OAUTH_ADMIN_ROLES', 'admin').split(OAUTH_ROLES_SEPARATOR) if role
-]
-
-OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv('OAUTH_ALLOWED_DOMAINS', '*').split(',')]
-
-OAUTH_UPDATE_PICTURE_ON_LOGIN = os.getenv('OAUTH_UPDATE_PICTURE_ON_LOGIN', 'False').lower() == 'true'
-
-OAUTH_UPDATE_NAME_ON_LOGIN = os.getenv('OAUTH_UPDATE_NAME_ON_LOGIN', 'False').lower() == 'true'
-
-OAUTH_UPDATE_EMAIL_ON_LOGIN = os.getenv('OAUTH_UPDATE_EMAIL_ON_LOGIN', 'False').lower() == 'true'
->>>>>>> v0.11.0
 
 OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID = (
     os.getenv('OAUTH_ACCESS_TOKEN_REQUEST_INCLUDE_CLIENT_ID', 'False').lower() == 'true'
 )
 
-<<<<<<< HEAD
 OAUTH_AUDIENCE = ConfigVar(
     'OAUTH_AUDIENCE',
     'oauth.audience',
     os.getenv('OAUTH_AUDIENCE', ''),
 )
-=======
-OAUTH_AUDIENCE = os.getenv('OAUTH_AUDIENCE', '')
->>>>>>> v0.11.0
 
 OAUTH_AUTHORIZE_PARAMS = {}
 _oauth_authorize_params = os.getenv('OAUTH_AUTHORIZE_PARAMS', '')
@@ -4317,23 +4174,25 @@ if _oauth_authorize_params:
         log.warning('OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
 
-<<<<<<< HEAD
-def load_oauth_providers():
-    OAUTH_PROVIDERS.clear()
-    if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
-=======
-def oauth_client_kwargs(scope: str, **kwargs):
+# v0.11.0 added this helper to centralise scope + timeout + PKCE
+# (code_challenge_method) across all providers. Adapted to the fork's
+# ConfigVar layer — reads `.value` off OAUTH_TIMEOUT / OAUTH_CODE_CHALLENGE_METHOD.
+def oauth_client_kwargs(scope, **kwargs):
+    scope_value = scope.value if hasattr(scope, 'value') else scope
+    timeout = OAUTH_TIMEOUT.value
+    code_challenge_method = OAUTH_CODE_CHALLENGE_METHOD.value
+
     client_kwargs = {
-        'scope': scope,
+        'scope': scope_value,
         **kwargs,
-        **({'timeout': int(OAUTH_TIMEOUT)} if OAUTH_TIMEOUT else {}),
+        **({'timeout': int(timeout)} if timeout else {}),
     }
 
-    if OAUTH_CODE_CHALLENGE_METHOD == 'S256':
+    if code_challenge_method == 'S256':
         client_kwargs['code_challenge_method'] = 'S256'
-    elif OAUTH_CODE_CHALLENGE_METHOD:
+    elif code_challenge_method:
         raise Exception(
-            'Code challenge methods other than "%s" not supported. Given: "%s"' % ('S256', OAUTH_CODE_CHALLENGE_METHOD)
+            'Code challenge methods other than "%s" not supported. Given: "%s"' % ('S256', code_challenge_method)
         )
 
     return client_kwargs
@@ -4341,28 +4200,16 @@ def oauth_client_kwargs(scope: str, **kwargs):
 
 def load_oauth_providers():
     OAUTH_PROVIDERS.clear()
-    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
->>>>>>> v0.11.0
+    if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
 
         def google_oauth_register(oauth: OAuth):
             client = oauth.register(
                 name='google',
-<<<<<<< HEAD
                 client_id=GOOGLE_CLIENT_ID.value,
                 client_secret=GOOGLE_CLIENT_SECRET.value,
                 server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-                client_kwargs={
-                    'scope': GOOGLE_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(GOOGLE_OAUTH_SCOPE.value),
                 redirect_uri=GOOGLE_REDIRECT_URI.value,
-=======
-                client_id=GOOGLE_CLIENT_ID,
-                client_secret=GOOGLE_CLIENT_SECRET,
-                server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-                client_kwargs=oauth_client_kwargs(GOOGLE_OAUTH_SCOPE),
-                redirect_uri=GOOGLE_REDIRECT_URI,
->>>>>>> v0.11.0
                 **({'authorize_params': GOOGLE_OAUTH_AUTHORIZE_PARAMS} if GOOGLE_OAUTH_AUTHORIZE_PARAMS else {}),
             )
             return client
@@ -4371,73 +4218,37 @@ def load_oauth_providers():
             'register': google_oauth_register,
         }
 
-<<<<<<< HEAD
     if MICROSOFT_CLIENT_ID.value and MICROSOFT_CLIENT_SECRET.value and MICROSOFT_CLIENT_TENANT_ID.value:
-=======
-    if MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET and MICROSOFT_CLIENT_TENANT_ID:
->>>>>>> v0.11.0
 
         def microsoft_oauth_register(oauth: OAuth):
             client = oauth.register(
                 name='microsoft',
-<<<<<<< HEAD
                 client_id=MICROSOFT_CLIENT_ID.value,
                 client_secret=MICROSOFT_CLIENT_SECRET.value,
                 server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL.value}/{MICROSOFT_CLIENT_TENANT_ID.value}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID.value}',
-                client_kwargs={
-                    'scope': MICROSOFT_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(MICROSOFT_OAUTH_SCOPE.value),
                 redirect_uri=MICROSOFT_REDIRECT_URI.value,
-=======
-                client_id=MICROSOFT_CLIENT_ID,
-                client_secret=MICROSOFT_CLIENT_SECRET,
-                server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL}/{MICROSOFT_CLIENT_TENANT_ID}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID}',
-                client_kwargs=oauth_client_kwargs(MICROSOFT_OAUTH_SCOPE),
-                redirect_uri=MICROSOFT_REDIRECT_URI,
->>>>>>> v0.11.0
             )
             return client
 
         OAUTH_PROVIDERS['microsoft'] = {
-<<<<<<< HEAD
             'picture_url': MICROSOFT_CLIENT_PICTURE_URL.value,
             'register': microsoft_oauth_register,
         }
 
     if GITHUB_CLIENT_ID.value and GITHUB_CLIENT_SECRET.value:
-=======
-            'picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-            'register': microsoft_oauth_register,
-        }
-
-    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
->>>>>>> v0.11.0
 
         def github_oauth_register(oauth: OAuth):
             client = oauth.register(
                 name='github',
-<<<<<<< HEAD
                 client_id=GITHUB_CLIENT_ID.value,
                 client_secret=GITHUB_CLIENT_SECRET.value,
-=======
-                client_id=GITHUB_CLIENT_ID,
-                client_secret=GITHUB_CLIENT_SECRET,
->>>>>>> v0.11.0
                 access_token_url='https://github.com/login/oauth/access_token',
                 authorize_url='https://github.com/login/oauth/authorize',
                 api_base_url='https://api.github.com',
                 userinfo_endpoint='https://api.github.com/user',
-<<<<<<< HEAD
-                client_kwargs={
-                    'scope': GITHUB_CLIENT_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(GITHUB_CLIENT_SCOPE.value),
                 redirect_uri=GITHUB_CLIENT_REDIRECT_URI.value,
-=======
-                client_kwargs=oauth_client_kwargs(GITHUB_CLIENT_SCOPE),
-                redirect_uri=GITHUB_CLIENT_REDIRECT_URI,
->>>>>>> v0.11.0
             )
             return client
 
@@ -4446,7 +4257,6 @@ def load_oauth_providers():
             'sub_claim': 'id',
         }
 
-<<<<<<< HEAD
     if (
         OAUTH_CLIENT_ID.value
         and (OAUTH_CLIENT_SECRET.value or OAUTH_CODE_CHALLENGE_METHOD.value)
@@ -4454,94 +4264,41 @@ def load_oauth_providers():
     ):
 
         def oidc_oauth_register(oauth: OAuth):
-            client_kwargs = {
-                'scope': OAUTH_SCOPES.value,
-                **(
-                    {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
-                    if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
-                    else {}
-                ),
-                **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-            }
-
-            if OAUTH_CODE_CHALLENGE_METHOD.value and OAUTH_CODE_CHALLENGE_METHOD.value == 'S256':
-                client_kwargs['code_challenge_method'] = 'S256'
-            elif OAUTH_CODE_CHALLENGE_METHOD.value:
-                raise Exception(
-                    'Code challenge methods other than "%s" not supported. Given: "%s"'
-                    % ('S256', OAUTH_CODE_CHALLENGE_METHOD.value)
-                )
-
             client = oauth.register(
                 name='oidc',
                 client_id=OAUTH_CLIENT_ID.value,
                 client_secret=OAUTH_CLIENT_SECRET.value,
                 server_metadata_url=OPENID_PROVIDER_URL.value,
-                client_kwargs=client_kwargs,
-                redirect_uri=OPENID_REDIRECT_URI.value,
-=======
-    if OAUTH_CLIENT_ID and (OAUTH_CLIENT_SECRET or OAUTH_CODE_CHALLENGE_METHOD) and OPENID_PROVIDER_URL:
-
-        def oidc_oauth_register(oauth: OAuth):
-            client = oauth.register(
-                name='oidc',
-                client_id=OAUTH_CLIENT_ID,
-                client_secret=OAUTH_CLIENT_SECRET,
-                server_metadata_url=OPENID_PROVIDER_URL,
                 client_kwargs=oauth_client_kwargs(
-                    OAUTH_SCOPES,
+                    OAUTH_SCOPES.value,
                     **(
-                        {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD}
-                        if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD
+                        {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
+                        if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
                         else {}
                     ),
                 ),
-                redirect_uri=OPENID_REDIRECT_URI,
->>>>>>> v0.11.0
+                redirect_uri=OPENID_REDIRECT_URI.value,
             )
             return client
 
         OAUTH_PROVIDERS['oidc'] = {
-<<<<<<< HEAD
             'name': OAUTH_PROVIDER_NAME.value,
             'register': oidc_oauth_register,
         }
 
     if FEISHU_CLIENT_ID.value and FEISHU_CLIENT_SECRET.value:
-=======
-            'name': OAUTH_PROVIDER_NAME,
-            'register': oidc_oauth_register,
-        }
-
-    if FEISHU_CLIENT_ID and FEISHU_CLIENT_SECRET:
->>>>>>> v0.11.0
 
         def feishu_oauth_register(oauth: OAuth):
             client = oauth.register(
                 name='feishu',
-<<<<<<< HEAD
                 client_id=FEISHU_CLIENT_ID.value,
                 client_secret=FEISHU_CLIENT_SECRET.value,
-=======
-                client_id=FEISHU_CLIENT_ID,
-                client_secret=FEISHU_CLIENT_SECRET,
->>>>>>> v0.11.0
                 access_token_url='https://open.feishu.cn/open-apis/authen/v2/oauth/token',
                 authorize_url='https://accounts.feishu.cn/open-apis/authen/v1/authorize',
                 api_base_url='https://open.feishu.cn/open-apis',
                 userinfo_endpoint='https://open.feishu.cn/open-apis/authen/v1/user_info',
-                client_kwargs={
-<<<<<<< HEAD
-                    'scope': FEISHU_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(FEISHU_OAUTH_SCOPE.value),
                 redirect_uri=FEISHU_REDIRECT_URI.value,
-=======
-                    'scope': FEISHU_OAUTH_SCOPE,
-                    **({'timeout': int(OAUTH_TIMEOUT)} if OAUTH_TIMEOUT else {}),
-                },
-                redirect_uri=FEISHU_REDIRECT_URI,
->>>>>>> v0.11.0
             )
             return client
 
@@ -4551,7 +4308,6 @@ def load_oauth_providers():
         }
 
     configured_providers = []
-<<<<<<< HEAD
     if GOOGLE_CLIENT_ID.value:
         configured_providers.append('Google')
     if MICROSOFT_CLIENT_ID.value:
@@ -4562,18 +4318,6 @@ def load_oauth_providers():
         configured_providers.append('Feishu')
 
     if configured_providers and not OPENID_PROVIDER_URL.value and not OPENID_END_SESSION_ENDPOINT.value:
-=======
-    if GOOGLE_CLIENT_ID:
-        configured_providers.append('Google')
-    if MICROSOFT_CLIENT_ID:
-        configured_providers.append('Microsoft')
-    if GITHUB_CLIENT_ID:
-        configured_providers.append('GitHub')
-    if FEISHU_CLIENT_ID:
-        configured_providers.append('Feishu')
-
-    if configured_providers and not OPENID_PROVIDER_URL and not OPENID_END_SESSION_ENDPOINT:
->>>>>>> v0.11.0
         provider_list = ', '.join(configured_providers)
         log.warning(
             f'⚠️  OAuth providers configured ({provider_list}) but OPENID_PROVIDER_URL not set - logout will not work!'
@@ -4590,7 +4334,6 @@ load_oauth_providers()
 # LDAP
 ####################################
 
-<<<<<<< HEAD
 ENABLE_LDAP = ConfigVar(
     'ENABLE_LDAP',
     'ldap.enable',
@@ -4679,445 +4422,4 @@ LDAP_ATTRIBUTE_FOR_GROUPS = ConfigVar(
     'LDAP_ATTRIBUTE_FOR_GROUPS',
     'ldap.server.attribute_for_groups',
     os.getenv('LDAP_ATTRIBUTE_FOR_GROUPS', 'memberOf'),
-=======
-ENABLE_LDAP = os.getenv('ENABLE_LDAP', 'false').lower() == 'true'
-
-LDAP_SERVER_LABEL = os.getenv('LDAP_SERVER_LABEL', 'LDAP Server')
-
-LDAP_SERVER_HOST = os.getenv('LDAP_SERVER_HOST', 'localhost')
-
-LDAP_SERVER_PORT = int(os.getenv('LDAP_SERVER_PORT', '389'))
-
-LDAP_ATTRIBUTE_FOR_MAIL = os.getenv('LDAP_ATTRIBUTE_FOR_MAIL', 'mail')
-
-LDAP_ATTRIBUTE_FOR_USERNAME = os.getenv('LDAP_ATTRIBUTE_FOR_USERNAME', 'uid')
-
-LDAP_APP_DN = os.getenv('LDAP_APP_DN', '')
-
-LDAP_APP_PASSWORD = os.getenv('LDAP_APP_PASSWORD', '')
-
-LDAP_SEARCH_BASE = os.getenv('LDAP_SEARCH_BASE', '')
-
-LDAP_SEARCH_FILTERS = os.getenv('LDAP_SEARCH_FILTER', os.getenv('LDAP_SEARCH_FILTERS', ''))
-
-LDAP_USE_TLS = os.getenv('LDAP_USE_TLS', 'True').lower() == 'true'
-
-LDAP_CA_CERT_FILE = os.getenv('LDAP_CA_CERT_FILE', '')
-
-LDAP_VALIDATE_CERT = os.getenv('LDAP_VALIDATE_CERT', 'True').lower() == 'true'
-
-LDAP_CIPHERS = os.getenv('LDAP_CIPHERS', 'ALL')
-
-ENABLE_LDAP_GROUP_MANAGEMENT = os.getenv('ENABLE_LDAP_GROUP_MANAGEMENT', 'False').lower() == 'true'
-
-ENABLE_LDAP_GROUP_CREATION = os.getenv('ENABLE_LDAP_GROUP_CREATION', 'False').lower() == 'true'
-
-LDAP_ATTRIBUTE_FOR_GROUPS = os.getenv('LDAP_ATTRIBUTE_FOR_GROUPS', 'memberOf')
-
-DEFAULT_CONFIG = {
-    'direct.enable': ENABLE_DIRECT_CONNECTIONS,
-    'ollama.enable': ENABLE_OLLAMA_API,
-    'ollama.base_urls': OLLAMA_BASE_URLS,
-    'ollama.api_configs': OLLAMA_API_CONFIGS,
-    'openai.enable': ENABLE_OPENAI_API,
-    'openai.api_keys': OPENAI_API_KEYS,
-    'openai.api_base_urls': OPENAI_API_BASE_URLS,
-    'openai.api_configs': OPENAI_API_CONFIGS,
-    'models.base_models_cache': ENABLE_BASE_MODELS_CACHE,
-    'tool_server.connections': TOOL_SERVER_CONNECTIONS,
-    'oauth.client.timeout': OAUTH_CLIENT_TIMEOUT,
-    'terminal_server.connections': TERMINAL_SERVER_CONNECTIONS,
-    'code_execution.enable': ENABLE_CODE_EXECUTION,
-    'code_execution.engine': CODE_EXECUTION_ENGINE,
-    'code_execution.jupyter.url': CODE_EXECUTION_JUPYTER_URL,
-    'code_execution.jupyter.auth': CODE_EXECUTION_JUPYTER_AUTH,
-    'code_execution.jupyter.auth_token': CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-    'code_execution.jupyter.auth_password': CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-    'code_execution.jupyter.timeout': CODE_EXECUTION_JUPYTER_TIMEOUT,
-    'code_interpreter.enable': ENABLE_CODE_INTERPRETER,
-    'memories.enable': ENABLE_MEMORIES,
-    'memories.system_context.enable': ENABLE_MEMORY_SYSTEM_CONTEXT,
-    'memories.background_review.enable': ENABLE_MEMORY_BACKGROUND_REVIEW,
-    'memories.review_interval_turns': MEMORIES_REVIEW_INTERVAL_TURNS,
-    'memories.user_char_limit': MEMORIES_USER_CHAR_LIMIT,
-    'memories.context_char_limit': MEMORIES_CONTEXT_CHAR_LIMIT,
-    'code_interpreter.engine': CODE_INTERPRETER_ENGINE,
-    'code_interpreter.prompt_template': CODE_INTERPRETER_PROMPT_TEMPLATE,
-    'code_interpreter.jupyter.url': CODE_INTERPRETER_JUPYTER_URL,
-    'code_interpreter.jupyter.auth': CODE_INTERPRETER_JUPYTER_AUTH,
-    'code_interpreter.jupyter.auth_token': CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-    'code_interpreter.jupyter.auth_password': CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-    'code_interpreter.jupyter.timeout': CODE_INTERPRETER_JUPYTER_TIMEOUT,
-    'google_drive.enable': ENABLE_GOOGLE_DRIVE_INTEGRATION,
-    'google_drive.client_id': GOOGLE_DRIVE_CLIENT_ID,
-    'google_drive.api_key': GOOGLE_DRIVE_API_KEY,
-    'onedrive.enable': ENABLE_ONEDRIVE_INTEGRATION,
-    'onedrive.sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
-    'onedrive.sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,
-    'rag.content_extraction_engine': CONTENT_EXTRACTION_ENGINE,
-    'rag.content_extraction.supported_media_mime_types': CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
-    'rag.datalab_marker_api_key': DATALAB_MARKER_API_KEY,
-    'rag.datalab_marker_api_base_url': DATALAB_MARKER_API_BASE_URL,
-    'rag.datalab_marker_additional_config': DATALAB_MARKER_ADDITIONAL_CONFIG,
-    'rag.datalab_marker_use_llm': DATALAB_MARKER_USE_LLM,
-    'rag.datalab_marker_skip_cache': DATALAB_MARKER_SKIP_CACHE,
-    'rag.datalab_marker_force_ocr': DATALAB_MARKER_FORCE_OCR,
-    'rag.datalab_marker_paginate': DATALAB_MARKER_PAGINATE,
-    'rag.datalab_marker_strip_existing_ocr': DATALAB_MARKER_STRIP_EXISTING_OCR,
-    'rag.datalab_marker_disable_image_extraction': DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-    'rag.datalab_marker_format_lines': DATALAB_MARKER_FORMAT_LINES,
-    'rag.datalab_marker_output_format': DATALAB_MARKER_OUTPUT_FORMAT,
-    'rag.mineru_api_mode': MINERU_API_MODE,
-    'rag.mineru_api_url': MINERU_API_URL,
-    'rag.mineru_api_timeout': MINERU_API_TIMEOUT,
-    'rag.mineru_api_key': MINERU_API_KEY,
-    'rag.mineru_params': MINERU_PARAMS,
-    'rag.mineru_file_extensions': MINERU_FILE_EXTENSIONS,
-    'rag.external_document_loader_url': EXTERNAL_DOCUMENT_LOADER_URL,
-    'rag.external_document_loader_api_key': EXTERNAL_DOCUMENT_LOADER_API_KEY,
-    'rag.external_document_loader_headers': EXTERNAL_DOCUMENT_LOADER_HEADERS,
-    'rag.tika_server_url': TIKA_SERVER_URL,
-    'rag.docling_server_url': DOCLING_SERVER_URL,
-    'rag.docling_api_key': DOCLING_API_KEY,
-    'rag.docling_params': DOCLING_PARAMS,
-    'rag.document_intelligence_endpoint': DOCUMENT_INTELLIGENCE_ENDPOINT,
-    'rag.document_intelligence_key': DOCUMENT_INTELLIGENCE_KEY,
-    'rag.document_intelligence_model': DOCUMENT_INTELLIGENCE_MODEL,
-    'rag.mistral_ocr_api_base_url': MISTRAL_OCR_API_BASE_URL,
-    'rag.mistral_ocr_api_key': MISTRAL_OCR_API_KEY,
-    'rag.mistral_ocr_use_base64': MISTRAL_OCR_USE_BASE64,
-    'rag.paddleocr_vl_base_url': PADDLEOCR_VL_BASE_URL,
-    'rag.paddleocr_vl_token': PADDLEOCR_VL_TOKEN,
-    'rag.bypass_embedding_and_retrieval': BYPASS_EMBEDDING_AND_RETRIEVAL,
-    'rag.top_k': RAG_TOP_K,
-    'rag.top_k_reranker': RAG_TOP_K_RERANKER,
-    'rag.relevance_threshold': RAG_RELEVANCE_THRESHOLD,
-    'rag.hybrid_bm25_weight': RAG_HYBRID_BM25_WEIGHT,
-    'rag.enable_hybrid_search': ENABLE_RAG_HYBRID_SEARCH,
-    'rag.enable_hybrid_search_enriched_texts': ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
-    'rag.full_context': RAG_FULL_CONTEXT,
-    'rag.file.max_count': RAG_FILE_MAX_COUNT,
-    'rag.file.max_size': RAG_FILE_MAX_SIZE,
-    'file.image_compression_width': FILE_IMAGE_COMPRESSION_WIDTH,
-    'file.image_compression_height': FILE_IMAGE_COMPRESSION_HEIGHT,
-    'rag.file.allowed_extensions': RAG_ALLOWED_FILE_EXTENSIONS,
-    'rag.embedding_engine': RAG_EMBEDDING_ENGINE,
-    'rag.pdf_extract_images': PDF_EXTRACT_IMAGES,
-    'rag.pdf_loader_mode': PDF_LOADER_MODE,
-    'rag.embedding_model': RAG_EMBEDDING_MODEL,
-    'rag.tokenizer_model': RAG_TOKENIZER_MODEL,
-    'rag.embedding_batch_size': RAG_EMBEDDING_BATCH_SIZE,
-    'rag.enable_async_embedding': ENABLE_ASYNC_EMBEDDING,
-    'rag.embedding_concurrent_requests': RAG_EMBEDDING_CONCURRENT_REQUESTS,
-    'rag.reranking_engine': RAG_RERANKING_ENGINE,
-    'rag.reranking_model': RAG_RERANKING_MODEL,
-    'rag.reranking_batch_size': RAG_RERANKING_BATCH_SIZE,
-    'rag.external_reranker_url': RAG_EXTERNAL_RERANKER_URL,
-    'rag.external_reranker_api_key': RAG_EXTERNAL_RERANKER_API_KEY,
-    'rag.external_reranker_timeout': RAG_EXTERNAL_RERANKER_TIMEOUT,
-    'rag.text_splitter': RAG_TEXT_SPLITTER,
-    'rag.enable_markdown_header_text_splitter': ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-    'rag.tiktoken_encoding_name': TIKTOKEN_ENCODING_NAME,
-    'rag.chunk_size': CHUNK_SIZE,
-    'rag.chunk_min_size_target': CHUNK_MIN_SIZE_TARGET,
-    'rag.chunk_overlap': CHUNK_OVERLAP,
-    'rag.template': RAG_TEMPLATE,
-    'rag.openai.api_base_url': RAG_OPENAI_API_BASE_URL,
-    'rag.openai.api_key': RAG_OPENAI_API_KEY,
-    'rag.azure_openai.base_url': RAG_AZURE_OPENAI_BASE_URL,
-    'rag.azure_openai.api_key': RAG_AZURE_OPENAI_API_KEY,
-    'rag.azure_openai.api_version': RAG_AZURE_OPENAI_API_VERSION,
-    'rag.ollama.base_url': RAG_OLLAMA_BASE_URL,
-    'rag.ollama.api_key': RAG_OLLAMA_API_KEY,
-    'rag.youtube_loader_language': YOUTUBE_LOADER_LANGUAGE,
-    'rag.youtube_loader_proxy_url': YOUTUBE_LOADER_PROXY_URL,
-    'web.search.enable': ENABLE_WEB_SEARCH,
-    'web.search.confirmation.enable': ENABLE_WEB_SEARCH_CONFIRMATION,
-    'web.search.confirmation.content': WEB_SEARCH_CONFIRMATION_CONTENT,
-    'web.search.engine': WEB_SEARCH_ENGINE,
-    'web.search.bypass_embedding_and_retrieval': BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-    'web.search.bypass_web_loader': BYPASS_WEB_SEARCH_WEB_LOADER,
-    'web.search.result_count': WEB_SEARCH_RESULT_COUNT,
-    'web.search.domain.filter_list': WEB_SEARCH_DOMAIN_FILTER_LIST,
-    'web.search.concurrent_requests': WEB_SEARCH_CONCURRENT_REQUESTS,
-    'web.fetch.max_content_length': WEB_FETCH_MAX_CONTENT_LENGTH,
-    'web.loader.engine': WEB_LOADER_ENGINE,
-    'web.loader.concurrent_requests': WEB_LOADER_CONCURRENT_REQUESTS,
-    'web.loader.timeout': WEB_LOADER_TIMEOUT,
-    'web.loader.ssl_verification': ENABLE_WEB_LOADER_SSL_VERIFICATION,
-    'web.search.trust_env': WEB_SEARCH_TRUST_ENV,
-    'web.search.ollama_cloud_api_key': OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-    'web.search.searxng_query_url': SEARXNG_QUERY_URL,
-    'web.search.openserp_base_url': OPENSERP_BASE_URL,
-    'web.search.searxng_language': SEARXNG_LANGUAGE,
-    'web.search.yacy_query_url': YACY_QUERY_URL,
-    'web.search.yacy_username': YACY_USERNAME,
-    'web.search.yacy_password': YACY_PASSWORD,
-    'web.search.google_pse_api_key': GOOGLE_PSE_API_KEY,
-    'web.search.google_pse_engine_id': GOOGLE_PSE_ENGINE_ID,
-    'web.search.brave_search_api_key': BRAVE_SEARCH_API_KEY,
-    'web.search.brave_search_context_tokens': BRAVE_SEARCH_CONTEXT_TOKENS,
-    'web.search.kagi_search_api_key': KAGI_SEARCH_API_KEY,
-    'web.search.mojeek_search_api_key': MOJEEK_SEARCH_API_KEY,
-    'web.search.bocha_search_api_key': BOCHA_SEARCH_API_KEY,
-    'web.search.serpstack_api_key': SERPSTACK_API_KEY,
-    'web.search.serpstack_https': SERPSTACK_HTTPS,
-    'web.search.serper_api_key': SERPER_API_KEY,
-    'web.search.serply_api_key': SERPLY_API_KEY,
-    'web.search.serphouse_api_key': SERPHOUSE_API_KEY,
-    'web.search.serphouse_domain': SERPHOUSE_DOMAIN,
-    'web.search.ddgs_backend': DDGS_BACKEND,
-    'web.search.jina_api_key': JINA_API_KEY,
-    'web.search.jina_api_base_url': JINA_API_BASE_URL,
-    'web.search.searchapi_api_key': SEARCHAPI_API_KEY,
-    'web.search.searchapi_engine': SEARCHAPI_ENGINE,
-    'web.search.serpapi_api_key': SERPAPI_API_KEY,
-    'web.search.serpapi_engine': SERPAPI_ENGINE,
-    'web.search.bing_search_v7_endpoint': BING_SEARCH_V7_ENDPOINT,
-    'web.search.bing_search_v7_subscription_key': BING_SEARCH_V7_SUBSCRIPTION_KEY,
-    'web.search.azure_ai_search_api_key': AZURE_AI_SEARCH_API_KEY,
-    'web.search.azure_ai_search_endpoint': AZURE_AI_SEARCH_ENDPOINT,
-    'web.search.azure_ai_search_index_name': AZURE_AI_SEARCH_INDEX_NAME,
-    'web.search.exa_api_key': EXA_API_KEY,
-    'web.search.perplexity_api_key': PERPLEXITY_API_KEY,
-    'web.search.perplexity_model': PERPLEXITY_MODEL,
-    'web.search.perplexity_search_context_usage': PERPLEXITY_SEARCH_CONTEXT_USAGE,
-    'web.search.perplexity_search_api_url': PERPLEXITY_SEARCH_API_URL,
-    'web.search.microsoft_web_iq_api_base_url': MICROSOFT_WEB_IQ_API_BASE_URL,
-    'web.search.microsoft_web_iq_api_key': MICROSOFT_WEB_IQ_API_KEY,
-    'web.search.microsoft_web_iq_language': MICROSOFT_WEB_IQ_LANGUAGE,
-    'web.search.sougou_api_sid': SOUGOU_API_SID,
-    'web.search.sougou_api_sk': SOUGOU_API_SK,
-    'web.search.tavily_api_key': TAVILY_API_KEY,
-    'web.search.tavily_extract_depth': TAVILY_EXTRACT_DEPTH,
-    'web.loader.playwright_ws_url': PLAYWRIGHT_WS_URL,
-    'web.loader.playwright_timeout': PLAYWRIGHT_TIMEOUT,
-    'web.loader.firecrawl_api_key': FIRECRAWL_API_KEY,
-    'web.loader.firecrawl_api_url': FIRECRAWL_API_BASE_URL,
-    'web.loader.firecrawl_timeout': FIRECRAWL_TIMEOUT,
-    'web.search.external_web_search_url': EXTERNAL_WEB_SEARCH_URL,
-    'web.search.external_web_search_api_key': EXTERNAL_WEB_SEARCH_API_KEY,
-    'web.loader.external_web_loader_url': EXTERNAL_WEB_LOADER_URL,
-    'web.loader.external_web_loader_api_key': EXTERNAL_WEB_LOADER_API_KEY,
-    'web.search.yandex_web_search_url': YANDEX_WEB_SEARCH_URL,
-    'web.search.yandex_web_search_api_key': YANDEX_WEB_SEARCH_API_KEY,
-    'web.search.yandex_web_search_config': YANDEX_WEB_SEARCH_CONFIG,
-    'web.search.youcom_api_key': YOUCOM_API_KEY,
-    'web.search.linkup_api_key': LINKUP_API_KEY,
-    'web.search.linkup_search_params': LINKUP_SEARCH_PARAMS,
-    'image_generation.enable': ENABLE_IMAGE_GENERATION,
-    'image_generation.engine': IMAGE_GENERATION_ENGINE,
-    'image_generation.model': IMAGE_GENERATION_MODEL,
-    'image_generation.size': IMAGE_SIZE,
-    'image_generation.steps': IMAGE_STEPS,
-    'image_generation.prompt.enable': ENABLE_IMAGE_PROMPT_GENERATION,
-    'image_generation.automatic1111.base_url': AUTOMATIC1111_BASE_URL,
-    'image_generation.automatic1111.api_auth': AUTOMATIC1111_API_AUTH,
-    'image_generation.automatic1111.api_params': AUTOMATIC1111_PARAMS,
-    'image_generation.comfyui.base_url': COMFYUI_BASE_URL,
-    'image_generation.comfyui.api_key': COMFYUI_API_KEY,
-    'image_generation.comfyui.workflow': COMFYUI_WORKFLOW,
-    'image_generation.comfyui.nodes': COMFYUI_WORKFLOW_NODES,
-    'image_generation.openai.api_base_url': IMAGES_OPENAI_API_BASE_URL,
-    'image_generation.openai.api_version': IMAGES_OPENAI_API_VERSION,
-    'image_generation.openai.api_key': IMAGES_OPENAI_API_KEY,
-    'image_generation.openai.params': IMAGES_OPENAI_API_PARAMS,
-    'image_generation.gemini.api_base_url': IMAGES_GEMINI_API_BASE_URL,
-    'image_generation.gemini.api_key': IMAGES_GEMINI_API_KEY,
-    'image_generation.gemini.endpoint_method': IMAGES_GEMINI_ENDPOINT_METHOD,
-    'images.edit.enable': ENABLE_IMAGE_EDIT,
-    'images.edit.engine': IMAGE_EDIT_ENGINE,
-    'images.edit.model': IMAGE_EDIT_MODEL,
-    'images.edit.size': IMAGE_EDIT_SIZE,
-    'images.edit.openai.api_base_url': IMAGES_EDIT_OPENAI_API_BASE_URL,
-    'images.edit.openai.api_version': IMAGES_EDIT_OPENAI_API_VERSION,
-    'images.edit.openai.api_key': IMAGES_EDIT_OPENAI_API_KEY,
-    'images.edit.gemini.api_base_url': IMAGES_EDIT_GEMINI_API_BASE_URL,
-    'images.edit.gemini.api_key': IMAGES_EDIT_GEMINI_API_KEY,
-    'images.edit.comfyui.base_url': IMAGES_EDIT_COMFYUI_BASE_URL,
-    'images.edit.comfyui.api_key': IMAGES_EDIT_COMFYUI_API_KEY,
-    'images.edit.comfyui.workflow': IMAGES_EDIT_COMFYUI_WORKFLOW,
-    'images.edit.comfyui.nodes': IMAGES_EDIT_COMFYUI_WORKFLOW_NODES,
-    'audio.stt.whisper_model': WHISPER_MODEL,
-    'audio.stt.deepgram.api_key': DEEPGRAM_API_KEY,
-    'audio.stt.openai.api_base_url': AUDIO_STT_OPENAI_API_BASE_URL,
-    'audio.stt.openai.api_key': AUDIO_STT_OPENAI_API_KEY,
-    'audio.stt.openai.api_request_format': AUDIO_STT_OPENAI_API_REQUEST_FORMAT,
-    'audio.stt.engine': AUDIO_STT_ENGINE,
-    'audio.stt.model': AUDIO_STT_MODEL,
-    'audio.stt.supported_content_types': AUDIO_STT_SUPPORTED_CONTENT_TYPES,
-    'audio.stt.allowed_extensions': AUDIO_STT_ALLOWED_EXTENSIONS,
-    'audio.stt.azure.api_key': AUDIO_STT_AZURE_API_KEY,
-    'audio.stt.azure.region': AUDIO_STT_AZURE_REGION,
-    'audio.stt.azure.locales': AUDIO_STT_AZURE_LOCALES,
-    'audio.stt.azure.base_url': AUDIO_STT_AZURE_BASE_URL,
-    'audio.stt.azure.max_speakers': AUDIO_STT_AZURE_MAX_SPEAKERS,
-    'audio.stt.mistral.api_key': AUDIO_STT_MISTRAL_API_KEY,
-    'audio.stt.mistral.api_base_url': AUDIO_STT_MISTRAL_API_BASE_URL,
-    'audio.stt.mistral.use_chat_completions': AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS,
-    'audio.tts.openai.api_base_url': AUDIO_TTS_OPENAI_API_BASE_URL,
-    'audio.tts.openai.api_key': AUDIO_TTS_OPENAI_API_KEY,
-    'audio.tts.openai.params': AUDIO_TTS_OPENAI_PARAMS,
-    'audio.tts.api_key': AUDIO_TTS_API_KEY,
-    'audio.tts.engine': AUDIO_TTS_ENGINE,
-    'audio.tts.model': AUDIO_TTS_MODEL,
-    'audio.tts.voice': AUDIO_TTS_VOICE,
-    'audio.tts.split_on': AUDIO_TTS_SPLIT_ON,
-    'audio.tts.azure.speech_region': AUDIO_TTS_AZURE_SPEECH_REGION,
-    'audio.tts.azure.speech_base_url': AUDIO_TTS_AZURE_SPEECH_BASE_URL,
-    'audio.tts.azure.speech_output_format': AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
-    'audio.tts.mistral.api_key': AUDIO_TTS_MISTRAL_API_KEY,
-    'audio.tts.mistral.api_base_url': AUDIO_TTS_MISTRAL_API_BASE_URL,
-    'webui.url': WEBUI_URL,
-    'ui.enable_signup': ENABLE_SIGNUP,
-    'ui.enable_login_form': ENABLE_LOGIN_FORM,
-    'ui.enable_password_change_form': ENABLE_PASSWORD_CHANGE_FORM,
-    'ui.default_locale': DEFAULT_LOCALE,
-    'ui.default_models': DEFAULT_MODELS,
-    'ui.default_pinned_models': DEFAULT_PINNED_MODELS,
-    'ui.prompt_suggestions': DEFAULT_PROMPT_SUGGESTIONS,
-    'ui.model_order_list': MODEL_ORDER_LIST,
-    'models.default_metadata': DEFAULT_MODEL_METADATA,
-    'models.default_params': DEFAULT_MODEL_PARAMS,
-    'ui.default_user_role': DEFAULT_USER_ROLE,
-    'ui.default_group_id': DEFAULT_GROUP_ID,
-    'ui.pending_user_overlay_title': PENDING_USER_OVERLAY_TITLE,
-    'ui.pending_user_overlay_content': PENDING_USER_OVERLAY_CONTENT,
-    'ui.watermark': RESPONSE_WATERMARK,
-    'user.permissions': USER_PERMISSIONS,
-    'folders.enable': ENABLE_FOLDERS,
-    'folders.max_file_count': FOLDER_MAX_FILE_COUNT,
-    'channels.enable': ENABLE_CHANNELS,
-    'channels.model_response_mode': CHANNEL_MODEL_RESPONSE_MODE,
-    'calendar.enable': ENABLE_CALENDAR,
-    'automations.enable': ENABLE_AUTOMATIONS,
-    'subagents.enable': ENABLE_SUBAGENTS,
-    'subagents.background_enabled': SUBAGENTS_BACKGROUND_ENABLED,
-    'subagents.max_concurrent': SUBAGENTS_MAX_CONCURRENT,
-    'subagents.max_async': SUBAGENTS_MAX_ASYNC,
-    'subagents.max_iterations': SUBAGENTS_MAX_ITERATIONS,
-    'subagents.max_output': SUBAGENTS_MAX_OUTPUT,
-    'subagents.system_prompt': SUBAGENTS_SYSTEM_PROMPT,
-    'automations.max_count': AUTOMATION_MAX_COUNT,
-    'automations.min_interval': AUTOMATION_MIN_INTERVAL,
-    'automations.auth_token_expires_in': AUTOMATION_AUTH_TOKEN_EXPIRES_IN,
-    'notes.enable': ENABLE_NOTES,
-    'users.enable_status': ENABLE_USER_STATUS,
-    'evaluation.arena.enable': ENABLE_EVALUATION_ARENA_MODELS,
-    'evaluation.arena.models': EVALUATION_ARENA_MODELS,
-    'webhook_url': WEBHOOK_URL,
-    'ui.enable_community_sharing': ENABLE_COMMUNITY_SHARING,
-    'ui.enable_message_rating': ENABLE_MESSAGE_RATING,
-    'ui.enable_user_webhooks': ENABLE_USER_WEBHOOKS,
-    'ui.banners': WEBUI_BANNERS,
-    'auth.admin.show': SHOW_ADMIN_DETAILS,
-    'auth.admin.email': ADMIN_EMAIL,
-    'task.model.default': TASK_MODEL,
-    'task.model.external': TASK_MODEL_EXTERNAL,
-    'chat.context_compaction.model': CONTEXT_COMPACTION_MODEL,
-    'chat.context_compaction.enable': ENABLE_CONTEXT_COMPACTION,
-    'chat.context_compaction.token_threshold': CONTEXT_COMPACTION_TOKEN_THRESHOLD,
-    'chat.context_compaction.token_cap': CONTEXT_COMPACTION_TOKEN_CAP,
-    'chat.context_compaction.retention_percentage': CONTEXT_COMPACTION_RETENTION_PERCENTAGE,
-    'chat.context_compaction.prompt_template': CONTEXT_COMPACTION_PROMPT_TEMPLATE,
-    'task.title.prompt_template': TITLE_GENERATION_PROMPT_TEMPLATE,
-    'task.tags.prompt_template': TAGS_GENERATION_PROMPT_TEMPLATE,
-    'task.image.prompt_template': IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
-    'task.follow_up.prompt_template': FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
-    'task.follow_up.enable': ENABLE_FOLLOW_UP_GENERATION,
-    'task.tags.enable': ENABLE_TAGS_GENERATION,
-    'task.title.enable': ENABLE_TITLE_GENERATION,
-    'task.query.search.enable': ENABLE_SEARCH_QUERY_GENERATION,
-    'task.query.retrieval.enable': ENABLE_RETRIEVAL_QUERY_GENERATION,
-    'task.query.prompt_template': QUERY_GENERATION_PROMPT_TEMPLATE,
-    'task.autocomplete.enable': ENABLE_AUTOCOMPLETE_GENERATION,
-    'task.autocomplete.input_max_length': AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
-    'task.autocomplete.prompt_template': AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
-    'task.voice.prompt_template': VOICE_MODE_PROMPT_TEMPLATE,
-    'task.voice.prompt.enable': ENABLE_VOICE_MODE_PROMPT,
-    'task.tools.prompt_template': TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
-    'auth.enable_api_keys': ENABLE_API_KEYS,
-    'auth.api_key.endpoint_restrictions': ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
-    'auth.api_key.allowed_endpoints': API_KEYS_ALLOWED_ENDPOINTS,
-    'auth.jwt_expiry': JWT_EXPIRES_IN,
-    'oauth.enable': ENABLE_OAUTH,
-    'oauth.enable_signup': ENABLE_OAUTH_SIGNUP,
-    'oauth.auto_redirect': OAUTH_AUTO_REDIRECT,
-    'oauth.refresh_token.include_scope': OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE,
-    'oauth.merge_accounts_by_email': OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
-    'oauth.google.client_id': GOOGLE_CLIENT_ID,
-    'oauth.google.client_secret': GOOGLE_CLIENT_SECRET,
-    'oauth.google.scope': GOOGLE_OAUTH_SCOPE,
-    'oauth.google.redirect_uri': GOOGLE_REDIRECT_URI,
-    'oauth.microsoft.client_id': MICROSOFT_CLIENT_ID,
-    'oauth.microsoft.client_secret': MICROSOFT_CLIENT_SECRET,
-    'oauth.microsoft.tenant_id': MICROSOFT_CLIENT_TENANT_ID,
-    'oauth.microsoft.login_base_url': MICROSOFT_CLIENT_LOGIN_BASE_URL,
-    'oauth.microsoft.picture_url': MICROSOFT_CLIENT_PICTURE_URL,
-    'oauth.microsoft.scope': MICROSOFT_OAUTH_SCOPE,
-    'oauth.microsoft.redirect_uri': MICROSOFT_REDIRECT_URI,
-    'oauth.github.client_id': GITHUB_CLIENT_ID,
-    'oauth.github.client_secret': GITHUB_CLIENT_SECRET,
-    'oauth.github.scope': GITHUB_CLIENT_SCOPE,
-    'oauth.github.redirect_uri': GITHUB_CLIENT_REDIRECT_URI,
-    'oauth.client_id': OAUTH_CLIENT_ID,
-    'oauth.client_secret': OAUTH_CLIENT_SECRET,
-    'oauth.provider_url': OPENID_PROVIDER_URL,
-    'oauth.end_session_endpoint': OPENID_END_SESSION_ENDPOINT,
-    'oauth.redirect_uri': OPENID_REDIRECT_URI,
-    'oauth.scopes': OAUTH_SCOPES,
-    'oauth.timeout': OAUTH_TIMEOUT,
-    'oauth.token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD,
-    'oauth.code_challenge_method': OAUTH_CODE_CHALLENGE_METHOD,
-    'oauth.provider_name': OAUTH_PROVIDER_NAME,
-    'oauth.sub_claim': OAUTH_SUB_CLAIM,
-    'oauth.username_claim': OAUTH_USERNAME_CLAIM,
-    'oauth.picture_claim': OAUTH_PICTURE_CLAIM,
-    'oauth.email_claim': OAUTH_EMAIL_CLAIM,
-    'oauth.group_claim': OAUTH_GROUPS_CLAIM,
-    'oauth.feishu.client_id': FEISHU_CLIENT_ID,
-    'oauth.feishu.client_secret': FEISHU_CLIENT_SECRET,
-    'oauth.feishu.scope': FEISHU_OAUTH_SCOPE,
-    'oauth.feishu.redirect_uri': FEISHU_REDIRECT_URI,
-    'oauth.enable_role_mapping': ENABLE_OAUTH_ROLE_MANAGEMENT,
-    'oauth.enable_group_mapping': ENABLE_OAUTH_GROUP_MANAGEMENT,
-    'oauth.enable_group_creation': ENABLE_OAUTH_GROUP_CREATION,
-    'oauth.group_default_share': OAUTH_GROUP_DEFAULT_SHARE,
-    'oauth.blocked_groups': OAUTH_BLOCKED_GROUPS,
-    'oauth.roles_claim': OAUTH_ROLES_CLAIM,
-    'oauth.allowed_roles': OAUTH_ALLOWED_ROLES,
-    'oauth.admin_roles': OAUTH_ADMIN_ROLES,
-    'oauth.allowed_domains': OAUTH_ALLOWED_DOMAINS,
-    'oauth.update_picture_on_login': OAUTH_UPDATE_PICTURE_ON_LOGIN,
-    'oauth.update_name_on_login': OAUTH_UPDATE_NAME_ON_LOGIN,
-    'oauth.update_email_on_login': OAUTH_UPDATE_EMAIL_ON_LOGIN,
-    'oauth.audience': OAUTH_AUDIENCE,
-    'ldap.enable': ENABLE_LDAP,
-    'ldap.server.label': LDAP_SERVER_LABEL,
-    'ldap.server.host': LDAP_SERVER_HOST,
-    'ldap.server.port': LDAP_SERVER_PORT,
-    'ldap.server.attribute_for_mail': LDAP_ATTRIBUTE_FOR_MAIL,
-    'ldap.server.attribute_for_username': LDAP_ATTRIBUTE_FOR_USERNAME,
-    'ldap.server.app_dn': LDAP_APP_DN,
-    'ldap.server.app_password': LDAP_APP_PASSWORD,
-    'ldap.server.users_dn': LDAP_SEARCH_BASE,
-    'ldap.server.search_filter': LDAP_SEARCH_FILTERS,
-    'ldap.server.use_tls': LDAP_USE_TLS,
-    'ldap.server.ca_cert_file': LDAP_CA_CERT_FILE,
-    'ldap.server.validate_cert': LDAP_VALIDATE_CERT,
-    'ldap.server.ciphers': LDAP_CIPHERS,
-    'ldap.group.enable_management': ENABLE_LDAP_GROUP_MANAGEMENT,
-    'ldap.group.enable_creation': ENABLE_LDAP_GROUP_CREATION,
-    'ldap.server.attribute_for_groups': LDAP_ATTRIBUTE_FOR_GROUPS,
-}
-
-
-ENABLE_PERSISTENT_CONFIG = os.getenv('ENABLE_PERSISTENT_CONFIG', 'True').lower() == 'true'
-ENABLE_OAUTH_PERSISTENT_CONFIG = os.getenv('ENABLE_OAUTH_PERSISTENT_CONFIG', 'False').lower() == 'true'
-
-Config.configure(
-    defaults=DEFAULT_CONFIG,
-    enable_persistent=ENABLE_PERSISTENT_CONFIG,
-    enable_oauth_persistent=ENABLE_OAUTH_PERSISTENT_CONFIG,
->>>>>>> v0.11.0
 )
