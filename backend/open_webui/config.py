@@ -2614,11 +2614,27 @@ YOUTUBE_LOADER_PROXY_URL = ConfigVar(
 # Web Search
 ####################################
 
-<<<<<<< HEAD
 ENABLE_WEB_SEARCH = ConfigVar(
     'ENABLE_WEB_SEARCH',
     'rag.web.search.enable',
     os.getenv('ENABLE_WEB_SEARCH', 'False').lower() == 'true',
+)
+
+# v0.11.0 additions — web-search confirmation prompt. Admin-editable via
+# routers/retrieval.py (keys under web.search.confirmation.*).
+ENABLE_WEB_SEARCH_CONFIRMATION = ConfigVar(
+    'ENABLE_WEB_SEARCH_CONFIRMATION',
+    'web.search.confirmation.enable',
+    os.getenv('ENABLE_WEB_SEARCH_CONFIRMATION', 'False').lower() == 'true',
+)
+
+WEB_SEARCH_CONFIRMATION_CONTENT = ConfigVar(
+    'WEB_SEARCH_CONFIRMATION_CONTENT',
+    'web.search.confirmation.content',
+    os.getenv(
+        'WEB_SEARCH_CONFIRMATION_CONTENT',
+        'Your query will be sent to the configured web search provider.',
+    ),
 )
 
 WEB_SEARCH_ENGINE = ConfigVar(
@@ -2645,27 +2661,6 @@ WEB_SEARCH_RESULT_COUNT = ConfigVar(
     'rag.web.search.result_count',
     int(os.getenv('WEB_SEARCH_RESULT_COUNT', '3')),
 )
-=======
-ENABLE_WEB_SEARCH = os.getenv('ENABLE_WEB_SEARCH', 'False').lower() == 'true'
-
-ENABLE_WEB_SEARCH_CONFIRMATION = os.getenv('ENABLE_WEB_SEARCH_CONFIRMATION', 'False').lower() == 'true'
-
-WEB_SEARCH_CONFIRMATION_CONTENT = os.getenv(
-    'WEB_SEARCH_CONFIRMATION_CONTENT',
-    'Your query will be sent to the configured web search provider.',
-)
-
-WEB_SEARCH_ENGINE = os.getenv('WEB_SEARCH_ENGINE', '')
-
-BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = (
-    os.getenv('BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL', 'False').lower() == 'true'
-)
-
-
-BYPASS_WEB_SEARCH_WEB_LOADER = os.getenv('BYPASS_WEB_SEARCH_WEB_LOADER', 'False').lower() == 'true'
-
-WEB_SEARCH_RESULT_COUNT = int(os.getenv('WEB_SEARCH_RESULT_COUNT', '3'))
->>>>>>> v0.11.0
 
 
 try:
@@ -2680,7 +2675,6 @@ except Exception as e:
 
 # You can provide a list of your own websites to filter after performing a web search.
 # This ensures the highest level of safety and reliability of the information sources.
-<<<<<<< HEAD
 WEB_SEARCH_DOMAIN_FILTER_LIST = ConfigVar(
     'WEB_SEARCH_DOMAIN_FILTER_LIST',
     'rag.web.search.domain.filter_list',
@@ -2742,6 +2736,13 @@ SEARXNG_QUERY_URL = ConfigVar(
     'SEARXNG_QUERY_URL',
     'rag.web.search.searxng_query_url',
     os.getenv('SEARXNG_QUERY_URL', ''),
+)
+
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+OPENSERP_BASE_URL = ConfigVar(
+    'OPENSERP_BASE_URL',
+    'rag.web.search.openserp_base_url',
+    os.getenv('OPENSERP_BASE_URL', 'http://localhost:7000'),
 )
 
 SEARXNG_LANGUAGE = ConfigVar(
@@ -2832,6 +2833,19 @@ SERPLY_API_KEY = ConfigVar(
     'SERPLY_API_KEY',
     'rag.web.search.serply_api_key',
     os.getenv('SERPLY_API_KEY', ''),
+)
+
+# v0.11.0 additions — admin-editable via routers/retrieval.py.
+SERPHOUSE_API_KEY = ConfigVar(
+    'SERPHOUSE_API_KEY',
+    'rag.web.search.serphouse_api_key',
+    os.getenv('SERPHOUSE_API_KEY', ''),
+)
+
+SERPHOUSE_DOMAIN = ConfigVar(
+    'SERPHOUSE_DOMAIN',
+    'rag.web.search.serphouse_domain',
+    os.getenv('SERPHOUSE_DOMAIN', 'google.com'),
 )
 
 DDGS_BACKEND = ConfigVar(
@@ -2934,6 +2948,26 @@ PERPLEXITY_SEARCH_API_URL = ConfigVar(
     'PERPLEXITY_SEARCH_API_URL',
     'rag.web.search.perplexity_search_api_url',
     os.getenv('PERPLEXITY_SEARCH_API_URL', 'https://api.perplexity.ai/search'),
+)
+
+# v0.11.0 additions — Microsoft Web IQ search provider; admin-editable via
+# routers/retrieval.py.
+MICROSOFT_WEB_IQ_API_BASE_URL = ConfigVar(
+    'MICROSOFT_WEB_IQ_API_BASE_URL',
+    'rag.web.search.microsoft_web_iq_api_base_url',
+    os.getenv('MICROSOFT_WEB_IQ_API_BASE_URL', 'https://api.microsoft.ai/v3'),
+)
+
+MICROSOFT_WEB_IQ_API_KEY = ConfigVar(
+    'MICROSOFT_WEB_IQ_API_KEY',
+    'rag.web.search.microsoft_web_iq_api_key',
+    os.getenv('MICROSOFT_WEB_IQ_API_KEY', ''),
+)
+
+MICROSOFT_WEB_IQ_LANGUAGE = ConfigVar(
+    'MICROSOFT_WEB_IQ_LANGUAGE',
+    'rag.web.search.microsoft_web_iq_language',
+    os.getenv('MICROSOFT_WEB_IQ_LANGUAGE', 'en'),
 )
 
 SOUGOU_API_SID = ConfigVar(
@@ -3043,143 +3077,6 @@ LINKUP_API_KEY = ConfigVar(
     'rag.web.search.linkup_api_key',
     os.getenv('LINKUP_API_KEY', ''),
 )
-=======
-WEB_SEARCH_DOMAIN_FILTER_LIST = web_search_domain_filter_list
-
-WEB_SEARCH_CONCURRENT_REQUESTS = int(os.getenv('WEB_SEARCH_CONCURRENT_REQUESTS', '0'))
-
-WEB_FETCH_MAX_CONTENT_LENGTH = (
-    int(os.getenv('WEB_FETCH_MAX_CONTENT_LENGTH')) if os.getenv('WEB_FETCH_MAX_CONTENT_LENGTH') else None
-)
-
-WEB_LOADER_ENGINE = os.getenv('WEB_LOADER_ENGINE', '')
-
-
-WEB_LOADER_CONCURRENT_REQUESTS = int(os.getenv('WEB_LOADER_CONCURRENT_REQUESTS', '10'))
-
-WEB_LOADER_TIMEOUT = os.getenv('WEB_LOADER_TIMEOUT', '')
-
-
-ENABLE_WEB_LOADER_SSL_VERIFICATION = os.getenv('ENABLE_WEB_LOADER_SSL_VERIFICATION', 'True').lower() == 'true'
-
-WEB_SEARCH_TRUST_ENV = os.getenv('WEB_SEARCH_TRUST_ENV', 'True').lower() == 'true'
-
-
-OLLAMA_CLOUD_WEB_SEARCH_API_KEY = os.getenv('OLLAMA_CLOUD_API_KEY', '')
-
-SEARXNG_QUERY_URL = os.getenv('SEARXNG_QUERY_URL', '')
-OPENSERP_BASE_URL = os.getenv('OPENSERP_BASE_URL', 'http://localhost:7000')
-
-SEARXNG_LANGUAGE = os.getenv('SEARXNG_LANGUAGE', 'all')
-
-YACY_QUERY_URL = os.getenv('YACY_QUERY_URL', '')
-
-YACY_USERNAME = os.getenv('YACY_USERNAME', '')
-
-YACY_PASSWORD = os.getenv('YACY_PASSWORD', '')
-
-GOOGLE_PSE_API_KEY = os.getenv('GOOGLE_PSE_API_KEY', '')
-
-GOOGLE_PSE_ENGINE_ID = os.getenv('GOOGLE_PSE_ENGINE_ID', '')
-
-BRAVE_SEARCH_API_KEY = os.getenv('BRAVE_SEARCH_API_KEY', '')
-
-BRAVE_SEARCH_CONTEXT_TOKENS = int(os.getenv('BRAVE_SEARCH_CONTEXT_TOKENS', '8192'))
-
-KAGI_SEARCH_API_KEY = os.getenv('KAGI_SEARCH_API_KEY', '')
-
-MOJEEK_SEARCH_API_KEY = os.getenv('MOJEEK_SEARCH_API_KEY', '')
-
-BOCHA_SEARCH_API_KEY = os.getenv('BOCHA_SEARCH_API_KEY', '')
-
-SERPSTACK_API_KEY = os.getenv('SERPSTACK_API_KEY', '')
-
-SERPSTACK_HTTPS = os.getenv('SERPSTACK_HTTPS', 'True').lower() == 'true'
-
-SERPER_API_KEY = os.getenv('SERPER_API_KEY', '')
-
-SERPLY_API_KEY = os.getenv('SERPLY_API_KEY', '')
-
-SERPHOUSE_API_KEY = os.getenv('SERPHOUSE_API_KEY', '')
-
-SERPHOUSE_DOMAIN = os.getenv('SERPHOUSE_DOMAIN', 'google.com')
-
-DDGS_BACKEND = os.getenv('DDGS_BACKEND', 'auto')
-
-JINA_API_KEY = os.getenv('JINA_API_KEY', '')
-
-JINA_API_BASE_URL = os.getenv('JINA_API_BASE_URL', '')
-
-SEARCHAPI_API_KEY = os.getenv('SEARCHAPI_API_KEY', '')
-
-SEARCHAPI_ENGINE = os.getenv('SEARCHAPI_ENGINE', '')
-
-SERPAPI_API_KEY = os.getenv('SERPAPI_API_KEY', '')
-
-SERPAPI_ENGINE = os.getenv('SERPAPI_ENGINE', '')
-
-BING_SEARCH_V7_ENDPOINT = os.getenv('BING_SEARCH_V7_ENDPOINT', 'https://api.bing.microsoft.com/v7.0/search')
-
-BING_SEARCH_V7_SUBSCRIPTION_KEY = os.getenv('BING_SEARCH_V7_SUBSCRIPTION_KEY', '')
-
-AZURE_AI_SEARCH_API_KEY = os.getenv('AZURE_AI_SEARCH_API_KEY', '')
-
-AZURE_AI_SEARCH_ENDPOINT = os.getenv('AZURE_AI_SEARCH_ENDPOINT', '')
-
-AZURE_AI_SEARCH_INDEX_NAME = os.getenv('AZURE_AI_SEARCH_INDEX_NAME', '')
-
-EXA_API_KEY = os.getenv('EXA_API_KEY', '')
-
-PERPLEXITY_API_KEY = os.getenv('PERPLEXITY_API_KEY', '')
-
-PERPLEXITY_MODEL = os.getenv('PERPLEXITY_MODEL', 'sonar')
-
-PERPLEXITY_SEARCH_CONTEXT_USAGE = os.getenv('PERPLEXITY_SEARCH_CONTEXT_USAGE', 'medium')
-
-PERPLEXITY_SEARCH_API_URL = os.getenv('PERPLEXITY_SEARCH_API_URL', 'https://api.perplexity.ai/search')
-
-MICROSOFT_WEB_IQ_API_BASE_URL = os.getenv('MICROSOFT_WEB_IQ_API_BASE_URL', 'https://api.microsoft.ai/v3')
-
-MICROSOFT_WEB_IQ_API_KEY = os.getenv('MICROSOFT_WEB_IQ_API_KEY', '')
-
-MICROSOFT_WEB_IQ_LANGUAGE = os.getenv('MICROSOFT_WEB_IQ_LANGUAGE', 'en')
-
-SOUGOU_API_SID = os.getenv('SOUGOU_API_SID', '')
-
-SOUGOU_API_SK = os.getenv('SOUGOU_API_SK', '')
-
-TAVILY_API_KEY = os.getenv('TAVILY_API_KEY', '')
-
-TAVILY_EXTRACT_DEPTH = os.getenv('TAVILY_EXTRACT_DEPTH', 'basic')
-
-PLAYWRIGHT_WS_URL = os.getenv('PLAYWRIGHT_WS_URL', '')
-
-PLAYWRIGHT_TIMEOUT = int(os.getenv('PLAYWRIGHT_TIMEOUT', '10000'))
-
-FIRECRAWL_API_KEY = os.getenv('FIRECRAWL_API_KEY', '')
-
-FIRECRAWL_API_BASE_URL = os.getenv('FIRECRAWL_API_BASE_URL', 'https://api.firecrawl.dev')
-
-FIRECRAWL_TIMEOUT = os.getenv('FIRECRAWL_TIMEOUT', '')
-
-EXTERNAL_WEB_SEARCH_URL = os.getenv('EXTERNAL_WEB_SEARCH_URL', '')
-
-EXTERNAL_WEB_SEARCH_API_KEY = os.getenv('EXTERNAL_WEB_SEARCH_API_KEY', '')
-
-EXTERNAL_WEB_LOADER_URL = os.getenv('EXTERNAL_WEB_LOADER_URL', '')
-
-EXTERNAL_WEB_LOADER_API_KEY = os.getenv('EXTERNAL_WEB_LOADER_API_KEY', '')
-
-YANDEX_WEB_SEARCH_URL = os.getenv('YANDEX_WEB_SEARCH_URL', '')
-
-YANDEX_WEB_SEARCH_API_KEY = os.getenv('YANDEX_WEB_SEARCH_API_KEY', '')
-
-YANDEX_WEB_SEARCH_CONFIG = os.getenv('YANDEX_WEB_SEARCH_CONFIG', '')
-
-YOUCOM_API_KEY = os.getenv('YOUCOM_API_KEY', os.getenv('YDC_API_KEY', ''))
-
-LINKUP_API_KEY = os.getenv('LINKUP_API_KEY', '')
->>>>>>> v0.11.0
 
 linkup_search_params = os.getenv('LINKUP_SEARCH_PARAMS', '')
 try:
@@ -3187,21 +3084,16 @@ try:
 except json.JSONDecodeError:
     linkup_search_params = {}
 
-<<<<<<< HEAD
 LINKUP_SEARCH_PARAMS = ConfigVar(
     'LINKUP_SEARCH_PARAMS',
     'rag.web.search.linkup_search_params',
     linkup_search_params,
 )
-=======
-LINKUP_SEARCH_PARAMS = linkup_search_params
->>>>>>> v0.11.0
 
 ####################################
 # Images
 ####################################
 
-<<<<<<< HEAD
 ENABLE_IMAGE_GENERATION = ConfigVar(
     'ENABLE_IMAGE_GENERATION',
     'image_generation.enable',
@@ -3219,13 +3111,6 @@ IMAGE_GENERATION_MODEL = ConfigVar(
     'image_generation.model',
     os.getenv('IMAGE_GENERATION_MODEL', ''),
 )
-=======
-ENABLE_IMAGE_GENERATION = os.getenv('ENABLE_IMAGE_GENERATION', '').lower() == 'true'
-
-IMAGE_GENERATION_ENGINE = os.getenv('IMAGE_GENERATION_ENGINE', 'openai')
-
-IMAGE_GENERATION_MODEL = os.getenv('IMAGE_GENERATION_MODEL', '')
->>>>>>> v0.11.0
 
 # Regex pattern for models that support IMAGE_SIZE = "auto".
 IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN = os.getenv('IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN', '^gpt-image')
@@ -3233,7 +3118,6 @@ IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN = os.getenv('IMAGE_AUTO_SIZE_MODELS_REGEX_P
 # Regex pattern for models that return URLs instead of base64 data.
 IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN = os.getenv('IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN', '^gpt-image')
 
-<<<<<<< HEAD
 IMAGE_SIZE = ConfigVar('IMAGE_SIZE', 'image_generation.size', os.getenv('IMAGE_SIZE', '512x512'))
 
 IMAGE_STEPS = ConfigVar('IMAGE_STEPS', 'image_generation.steps', int(os.getenv('IMAGE_STEPS', 50)))
@@ -3254,16 +3138,6 @@ AUTOMATIC1111_API_AUTH = ConfigVar(
     'image_generation.automatic1111.api_auth',
     os.getenv('AUTOMATIC1111_API_AUTH', ''),
 )
-=======
-IMAGE_SIZE = os.getenv('IMAGE_SIZE', '512x512')
-
-IMAGE_STEPS = int(os.getenv('IMAGE_STEPS', 50))
-
-ENABLE_IMAGE_PROMPT_GENERATION = os.getenv('ENABLE_IMAGE_PROMPT_GENERATION', 'true').lower() == 'true'
-
-AUTOMATIC1111_BASE_URL = os.getenv('AUTOMATIC1111_BASE_URL', '')
-AUTOMATIC1111_API_AUTH = os.getenv('AUTOMATIC1111_API_AUTH', '')
->>>>>>> v0.11.0
 
 automatic1111_params = os.getenv('AUTOMATIC1111_PARAMS', '')
 try:
@@ -3271,7 +3145,6 @@ try:
 except json.JSONDecodeError:
     automatic1111_params = {}
 
-<<<<<<< HEAD
 AUTOMATIC1111_PARAMS = ConfigVar(
     'AUTOMATIC1111_PARAMS',
     'image_generation.automatic1111.api_params',
@@ -3289,13 +3162,6 @@ COMFYUI_API_KEY = ConfigVar(
     'image_generation.comfyui.api_key',
     os.getenv('COMFYUI_API_KEY', ''),
 )
-=======
-AUTOMATIC1111_PARAMS = automatic1111_params
-
-COMFYUI_BASE_URL = os.getenv('COMFYUI_BASE_URL', '')
-
-COMFYUI_API_KEY = os.getenv('COMFYUI_API_KEY', '')
->>>>>>> v0.11.0
 
 COMFYUI_DEFAULT_WORKFLOW = """
 {
@@ -3408,15 +3274,11 @@ COMFYUI_DEFAULT_WORKFLOW = """
 """
 
 
-<<<<<<< HEAD
 COMFYUI_WORKFLOW = ConfigVar(
     'COMFYUI_WORKFLOW',
     'image_generation.comfyui.workflow',
     os.getenv('COMFYUI_WORKFLOW', COMFYUI_DEFAULT_WORKFLOW),
 )
-=======
-COMFYUI_WORKFLOW = os.getenv('COMFYUI_WORKFLOW', COMFYUI_DEFAULT_WORKFLOW)
->>>>>>> v0.11.0
 
 comfyui_workflow_nodes = os.getenv('COMFYUI_WORKFLOW_NODES', '')
 try:
@@ -3424,7 +3286,6 @@ try:
 except json.JSONDecodeError:
     comfyui_workflow_nodes = []
 
-<<<<<<< HEAD
 COMFYUI_WORKFLOW_NODES = ConfigVar(
     'COMFYUI_WORKFLOW_NODES',
     'image_generation.comfyui.nodes',
@@ -3447,14 +3308,6 @@ IMAGES_OPENAI_API_KEY = ConfigVar(
     'image_generation.openai.api_key',
     os.getenv('IMAGES_OPENAI_API_KEY', OPENAI_API_KEY),
 )
-=======
-COMFYUI_WORKFLOW_NODES = comfyui_workflow_nodes
-
-IMAGES_OPENAI_API_BASE_URL = os.getenv('IMAGES_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-IMAGES_OPENAI_API_VERSION = os.getenv('IMAGES_OPENAI_API_VERSION', '')
-
-IMAGES_OPENAI_API_KEY = os.getenv('IMAGES_OPENAI_API_KEY', OPENAI_API_KEY)
->>>>>>> v0.11.0
 
 images_openai_params = os.getenv('IMAGES_OPENAI_PARAMS', '')
 try:
@@ -3463,7 +3316,6 @@ except json.JSONDecodeError:
     images_openai_params = {}
 
 
-<<<<<<< HEAD
 IMAGES_OPENAI_API_PARAMS = ConfigVar('IMAGES_OPENAI_API_PARAMS', 'image_generation.openai.params', images_openai_params)
 
 
@@ -3482,6 +3334,12 @@ IMAGES_GEMINI_ENDPOINT_METHOD = ConfigVar(
     'IMAGES_GEMINI_ENDPOINT_METHOD',
     'image_generation.gemini.endpoint_method',
     os.getenv('IMAGES_GEMINI_ENDPOINT_METHOD', ''),
+)
+
+# v0.11.0 addition — imported as a plain bool by routers/images.py alongside
+# IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN etc.; not admin-editable.
+ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION = (
+    os.getenv('ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION', 'true').lower() == 'true'
 )
 
 ENABLE_IMAGE_EDIT = ConfigVar(
@@ -3549,39 +3407,6 @@ IMAGES_EDIT_COMFYUI_WORKFLOW = ConfigVar(
     'images.edit.comfyui.workflow',
     os.getenv('IMAGES_EDIT_COMFYUI_WORKFLOW', ''),
 )
-=======
-IMAGES_OPENAI_API_PARAMS = images_openai_params
-
-
-IMAGES_GEMINI_API_BASE_URL = os.getenv('IMAGES_GEMINI_API_BASE_URL', GEMINI_API_BASE_URL)
-IMAGES_GEMINI_API_KEY = os.getenv('IMAGES_GEMINI_API_KEY', GEMINI_API_KEY)
-
-IMAGES_GEMINI_ENDPOINT_METHOD = os.getenv('IMAGES_GEMINI_ENDPOINT_METHOD', '')
-
-ENABLE_IMAGE_EDIT = os.getenv('ENABLE_IMAGE_EDIT', '').lower() == 'true'
-
-IMAGE_EDIT_ENGINE = os.getenv('IMAGE_EDIT_ENGINE', 'openai')
-
-IMAGE_EDIT_MODEL = os.getenv('IMAGE_EDIT_MODEL', '')
-
-IMAGE_EDIT_SIZE = os.getenv('IMAGE_EDIT_SIZE', '')
-
-ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION = os.getenv('ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION', 'true').lower() == 'true'
-
-IMAGES_EDIT_OPENAI_API_BASE_URL = os.getenv('IMAGES_EDIT_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-IMAGES_EDIT_OPENAI_API_VERSION = os.getenv('IMAGES_EDIT_OPENAI_API_VERSION', '')
-
-IMAGES_EDIT_OPENAI_API_KEY = os.getenv('IMAGES_EDIT_OPENAI_API_KEY', OPENAI_API_KEY)
-
-IMAGES_EDIT_GEMINI_API_BASE_URL = os.getenv('IMAGES_EDIT_GEMINI_API_BASE_URL', GEMINI_API_BASE_URL)
-IMAGES_EDIT_GEMINI_API_KEY = os.getenv('IMAGES_EDIT_GEMINI_API_KEY', GEMINI_API_KEY)
-
-
-IMAGES_EDIT_COMFYUI_BASE_URL = os.getenv('IMAGES_EDIT_COMFYUI_BASE_URL', '')
-IMAGES_EDIT_COMFYUI_API_KEY = os.getenv('IMAGES_EDIT_COMFYUI_API_KEY', '')
-
-IMAGES_EDIT_COMFYUI_WORKFLOW = os.getenv('IMAGES_EDIT_COMFYUI_WORKFLOW', '')
->>>>>>> v0.11.0
 
 images_edit_comfyui_workflow_nodes = os.getenv('IMAGES_EDIT_COMFYUI_WORKFLOW_NODES', '')
 try:
@@ -3589,15 +3414,11 @@ try:
 except json.JSONDecodeError:
     images_edit_comfyui_workflow_nodes = []
 
-<<<<<<< HEAD
 IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = ConfigVar(
     'IMAGES_EDIT_COMFYUI_WORKFLOW_NODES',
     'images.edit.comfyui.nodes',
     images_edit_comfyui_workflow_nodes,
 )
-=======
-IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = images_edit_comfyui_workflow_nodes
->>>>>>> v0.11.0
 
 ####################################
 # Audio
