@@ -5,53 +5,27 @@ import json
 import logging
 import mimetypes
 import os
-<<<<<<< HEAD
-import random
-import re
-import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
-from typing import Optional
-from urllib.parse import parse_qs, urlencode, urlparse
-=======
-import sys
-import time
-from contextlib import asynccontextmanager
->>>>>>> v0.11.0
 from uuid import uuid4
 
 import aiohttp
 import anyio.to_thread
-<<<<<<< HEAD
-from aiocache import cached
-=======
->>>>>>> v0.11.0
 from fastapi import (
     BackgroundTasks,
     Depends,
     FastAPI,
     HTTPException,
     Request,
-<<<<<<< HEAD
-    UploadFile,
-=======
->>>>>>> v0.11.0
     applications,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-<<<<<<< HEAD
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from redis import Redis
-=======
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
->>>>>>> v0.11.0
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import Headers
@@ -68,7 +42,6 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
-<<<<<<< HEAD
     ADMIN_EMAIL,
     API_KEYS_ALLOWED_ENDPOINTS,
     AUDIO_STT_ALLOWED_EXTENSIONS,
@@ -168,17 +141,10 @@ from open_webui.config import (
     DOCUMENT_INTELLIGENCE_ENDPOINT,
     DOCUMENT_INTELLIGENCE_KEY,
     DOCUMENT_INTELLIGENCE_MODEL,
-=======
-    BYPASS_ADMIN_ACCESS_CONTROL,
-    CACHE_DIR,
-    CORS_ALLOW_ORIGIN,
-    DEFAULT_LOCALE,
->>>>>>> v0.11.0
     ENABLE_ADMIN_ANALYTICS,
     # Admin
     ENABLE_ADMIN_CHAT_ACCESS,
     ENABLE_ADMIN_EXPORT,
-<<<<<<< HEAD
     ENABLE_API_KEYS,
     ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
     ENABLE_ASYNC_EMBEDDING,
@@ -324,22 +290,10 @@ from open_webui.config import (
     OLLAMA_API_CONFIGS,
     OLLAMA_BASE_URLS,
     OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-=======
-    ENABLE_ONEDRIVE_BUSINESS,
-    ENABLE_ONEDRIVE_PERSONAL,
-    # OpenAI
-    ENV,
-    FRONTEND_BUILD_DIR,
-    GOOGLE_DRIVE_API_KEY,
-    GOOGLE_DRIVE_CLIENT_ID,
-    IFRAME_CSP,
-    OAUTH_PROVIDERS,
->>>>>>> v0.11.0
     ONEDRIVE_CLIENT_ID_BUSINESS,
     ONEDRIVE_CLIENT_ID_PERSONAL,
     ONEDRIVE_SHAREPOINT_TENANT_ID,
     ONEDRIVE_SHAREPOINT_URL,
-<<<<<<< HEAD
     OPENAI_API_BASE_URLS,
     OPENAI_API_CONFIGS,
     OPENAI_API_KEYS,
@@ -456,31 +410,15 @@ from open_webui.config import (
     AppConfig,
     async_reset_config,
     reset_config,
-=======
-    STATIC_DIR,
-    THREAD_POOL_SIZE,
-    WEBUI_AUTH,
-    WEBUI_NAME,
-    async_reset_config,
-    import_legacy_config_json,
-    seed_registered_defaults,
->>>>>>> v0.11.0
 )
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
-<<<<<<< HEAD
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
-    PII_FILTER_IDS,
     AUDIT_EXCLUDED_PATHS,
     AUDIT_INCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
     BILLING_ENABLED,
-=======
-    AUDIT_EXCLUDED_PATHS,
-    AUDIT_INCLUDED_PATHS,
-    AUDIT_LOG_LEVEL,
->>>>>>> v0.11.0
     BYPASS_MODEL_ACCESS_CONTROL,
     CHANGELOG,
     DEPLOYMENT_ID,
@@ -488,64 +426,45 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
-<<<<<<< HEAD
-=======
     ENABLE_PLUGINS,
-    EXTERNAL_PWA_MANIFEST_URL,
->>>>>>> v0.11.0
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    ENABLE_PYODIDE_FILE_PERSISTENCE,
     # SCIM
     ENABLE_SCIM,
     ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
-<<<<<<< HEAD
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
     EXTERNAL_PWA_MANIFEST_URL,
-=======
-    ENABLE_PYODIDE_FILE_PERSISTENCE,
-    ENABLE_VERSION_UPDATE_CHECK,
-    ENABLE_WEBSOCKET_SUPPORT,
->>>>>>> v0.11.0
     GLOBAL_LOG_LEVEL,
     INSTANCE_ID,
     LICENSE_KEY,
     LOG_FORMAT,
     MAX_BODY_LOG_SIZE,
+    PII_FILTER_IDS,
     # Redis
-<<<<<<< HEAD
     REDIS_CLUSTER,
-=======
->>>>>>> v0.11.0
     REDIS_KEY_PREFIX,
     REDIS_URL,
     RESET_CONFIG_ON_START,
     SAFE_MODE,
     SCIM_TOKEN,
-<<<<<<< HEAD
     SSE_KEEPALIVE_INTERVAL,
-=======
->>>>>>> v0.11.0
     VERSION,
     # Admin Account Runtime Creation
     WEBUI_ADMIN_EMAIL,
     WEBUI_ADMIN_NAME,
     WEBUI_ADMIN_PASSWORD,
-<<<<<<< HEAD
     WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
-=======
-    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
->>>>>>> v0.11.0
     WEBUI_BUILD_HASH,
     WEBUI_SECRET_KEY,
     WEBUI_SESSION_COOKIE_SAME_SITE,
     WEBUI_SESSION_COOKIE_SECURE,
-<<<<<<< HEAD
     _sock_read_source,
     _sse_keepalive_source,
 )
