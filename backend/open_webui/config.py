@@ -3425,15 +3425,11 @@ IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = ConfigVar(
 ####################################
 
 # Transcription
-<<<<<<< HEAD
 WHISPER_MODEL = ConfigVar(
     'WHISPER_MODEL',
     'audio.stt.whisper_model',
     os.getenv('WHISPER_MODEL', 'base'),
 )
-=======
-WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'base')
->>>>>>> v0.11.0
 
 WHISPER_COMPUTE_TYPE = os.getenv('WHISPER_COMPUTE_TYPE', 'int8')
 WHISPER_MODEL_DIR = os.getenv('WHISPER_MODEL_DIR', f'{CACHE_DIR}/whisper/models')
@@ -3446,20 +3442,15 @@ WHISPER_MULTILINGUAL = os.getenv('WHISPER_MULTILINGUAL', 'False').lower() == 'tr
 WHISPER_LANGUAGE = os.getenv('WHISPER_LANGUAGE', '').lower() or None
 
 # Add Deepgram configuration
-<<<<<<< HEAD
 DEEPGRAM_API_KEY = ConfigVar(
     'DEEPGRAM_API_KEY',
     'audio.stt.deepgram.api_key',
     os.getenv('DEEPGRAM_API_KEY', ''),
 )
-=======
-DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY', '')
->>>>>>> v0.11.0
 
 # ElevenLabs configuration
 ELEVENLABS_API_BASE_URL = os.getenv('ELEVENLABS_API_BASE_URL', 'https://api.elevenlabs.io')
 
-<<<<<<< HEAD
 AUDIO_STT_OPENAI_API_BASE_URL = ConfigVar(
     'AUDIO_STT_OPENAI_API_BASE_URL',
     'audio.stt.openai.api_base_url',
@@ -3470,6 +3461,13 @@ AUDIO_STT_OPENAI_API_KEY = ConfigVar(
     'AUDIO_STT_OPENAI_API_KEY',
     'audio.stt.openai.api_key',
     os.getenv('AUDIO_STT_OPENAI_API_KEY', OPENAI_API_KEY),
+)
+
+# v0.11.0 addition — admin-editable via routers/audio.py.
+AUDIO_STT_OPENAI_API_REQUEST_FORMAT = ConfigVar(
+    'AUDIO_STT_OPENAI_API_REQUEST_FORMAT',
+    'audio.stt.openai.api_request_format',
+    os.getenv('AUDIO_STT_OPENAI_API_REQUEST_FORMAT', 'multipart'),
 )
 
 AUDIO_STT_ENGINE = ConfigVar(
@@ -3565,51 +3563,6 @@ AUDIO_TTS_OPENAI_API_KEY = ConfigVar(
     'audio.tts.openai.api_key',
     os.getenv('AUDIO_TTS_OPENAI_API_KEY', OPENAI_API_KEY),
 )
-=======
-AUDIO_STT_OPENAI_API_BASE_URL = os.getenv('AUDIO_STT_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-
-AUDIO_STT_OPENAI_API_KEY = os.getenv('AUDIO_STT_OPENAI_API_KEY', OPENAI_API_KEY)
-
-AUDIO_STT_OPENAI_API_REQUEST_FORMAT = os.getenv('AUDIO_STT_OPENAI_API_REQUEST_FORMAT', 'multipart')
-
-AUDIO_STT_ENGINE = os.getenv('AUDIO_STT_ENGINE', '')
-
-AUDIO_STT_MODEL = os.getenv('AUDIO_STT_MODEL', '')
-
-AUDIO_STT_SUPPORTED_CONTENT_TYPES = [
-    content_type.strip()
-    for content_type in os.getenv('AUDIO_STT_SUPPORTED_CONTENT_TYPES', '').split(',')
-    if content_type.strip()
-]
-
-AUDIO_STT_ALLOWED_EXTENSIONS = [
-    ext.strip()
-    for ext in os.getenv(
-        'AUDIO_STT_ALLOWED_EXTENSIONS',
-        'mp3,wav,m4a,webm,ogg,flac,mp4,mpga,mpeg',
-    ).split(',')
-    if ext.strip()
-]
-
-AUDIO_STT_AZURE_API_KEY = os.getenv('AUDIO_STT_AZURE_API_KEY', '')
-
-AUDIO_STT_AZURE_REGION = os.getenv('AUDIO_STT_AZURE_REGION', '')
-
-AUDIO_STT_AZURE_LOCALES = os.getenv('AUDIO_STT_AZURE_LOCALES', '')
-
-AUDIO_STT_AZURE_BASE_URL = os.getenv('AUDIO_STT_AZURE_BASE_URL', '')
-
-AUDIO_STT_AZURE_MAX_SPEAKERS = os.getenv('AUDIO_STT_AZURE_MAX_SPEAKERS', '')
-
-AUDIO_STT_MISTRAL_API_KEY = os.getenv('AUDIO_STT_MISTRAL_API_KEY', '')
-
-AUDIO_STT_MISTRAL_API_BASE_URL = os.getenv('AUDIO_STT_MISTRAL_API_BASE_URL', 'https://api.mistral.ai/v1')
-
-AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS = os.getenv('AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS', 'false').lower() == 'true'
-
-AUDIO_TTS_OPENAI_API_BASE_URL = os.getenv('AUDIO_TTS_OPENAI_API_BASE_URL', OPENAI_API_BASE_URL)
-AUDIO_TTS_OPENAI_API_KEY = os.getenv('AUDIO_TTS_OPENAI_API_KEY', OPENAI_API_KEY)
->>>>>>> v0.11.0
 
 audio_tts_openai_params = os.getenv('AUDIO_TTS_OPENAI_PARAMS', '')
 try:
