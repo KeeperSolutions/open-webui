@@ -260,12 +260,6 @@ def convert_anthropic_to_openai_payload(
 
                             if content_type == 'text':
                                 converted_parts.append(
-<<<<<<< HEAD
-                                    {
-                                        'type': 'text',
-                                        'text': content_block.get('text', ''),
-                                    }
-=======
                                     _copy_cache_control(
                                         content_block,
                                         {
@@ -273,7 +267,6 @@ def convert_anthropic_to_openai_payload(
                                             'text': content_block.get('text', ''),
                                         },
                                     )
->>>>>>> v0.11.0
                                 )
                             elif content_type == 'image':
                                 source = content_block.get('source', {})
@@ -281,23 +274,6 @@ def convert_anthropic_to_openai_payload(
                                     media_type = source.get('media_type', 'image/png')
                                     data = source.get('data', '')
                                     converted_parts.append(
-<<<<<<< HEAD
-                                        {
-                                            'type': 'image_url',
-                                            'image_url': {
-                                                'url': f'data:{media_type};base64,{data}',
-                                            },
-                                        }
-                                    )
-                                elif source.get('type') == 'url':
-                                    converted_parts.append(
-                                        {
-                                            'type': 'image_url',
-                                            'image_url': {
-                                                'url': source.get('url', ''),
-                                            },
-                                        }
-=======
                                         _copy_cache_control(
                                             content_block,
                                             {
@@ -319,7 +295,6 @@ def convert_anthropic_to_openai_payload(
                                                 },
                                             },
                                         )
->>>>>>> v0.11.0
                                     )
                             elif content_type == 'document':
                                 # Documents have no direct OpenAI equivalent;
@@ -352,13 +327,9 @@ def convert_anthropic_to_openai_payload(
                                 converted_parts.append({'type': 'text', 'text': search_text})
 
                         # Flatten to string when only text parts are present
-<<<<<<< HEAD
-                        if all(part.get('type') == 'text' for part in converted_parts):
-=======
                         if all(part.get('type') == 'text' for part in converted_parts) and not _has_cache_control(
                             converted_parts
                         ):
->>>>>>> v0.11.0
                             tool_content = '\n'.join(part.get('text', '') for part in converted_parts)
                         elif converted_parts:
                             tool_content = converted_parts

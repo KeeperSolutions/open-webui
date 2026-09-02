@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-import copy
-=======
->>>>>>> v0.11.0
 import json
 from typing import Callable, Optional
 
@@ -10,21 +6,11 @@ from open_webui.utils.misc import (
     deep_update,
     replace_system_message_content,
 )
-<<<<<<< HEAD
-from open_webui.utils.task import prompt_template, prompt_variables_template
-
-
-# What goes out cannot be taken back. Let it be shaped
-# well before it leaves this place.
-# inplace function: form_data is modified
-async def apply_system_prompt_to_body(
-=======
 from open_webui.utils.chat_variables import render_chat_variables, render_user_variables
 from open_webui.utils.task import prompt_template, prompt_variables_template
 
 
 async def resolve_system_prompt(
->>>>>>> v0.11.0
     system: Optional[str],
     metadata: Optional[dict] = None,
     user=None,
@@ -49,8 +35,6 @@ async def resolve_system_prompt(
 
     # Legacy (API Usage)
     system = await prompt_template(system, user)
-<<<<<<< HEAD
-=======
 
     return system
 
@@ -68,7 +52,6 @@ async def apply_system_prompt_to_body(
     system = await resolve_system_prompt(system, metadata, user)
     if not system:
         return form_data
->>>>>>> v0.11.0
 
     if replace:
         form_data['messages'] = replace_system_message_content(system, form_data.get('messages', []))

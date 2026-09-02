@@ -2,21 +2,13 @@ import asyncio
 import json
 import logging
 
-import aiohttp
 from open_webui.config import WEBUI_FAVICON_URL
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
-<<<<<<< HEAD
-    AIOHTTP_CLIENT_TIMEOUT,
-    VERSION,
-)
-from open_webui.retrieval.web.utils import validate_url
-=======
     VERSION,
 )
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 
@@ -41,15 +33,10 @@ async def post_webhook(name: str, url: str, message: str, event_data: dict, desc
         # Block private-IP / loopback / cloud-metadata targets — the URL is
         # caller-controlled (user notification settings under
         # ENABLE_USER_WEBHOOKS, automation notification triggers).
-<<<<<<< HEAD
-        validate_url(url)
-        payload = {}
-=======
         await asyncio.to_thread(validate_url, url)
     except Exception as e:
         log.warning('Webhook skipped, URL invalid or not publicly resolvable: %s', e)
         return False
->>>>>>> v0.11.0
 
     try:
         payload = {}
@@ -94,13 +81,7 @@ async def post_webhook(name: str, url: str, message: str, event_data: dict, desc
             payload = event_data
 
         log.debug(f'payload: {payload}')
-<<<<<<< HEAD
-        async with aiohttp.ClientSession(
-            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
-        ) as session:
-=======
         async with get_ssrf_safe_session() as session:
->>>>>>> v0.11.0
             async with session.post(
                 url,
                 json=payload,

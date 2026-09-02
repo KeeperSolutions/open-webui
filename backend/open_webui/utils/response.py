@@ -2,10 +2,7 @@ import json
 from numbers import Number
 from uuid import uuid4
 
-<<<<<<< HEAD
-=======
 from open_webui.utils.json_codec import JSONCodec
->>>>>>> v0.11.0
 from open_webui.utils.misc import (
     openai_chat_chunk_message_template,
     openai_chat_completion_message_template,
@@ -260,14 +257,9 @@ async def convert_streaming_response_ollama_to_openai(ollama_streaming_response)
         if done:
             usage = convert_ollama_usage_to_openai(data)
 
-<<<<<<< HEAD
-        data = openai_chat_chunk_message_template(model, message_content, reasoning_content, openai_tool_calls, usage)
-        data['id'] = completion_id
-=======
         data = openai_chat_chunk_message_template(
             model, message_content, reasoning_content, openai_tool_calls, usage, message_id=completion_id
         )
->>>>>>> v0.11.0
 
         # First chunk must carry delta.role (OpenAI spec).
         if first:

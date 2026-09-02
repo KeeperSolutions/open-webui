@@ -4,20 +4,12 @@ import sys
 from typing import Any
 
 from fastapi import Request
-<<<<<<< HEAD
-from open_webui.env import GLOBAL_LOG_LEVEL
-=======
 from open_webui.env import ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
->>>>>>> v0.11.0
 from open_webui.models.functions import Functions
 from open_webui.models.users import UserModel
 from open_webui.socket.main import get_event_call, get_event_emitter
 from open_webui.utils.middleware import process_tool_result
-<<<<<<< HEAD
-from open_webui.utils.models import get_all_models
-=======
 from open_webui.utils.models import check_model_access, get_all_models
->>>>>>> v0.11.0
 from open_webui.utils.plugin import get_function_module_from_cache
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -54,8 +46,6 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         raise Exception('Model not found')
     model = models[model_id]
 
-<<<<<<< HEAD
-=======
     # Availability gate — keep this route consistent with the actions a model
     # actually surfaces to the client. Executing admin-authored Function code is
     # intended; this only stops a disabled, unassigned, or access-restricted
@@ -73,7 +63,6 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
         if action_id not in surfaced_action_ids:
             raise Exception(f'Action not available: {action_id}')
 
->>>>>>> v0.11.0
     __event_emitter__ = await get_event_emitter(
         {
             'chat_id': data['chat_id'],

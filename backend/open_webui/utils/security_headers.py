@@ -1,12 +1,6 @@
 import os
 import re
 from typing import Dict
-<<<<<<< HEAD
-
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-=======
->>>>>>> v0.11.0
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send

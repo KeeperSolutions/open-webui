@@ -55,42 +55,6 @@ def include_user_info_headers(headers: dict, user: Optional[Any] = None) -> dict
                 FORWARD_USER_INFO_HEADER_JWT,
             )
 
-<<<<<<< HEAD
-=======
-def _mint_forward_user_jwt(user: Any) -> str:
-    now = int(time.time())
-    payload = {
-        'sub': str(user.id),
-        'email': str(user.email),
-        'name': str(user.name),
-        'role': str(user.role),
-        'iss': 'open-webui',
-        'iat': now,
-        'exp': now + FORWARD_USER_INFO_HEADER_JWT_EXPIRES_SECONDS,
-    }
-    return jwt.encode(payload, FORWARD_USER_INFO_HEADER_JWT_SECRET, algorithm='HS256')
-
-
-def include_user_info_headers(headers: dict, user: Optional[Any] = None) -> dict:
-    """
-    Forward user identity to external backends: signed JWT in
-    FORWARD_USER_INFO_HEADER_JWT if FORWARD_USER_INFO_HEADER_JWT_SECRET is set;
-    otherwise the legacy X-OpenWebUI-User-* headers.
-    """
-    if user is None:
-        return headers
-
-    if FORWARD_USER_INFO_HEADER_JWT_SECRET:
-        try:
-            token = _mint_forward_user_jwt(user)
-            return {**headers, FORWARD_USER_INFO_HEADER_JWT: token}
-        except Exception:
-            log.exception(
-                'Failed to mint %s; falling back to plain user-info headers.',
-                FORWARD_USER_INFO_HEADER_JWT,
-            )
-
->>>>>>> v0.11.0
     return {
         **headers,
         FORWARD_USER_INFO_HEADER_USER_NAME: quote(user.name.strip(), safe=' '),
@@ -100,9 +64,6 @@ def include_user_info_headers(headers: dict, user: Optional[Any] = None) -> dict
     }
 
 
-<<<<<<< HEAD
-def get_custom_headers(custom_headers: dict, user=None, metadata: dict = None) -> dict:
-=======
 def custom_headers_require_user_groups(custom_headers: Optional[dict]) -> bool:
     if not custom_headers or not isinstance(custom_headers, dict):
         return False
@@ -133,20 +94,10 @@ async def get_custom_headers(custom_headers: dict, user=None, metadata: dict = N
 def parse_custom_headers(
     custom_headers: dict, user=None, metadata: dict = None, request=None, user_groups: Optional[list] = None
 ) -> dict:
->>>>>>> v0.11.0
     if not custom_headers or not isinstance(custom_headers, dict):
         return {}
 
     metadata = metadata or {}
-<<<<<<< HEAD
-    template_vars = {
-        '{{CHAT_ID}}': metadata.get('chat_id', '') or '',
-        '{{MESSAGE_ID}}': metadata.get('message_id', '') or '',
-        '{{USER_ID}}': (user.id if user else '') or '',
-        '{{USER_NAME}}': (user.name if user else '') or '',
-        '{{USER_EMAIL}}': (user.email if user else '') or '',
-        '{{USER_ROLE}}': (user.role if user else '') or '',
-=======
 
     # UA from the live request; fall back to metadata for detached RAG/tool calls.
     user_agent = ''
@@ -179,7 +130,6 @@ def parse_custom_headers(
         '{{USER_GROUPS}}': ','.join(group.name.strip() for group in user_groups) if user_groups else '',
         '{{USER_GROUP_IDS}}': ','.join(group.id for group in user_groups) if user_groups else '',
         '{{USER_AGENT}}': user_agent,
->>>>>>> v0.11.0
     }
 
     parsed_headers = {}

@@ -17,10 +17,7 @@ from open_webui.env import (
     ENABLE_OTEL_LOGS,
     GLOBAL_LOG_LEVEL,
     LOG_FORMAT,
-<<<<<<< HEAD
-=======
     LOGURU_DIAGNOSE,
->>>>>>> v0.11.0
 )
 
 if TYPE_CHECKING:
