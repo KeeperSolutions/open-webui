@@ -2,10 +2,7 @@ import ast
 import asyncio
 import base64
 import copy
-<<<<<<< HEAD
 import html
-=======
->>>>>>> v0.11.0
 import inspect
 import json
 import logging
@@ -32,45 +29,28 @@ from open_webui.config import (
 )
 from open_webui.constants import TASKS
 from open_webui.env import (
-<<<<<<< HEAD
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
-    BYPASS_MODEL_ACCESS_CONTROL,
-    CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
-    CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
-    ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
-=======
     BYPASS_MODEL_ACCESS_CONTROL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     ENABLE_API_OUTLET_FILTERS,
     ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
     ENABLE_PLUGINS,
->>>>>>> v0.11.0
     ENABLE_QUERIES_CACHE,
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
     GLOBAL_LOG_LEVEL,
     RAG_SYSTEM_CONTEXT,
-<<<<<<< HEAD
     SSE_KEEPALIVE_INTERVAL,
-=======
->>>>>>> v0.11.0
 )
+from open_webui.events import EVENTS, publish_event
 from open_webui.models.chats import Chats
-from open_webui.models.config import Config
 from open_webui.models.folders import Folders
-<<<<<<< HEAD
 from open_webui.models.functions import Functions
-from open_webui.models.models import Models
-from open_webui.models.oauth_sessions import OAuthSessions
-from open_webui.models.users import UserModel, Users
-=======
 from open_webui.models.models import Models
 from open_webui.models.notes import Notes
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import UserModel, Users
-from open_webui.events import EVENTS, publish_event
->>>>>>> v0.11.0
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.images import (
     CreateImageForm,
@@ -78,13 +58,8 @@ from open_webui.routers.images import (
     image_edits,
     image_generations,
 )
-<<<<<<< HEAD
-from open_webui.routers.memories import QueryMemoryForm, query_memory
-from open_webui.routers.pipelines import (
-=======
 from open_webui.routers.pipelines import (
     get_sorted_filters,
->>>>>>> v0.11.0
     process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
 )
@@ -103,20 +78,17 @@ from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
 )
-from open_webui.utils.access_control import has_connection_access, has_permission
-<<<<<<< HEAD
-from open_webui.utils.access_control.files import get_accessible_folder_files
-from open_webui.utils.chat import generate_chat_completion
-from open_webui.utils.code_interpreter import execute_code_jupyter
-=======
 from open_webui.models.access_grants import AccessGrants
-from open_webui.utils.access_control.files import get_owner_accessible_folder_files
+from open_webui.utils.access_control import has_connection_access, has_permission
+from open_webui.utils.access_control.files import (
+    get_accessible_folder_files,
+    get_owner_accessible_folder_files,
+)
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.context_compaction import compact_messages_for_request
->>>>>>> v0.11.0
 from open_webui.utils.files import (
     convert_markdown_base64_images,
     get_file_url_from_base64,
@@ -124,22 +96,14 @@ from open_webui.utils.files import (
     get_image_url_from_base64,
 )
 from open_webui.utils.filter import (
-<<<<<<< HEAD
+    FilterContext,
+    get_filter_functions,
     get_sorted_filter_ids,
     process_filter_functions,
 )
-
-from open_webui.utils.mcp.client import MCPClient
-=======
-    FilterContext,
-    get_filter_functions,
-    process_filter_functions,
-)
-
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.memory import add_memory_context, review_memory_after_turn
->>>>>>> v0.11.0
 from open_webui.utils.misc import (
     add_or_update_system_message,
     add_or_update_user_message,
@@ -152,10 +116,7 @@ from open_webui.utils.misc import (
     get_last_user_message,
     get_last_user_message_item,
     get_message_list,
-<<<<<<< HEAD
-=======
     get_output_text,
->>>>>>> v0.11.0
     get_system_message,
     is_string_allowed,
     merge_system_messages,
@@ -164,15 +125,9 @@ from open_webui.utils.misc import (
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
-<<<<<<< HEAD
-from open_webui.utils.payload import apply_system_prompt_to_body
-from open_webui.utils.plugin import load_function_module_by_id
-from open_webui.utils.response import normalize_usage
-=======
 from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
->>>>>>> v0.11.0
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.task import (
     get_task_model_id,
@@ -181,28 +136,22 @@ from open_webui.utils.task import (
 )
 from open_webui.utils.tools import (
     build_tool_server_headers,
-<<<<<<< HEAD
-=======
     get_attached_knowledge,
->>>>>>> v0.11.0
     get_builtin_tools,
     get_terminal_tools,
     get_tools,
     get_updated_tool_function,
 )
-<<<<<<< HEAD
 from open_webui.utils.webhook import post_webhook
-=======
->>>>>>> v0.11.0
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
 from open_webui.utils.sse import _KEEPALIVE, _keepalive_iter
-=======
+
+
 async def publish_chat_finished_event(
     request: Request, user: UserModel, metadata: dict, title: str, content: str, output: list | None = None
 ):
@@ -211,7 +160,7 @@ async def publish_chat_finished_event(
         return
 
     content = content or get_output_text(output)
-    webui_url = await Config.get('webui.url')
+    webui_url = request.app.state.config.WEBUI_URL
     await publish_event(
         request,
         EVENTS.CHAT_FINISHED,
@@ -233,8 +182,6 @@ async def publish_chat_finished_event(
     if event_emitter:
         folder_id = metadata.get('folder_id') or await Chats.get_chat_folder_id(chat_id, metadata.get('user_id'))
         await event_emitter({'type': 'chat:list', 'data': {'chat_id': chat_id, 'folder_id': folder_id}})
-
->>>>>>> v0.11.0
 
 # We believe in one maker of all models, seen and unseen,
 # and in the reasoning which proceeds from the architect.
