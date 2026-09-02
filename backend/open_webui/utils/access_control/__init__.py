@@ -69,18 +69,10 @@ async def get_permissions(
     return permissions
 
 
-<<<<<<< HEAD
 def has_permission_for_groups(
     user_groups: list,
     permission_key: str,
     default_permissions: dict[str, Any] = {},
-=======
-async def has_permission(
-    user_id: str,
-    permission_key: str,
-    default_permissions: dict[str, Any] = {},
-    db: AsyncSession | None = None,
->>>>>>> v0.11.0
 ) -> bool:
     """
     Resolve a permission against an ALREADY-FETCHED list of groups.
@@ -105,12 +97,6 @@ async def has_permission(
 
     permission_hierarchy = permission_key.split('.')
 
-<<<<<<< HEAD
-=======
-    # Retrieve user group permissions
-    user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
-
->>>>>>> v0.11.0
     for group in user_groups:
         if get_permission(group.permissions or {}, permission_hierarchy):
             return True
@@ -120,7 +106,6 @@ async def has_permission(
     return get_permission(default_permissions, permission_hierarchy)
 
 
-<<<<<<< HEAD
 async def has_permission(
     user_id: str,
     permission_key: str,
@@ -137,8 +122,6 @@ async def has_permission(
     return has_permission_for_groups(user_groups, permission_key, default_permissions)
 
 
-=======
->>>>>>> v0.11.0
 async def has_access(
     user_id: str,
     permission: str = 'read',
@@ -150,11 +133,7 @@ async def has_access(
     Check if a user has the specified permission using an in-memory access_grants list.
 
     Used for config-driven resources (arena models, tool servers) that store
-<<<<<<< HEAD
     access control as JSON in ConfigVar rather than in the access_grant DB table.
-=======
-    access control as JSON config rather than in the access_grant DB table.
->>>>>>> v0.11.0
 
     Semantics:
     - None or []  → private (owner-only, deny all)
@@ -201,12 +180,6 @@ async def has_connection_access(
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
         return True
 
-<<<<<<< HEAD
-    if user_group_ids is None:
-        user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
-
-    access_grants = (connection.get('config') or {}).get('access_grants', [])
-=======
     access_grants = (connection.get('config') or {}).get('access_grants', [])
     if not access_grants:
         # No grants configured → private, admin-only: admins must keep access
@@ -217,7 +190,6 @@ async def has_connection_access(
     if user_group_ids is None:
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
 
->>>>>>> v0.11.0
     return await has_access(user.id, 'read', access_grants, user_group_ids)
 
 
@@ -268,10 +240,7 @@ async def filter_allowed_access_grants(
     user_role: str,
     access_grants: list,
     public_permission_key: str,
-<<<<<<< HEAD
-=======
     anyone_permission_key: str | None = None,
->>>>>>> v0.11.0
     db: AsyncSession | None = None,
 ) -> list:
     """
@@ -350,10 +319,7 @@ async def has_base_model_access(
     user_id: str,
     model_info,
     *,
-<<<<<<< HEAD
-=======
     user_role: str | None = None,
->>>>>>> v0.11.0
     user_group_ids: set[str] | None = None,
     db=None,
 ) -> bool:
@@ -361,17 +327,11 @@ async def has_base_model_access(
     Walk the ``base_model_id`` chain and verify the caller has read access
     at every hop.
 
-<<<<<<< HEAD
-    Returns ``True`` when access is granted (or the chain ends at a raw
-    provider model that has no per-model ACL).  Returns ``False`` the
-    moment a registered base model denies access.
-=======
     A base model without a ``model`` table row is admin-only, matching how
     unregistered models are treated for direct use (``get_filtered_models``
     hides them from non-admins and ``check_model_access`` rejects them), so
     a shared preset cannot be used to reach a base model the caller could
     not use directly.  Returns ``False`` the moment any hop denies access.
->>>>>>> v0.11.0
     """
     from open_webui.models.access_grants import AccessGrants
     from open_webui.models.models import Models
@@ -382,11 +342,7 @@ async def has_base_model_access(
         seen.add(base_model_id)
         base_model_info = await Models.get_model_by_id(base_model_id, db=db)
         if base_model_info is None:
-<<<<<<< HEAD
-            break  # Raw provider model — no per-model ACL
-=======
             return user_role == 'admin'
->>>>>>> v0.11.0
         if not (
             user_id == base_model_info.user_id
             or await AccessGrants.has_access(
@@ -427,12 +383,8 @@ async def check_model_access(
         return
 
     if model_info:
-<<<<<<< HEAD
-        if user.role == 'user':
-=======
         # Enforce for every non-admin role (including pending); never fail open.
         if user.role != 'admin':
->>>>>>> v0.11.0
             from open_webui.models.access_grants import AccessGrants
 
             user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
@@ -449,11 +401,7 @@ async def check_model_access(
                 raise HTTPException(status_code=403, detail='Model not found')
 
             # Enforce access on chained base models
-<<<<<<< HEAD
-            if not await has_base_model_access(user.id, model_info, user_group_ids=user_group_ids):
-=======
             if not await has_base_model_access(user.id, model_info, user_role=user.role, user_group_ids=user_group_ids):
->>>>>>> v0.11.0
                 raise HTTPException(status_code=403, detail='Model not found')
     else:
         if user.role != 'admin':

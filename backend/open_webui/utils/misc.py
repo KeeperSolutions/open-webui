@@ -168,17 +168,6 @@ def get_last_user_message_item(messages: list[dict]) -> dict | None:
 
 
 def get_content_from_message(message: dict) -> str | None:
-<<<<<<< HEAD
-    if isinstance(message.get('content'), list):
-        for item in message['content']:
-            if item['type'] == 'text':
-                return item['text']
-    else:
-        return message.get('content')
-    return None
-
-
-=======
     content = message.get('content')
     if isinstance(content, list):
         for item in content:
@@ -213,7 +202,6 @@ def get_output_text(output: list | None) -> str:
     return '\n'.join(texts)
 
 
->>>>>>> v0.11.0
 def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
     """Drop unpaired tool_use / tool_result from a reconstructed conversation.
 
@@ -258,11 +246,7 @@ def reconcile_tool_pairs(messages: list[dict]) -> list[dict]:
 
         # All tool_calls were orphans — keep the message only if it
         # carries meaningful text or reasoning content.
-<<<<<<< HEAD
-        content = message.get('content', '')
-=======
         content = get_content_from_message(message) or ''
->>>>>>> v0.11.0
         has_meaningful_content = content.strip() if isinstance(content, str) else content
         if has_meaningful_content or message.get('reasoning_content'):
             reconciled_messages.append({key: value for key, value in message.items() if key != 'tool_calls'})
@@ -274,10 +258,7 @@ def convert_output_to_messages(
     output: list,
     raw: bool = False,
     reasoning_format: str | None = None,
-<<<<<<< HEAD
-=======
     flatten_tool_images: bool = False,
->>>>>>> v0.11.0
 ) -> list[dict]:
     """
     Convert OR-aligned output items to OpenAI Chat Completion-format messages.
@@ -296,11 +277,8 @@ def convert_output_to_messages(
               (for Ollama, which expects reasoning as tagged content).
             - ``'reasoning_content'``: set as ``reasoning_content`` top-level field
               (for llama.cpp, which routes it via the chat template).
-<<<<<<< HEAD
-=======
         flatten_tool_images: Move tool output images into a following user
             message for Chat Completions providers.
->>>>>>> v0.11.0
     """
     if not output or not isinstance(output, list):
         return []
@@ -309,12 +287,6 @@ def convert_output_to_messages(
     pending_tool_calls = []
     pending_content = []
     pending_reasoning = []  # Only populated when reasoning_format == 'reasoning_content'
-<<<<<<< HEAD
-
-    def flush_pending():
-        nonlocal pending_content, pending_tool_calls, pending_reasoning
-        if not pending_content and not pending_tool_calls and not pending_reasoning:
-=======
     pending_reasoning_details = []
     pending_tool_image_urls = []
     function_call_ids = {
@@ -324,7 +296,6 @@ def convert_output_to_messages(
     def flush_pending():
         nonlocal pending_content, pending_tool_calls, pending_reasoning, pending_reasoning_details
         if not pending_content and not pending_tool_calls and not pending_reasoning and not pending_reasoning_details:
->>>>>>> v0.11.0
             return
 
         message = {
@@ -336,18 +307,13 @@ def convert_output_to_messages(
         if pending_reasoning:
             message['reasoning_content'] = '\n'.join(pending_reasoning)
 
-<<<<<<< HEAD
-=======
         if pending_reasoning_details:
             message['reasoning_details'] = pending_reasoning_details
 
->>>>>>> v0.11.0
         messages.append(message)
         pending_content = []
         pending_tool_calls = []
         pending_reasoning = []
-<<<<<<< HEAD
-=======
         pending_reasoning_details = []
 
     def flush_tool_images():
@@ -368,7 +334,6 @@ def convert_output_to_messages(
             }
         )
         pending_tool_image_urls = []
->>>>>>> v0.11.0
 
     for item in output:
         item_type = item.get('type', '')
@@ -450,12 +415,8 @@ def convert_output_to_messages(
                 )
 
         elif item_type == 'reasoning':
-<<<<<<< HEAD
-            if not reasoning_format:
-=======
             reasoning_details = item.get('reasoning_details') if raw else None
             if not reasoning_format and not reasoning_details:
->>>>>>> v0.11.0
                 continue
 
             reasoning_text = ''
@@ -475,14 +436,11 @@ def convert_output_to_messages(
                 elif reasoning_format == 'reasoning_content':
                     # llama.cpp: collect for reasoning_content field
                     pending_reasoning.append(reasoning_text)
-<<<<<<< HEAD
-=======
 
             if reasoning_details:
                 pending_reasoning_details.extend(
                     reasoning_details if isinstance(reasoning_details, list) else [reasoning_details]
                 )
->>>>>>> v0.11.0
 
         elif item_type == 'open_webui:code_interpreter':
             # Always include code interpreter content so the LLM knows
@@ -720,10 +678,7 @@ def openai_chat_chunk_message_template(
     reasoning_content: str | None = None,
     tool_calls: list[dict | None] = None,
     usage: dict | None = None,
-<<<<<<< HEAD
-=======
     message_id: str | None = None,
->>>>>>> v0.11.0
 ) -> dict:
     template = openai_chat_message_template(model, message_id)
     template['object'] = 'chat.completion.chunk'
@@ -833,25 +788,10 @@ def sanitize_text_for_db(text: str) -> str:
     """Remove null bytes and invalid UTF-8 surrogates from text for PostgreSQL storage."""
     if not isinstance(text, str):
         return text
-<<<<<<< HEAD
-    # Fast path: skip work when there are no null bytes (the common case)
-    if '\x00' not in text:
-        return text
-    # Remove null bytes
-    text = text.replace('\x00', '').replace('\u0000', '')
-    # Remove invalid UTF-8 surrogate characters that can cause encoding errors
-    # This handles cases where binary data or encoding issues introduced surrogates
-    try:
-        text = text.encode('utf-8', errors='surrogatepass').decode('utf-8', errors='ignore')
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        pass
-    return text
-=======
     # Fast path: skip work when there are no null bytes or surrogate code points.
     if '\x00' not in text and not SURROGATE_RE.search(text):
         return text
     return SURROGATE_RE.sub('', text.replace('\x00', ''))
->>>>>>> v0.11.0
 
 
 def _strip_null_bytes_deep(obj):
@@ -859,14 +799,10 @@ def _strip_null_bytes_deep(obj):
     if isinstance(obj, str):
         return sanitize_text_for_db(obj)
     elif isinstance(obj, dict):
-<<<<<<< HEAD
-        return {k: _strip_null_bytes_deep(v) for k, v in obj.items()}
-=======
         cleaned = {}
         for k, v in obj.items():
             cleaned[sanitize_text_for_db(k) if isinstance(k, str) else k] = _strip_null_bytes_deep(v)
         return cleaned
->>>>>>> v0.11.0
     elif isinstance(obj, list):
         return [_strip_null_bytes_deep(v) for v in obj]
     return obj
@@ -876,25 +812,12 @@ def sanitize_data_for_db(obj):
     """Recursively sanitize all strings in a data structure for database storage.
 
     Performs a fast pre-check: serializes the structure once and scans for
-<<<<<<< HEAD
-    null bytes.  If none are found (the overwhelmingly common case), the
-=======
     null bytes or invalid UTF-8 surrogates. If none are found, the
->>>>>>> v0.11.0
     original object is returned immediately, skipping the expensive
     recursive walk.
     """
     if isinstance(obj, str):
         return sanitize_text_for_db(obj)
-<<<<<<< HEAD
-    # Fast path: check for null bytes in the serialized form.
-    # json.dumps is implemented in C and much faster than a Python-level
-    # recursive walk over every leaf string.
-    try:
-        if '\\u0000' not in json.dumps(obj, ensure_ascii=False):
-            return obj
-    except (TypeError, ValueError):
-=======
     # Fast path: check for null bytes and surrogate code points in the serialized form.
     # json.dumps is implemented in C and much faster than a Python-level
     # recursive walk over every leaf string.
@@ -904,7 +827,6 @@ def sanitize_data_for_db(obj):
             serialized.encode('utf-8')
             return obj
     except (TypeError, ValueError, UnicodeEncodeError):
->>>>>>> v0.11.0
         pass
     return _strip_null_bytes_deep(obj)
 

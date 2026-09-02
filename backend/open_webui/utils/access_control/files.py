@@ -4,37 +4,24 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
-<<<<<<< HEAD
-from open_webui.models.groups import Groups
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.models import Models
-from open_webui.models.users import UserModel
-=======
 from open_webui.models.folders import FolderModel
 from open_webui.models.groups import Groups
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
->>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
 FOLDER_FILE_TYPES = {'file', 'collection', 'note'}
 
-<<<<<<< HEAD
-=======
 
->>>>>>> v0.11.0
 async def has_access_to_file(
     file_id: str | None,
     access_type: str,
     user: UserModel,
     db: AsyncSession | None = None,
-<<<<<<< HEAD
-=======
     user_group_ids: set[str] | None = None,
->>>>>>> v0.11.0
 ) -> bool:
     """
     Check if a user has the specified access to a file through any of:
@@ -55,20 +42,6 @@ async def has_access_to_file(
     if file.user_id == user.id:
         return True
 
-<<<<<<< HEAD
-    # Check if the file is associated with any knowledge bases the user has access to
-    knowledge_bases = await Knowledges.get_knowledges_by_file_id(file_id, db=db)
-    user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
-    for knowledge_base in knowledge_bases:
-        if knowledge_base.user_id == user.id or await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='knowledge',
-            resource_id=knowledge_base.id,
-            permission=access_type,
-            user_group_ids=user_group_ids,
-            db=db,
-        ):
-=======
     # Check if the file is associated with any knowledge bases the user has access to.
     # An object (knowledge base or workspace model) confers write/delete on a file only when
     # the object's OWNER owns that file; otherwise a read-only file laundered into an object
@@ -88,17 +61,10 @@ async def has_access_to_file(
                 db=db,
             )
         ) and (access_type == 'read' or knowledge_base.user_id == file.user_id):
->>>>>>> v0.11.0
             return True
 
     knowledge_base_id = file.meta.get('collection_name') if file.meta else None
     if knowledge_base_id:
-<<<<<<< HEAD
-        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user.id, access_type, db=db)
-        for knowledge_base in knowledge_bases:
-            if knowledge_base.id == knowledge_base_id:
-                return True
-=======
         # Fetch the one referenced knowledge base instead of listing every
         # knowledge base the user can access just to scan for this id.
         knowledge_base = await Knowledges.get_knowledge_by_id(knowledge_base_id, db=db)
@@ -118,7 +84,6 @@ async def has_access_to_file(
             )
         ):
             return True
->>>>>>> v0.11.0
 
     # Check if the file is associated with any channels the user has access to
     channels = await Channels.get_channels_by_file_id_and_user_id(file_id, user.id, db=db)
@@ -139,16 +104,11 @@ async def has_access_to_file(
         if accessible_ids:
             return True
 
-<<<<<<< HEAD
-    # Check if the file is directly attached to a shared workspace model
-    for model in await Models.get_models_by_user_id(user.id, permission=access_type, db=db):
-=======
     # Check if the file is directly attached to a shared workspace model (per the ownership
     # note above, model write is conferred only for files the model owner owns).
     for model in await Models.get_models_by_user_id(
         user.id, permission=access_type, db=db, user_group_ids=user_group_ids
     ):
->>>>>>> v0.11.0
         knowledge_items = getattr(model.meta, 'knowledge', None) or []
         for item in knowledge_items:
             if isinstance(item, dict) and item.get('type') == 'file' and item.get('id') == file.id:
@@ -165,27 +125,6 @@ async def get_accessible_folder_files(
 ) -> list[dict]:
     """Filter folder.data['files'] entries to those the caller can read.
 
-<<<<<<< HEAD
-    Each entry is expected to have 'type' ('file' or 'collection') and 'id'.
-    Admins bypass all checks. Unknown types are kept as-is.
-    """
-    if not entries:
-        return []
-    if user.role == 'admin':
-        return list(entries)
-
-    accessible: list[dict] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        entry_type = entry.get('type')
-        entry_id = entry.get('id')
-        if not entry_id:
-            accessible.append(entry)
-            continue
-        if entry_type == 'file':
-            if await has_access_to_file(entry_id, 'read', user, db=db):
-=======
     Entries carry a 'type' ('file', 'collection' or 'note') and 'id'. Entries of any other
     shape are dropped because they cannot be access-checked.
     """
@@ -208,16 +147,10 @@ async def get_accessible_folder_files(
         entry_id = entry.get('id')
         if entry_type == 'file':
             if await has_access_to_file(entry_id, 'read', user, db=db, user_group_ids=user_group_ids):
->>>>>>> v0.11.0
                 accessible.append(entry)
         elif entry_type == 'collection':
             if await Knowledges.check_access_by_user_id(entry_id, user.id, 'read', db=db):
                 accessible.append(entry)
-<<<<<<< HEAD
-        else:
-            accessible.append(entry)
-    return accessible
-=======
         elif entry_type == 'note':
             # Owner has no self-grant (notes are private by default), so check ownership too.
             from open_webui.models.notes import Notes
@@ -263,4 +196,3 @@ async def get_owner_accessible_folder_files(folder: FolderModel, db: AsyncSessio
         return []
 
     return await get_accessible_folder_files(files, owner, db=db)
->>>>>>> v0.11.0
