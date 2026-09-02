@@ -704,8 +704,6 @@ async def lifespan(app: FastAPI):
     if RESET_CONFIG_ON_START:
         await async_reset_config()
 
-    await import_legacy_config_json()
-    await seed_registered_defaults()
     await initialize_runtime_config(app)
     await migrate_legacy_webhook_config()
     await publish_event(app, EVENTS.SYSTEM_STARTUP_STARTED, source='system')
@@ -719,9 +717,6 @@ async def lifespan(app: FastAPI):
         if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
             # Disable signup since we now have an admin
             await Config.upsert({'ui.enable_signup': False})
-
-    if SAFE_MODE:
-        await Functions.deactivate_all_functions()
 
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
@@ -743,8 +738,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
 
-<<<<<<< HEAD
     from open_webui.tasks.billing import periodic_nightly_deep_rescan, periodic_ledger_poller
+
     asyncio.create_task(periodic_nightly_deep_rescan())
     asyncio.create_task(periodic_ledger_poller())
 
@@ -753,39 +748,9 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler_worker_loop(app))
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
+    # (base-models-cache pre-load is handled further down via
+    # app.state.config.ENABLE_BASE_MODELS_CACHE)
     if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
-=======
-    from open_webui.utils.automations import scheduler_worker_loop
-
-    asyncio.create_task(scheduler_worker_loop(app))
-
-    if await Config.get('models.base_models_cache'):
-        try:
-            await get_all_models(
-                Request(
-                    # Creating a mock request object to pass to get_all_models
-                    {
-                        'type': 'http',
-                        'asgi.version': '3.0',
-                        'asgi.spec_version': '2.0',
-                        'method': 'GET',
-                        'path': '/internal',
-                        'query_string': b'',
-                        'headers': Headers({}).raw,
-                        'client': ('127.0.0.1', 12345),
-                        'server': ('127.0.0.1', 80),
-                        'scheme': 'http',
-                        'app': app,
-                    }
-                ),
-                None,
-            )
-        except Exception as e:
-            log.warning(f'Failed to pre-fetch models at startup: {e}')
-
-    # Pre-fetch tool server specs so the first request doesn't pay the latency cost
-    if len(await Config.get('tool_server.connections', []) or []) > 0:
->>>>>>> v0.11.0
         mock_request = Request(
             {
                 'type': 'http',
@@ -862,11 +827,8 @@ async def lifespan(app: FastAPI):
     log.info("Application startup complete - ready to serve requests")
     yield
 
-<<<<<<< HEAD
-=======
     await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_STARTED, source='system')
 
->>>>>>> v0.11.0
     # Shutdown: clean up shared resources
     from open_webui.utils.session_pool import close_session
 
@@ -902,14 +864,11 @@ oauth_client_manager = OAuthClientManager(app)
 app.state.oauth_client_manager = oauth_client_manager
 
 app.state.instance_id = None
-<<<<<<< HEAD
 app.state.config = AppConfig(
     redis_url=REDIS_URL,
     redis_cluster=REDIS_CLUSTER,
     redis_key_prefix=REDIS_KEY_PREFIX,
 )
-=======
->>>>>>> v0.11.0
 app.state.redis = None
 
 app.state.WEBUI_NAME = WEBUI_NAME
