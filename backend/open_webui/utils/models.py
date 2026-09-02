@@ -9,35 +9,20 @@ from open_webui.config import (
     BYPASS_ADMIN_ACCESS_CONTROL,
     DEFAULT_ARENA_MODEL,
 )
-<<<<<<< HEAD
-from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
-from open_webui.functions import get_function_models
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.functions import Functions
-from open_webui.models.groups import Groups
-from open_webui.models.models import Models
-=======
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
 from open_webui.functions import get_function_models
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.config import Config
 from open_webui.models.functions import Functions
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
-from open_webui.utils.chat_variables import get_chat_variables_schema
->>>>>>> v0.11.0
 from open_webui.models.users import UserModel
 from open_webui.routers import ollama, openai
 from open_webui.socket.utils import RedisDict
 from open_webui.utils.access_control import has_access, has_base_model_access
+from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.utils.plugin import (
-<<<<<<< HEAD
-    get_function_module_from_cache,
-    load_function_module_by_id,
-=======
     get_functions_cache,
     get_function_module_from_cache,
->>>>>>> v0.11.0
 )
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -68,9 +53,16 @@ async def fetch_openai_models(request: Request, user: UserModel = None):
 
 
 async def get_all_base_models(request: Request, user: UserModel = None):
-    config = await Config.get_many('openai.enable', 'ollama.enable')
-    openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
-    ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
+    openai_task = (
+        fetch_openai_models(request, user)
+        if request.app.state.config.ENABLE_OPENAI_API
+        else asyncio.sleep(0, result=[])
+    )
+    ollama_task = (
+        fetch_ollama_models(request, user)
+        if request.app.state.config.ENABLE_OLLAMA_API
+        else asyncio.sleep(0, result=[])
+    )
     function_task = get_function_models(request)
 
     openai_models, ollama_models, function_models = await asyncio.gather(openai_task, ollama_task, function_task)
@@ -79,16 +71,10 @@ async def get_all_base_models(request: Request, user: UserModel = None):
 
 
 async def get_all_models(request, refresh: bool = False, user: UserModel = None):
-    config = await Config.get_many(
-        'models.base_models_cache',
-        'evaluation.arena.enable',
-        'evaluation.arena.models',
-        'models.default_metadata',
-    )
     if (
         request.app.state.MODELS
         and request.app.state.BASE_MODELS
-        and (config.get('models.base_models_cache') and not refresh)
+        and (request.app.state.config.ENABLE_BASE_MODELS_CACHE and not refresh)
     ):
         base_models = request.app.state.BASE_MODELS
     else:
@@ -106,9 +92,9 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
         return []
 
     # Add arena models
-    if config.get('evaluation.arena.enable'):
+    if request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS:
         arena_models = []
-        arena_config = config.get('evaluation.arena.models') or []
+        arena_config = request.app.state.config.EVALUATION_ARENA_MODELS or []
         if len(arena_config) > 0:
             arena_models = [
                 {
@@ -141,13 +127,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
             ]
         models = models + arena_models
 
-<<<<<<< HEAD
-    global_action_ids = {function.id for function in await Functions.get_global_action_functions()}
-    enabled_action_ids = {function.id for function in await Functions.get_functions_by_type('action', active_only=True)}
-
-    global_filter_ids = {function.id for function in await Functions.get_global_filter_functions()}
-    enabled_filter_ids = {function.id for function in await Functions.get_functions_by_type('filter', active_only=True)}
-=======
     # One query per type: the global sets are subsets of the active sets, so
     # deriving them from the same rows halves the function-table queries.
     if ENABLE_PLUGINS:
@@ -163,7 +142,6 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
         enabled_action_ids = set()
         global_filter_ids = set()
         enabled_filter_ids = set()
->>>>>>> v0.11.0
 
     custom_models = await Models.get_all_models()
 
@@ -333,7 +311,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
 
     # Apply global model defaults to all models
     # Per-model overrides take precedence over global defaults
-    default_metadata = config.get('models.default_metadata') or {}
+    default_metadata = request.app.state.config.DEFAULT_MODEL_METADATA or {}
 
     if default_metadata:
         for model in models:
@@ -355,14 +333,11 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
     # Batch-fetch all function valves in one query to avoid N+1 DB hits
     # inside get_action_priority (previously called per action × per model).
     all_function_valves = await Functions.get_function_valves_by_ids(list(all_function_ids))
-<<<<<<< HEAD
-=======
     functions_cache = get_functions_cache(request)
 
     # Global actions and filters appear in every model, so priorities and item
     # lists are memoized across the loop instead of rebuilt per model.
     action_priorities = {}
->>>>>>> v0.11.0
 
     def get_action_priority(action_id):
         if action_id in action_priorities:
@@ -453,11 +428,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
     return models
 
 
-<<<<<<< HEAD
-async def check_model_access(user, model, db=None):
-=======
 async def check_model_access(user, model, model_info=None, db=None):
->>>>>>> v0.11.0
     if model.get('arena'):
         meta = model.get('info', {}).get('meta', {})
         access_grants = meta.get('access_grants', [])
@@ -469,13 +440,9 @@ async def check_model_access(user, model, model_info=None, db=None):
         ):
             raise Exception('Model not found')
     else:
-<<<<<<< HEAD
-        model_info = await Models.get_model_by_id(model.get('id'), db=db)
-=======
         # Callers that already fetched the row (chat completion entry) pass it in
         if model_info is None or model_info.id != model.get('id'):
             model_info = await Models.get_model_by_id(model.get('id'), db=db)
->>>>>>> v0.11.0
         if not model_info:
             raise Exception('Model not found')
 
@@ -499,13 +466,9 @@ async def check_model_access(user, model, model_info=None, db=None):
             raise Exception('Model not found')
 
         # Enforce access on chained base models
-<<<<<<< HEAD
-        if not await has_base_model_access(user.id, model_info, db=db):
-=======
         if not await has_base_model_access(
             user.id, model_info, user_role=user.role, user_group_ids=user_group_ids, db=db
         ):
->>>>>>> v0.11.0
             raise Exception('Model not found')
 
 

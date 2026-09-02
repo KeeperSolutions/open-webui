@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-<<<<<<< HEAD
-=======
 import asyncio
->>>>>>> v0.11.0
 import logging
 import os
 import re
@@ -16,10 +13,7 @@ from typing import Any
 
 from open_webui.env import (
     ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS,
-<<<<<<< HEAD
-=======
     ENABLE_PLUGINS,
->>>>>>> v0.11.0
     OFFLINE_MODE,
     PIP_OPTIONS,
     PIP_PACKAGE_INDEX_OPTIONS,
@@ -210,13 +204,10 @@ def replace_imports(content):
 # May the intent of the one who wrote it survive every
 # import and transformation, as a deed survives the generations.
 async def load_tool_module_by_id(tool_id, content=None):
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
 
     frontmatter = None
->>>>>>> v0.11.0
     if content is None:
         tool = await Tools.get_tool_by_id(tool_id)
         if not tool:
@@ -266,13 +257,10 @@ async def load_tool_module_by_id(tool_id, content=None):
 
 
 async def load_function_module_by_id(function_id: str, content: str | None = None):
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
 
     frontmatter = None
->>>>>>> v0.11.0
     if content is None:
         function = await Functions.get_function_by_id(function_id)
         if not function:
@@ -327,9 +315,6 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
         os.unlink(temp_file.name)
 
 
-<<<<<<< HEAD
-async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
-=======
 def _state_cache(request, name: str) -> dict:
     if not hasattr(request.app.state, name):
         setattr(request.app.state, name, {})
@@ -357,7 +342,6 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
     tool_contents_cache = get_tool_contents_cache(request)
     content = None
 
->>>>>>> v0.11.0
     if load_from_db:
         # Always load from the database by default
         tool = await Tools.get_tool_by_id(tool_id)
@@ -391,13 +375,10 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
 async def get_function_module_from_cache(
     request, function_id, function: FunctionModel | None = None, load_from_db=True
 ):
-<<<<<<< HEAD
-=======
     functions_cache = get_functions_cache(request)
     function_contents_cache = get_function_contents_cache(request)
     content = None
 
->>>>>>> v0.11.0
     if load_from_db:
         # Always load from the database by default
         # This is useful for hooks like "inlet" or "outlet" where the content might change
@@ -477,13 +458,10 @@ async def install_tool_and_function_dependencies():
     and then installing them using pip. Duplicates or similar version specifications are
     handled by pip as much as possible.
     """
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         log.info('ENABLE_PLUGINS is disabled, skipping tool and function dependencies.')
         return
 
->>>>>>> v0.11.0
     function_list = await Functions.get_functions(active_only=True)
     tool_list = await Tools.get_tools()
 
