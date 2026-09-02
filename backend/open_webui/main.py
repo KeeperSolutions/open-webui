@@ -1558,11 +1558,8 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
-<<<<<<< HEAD
 app.include_router(providers.router, prefix='/api/v1/providers', tags=['providers'])
-=======
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
->>>>>>> v0.11.0
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
@@ -1589,24 +1586,6 @@ if ENABLE_SCIM:
     app.include_router(scim.router, prefix='/api/v1/scim/v2', tags=['scim'])
 
 
-<<<<<<< HEAD
-try:
-    audit_level = AuditLevel(AUDIT_LOG_LEVEL)
-except ValueError as e:
-    logger.error(f'Invalid audit level: {AUDIT_LOG_LEVEL}. Error: {e}')
-    audit_level = AuditLevel.NONE
-
-if audit_level != AuditLevel.NONE:
-    app.add_middleware(
-        AuditLoggingMiddleware,
-        audit_level=audit_level,
-        excluded_paths=AUDIT_EXCLUDED_PATHS,
-        included_paths=AUDIT_INCLUDED_PATHS,
-        audit_get_requests=ENABLE_AUDIT_GET_REQUESTS,
-        max_body_size=MAX_BODY_LOG_SIZE,
-    )
-=======
->>>>>>> v0.11.0
 ##################################
 #
 # Chat Endpoints
@@ -1647,7 +1626,7 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
             log.debug(f'Error processing model tags: {e}')
             model['tags'] = []
 
-    model_order_list = await Config.get('ui.model_order_list')
+    model_order_list = request.app.state.config.MODEL_ORDER_LIST
     if model_order_list:
         model_order_dict = {model_id: i for i, model_id in enumerate(model_order_list)}
         # Sort models by order list priority, with fallback for those not in the list
@@ -1658,18 +1637,10 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
             )
         )
 
-<<<<<<< HEAD
-    models = await get_filtered_models(models, user)
-
-    log.debug(
-        f'/api/models returned filtered models accessible to the user: {json.dumps([model.get("id") for model in models])}'
-    )
-=======
     if log.isEnabledFor(logging.DEBUG):
         log.debug(
             f'/api/models returned filtered models accessible to the user: {json.dumps([model.get("id") for model in models])}'
         )
->>>>>>> v0.11.0
     return {'data': models}
 
 
@@ -1692,21 +1663,10 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
     """
     model_id = form_data.model
 
-<<<<<<< HEAD
-    # --- Ollama provider ---
-    ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
-    if model_id in ollama_models:
-        url_indices = ollama_models[model_id].get('urls', [])
-        errors = []
-        for idx in url_indices:
-            url = request.app.state.config.OLLAMA_BASE_URLS[idx]
-            api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
-                str(idx),
-                request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
-=======
     ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
     openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
 
+    # Resolve aliased/custom models down to their base model id.
     seen = set()
     while model_id not in ollama_models and model_id not in openai_models and model_id not in seen:
         seen.add(model_id)
@@ -1717,9 +1677,8 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
 
     # --- Ollama provider ---
     if model_id in ollama_models:
-        ollama_config = await Config.get_many('ollama.base_urls', 'ollama.api_configs')
-        ollama_base_urls = ollama_config.get('ollama.base_urls') or []
-        ollama_api_configs = ollama_config.get('ollama.api_configs') or {}
+        ollama_base_urls = request.app.state.config.OLLAMA_BASE_URLS
+        ollama_api_configs = request.app.state.config.OLLAMA_API_CONFIGS
         url_indices = ollama_models[model_id].get('urls', [])
         errors = []
         for idx in url_indices:
@@ -1727,18 +1686,11 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
             api_config = ollama_api_configs.get(
                 str(idx),
                 ollama_api_configs.get(url, {}),
->>>>>>> v0.11.0
             )
             key = api_config.get('key', None)
 
             prefix_id = api_config.get('prefix_id', None)
-<<<<<<< HEAD
-            actual_model = model_id
-            if prefix_id and actual_model.startswith(f'{prefix_id}.'):
-                actual_model = actual_model[len(f'{prefix_id}.') :]
-=======
             actual_model = strip_provider_model_prefix(model_id, prefix_id)
->>>>>>> v0.11.0
 
             payload = json.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
 
@@ -1768,26 +1720,10 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
         return {'status': True}
 
     # --- OpenAI-compatible providers ---
-<<<<<<< HEAD
-    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
     if model_id in openai_models:
-        model_info = openai_models[model_id]
-        idx = model_info.get('urlIdx')
-        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(str(idx), {})
-        provider = api_config.get('provider', '')
-        base_url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-        key = (
-            request.app.state.config.OPENAI_API_KEYS[idx] if idx < len(request.app.state.config.OPENAI_API_KEYS) else ''
-        )
-
-        if provider == 'llama.cpp':
-            root_url = base_url.rstrip('/').removesuffix('/v1')
-=======
-    if model_id in openai_models:
-        openai_config = await Config.get_many('openai.api_configs', 'openai.api_base_urls', 'openai.api_keys')
-        openai_api_configs = openai_config.get('openai.api_configs') or {}
-        openai_base_urls = openai_config.get('openai.api_base_urls') or []
-        openai_api_keys = openai_config.get('openai.api_keys') or []
+        openai_api_configs = request.app.state.config.OPENAI_API_CONFIGS
+        openai_base_urls = request.app.state.config.OPENAI_API_BASE_URLS
+        openai_api_keys = request.app.state.config.OPENAI_API_KEYS
         model_info = openai_models[model_id]
         idx = model_info.get('urlIdx')
         api_config = openai_api_configs.get(str(idx), {})
@@ -1798,7 +1734,6 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
         if provider == 'llama.cpp':
             root_url = base_url.rstrip('/').removesuffix('/v1')
             actual_model = strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
->>>>>>> v0.11.0
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
                 async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
@@ -1808,11 +1743,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
                     }
                     async with session.post(
                         f'{root_url}/models/unload',
-<<<<<<< HEAD
-                        json={'model': model_id},
-=======
                         json={'model': actual_model},
->>>>>>> v0.11.0
                         headers=headers,
                     ) as r:
                         if not r.ok:
@@ -1829,7 +1760,6 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
                 status_code=400,
                 detail=f'Provider "{provider or "default"}" does not support model unloading',
             )
-
     raise HTTPException(status_code=404, detail=f'Model "{model_id}" not found')
 
 
