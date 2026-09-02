@@ -1833,11 +1833,7 @@ async def chat_completion(
             # Check if user has access to the model
             if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
                 try:
-<<<<<<< HEAD
-                    await check_model_access(user, model)
-=======
                     await check_model_access(user, model, model_info=model_info)
->>>>>>> v0.11.0
                 except Exception as e:
                     raise e
         else:
@@ -1845,7 +1841,7 @@ async def chat_completion(
             await _set_direct_model(request, model, user)
 
         # Model params: global defaults as base, per-model overrides win
-        default_model_params = await Config.get('models.default_params', {}) or {}
+        default_model_params = request.app.state.config.DEFAULT_MODEL_PARAMS or {}
         model_info_params = {
             **default_model_params,
             **(model_info.params.model_dump() if model_info and model_info.params else {}),
@@ -1862,7 +1858,7 @@ async def chat_completion(
             base_model_id = model_info.base_model_id
             if base_model_id not in request.app.state.MODELS:
                 if ENABLE_CUSTOM_MODEL_FALLBACK:
-                    default_models = ((await Config.get('ui.default_models')) or '').split(',')
+                    default_models = ((request.app.state.config.DEFAULT_MODELS) or '').split(',')
 
                     fallback_model_id = default_models[0].strip() if default_models[0] else None
 
@@ -1890,12 +1886,9 @@ async def chat_completion(
         if model_info_params.get('reasoning_tags') is not None:
             reasoning_tags = model_info_params.get('reasoning_tags')
 
-<<<<<<< HEAD
-=======
         if model_info_params.get('compact_token_threshold') is not None:
             compact_token_threshold = model_info_params.get('compact_token_threshold')
 
->>>>>>> v0.11.0
         # parent_id signals intent:
         #   null   → new chat (root message, no parent)
         #   value  → follow-up (user message's parentId = prev assistant)
@@ -1904,17 +1897,6 @@ async def chat_completion(
         parent_id = form_data.pop('parent_id', None)
         form_data.pop('new_chat', None)  # Legacy field
 
-<<<<<<< HEAD
-        # Multi-model: {model_id: assistant_message_id}
-        # Single-model fallback: built from 'model' + 'id'
-        message_ids = form_data.pop('message_ids', None)
-        if not message_ids:
-            message_ids = {model_id: form_data.pop('id', None)}
-        else:
-            form_data.pop('id', None)
-
-        user_message = form_data.pop('user_message', None) or form_data.pop('parent_message', None)
-=======
         # Multi-model message_ids: list of {model_id, message_id} entries.
         # Supports both the new array format and legacy dict format for backward compat.
         message_ids = form_data.pop('message_ids', None)
@@ -1937,7 +1919,6 @@ async def chat_completion(
             chat_variables = existing_chat.variables if existing_chat else {}
 
         chat_variables = normalize_chat_variables(chat_variables)
->>>>>>> v0.11.0
 
         # Drop tool_servers if caller lacks features.direct_tool_servers —
         # mirrors the storage-side strip in user/settings/update.
@@ -1948,22 +1929,15 @@ async def chat_completion(
             and not await has_permission(
                 user.id,
                 'features.direct_tool_servers',
-<<<<<<< HEAD
                 request.app.state.config.USER_PERMISSIONS,
-=======
-                await Config.get('user.permissions'),
->>>>>>> v0.11.0
             )
         ):
             tool_servers = None
 
         metadata = {
             'user_id': user.id,
-<<<<<<< HEAD
-=======
             'user_agent': request.headers.get('user-agent', '') or '',
             'internal': getattr(request.state, 'internal', False) is True,
->>>>>>> v0.11.0
             'chat_id': form_data.pop('chat_id', None) or '',
             'user_message': user_message,
             'user_message_id': user_message.get('id') if user_message else None,
@@ -1994,13 +1968,10 @@ async def chat_completion(
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())
 
-<<<<<<< HEAD
-=======
         initial_title_generation = None
         if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
             initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
 
->>>>>>> v0.11.0
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
 
@@ -2013,126 +1984,6 @@ async def chat_completion(
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=ERROR_MESSAGES.NOT_FOUND,
-<<<<<<< HEAD
-                    )
-                if user.role != 'admin':
-                    if channel.type in ['group', 'dm']:
-                        if not await Channels.is_user_channel_member(channel.id, user.id):
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail=ERROR_MESSAGES.DEFAULT(),
-                            )
-                    else:
-                        if not await AccessGrants.has_access(
-                            user_id=user.id,
-                            resource_type='channel',
-                            resource_id=channel.id,
-                            permission='write',
-                        ):
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail=ERROR_MESSAGES.DEFAULT(),
-                            )
-                target_message_id = list(message_ids.values())[0] if message_ids else None
-                if target_message_id:
-                    target_message = await Messages.get_message_by_id(target_message_id)
-                    if target_message and target_message.channel_id != channel.id:
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail=ERROR_MESSAGES.DEFAULT(),
-                        )
-
-            if not chat_id.startswith('local:') and not chat_id.startswith(
-                'channel:'
-            ):  # temporary/channel chats are not stored
-                if is_new_chat:
-                    # Build the full history upfront with ALL assistant placeholders
-                    user_message = metadata.get('user_message') or {}
-                    user_message_id = user_message.get('id') if user_message else None
-
-                    history_messages = {}
-                    all_assistant_ids = [assistant_id for assistant_id in message_ids.values() if assistant_id]
-
-                    if user_message_id and user_message:
-                        user_message['childrenIds'] = all_assistant_ids
-                        history_messages[user_message_id] = user_message
-
-                    for target_model_id, assistant_message_id in message_ids.items():
-                        if assistant_message_id:
-                            history_messages[assistant_message_id] = {
-                                'id': assistant_message_id,
-                                'parentId': user_message_id,
-                                'childrenIds': [],
-                                'role': 'assistant',
-                                'content': '',
-                                'done': False,
-                                'model': target_model_id,
-                                'timestamp': int(time.time()),
-                            }
-
-                    await Chats.insert_new_chat(
-                        chat_id,
-                        user.id,
-                        ChatForm(
-                            chat={
-                                'id': chat_id,
-                                'title': 'New Chat',
-                                'models': list(message_ids.keys()),
-                                'history': {
-                                    'currentId': all_assistant_ids[0] if all_assistant_ids else user_message_id,
-                                    'messages': history_messages,
-                                },
-                                'messages': [
-                                    {'role': 'user', 'content': user_message.get('content', '')},
-                                ]
-                                if user_message_id
-                                else [],
-                                'files': metadata.get('files') or [],
-                                'tags': [],
-                                'timestamp': int(time.time() * 1000),
-                            },
-                            folder_id=metadata.get('folder_id'),
-                        ),
-                    )
-
-                    # Insert chat files from user message if any
-                    user_message_files = user_message.get('files', [])
-                    if user_message_files:
-                        try:
-                            await Chats.insert_chat_files(
-                                chat_id,
-                                user_message_id,
-                                [
-                                    file_item.get('id')
-                                    for file_item in user_message_files
-                                    if file_item.get('type') == 'file'
-                                ],
-                                user.id,
-                            )
-                        except Exception as e:
-                            log.debug(f'Error inserting chat files: {e}')
-                            pass
-                else:
-                    # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
-                        raise HTTPException(
-                            status_code=status.HTTP_404_NOT_FOUND,
-                            detail=ERROR_MESSAGES.DEFAULT(),
-                        )
-
-                    # Persist chat-level files (knowledge collections, docs, etc.)
-                    # The old frontend saveChatHandler did this on every message;
-                    # now the backend owns persistence.
-                    chat_files = metadata.get('files')
-                    if chat_files is not None:
-                        existing_chat = await Chats.get_chat_by_id(chat_id)
-                        if existing_chat:
-                            updated = {**existing_chat.chat, 'files': chat_files}
-                            await Chats.update_chat_by_id(chat_id, updated)
-
-                    # Save user message to DB
-                    user_message = metadata.get('user_message') or {}
-=======
                     )
                 if user.role != 'admin':
                     if channel.type in ['group', 'dm']:
@@ -2326,15 +2177,12 @@ async def chat_completion(
                     await Chats.update_chat_variables_by_id(chat_id, chat_variables)
 
                     # Save user message to DB
->>>>>>> v0.11.0
                     if user_message and user_message.get('id'):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             chat_id,
                             user_message['id'],
                             user_message,
                         )
-<<<<<<< HEAD
-=======
                         await emit_chat_list_event({**metadata, 'message_id': user_message['id']}, chat_id)
                         await publish_event(
                             request,
@@ -2356,7 +2204,6 @@ async def chat_completion(
                                 await cancel_timers_for_chat(chat_id, 'chat.user_message', user.id)
                             except Exception:
                                 log.exception('Failed to cancel chat.user_message timers for chat %s', chat_id)
->>>>>>> v0.11.0
 
                         # Link grandparent → user message (childrenIds)
                         grandparent_id = user_message.get('parentId')
@@ -2390,11 +2237,7 @@ async def chat_completion(
 
                     # Save ALL assistant placeholders
                     user_message_id = metadata.get('user_message_id')
-<<<<<<< HEAD
-                    all_assistant_ids = [assistant_id for assistant_id in message_ids.values() if assistant_id]
-=======
                     all_assistant_ids = [entry['message_id'] for entry in message_ids if entry.get('message_id')]
->>>>>>> v0.11.0
 
                     # Link user message → all assistant messages (childrenIds)
                     if user_message_id and all_assistant_ids:
@@ -2411,22 +2254,6 @@ async def chat_completion(
                             )
 
                     # Save each assistant placeholder
-<<<<<<< HEAD
-                    for target_model_id, assistant_message_id in message_ids.items():
-                        if assistant_message_id:
-                            await Chats.upsert_message_to_chat_by_id_and_message_id(
-                                chat_id,
-                                assistant_message_id,
-                                {
-                                    'id': assistant_message_id,
-                                    'parentId': user_message_id,
-                                    'childrenIds': [],
-                                    'role': 'assistant',
-                                    'content': '',
-                                    'done': False,
-                                    'model': target_model_id,
-                                    'timestamp': int(time.time()),
-=======
                     for entry in message_ids:
                         target_model_id = entry['model_id']
                         assistant_message_id = entry['message_id']
@@ -2459,7 +2286,6 @@ async def chat_completion(
                                     'chat_id': chat_id,
                                     'role': 'assistant',
                                     'model': target_model_id,
->>>>>>> v0.11.0
                                 },
                             )
 
@@ -2518,13 +2344,7 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
-<<<<<<< HEAD
-                    if not metadata.get('chat_id', '').startswith('local:') and not metadata.get(
-                        'chat_id', ''
-                    ).startswith('channel:'):
-=======
                     if is_saved_chat_id(metadata.get('chat_id')):
->>>>>>> v0.11.0
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -2570,12 +2390,8 @@ async def chat_completion(
             # task's current cancel scope", which propagates as a
             # BaseException through the finally block, discards the response
             # return value, and surfaces as a 500 "No response returned."
-<<<<<<< HEAD
-            # MCPClient.disconnect() already catches BaseException internally.
-=======
             # MCPClient.disconnect() suppresses known transport teardown errors
             # while still propagating real task cancellation.
->>>>>>> v0.11.0
             try:
                 if mcp_clients := metadata.get('mcp_clients'):
                     for client in reversed(list(mcp_clients.values())):
@@ -2596,9 +2412,6 @@ async def chat_completion(
                         event_emitter = await get_event_emitter(metadata, update_db=False)
                         if event_emitter:
                             try:
-<<<<<<< HEAD
-                                await asyncio.shield(event_emitter({'type': 'chat:active', 'data': {'active': False}}))
-=======
                                 folder_id = metadata.get('folder_id') or await Chats.get_chat_folder_id(
                                     chat_id, user.id
                                 )
@@ -2610,20 +2423,11 @@ async def chat_completion(
                                         }
                                     )
                                 )
->>>>>>> v0.11.0
                             except asyncio.CancelledError:
                                 pass
             except Exception:
                 pass
 
-<<<<<<< HEAD
-    # Fan out: one task per model
-    if metadata.get('session_id') and metadata.get('chat_id'):
-        task_ids = []
-        chat_id = metadata['chat_id']
-
-        for idx, (target_model_id, assistant_message_id) in enumerate(message_ids.items()):
-=======
             try:
                 chat_id = metadata.get('chat_id')
                 if (
@@ -2662,7 +2466,6 @@ async def chat_completion(
         for idx, entry in enumerate(message_ids):
             target_model_id = entry['model_id']
             assistant_message_id = entry['message_id']
->>>>>>> v0.11.0
             if not assistant_message_id:
                 continue
 
@@ -2670,10 +2473,7 @@ async def chat_completion(
             per_model_metadata = {
                 **metadata,
                 'message_id': assistant_message_id,
-<<<<<<< HEAD
-=======
                 'task_id': str(uuid4()),
->>>>>>> v0.11.0
             }
 
             # Per-model form_data: own model
@@ -2686,40 +2486,6 @@ async def chat_completion(
             # Resolve the model object for this specific model
             resolved_model = request.app.state.MODELS.get(target_model_id, model)
 
-<<<<<<< HEAD
-            # Only the first model runs title/tags generation;
-            # subsequent models only run follow-ups.
-            task_id, _ = await create_task(
-                request.app.state.redis,
-                process_chat(
-                    request,
-                    model_form_data,
-                    user,
-                    per_model_metadata,
-                    resolved_model,
-                    tasks
-                    if idx == 0
-                    else {
-                        k: v
-                        for k, v in (tasks or {}).items()
-                        if k not in (TASKS.TITLE_GENERATION, TASKS.TAGS_GENERATION)
-                    }
-                    or None,
-                ),
-                id=chat_id,
-            )
-            per_model_metadata['task_id'] = task_id
-            task_ids.append(task_id)
-
-        # Emit chat:active=true
-        if task_ids:
-            event_emitter = await get_event_emitter(
-                {**metadata, 'message_id': list(message_ids.values())[0]},
-                update_db=False,
-            )
-            if event_emitter:
-                await event_emitter({'type': 'chat:active', 'data': {'active': True}})
-=======
             # Only the first model runs chat-level background tasks;
             # subsequent models only run follow-ups.
             process = process_chat(
@@ -2764,7 +2530,6 @@ async def chat_completion(
             if event_emitter:
                 folder_id = metadata.get('folder_id') or await Chats.get_chat_folder_id(chat_id, user.id)
                 await event_emitter({'type': 'chat:active', 'data': {'active': True, 'folder_id': folder_id}})
->>>>>>> v0.11.0
 
         return {
             'status': True,
@@ -2773,11 +2538,7 @@ async def chat_completion(
         }
     else:
         # Legacy/direct: single model, synchronous
-<<<<<<< HEAD
-        metadata['message_id'] = list(message_ids.values())[0]
-=======
         metadata['message_id'] = message_ids[0]['message_id']
->>>>>>> v0.11.0
         return await process_chat(request, form_data, user, metadata, model, tasks)
 
 
@@ -2973,11 +2734,8 @@ async def verify_chat_ownership(chat_id: str | None, user) -> None:
 async def chat_completed(request: Request, form_data: dict, user=Depends(get_verified_user)):
     """Deprecated: outlet filters now run inline during chat completion.
     Kept for backward compatibility with external integrations."""
-<<<<<<< HEAD
-=======
     await verify_chat_ownership(form_data.get('chat_id'), user)
 
->>>>>>> v0.11.0
     try:
         model_item = form_data.pop('model_item', {})
 
@@ -3026,13 +2784,10 @@ async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
 
 @app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-<<<<<<< HEAD
-    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = chat_id[len('local:') :]
-=======
     socket_id = get_temporary_chat_session_id(chat_id)
+    if socket_id is None and chat_id.startswith('channel:'):
+        socket_id = chat_id.removeprefix('channel:')
     if socket_id:
->>>>>>> v0.11.0
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             return {'task_ids': []}
@@ -3049,13 +2804,10 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-<<<<<<< HEAD
-    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = chat_id[len('local:') :]
-=======
     socket_id = get_temporary_chat_session_id(chat_id)
+    if socket_id is None and chat_id.startswith('channel:'):
+        socket_id = chat_id.removeprefix('channel:')
     if socket_id:
->>>>>>> v0.11.0
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
@@ -3104,60 +2856,7 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = not await Users.has_users()
 
-<<<<<<< HEAD
     user_count = await Users.get_num_users() if app.state.LICENSE_METADATA else None
-=======
-    license_metadata = getattr(app.state, 'LICENSE_METADATA', None)
-    user_count = await Users.get_num_users() if license_metadata else None
-    config = await Config.get_many(
-        'oauth.enable',
-        'oauth.auto_redirect',
-        'ldap.enable',
-        'ui.enable_signup',
-        'ui.enable_login_form',
-        'auth.enable_api_keys',
-        'ui.enable_password_change_form',
-        'direct.enable',
-        'folders.enable',
-        'folders.max_file_count',
-        'channels.enable',
-        'calendar.enable',
-        'automations.enable',
-        'notes.enable',
-        'chat.context_compaction.enable',
-        'web.search.enable',
-        'web.search.confirmation.enable',
-        'web.search.confirmation.content',
-        'code_execution.enable',
-        'code_interpreter.enable',
-        'image_generation.enable',
-        'task.autocomplete.enable',
-        'ui.enable_community_sharing',
-        'ui.enable_message_rating',
-        'ui.enable_user_webhooks',
-        'users.enable_status',
-        'google_drive.enable',
-        'onedrive.enable',
-        'memories.enable',
-        'ui.default_models',
-        'ui.default_pinned_models',
-        'ui.prompt_suggestions',
-        'code_execution.engine',
-        'code_interpreter.engine',
-        'audio.tts.engine',
-        'audio.tts.voice',
-        'audio.tts.split_on',
-        'audio.stt.engine',
-        'rag.file.max_size',
-        'rag.file.max_count',
-        'file.image_compression_width',
-        'file.image_compression_height',
-        'user.permissions',
-        'ui.pending_user_overlay_title',
-        'ui.pending_user_overlay_content',
-        'ui.watermark',
-    )
->>>>>>> v0.11.0
 
     return {
         **({'onboarding': True} if onboarding else {}),
@@ -3166,48 +2865,30 @@ async def get_app_config(request: Request):
         'version': VERSION,
         'default_locale': str(DEFAULT_LOCALE),
         'oauth': {
-<<<<<<< HEAD
-            'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()},
+            'providers': {name: provider.get('name', name) for name, provider in OAUTH_PROVIDERS.items()},
             'auto_redirect': app.state.config.OAUTH_AUTO_REDIRECT,
-=======
-            # Hide providers (and thus the login buttons / auto-redirect) when OAuth
-            # is disabled, without clearing the admin's provider configuration.
-            'providers': (
-                {name: provider.get('name', name) for name, provider in OAUTH_PROVIDERS.items()}
-                if config.get('oauth.enable', True)
-                else {}
-            ),
-            'auto_redirect': config.get('oauth.auto_redirect'),
->>>>>>> v0.11.0
         },
         'features': {
             # --- Public: required by login/signup page pre-auth ---
             'auth': WEBUI_AUTH,
-<<<<<<< HEAD
             'auth_trusted_header': bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
             'enable_billing': BILLING_ENABLED,
             'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
             'enable_ldap': app.state.config.ENABLE_LDAP,
             'enable_signup': app.state.config.ENABLE_SIGNUP,
             'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
-=======
-            'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
-            'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            'enable_ldap': config.get('ldap.enable'),
-            'enable_signup': config.get('ui.enable_signup'),
-            'enable_login_form': config.get('ui.enable_login_form'),
->>>>>>> v0.11.0
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
             # --- Authenticated: only consumed by logged-in frontend ---
             **(
                 {
-<<<<<<< HEAD
                     'enable_api_keys': app.state.config.ENABLE_API_KEYS,
                     'enable_password_change_form': app.state.config.ENABLE_PASSWORD_CHANGE_FORM,
                     'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
+                    'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': app.state.config.ENABLE_FOLDERS,
                     'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
                     'enable_channels': app.state.config.ENABLE_CHANNELS,
@@ -3237,46 +2918,12 @@ async def get_app_config(request: Request):
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     'enable_memories': app.state.config.ENABLE_MEMORIES,
-=======
-                    'enable_api_keys': config.get('auth.enable_api_keys'),
-                    'enable_password_change_form': config.get('ui.enable_password_change_form'),
-                    'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
-                    'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
-                    'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-                    'enable_easter_eggs': ENABLE_EASTER_EGGS,
-                    'enable_direct_connections': config.get('direct.enable'),
-                    'enable_plugins': ENABLE_PLUGINS,
-                    'enable_folders': config.get('folders.enable'),
-                    'folder_max_file_count': config.get('folders.max_file_count'),
-                    'enable_channels': config.get('channels.enable'),
-                    'enable_calendar': config.get('calendar.enable'),
-                    'enable_automations': config.get('automations.enable'),
-                    'enable_notes': config.get('notes.enable'),
-                    'enable_context_compaction': config.get('chat.context_compaction.enable'),
-                    'enable_web_search': config.get('web.search.enable'),
-                    'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
-                    'web_search_confirmation_content': config.get('web.search.confirmation.content'),
-                    'enable_code_execution': config.get('code_execution.enable'),
-                    'enable_code_interpreter': config.get('code_interpreter.enable'),
-                    'enable_image_generation': config.get('image_generation.enable'),
-                    'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
-                    'enable_community_sharing': config.get('ui.enable_community_sharing'),
-                    'enable_message_rating': config.get('ui.enable_message_rating'),
-                    'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
-                    'enable_user_status': config.get('users.enable_status'),
-                    'enable_admin_export': ENABLE_ADMIN_EXPORT,
-                    'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
-                    'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
-                    'enable_google_drive_integration': config.get('google_drive.enable'),
-                    'enable_onedrive_integration': config.get('onedrive.enable'),
-                    'enable_memories': config.get('memories.enable'),
->>>>>>> v0.11.0
                     **(
                         {
                             'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,
                             'enable_onedrive_business': ENABLE_ONEDRIVE_BUSINESS,
                         }
-                        if config.get('onedrive.enable')
+                        if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
                 }
@@ -3286,67 +2933,55 @@ async def get_app_config(request: Request):
         },
         **(
             {
-<<<<<<< HEAD
                 'default_models': app.state.config.DEFAULT_MODELS,
                 'default_pinned_models': app.state.config.DEFAULT_PINNED_MODELS,
                 'default_prompt_suggestions': app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
-=======
-                'default_models': config.get('ui.default_models'),
-                'default_pinned_models': config.get('ui.default_pinned_models'),
-                'default_prompt_suggestions': config.get('ui.prompt_suggestions'),
->>>>>>> v0.11.0
                 **({'user_count': user_count} if user_count is not None else {}),
                 'code': {
-                    'engine': config.get('code_execution.engine'),
-                    'interpreter_engine': config.get('code_interpreter.engine'),
+                    'engine': app.state.config.CODE_EXECUTION_ENGINE,
+                    'interpreter_engine': app.state.config.CODE_INTERPRETER_ENGINE,
                 },
                 'audio': {
                     'tts': {
-                        'engine': config.get('audio.tts.engine'),
-                        'voice': config.get('audio.tts.voice'),
-                        'split_on': config.get('audio.tts.split_on'),
+                        'engine': app.state.config.TTS_ENGINE,
+                        'voice': app.state.config.TTS_VOICE,
+                        'split_on': app.state.config.TTS_SPLIT_ON,
                     },
                     'stt': {
-                        'engine': config.get('audio.stt.engine'),
+                        'engine': app.state.config.STT_ENGINE,
                     },
                 },
                 'file': {
-                    'max_size': config.get('rag.file.max_size'),
-                    'max_count': config.get('rag.file.max_count'),
+                    'max_size': app.state.config.FILE_MAX_SIZE,
+                    'max_count': app.state.config.FILE_MAX_COUNT,
                     'image_compression': {
-                        'width': config.get('file.image_compression_width'),
-                        'height': config.get('file.image_compression_height'),
+                        'width': app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
+                        'height': app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
                     },
                 },
-                'permissions': {**(config.get('user.permissions') or {})},
+                'permissions': {**app.state.config.USER_PERMISSIONS},
                 'google_drive': {
-                    'client_id': GOOGLE_DRIVE_CLIENT_ID,
-                    'api_key': GOOGLE_DRIVE_API_KEY,
+                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+                    'api_key': GOOGLE_DRIVE_API_KEY.value,
                 },
                 'onedrive': {
                     'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
                     'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
-                    'sharepoint_url': ONEDRIVE_SHAREPOINT_URL,
-                    'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID,
+                    'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
+                    'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
                 },
                 'ui': {
-<<<<<<< HEAD
                     'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
                     'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     'response_watermark': app.state.config.RESPONSE_WATERMARK,
-=======
-                    'pending_user_overlay_title': config.get('ui.pending_user_overlay_title'),
-                    'pending_user_overlay_content': config.get('ui.pending_user_overlay_content'),
-                    'response_watermark': config.get('ui.watermark'),
->>>>>>> v0.11.0
                     'iframe_csp': IFRAME_CSP,
                 },
-                'license_metadata': license_metadata,
+                'license_metadata': app.state.LICENSE_METADATA,
                 **(
                     {
-                        'active_entries': user_count,
+                        'active_entries': app.state.USER_COUNT,
                     }
-                    if user.role == 'admin' and user_count is not None
+                    if user.role == 'admin'
                     else {}
                 ),
             }
@@ -3355,8 +2990,8 @@ async def get_app_config(request: Request):
                 **(
                     {
                         'ui': {
-                            'pending_user_overlay_title': config.get('ui.pending_user_overlay_title'),
-                            'pending_user_overlay_content': config.get('ui.pending_user_overlay_content'),
+                            'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
+                            'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
                         }
                     }
                     if user and user.role == 'pending'
@@ -3365,11 +3000,11 @@ async def get_app_config(request: Request):
                 **(
                     {
                         'metadata': {
-                            'login_footer': license_metadata.get('login_footer', ''),
-                            'auth_logo_position': license_metadata.get('auth_logo_position', ''),
+                            'login_footer': app.state.LICENSE_METADATA.get('login_footer', ''),
+                            'auth_logo_position': app.state.LICENSE_METADATA.get('auth_logo_position', ''),
                         }
                     }
-                    if license_metadata
+                    if app.state.LICENSE_METADATA
                     else {}
                 ),
             }
@@ -3550,28 +3185,9 @@ async def get_current_usage(user=Depends(get_verified_user)):
 
 # --- OAuth Login & Callback ---
 
+# (MCP tool-server OAuth 2.1 clients are registered in initialize_runtime_config,
+# called from lifespan.)
 
-<<<<<<< HEAD
-# Initialize OAuth client manager with any MCP tool servers using OAuth 2.1
-if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
-    for tool_server_connection in app.state.config.TOOL_SERVER_CONNECTIONS:
-        if tool_server_connection.get('type', 'openapi') == 'mcp':
-            server_id = tool_server_connection.get('info', {}).get('id')
-            auth_type = tool_server_connection.get('auth_type', 'none')
-
-            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-                try:
-                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
-                    app.state.oauth_client_manager.add_client(
-                        f'mcp:{server_id}',
-                        OAuthClientInformationFull(**oauth_client_info),
-                    )
-                except Exception as e:
-                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
-                    pass
-
-=======
->>>>>>> v0.11.0
 try:
     if ENABLE_STAR_SESSIONS_MIDDLEWARE:
         redis_session_store = RedisStore(
@@ -3606,7 +3222,7 @@ async def register_client(request, client_id: str) -> bool:
     connection = None
     connection_idx = None
 
-    tool_server_connections = await Config.get('tool_server.connections', []) or []
+    tool_server_connections = request.app.state.config.TOOL_SERVER_CONNECTIONS or []
     for idx, conn in enumerate(tool_server_connections):
         if conn.get('type', 'openapi') == server_type:
             info = conn.get('info') or {}
@@ -3629,11 +3245,7 @@ async def register_client(request, client_id: str) -> bool:
     try:
         if auth_type == 'oauth_2.1_static':
             # Static credentials: rebuild from admin-provided credentials + fresh metadata
-<<<<<<< HEAD
-            info = connection.get('info', {})
-=======
             info = connection.get('info') or {}
->>>>>>> v0.11.0
             oauth_client_id = info.get('oauth_client_id') or ''
             oauth_client_secret = info.get('oauth_client_secret') or ''
             if not oauth_client_id or not oauth_client_secret:
@@ -3651,10 +3263,7 @@ async def register_client(request, client_id: str) -> bool:
                 server_url,
                 oauth_client_id=oauth_client_id,
                 oauth_client_secret=oauth_client_secret,
-<<<<<<< HEAD
-=======
                 oauth_scope=oauth_scope,
->>>>>>> v0.11.0
             )
         else:
             oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
@@ -3669,7 +3278,7 @@ async def register_client(request, client_id: str) -> bool:
         return False
 
     try:
-        connections = await Config.get('tool_server.connections', []) or []
+        connections = list(request.app.state.config.TOOL_SERVER_CONNECTIONS or [])
         connections[connection_idx] = {
             **connection,
             'info': {
@@ -3677,13 +3286,9 @@ async def register_client(request, client_id: str) -> bool:
                 'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
             },
         }
-<<<<<<< HEAD
         # Re-assign the full list to trigger AppConfig.__setattr__ → ConfigVar.save()
         # (in-place list mutation via list[idx] = ... does not trigger __setattr__)
         request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
-=======
-        await Config.upsert({'tool_server.connections': connections})
->>>>>>> v0.11.0
     except Exception as e:
         log.error(f'Failed to persist updated OAuth client info for tool server {client_id}: {e}')
         return False
@@ -3797,18 +3402,10 @@ async def oauth_backchannel_logout(
 
 @app.get('/manifest.json')
 async def get_manifest_json():
-<<<<<<< HEAD
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
         session = await get_session()
         async with session.get(
             app.state.EXTERNAL_PWA_MANIFEST_URL,
-=======
-    external_pwa_manifest_url = getattr(app.state, 'EXTERNAL_PWA_MANIFEST_URL', None)
-    if external_pwa_manifest_url:
-        session = await get_session()
-        async with session.get(
-            external_pwa_manifest_url,
->>>>>>> v0.11.0
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
         ) as r:
             r.raise_for_status()
@@ -3845,21 +3442,15 @@ async def get_manifest_json():
 
 @app.get('/opensearch.xml')
 async def get_opensearch_xml():
-    webui_url = await Config.get('webui.url')
+    webui_url = app.state.WEBUI_URL
     xml_content = rf"""
     <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/" xmlns:moz="http://www.mozilla.org/2006/browser/search/">
     <ShortName>{app.state.WEBUI_NAME}</ShortName>
     <Description>Search {app.state.WEBUI_NAME}</Description>
     <InputEncoding>UTF-8</InputEncoding>
-<<<<<<< HEAD
-    <Image width="16" height="16" type="image/x-icon">{app.state.WEBUI_URL}/static/favicon.png</Image>
-    <Url type="text/html" method="get" template="{app.state.WEBUI_URL}/?q={"{searchTerms}"}"/>
-    <moz:SearchForm>{app.state.WEBUI_URL}</moz:SearchForm>
-=======
     <Image width="16" height="16" type="image/x-icon">{webui_url}/static/favicon.png</Image>
     <Url type="text/html" method="get" template="{webui_url}/?q={'{searchTerms}'}"/>
     <moz:SearchForm>{webui_url}</moz:SearchForm>
->>>>>>> v0.11.0
     </OpenSearchDescription>
     """
     return Response(content=xml_content, media_type='application/xml')
