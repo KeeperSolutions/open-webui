@@ -716,7 +716,7 @@ async def lifespan(app: FastAPI):
     if WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD:
         if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
             # Disable signup since we now have an admin
-            await Config.upsert({'ui.enable_signup': False})
+            app.state.config.ENABLE_SIGNUP = False
 
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
@@ -953,66 +953,32 @@ app.state.BASE_MODELS = []
 #
 ########################################
 
-<<<<<<< HEAD
+########################################
+
 app.state.WEBUI_URL = WEBUI_URL.value
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 app.state.config.OAUTH_AUTO_REDIRECT = OAUTH_AUTO_REDIRECT
 app.state.config.ENABLE_PASSWORD_CHANGE_FORM = ENABLE_PASSWORD_CHANGE_FORM
-=======
->>>>>>> v0.11.0
 
-async def initialize_runtime_config(app: FastAPI):
-    # Migrate legacy access_control → access_grants on boot.
-    from open_webui.utils.access_control import migrate_access_control
+app.state.config.ENABLE_API_KEYS = ENABLE_API_KEYS
+app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
+app.state.config.API_KEYS_ALLOWED_ENDPOINTS = API_KEYS_ALLOWED_ENDPOINTS
 
-    connections = await Config.get('tool_server.connections', []) or []
-    if any('access_control' in c.get('config', {}) for c in connections):
-        for connection in connections:
-            migrate_access_control(connection.get('config', {}))
-        await Config.upsert({'tool_server.connections': connections})
+app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
 
-    for tool_server_connection in connections:
-        if tool_server_connection.get('type', 'openapi') == 'mcp':
-            server_id = (tool_server_connection.get('info') or {}).get('id')
-            auth_type = tool_server_connection.get('auth_type', 'none')
+app.state.config.SHOW_ADMIN_DETAILS = SHOW_ADMIN_DETAILS
+app.state.config.ADMIN_EMAIL = ADMIN_EMAIL
 
-            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-                try:
-                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
-                    oauth_client_info = await recover_static_oauth_client_metadata(
-                        tool_server_connection, oauth_client_info
-                    )
-                    oauth_client_info = apply_connection_oauth_options(tool_server_connection, oauth_client_info)
-                    app.state.oauth_client_manager.add_client(
-                        f'mcp:{server_id}',
-                        OAuthClientInformationFull(**oauth_client_info),
-                    )
-                except Exception as e:
-                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
 
-<<<<<<< HEAD
 app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
 app.state.config.DEFAULT_PINNED_MODELS = DEFAULT_PINNED_MODELS
 app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
 app.state.config.FEATURED_MODELS = FEATURED_MODELS
 app.state.config.DEFAULT_MODEL_METADATA = DEFAULT_MODEL_METADATA
 app.state.config.DEFAULT_MODEL_PARAMS = DEFAULT_MODEL_PARAMS
-=======
-    arena_models = await Config.get('evaluation.arena.models', []) or []
-    if any('access_control' in m.get('meta', {}) for m in arena_models):
-        for model in arena_models:
-            migrate_access_control(model.get('meta', {}))
-        await Config.upsert({'evaluation.arena.models': arena_models})
->>>>>>> v0.11.0
 
-    app.state.EMBEDDING_FUNCTION = None
-    app.state.RERANKING_FUNCTION = None
-    app.state.ef = None
-    app.state.rf = None
-    app.state.YOUTUBE_LOADER_TRANSLATION = None
 
-<<<<<<< HEAD
 app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
 app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
 app.state.config.DEFAULT_GROUP_ID = DEFAULT_GROUP_ID
@@ -1042,22 +1008,6 @@ app.state.config.ENABLE_USER_STATUS = ENABLE_USER_STATUS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
-
-# Migrate legacy access_control → access_grants on boot
-from open_webui.utils.access_control import has_permission, migrate_access_control
-
-connections = app.state.config.TOOL_SERVER_CONNECTIONS
-if any('access_control' in c.get('config', {}) for c in connections):
-    for connection in connections:
-        migrate_access_control(connection.get('config', {}))
-    app.state.config.TOOL_SERVER_CONNECTIONS = connections
-
-arena_models = app.state.config.EVALUATION_ARENA_MODELS
-if any('access_control' in m.get('meta', {}) for m in arena_models):
-    for model in arena_models:
-        migrate_access_control(model.get('meta', {}))
-    app.state.config.EVALUATION_ARENA_MODELS = arena_models
-
 app.state.config.OAUTH_SUB_CLAIM = OAUTH_SUB_CLAIM
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
 app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
@@ -1272,130 +1222,77 @@ app.state.config.FIRECRAWL_API_BASE_URL = FIRECRAWL_API_BASE_URL
 app.state.config.FIRECRAWL_API_KEY = FIRECRAWL_API_KEY
 app.state.config.FIRECRAWL_TIMEOUT = FIRECRAWL_TIMEOUT
 app.state.config.TAVILY_EXTRACT_DEPTH = TAVILY_EXTRACT_DEPTH
-
-app.state.EMBEDDING_FUNCTION = None
-app.state.RERANKING_FUNCTION = None
-app.state.ef = None
-app.state.rf = None
-
-app.state.YOUTUBE_LOADER_TRANSLATION = None
-
-
-try:
-    app.state.ef = get_ef(app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL)
-    if app.state.config.ENABLE_RAG_HYBRID_SEARCH and not app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-        app.state.rf = get_rf(
-            app.state.config.RAG_RERANKING_ENGINE,
-            app.state.config.RAG_RERANKING_MODEL,
-            app.state.config.RAG_EXTERNAL_RERANKER_URL,
-            app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
-            app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT,
-=======
-    try:
-        rag_config = await Config.get_many(
-            'rag.embedding_engine',
-            'rag.embedding_model',
-            'rag.enable_hybrid_search',
-            'rag.bypass_embedding_and_retrieval',
-            'rag.reranking_engine',
-            'rag.reranking_model',
-            'rag.external_reranker_url',
-            'rag.external_reranker_api_key',
-            'rag.external_reranker_timeout',
->>>>>>> v0.11.0
-        )
-        app.state.ef = get_ef(rag_config.get('rag.embedding_engine'), rag_config.get('rag.embedding_model'))
-        if rag_config.get('rag.enable_hybrid_search') and not rag_config.get('rag.bypass_embedding_and_retrieval'):
-            app.state.rf = get_rf(
-                rag_config.get('rag.reranking_engine'),
-                rag_config.get('rag.reranking_model'),
-                rag_config.get('rag.external_reranker_url'),
-                rag_config.get('rag.external_reranker_api_key'),
-                rag_config.get('rag.external_reranker_timeout'),
-            )
-        else:
-            app.state.rf = None
-    except Exception as e:
-        log.error(f'Error updating models: {e}')
-        app.state.rf = None
-
-    rag_config = await Config.get_many(
-        'rag.embedding_engine',
-        'rag.embedding_model',
-        'rag.openai.api_base_url',
-        'rag.ollama.base_url',
-        'rag.azure_openai.base_url',
-        'rag.openai.api_key',
-        'rag.ollama.api_key',
-        'rag.azure_openai.api_key',
-        'rag.embedding_batch_size',
-        'rag.azure_openai.api_version',
-        'rag.enable_async_embedding',
-        'rag.embedding_concurrent_requests',
-        'rag.reranking_engine',
-        'rag.reranking_model',
-        'rag.reranking_batch_size',
-    )
-    embedding_engine = rag_config.get('rag.embedding_engine')
-    app.state.EMBEDDING_FUNCTION = get_embedding_function(
-        embedding_engine,
-        rag_config.get('rag.embedding_model'),
-        embedding_function=app.state.ef,
-        url=(
-            rag_config.get('rag.openai.api_base_url')
-            if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.base_url')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.base_url')
-            )
-        ),
-        key=(
-            rag_config.get('rag.openai.api_key')
-            if embedding_engine == 'openai'
-            else (
-                rag_config.get('rag.ollama.api_key')
-                if embedding_engine == 'ollama'
-                else rag_config.get('rag.azure_openai.api_key')
-            )
-        ),
-        embedding_batch_size=rag_config.get('rag.embedding_batch_size'),
-        azure_api_version=(
-            rag_config.get('rag.azure_openai.api_version') if embedding_engine == 'azure_openai' else None
-        ),
-        enable_async=rag_config.get('rag.enable_async_embedding'),
-        concurrent_requests=rag_config.get('rag.embedding_concurrent_requests'),
-    )
-
-    app.state.RERANKING_FUNCTION = get_reranking_function(
-        rag_config.get('rag.reranking_engine'),
-        rag_config.get('rag.reranking_model'),
-        reranking_function=app.state.rf,
-        reranking_batch_size=rag_config.get('rag.reranking_batch_size'),
-    )
-
-<<<<<<< HEAD
-app.state.RERANKING_FUNCTION = get_reranking_function(
-    app.state.config.RAG_RERANKING_ENGINE,
-    app.state.config.RAG_RERANKING_MODEL,
-    reranking_function=app.state.rf,
-    reranking_batch_size=app.state.config.RAG_RERANKING_BATCH_SIZE,
-)
-=======
->>>>>>> v0.11.0
-
 ########################################
 #
 # CODE EXECUTION
 #
 ########################################
 
+app.state.config.ENABLE_CODE_EXECUTION = ENABLE_CODE_EXECUTION
+app.state.config.CODE_EXECUTION_ENGINE = CODE_EXECUTION_ENGINE
+app.state.config.CODE_EXECUTION_JUPYTER_URL = CODE_EXECUTION_JUPYTER_URL
+app.state.config.CODE_EXECUTION_JUPYTER_AUTH = CODE_EXECUTION_JUPYTER_AUTH
+app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN = CODE_EXECUTION_JUPYTER_AUTH_TOKEN
+app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
+app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT = CODE_EXECUTION_JUPYTER_TIMEOUT
+
+app.state.config.ENABLE_CODE_INTERPRETER = ENABLE_CODE_INTERPRETER
+app.state.config.CODE_INTERPRETER_ENGINE = CODE_INTERPRETER_ENGINE
+app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE = CODE_INTERPRETER_PROMPT_TEMPLATE
+
+app.state.config.CODE_INTERPRETER_JUPYTER_URL = CODE_INTERPRETER_JUPYTER_URL
+app.state.config.CODE_INTERPRETER_JUPYTER_AUTH = CODE_INTERPRETER_JUPYTER_AUTH
+app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
+app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
+app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
 
 ########################################
 #
 # IMAGES
 #
 ########################################
+
+app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
+app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
+app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
+app.state.config.ENABLE_MEMORIES = ENABLE_MEMORIES
+
+app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
+app.state.config.IMAGE_SIZE = IMAGE_SIZE
+app.state.config.IMAGE_STEPS = IMAGE_STEPS
+
+app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
+app.state.config.IMAGES_OPENAI_API_VERSION = IMAGES_OPENAI_API_VERSION
+app.state.config.IMAGES_OPENAI_API_KEY = IMAGES_OPENAI_API_KEY
+app.state.config.IMAGES_OPENAI_API_PARAMS = IMAGES_OPENAI_API_PARAMS
+
+app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
+app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
+app.state.config.IMAGES_GEMINI_ENDPOINT_METHOD = IMAGES_GEMINI_ENDPOINT_METHOD
+
+app.state.config.AUTOMATIC1111_BASE_URL = AUTOMATIC1111_BASE_URL
+app.state.config.AUTOMATIC1111_API_AUTH = AUTOMATIC1111_API_AUTH
+app.state.config.AUTOMATIC1111_PARAMS = AUTOMATIC1111_PARAMS
+
+app.state.config.COMFYUI_BASE_URL = COMFYUI_BASE_URL
+app.state.config.COMFYUI_API_KEY = COMFYUI_API_KEY
+app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
+app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
+
+
+app.state.config.ENABLE_IMAGE_EDIT = ENABLE_IMAGE_EDIT
+app.state.config.IMAGE_EDIT_ENGINE = IMAGE_EDIT_ENGINE
+app.state.config.IMAGE_EDIT_MODEL = IMAGE_EDIT_MODEL
+app.state.config.IMAGE_EDIT_SIZE = IMAGE_EDIT_SIZE
+app.state.config.IMAGES_EDIT_OPENAI_API_BASE_URL = IMAGES_EDIT_OPENAI_API_BASE_URL
+app.state.config.IMAGES_EDIT_OPENAI_API_KEY = IMAGES_EDIT_OPENAI_API_KEY
+app.state.config.IMAGES_EDIT_OPENAI_API_VERSION = IMAGES_EDIT_OPENAI_API_VERSION
+app.state.config.IMAGES_EDIT_GEMINI_API_BASE_URL = IMAGES_EDIT_GEMINI_API_BASE_URL
+app.state.config.IMAGES_EDIT_GEMINI_API_KEY = IMAGES_EDIT_GEMINI_API_KEY
+app.state.config.IMAGES_EDIT_COMFYUI_BASE_URL = IMAGES_EDIT_COMFYUI_BASE_URL
+app.state.config.IMAGES_EDIT_COMFYUI_API_KEY = IMAGES_EDIT_COMFYUI_API_KEY
+app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW = IMAGES_EDIT_COMFYUI_WORKFLOW
+app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = IMAGES_EDIT_COMFYUI_WORKFLOW_NODES
 
 
 ########################################
@@ -1404,7 +1301,6 @@ app.state.RERANKING_FUNCTION = get_reranking_function(
 #
 ########################################
 
-<<<<<<< HEAD
 app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
 app.state.config.STT_MODEL = AUDIO_STT_MODEL
 app.state.config.STT_SUPPORTED_CONTENT_TYPES = AUDIO_STT_SUPPORTED_CONTENT_TYPES
@@ -1446,8 +1342,6 @@ app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT = AUDIO_TTS_AZURE_SPEECH_OUTPUT_
 app.state.config.TTS_MISTRAL_API_KEY = AUDIO_TTS_MISTRAL_API_KEY
 app.state.config.TTS_MISTRAL_API_BASE_URL = AUDIO_TTS_MISTRAL_API_BASE_URL
 
-=======
->>>>>>> v0.11.0
 
 app.state.faster_whisper_model = None
 app.state.speech_synthesiser = None
@@ -1461,7 +1355,6 @@ app.state.speech_speaker_embeddings_dataset = None
 ########################################
 
 
-<<<<<<< HEAD
 app.state.config.TASK_MODEL = TASK_MODEL
 app.state.config.TASK_MODEL_EXTERNAL = TASK_MODEL_EXTERNAL
 
@@ -1487,8 +1380,102 @@ app.state.config.VOICE_MODE_PROMPT_TEMPLATE = VOICE_MODE_PROMPT_TEMPLATE
 app.state.config.ENABLE_VOICE_MODE_PROMPT = ENABLE_VOICE_MODE_PROMPT
 
 
-=======
->>>>>>> v0.11.0
+async def initialize_runtime_config(app: FastAPI):
+    # Migrate legacy access_control → access_grants on boot.
+    from open_webui.utils.access_control import migrate_access_control
+
+    connections = app.state.config.TOOL_SERVER_CONNECTIONS
+    if any('access_control' in c.get('config', {}) for c in connections):
+        for connection in connections:
+            migrate_access_control(connection.get('config', {}))
+        app.state.config.TOOL_SERVER_CONNECTIONS = connections
+
+    # v0.11.0: register OAuth clients for MCP tool servers that use OAuth 2.1.
+    for tool_server_connection in connections:
+        if tool_server_connection.get('type', 'openapi') == 'mcp':
+            server_id = (tool_server_connection.get('info') or {}).get('id')
+            auth_type = tool_server_connection.get('auth_type', 'none')
+
+            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
+                try:
+                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
+                    oauth_client_info = await recover_static_oauth_client_metadata(
+                        tool_server_connection, oauth_client_info
+                    )
+                    oauth_client_info = apply_connection_oauth_options(tool_server_connection, oauth_client_info)
+                    app.state.oauth_client_manager.add_client(
+                        f'mcp:{server_id}',
+                        OAuthClientInformationFull(**oauth_client_info),
+                    )
+                except Exception as e:
+                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
+
+    arena_models = app.state.config.EVALUATION_ARENA_MODELS
+    if any('access_control' in m.get('meta', {}) for m in arena_models):
+        for model in arena_models:
+            migrate_access_control(model.get('meta', {}))
+        app.state.config.EVALUATION_ARENA_MODELS = arena_models
+
+    app.state.EMBEDDING_FUNCTION = None
+    app.state.RERANKING_FUNCTION = None
+    app.state.ef = None
+    app.state.rf = None
+    app.state.YOUTUBE_LOADER_TRANSLATION = None
+
+    try:
+        app.state.ef = get_ef(app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL)
+        if app.state.config.ENABLE_RAG_HYBRID_SEARCH and not app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
+            app.state.rf = get_rf(
+                app.state.config.RAG_RERANKING_ENGINE,
+                app.state.config.RAG_RERANKING_MODEL,
+                app.state.config.RAG_EXTERNAL_RERANKER_URL,
+                app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
+                app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT,
+            )
+        else:
+            app.state.rf = None
+    except Exception as e:
+        log.error(f'Error updating models: {e}')
+        app.state.rf = None
+
+    app.state.EMBEDDING_FUNCTION = get_embedding_function(
+        app.state.config.RAG_EMBEDDING_ENGINE,
+        app.state.config.RAG_EMBEDDING_MODEL,
+        embedding_function=app.state.ef,
+        url=(
+            app.state.config.RAG_OPENAI_API_BASE_URL
+            if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+            else (
+                app.state.config.RAG_OLLAMA_BASE_URL
+                if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
+                else app.state.config.RAG_AZURE_OPENAI_BASE_URL
+            )
+        ),
+        key=(
+            app.state.config.RAG_OPENAI_API_KEY
+            if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+            else (
+                app.state.config.RAG_OLLAMA_API_KEY
+                if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
+                else app.state.config.RAG_AZURE_OPENAI_API_KEY
+            )
+        ),
+        embedding_batch_size=app.state.config.RAG_EMBEDDING_BATCH_SIZE,
+        azure_api_version=(
+            app.state.config.RAG_AZURE_OPENAI_API_VERSION
+            if app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
+            else None
+        ),
+        enable_async=app.state.config.ENABLE_ASYNC_EMBEDDING,
+        concurrent_requests=app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+    )
+
+    app.state.RERANKING_FUNCTION = get_reranking_function(
+        app.state.config.RAG_RERANKING_ENGINE,
+        app.state.config.RAG_RERANKING_MODEL,
+        reranking_function=app.state.rf,
+        reranking_batch_size=app.state.config.RAG_RERANKING_BATCH_SIZE,
+    )
 ########################################
 #
 # WEBUI
