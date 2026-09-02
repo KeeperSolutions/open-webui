@@ -468,6 +468,15 @@ from open_webui.env import (
     _sock_read_source,
     _sse_keepalive_source,
 )
+from open_webui.events import (
+    EVENTS,
+    delete_event_webhook,
+    get_event_catalog as get_event_catalog_items,
+    get_event_webhooks,
+    migrate_legacy_webhook_config,
+    publish_event,
+    upsert_event_webhook,
+)
 from open_webui.internal.db import ScopedSession, engine, get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
@@ -498,110 +507,12 @@ from open_webui.routers import (
     model_classes,
     models,
     notes,
+    notifications,
     ollama,
     openai,
     pipelines,
     prompts,
     providers,
-    retrieval,
-    scim,
-    skills,
-    tasks,
-    terminals,
-    tools,
-    users,
-    utils,
-)
-from open_webui.routers.retrieval import (
-    get_ef,
-    get_embedding_function,
-    get_reranking_function,
-    get_rf,
-)
-from open_webui.socket.main import (
-    MODELS,
-    get_event_emitter,
-    get_models_in_use,
-    get_user_id_from_session_pool,
-    periodic_session_pool_cleanup,
-    periodic_usage_pool_cleanup,
-)
-from open_webui.socket.main import (
-    app as socket_app,
-)
-from open_webui.tasks import (
-    cleanup_task,
-    create_task,
-    has_active_tasks,
-    list_task_ids_by_item_id,
-    list_tasks,
-    redis_task_command_listener,
-    stop_item_tasks,
-    stop_task,
-)  # Import from tasks.py
-from open_webui.utils import logger
-from open_webui.utils.actions import chat_action as chat_action_handler
-from open_webui.utils.asgi_middleware import (
-    AuthTokenMiddleware,
-    CommitSessionMiddleware,
-    RedirectMiddleware,
-    WebsocketUpgradeGuardMiddleware,
-)
-from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
-from open_webui.utils.auth import (
-    create_admin_user,
-    decode_token,
-    get_admin_user,
-    get_http_authorization_cred,
-    get_license_data,
-    get_verified_user,
-)
-
-
-=======
-)
-from open_webui.events import (
-    EVENTS,
-    delete_event_webhook,
-    get_event_catalog as get_event_catalog_items,
-    get_event_webhooks,
-    migrate_legacy_webhook_config,
-    publish_event,
-    upsert_event_webhook,
-)
-from open_webui.internal.db import engine, get_async_session
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.channels import Channels
-from open_webui.models.chats import ChatForm, Chats
-from open_webui.models.config import Config
-from open_webui.models.functions import Functions
-from open_webui.models.messages import Messages
-from open_webui.models.models import Models
-from open_webui.models.users import Users
-from open_webui.routers import (
-    analytics,
-    audio,
-    auths,
-    automations,
-    calendar,
-    channels,
-    chats,
-    configs,
-    evaluations,
-    files,
-    folders,
-    functions,
-    groups,
-    images,
-    knowledge,
-    memories,
-    models,
-    notifications,
-    notes,
-    ollama,
-    openai,
-    pipelines,
-    prompts,
     retrieval,
     scim,
     skills,
@@ -656,16 +567,12 @@ from open_webui.utils.auth import (
     get_license_data,
     get_verified_user,
 )
->>>>>>> v0.11.0
 from open_webui.utils.chat import (
     chat_completed as chat_completed_handler,
 )
 from open_webui.utils.chat import (
     generate_chat_completion as chat_completion_handler,
 )
-<<<<<<< HEAD
-from open_webui.utils.embeddings import generate_embeddings
-=======
 from open_webui.utils.chat_id import (
     get_temporary_chat_session_id,
     is_saved_chat_id,
@@ -676,7 +583,6 @@ from open_webui.utils.chat_variables import (
 )
 from open_webui.utils.embeddings import generate_embeddings
 from open_webui.utils.json_response import apply_orjson_http_json
->>>>>>> v0.11.0
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -684,45 +590,24 @@ from open_webui.utils.middleware import (
     process_chat_payload,
     process_chat_response,
 )
-<<<<<<< HEAD
-=======
 from open_webui.utils.model_ids import strip_provider_model_prefix
->>>>>>> v0.11.0
 from open_webui.utils.models import (
     check_model_access,
     get_all_base_models,
     get_all_models,
     get_filtered_models,
 )
-<<<<<<< HEAD
 from open_webui.routers.billing import check_billing_access
 from open_webui import kms
-=======
->>>>>>> v0.11.0
 from open_webui.utils.oauth import (
     OAuthClientInformationFull,
     OAuthClientManager,
     OAuthManager,
-<<<<<<< HEAD
-=======
     apply_connection_oauth_options,
->>>>>>> v0.11.0
     decrypt_data,
     encrypt_data,
     get_oauth_client_info_with_dynamic_client_registration,
     get_oauth_client_info_with_static_credentials,
-<<<<<<< HEAD
-    resolve_oauth_client_info,
-)
-from open_webui.utils.plugin import install_tool_and_function_dependencies
-from open_webui.utils.redis import get_redis_client, get_redis_connection
-from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.session_pool import get_session
-from open_webui.utils.tools import set_terminal_servers, set_tool_servers
-
-if SAFE_MODE:
-    print('SAFE MODE ENABLED')  # allow-print
-=======
     recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
 )
@@ -733,8 +618,7 @@ from open_webui.utils.session_pool import cleanup_response, get_session, stream_
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 
 if SAFE_MODE:
-    print('SAFE MODE ENABLED')
->>>>>>> v0.11.0
+    print('SAFE MODE ENABLED')  # allow-print
     # Functions.deactivate_all_functions() is awaited in lifespan below
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -788,19 +672,12 @@ v{VERSION} - building the best AI user interface.
 https://github.com/open-webui/open-webui
 """
     try:
-<<<<<<< HEAD
         print(banner)  # allow-print
     except UnicodeEncodeError:
         # Stdout can't encode the box-drawing banner (Windows cp1252, redirected/headless stdout); fall back to ASCII.
         print(  # allow-print
             f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui'
         )
-=======
-        print(banner)
-    except UnicodeEncodeError:
-        # Stdout can't encode the box-drawing banner (Windows cp1252, redirected/headless stdout); fall back to ASCII.
-        print(f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui')
->>>>>>> v0.11.0
 
 
 @asynccontextmanager
