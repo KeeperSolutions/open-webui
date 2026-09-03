@@ -23,20 +23,9 @@ from open_webui.retrieval.vector.main import (
     VectorDBBase,
     VectorItem,
 )
-<<<<<<< HEAD
-from pymilvus import (
-    Collection,
-    CollectionSchema,
-    DataType,
-    FieldSchema,
-    connections,
-    utility,
-)
-=======
 from pymilvus import DataType
 from pymilvus import MilvusClient as Client
 from pymilvus.exceptions import MilvusException
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 
@@ -190,11 +179,7 @@ class MilvusClient(VectorDBBase):
     def has_collection(self, collection_name: str) -> bool:
         mt_collection, resource_id = self._get_collection_and_resource_id(collection_name)
         _validate_resource_id(resource_id)
-<<<<<<< HEAD
-        if not utility.has_collection(mt_collection):
-=======
         if not self.client.has_collection(mt_collection):
->>>>>>> v0.11.0
             return False
 
         self.client.load_collection(mt_collection)
@@ -255,11 +240,7 @@ class MilvusClient(VectorDBBase):
 
         mt_collection, resource_id = self._get_collection_and_resource_id(collection_name)
         _validate_resource_id(resource_id)
-<<<<<<< HEAD
-        if not utility.has_collection(mt_collection):
-=======
         if not self.client.has_collection(mt_collection):
->>>>>>> v0.11.0
             return None
 
         self.client.load_collection(mt_collection)
@@ -298,17 +279,9 @@ class MilvusClient(VectorDBBase):
     ):
         mt_collection, resource_id = self._get_collection_and_resource_id(collection_name)
         _validate_resource_id(resource_id)
-<<<<<<< HEAD
-        if not utility.has_collection(mt_collection):
-            return
-
-        collection = Collection(mt_collection)
-
-=======
         if not self.client.has_collection(mt_collection):
             return
 
->>>>>>> v0.11.0
         expr = [f"{RESOURCE_ID_FIELD} == '{resource_id}'"]
         if ids:
             # Milvus expects a string list for 'in' operator
@@ -330,11 +303,7 @@ class MilvusClient(VectorDBBase):
     def delete_collection(self, collection_name: str):
         mt_collection, resource_id = self._get_collection_and_resource_id(collection_name)
         _validate_resource_id(resource_id)
-<<<<<<< HEAD
-        if not utility.has_collection(mt_collection):
-=======
         if not self.client.has_collection(mt_collection):
->>>>>>> v0.11.0
             return
 
         self.client.delete(collection_name=mt_collection, filter=f"{RESOURCE_ID_FIELD} == '{resource_id}'")
@@ -342,11 +311,7 @@ class MilvusClient(VectorDBBase):
     def query(self, collection_name: str, filter: Dict[str, Any], limit: Optional[int] = None) -> Optional[GetResult]:
         mt_collection, resource_id = self._get_collection_and_resource_id(collection_name)
         _validate_resource_id(resource_id)
-<<<<<<< HEAD
-        if not utility.has_collection(mt_collection):
-=======
         if not self.client.has_collection(mt_collection):
->>>>>>> v0.11.0
             return None
 
         self.client.load_collection(mt_collection)

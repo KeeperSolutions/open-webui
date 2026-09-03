@@ -24,11 +24,7 @@ from open_webui.retrieval.vector.main import (
     VectorDBBase,
     VectorItem,
 )
-<<<<<<< HEAD
-from open_webui.retrieval.vector.utils import process_metadata
-=======
 from open_webui.retrieval.vector.utils import merge_hybrid_search_results, process_metadata
->>>>>>> v0.11.0
 from open_webui.utils.misc import sanitize_text_for_db
 from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (

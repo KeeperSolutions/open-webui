@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-<<<<<<< HEAD
-=======
 import ipaddress
->>>>>>> v0.11.0
 from urllib.parse import urlparse
 
 import validators
 from open_webui.retrieval.web.utils import resolve_hostname
-<<<<<<< HEAD
-from open_webui.utils.misc import is_string_allowed
-=======
 from open_webui.utils.misc import get_allow_block_lists, is_host_allowed
->>>>>>> v0.11.0
 from pydantic import BaseModel
 
 

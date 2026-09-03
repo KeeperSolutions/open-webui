@@ -28,11 +28,7 @@ def process_metadata(
         if value is None:
             continue
         # Convert non-serializable fields to strings
-<<<<<<< HEAD
-        if isinstance(value, (datetime, list, dict)):
-=======
         if isinstance(value, (dt.datetime, list, dict)):
->>>>>>> v0.11.0
             result[key] = sanitize_text_for_db(str(value))
         else:
             result[key] = sanitize_text_for_db(value)

@@ -25,14 +25,9 @@ from open_webui.retrieval.vector.main import (
     VectorItem,
 )
 from open_webui.retrieval.vector.utils import process_metadata
-<<<<<<< HEAD
-from pymilvus import Collection, DataType, FieldSchema, connections
-from pymilvus import MilvusClient as Client
-=======
 from pymilvus import DataType
 from pymilvus import MilvusClient as Client
 from pymilvus.exceptions import MilvusException
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 

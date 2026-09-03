@@ -3,10 +3,7 @@ from typing import Optional
 
 import chromadb
 from chromadb import Settings
-<<<<<<< HEAD
-=======
 from chromadb.errors import NotFoundError
->>>>>>> v0.11.0
 from chromadb.utils.batch_utils import create_batches
 from open_webui.config import (
     CHROMA_CLIENT_AUTH_CREDENTIALS,

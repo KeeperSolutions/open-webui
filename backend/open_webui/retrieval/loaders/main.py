@@ -16,26 +16,18 @@ from langchain_community.document_loaders import (
     YoutubeLoader,
 )
 from langchain_core.documents import Document
-<<<<<<< HEAD
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, GLOBAL_LOG_LEVEL, REQUESTS_VERIFY
-=======
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     GLOBAL_LOG_LEVEL,
     MINERU_MAX_MARKDOWN_BYTES,
     REQUESTS_VERIFY,
 )
->>>>>>> v0.11.0
 from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.external_document import ExternalDocumentLoader
 from open_webui.retrieval.loaders.mineru import MinerULoader
 from open_webui.retrieval.loaders.mistral import MistralLoader
-<<<<<<< HEAD
-from open_webui.retrieval.loaders.paddleocr_vl import PaddleOCRVLLoader
-=======
 from open_webui.retrieval.loaders.paddleocr_vl import PADDLEOCR_VL_SUPPORTED_EXTENSIONS, PaddleOCRVLLoader
 from open_webui.utils.headers import get_user_groups_for_custom_headers
->>>>>>> v0.11.0
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -276,8 +268,6 @@ class Loader:
         loop for the entire parse — minutes for large PDFs. This offloads
         the work to a worker thread so the loop stays responsive.
         """
-<<<<<<< HEAD
-=======
         # Group lookup is async-only, so it must happen before `load`
         # is offloaded to a thread without a running event loop.
         if self.engine == 'external' and self.user_groups is None:
@@ -285,7 +275,6 @@ class Loader:
                 self.kwargs.get('EXTERNAL_DOCUMENT_LOADER_HEADERS'), self.user
             )
 
->>>>>>> v0.11.0
         return await asyncio.to_thread(self.load, filename, file_content_type, file_path)
 
     def _is_text_file(self, file_ext: str, file_content_type: str) -> bool:
@@ -325,20 +314,12 @@ class Loader:
         try:
             raw.decode('utf-8')
             return 'utf-8'
-<<<<<<< HEAD
-        except UnicodeDecodeError:
-            pass
-=======
         except UnicodeDecodeError as e:
             first_non_utf8 = e.start
->>>>>>> v0.11.0
 
         # Use chardet as a hint, not as ground truth
         import chardet
 
-<<<<<<< HEAD
-        detected = chardet.detect(raw)
-=======
         # chardet is pure Python (~1.3s/MB), so sample around the first bad byte
         window = 256 * 1024
         sample_start = max(0, first_non_utf8 - window // 2)
@@ -347,7 +328,6 @@ class Loader:
         # A stray byte can sit far from the real payload, leaving the sample with nothing to read
         if len(sample.translate(None, delete=bytes(range(128)))) < 64 and len(sample) < len(raw):
             detected = chardet.detect(raw)
->>>>>>> v0.11.0
         detected_enc = (detected.get('encoding') or '').lower().replace('-', '').replace('_', '')
 
         # Map chardet's detected encoding to the correct superset codec.

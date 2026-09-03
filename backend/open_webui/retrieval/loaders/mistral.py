@@ -5,21 +5,13 @@ import os
 import sys
 import time
 from contextlib import asynccontextmanager
-<<<<<<< HEAD
-from typing import Any, Dict, List
-=======
 from typing import Any, Dict, List, Optional
->>>>>>> v0.11.0
 
 import aiohttp
 import requests
 from langchain_core.documents import Document
-<<<<<<< HEAD
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, GLOBAL_LOG_LEVEL
-=======
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, ENABLE_FORWARD_USER_INFO_HEADERS, GLOBAL_LOG_LEVEL
 from open_webui.utils.headers import include_user_info_headers
->>>>>>> v0.11.0
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -298,16 +290,6 @@ class MistralLoader:
 
                 self._debug_log(f'Uploading file: {self.file_name} ({self.file_size:,} bytes)')
 
-<<<<<<< HEAD
-            async with session.post(
-                url,
-                data=writer,
-                headers=self.headers,
-                timeout=aiohttp.ClientTimeout(total=self.upload_timeout),
-                ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            ) as response:
-                return await self._handle_response_async(response)
-=======
                 async with session.post(
                     url,
                     data=writer,
@@ -316,7 +298,6 @@ class MistralLoader:
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 ) as response:
                     return await self._handle_response_async(response)
->>>>>>> v0.11.0
 
         response_data = await self._retry_request_async(upload_request)
 
