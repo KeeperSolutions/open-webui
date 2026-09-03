@@ -43,12 +43,8 @@
 		deleteKnowledgeDirectory,
 		moveFileInKnowledge,
 		syncKnowledgeDiff,
-<<<<<<< HEAD
-		syncKnowledgeCleanup
-=======
 		syncKnowledgeCleanup,
 		testExternalKnowledgeRetrieval
->>>>>>> v0.11.0
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
 
@@ -75,10 +71,7 @@
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-<<<<<<< HEAD
-=======
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
->>>>>>> v0.11.0
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
@@ -150,8 +143,6 @@
 	let deleteDirectoryContents = true;
 
 	let pendingPollTimer: ReturnType<typeof setInterval> | null = null;
-<<<<<<< HEAD
-=======
 	let externalTestQuery = '';
 	let externalTestResult: {
 		documents?: string[];
@@ -160,7 +151,6 @@
 	} | null = null;
 
 	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
->>>>>>> v0.11.0
 
 	const reset = () => {
 		currentPage = 1;
@@ -498,27 +488,14 @@
 		}
 	};
 
-<<<<<<< HEAD
-	// Collect files from a directory without uploading — returns {path, filename, file}[]
-	const collectDirectoryFiles = async (): Promise<Array<{
-		path: string;
-		filename: string;
-		file: File;
-	}> | null> => {
-=======
 	// Collect files from a directory without uploading.
 	const collectDirectoryFiles = async (): Promise<DirectoryFileEntry[] | null> => {
->>>>>>> v0.11.0
 		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
 
 		try {
 			if (isFileSystemAccessSupported) {
 				const dirHandle = await window.showDirectoryPicker();
-<<<<<<< HEAD
-				const collected: Array<{ path: string; filename: string; file: File }> = [];
-=======
 				const collected: DirectoryFileEntry[] = [];
->>>>>>> v0.11.0
 
 				async function traverse(handle: FileSystemDirectoryHandle, dirPath = '') {
 					for await (const entry of handle.values()) {
@@ -535,11 +512,7 @@
 					}
 				}
 
-<<<<<<< HEAD
-				await traverse(dirHandle);
-=======
 				await traverse(dirHandle, dirHandle.name);
->>>>>>> v0.11.0
 				return collected;
 			} else {
 				// Firefox fallback
@@ -560,15 +533,8 @@
 
 							const collected = files.map((file) => {
 								const parts = file.webkitRelativePath.split('/');
-<<<<<<< HEAD
-								// Remove root dir name, extract path and filename
-								const withoutRoot = parts.slice(1);
-								const filename = withoutRoot.pop() || file.name;
-								const path = withoutRoot.join('/');
-=======
 								const filename = parts.pop() || file.name;
 								const path = parts.join('/');
->>>>>>> v0.11.0
 								return { path, filename, file };
 							});
 
@@ -594,8 +560,6 @@
 		}
 	};
 
-<<<<<<< HEAD
-=======
 	const buildDirectoryManifest = async (
 		entries: DirectoryFileEntry[]
 	): Promise<DirectoryManifestEntry[]> => {
@@ -696,7 +660,6 @@
 		}
 	};
 
->>>>>>> v0.11.0
 	// Incremental sync: hash locally → diff on server → upload only what changed
 	const syncDirectoryHandler = async () => {
 		if (!pendingSyncFiles?.length) return;
@@ -706,17 +669,7 @@
 			syncing = $i18n.t('Computing checksums ({{count}} files)', {
 				count: pendingSyncFiles.length
 			});
-<<<<<<< HEAD
-			const manifest = await Promise.all(
-				pendingSyncFiles.map(async (entry) => ({
-					...entry,
-					checksum: await computeFileHash(entry.file),
-					size: entry.file.size
-				}))
-			);
-=======
 			const manifest = await buildDirectoryManifest(pendingSyncFiles);
->>>>>>> v0.11.0
 			pendingSyncFiles = null;
 
 			// ── 3. Diff against knowledge base ──
@@ -744,27 +697,7 @@
 			}
 
 			// ── 5. mkdir — create missing directories (parents first) ──
-<<<<<<< HEAD
-			const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
-			for (const dirPath of diff.mkdir) {
-				const segments = dirPath.split('/');
-				const name = segments.at(-1)!;
-				const parentPath = segments.slice(0, -1).join('/');
-				const parentId = parentPath ? directoryIdByPath[parentPath] : null;
-
-				const directory = await createKnowledgeDirectory(
-					localStorage.token,
-					knowledge.id,
-					name,
-					parentId
-				);
-				if (directory) {
-					directoryIdByPath[dirPath] = directory.id;
-				}
-			}
-=======
 			const directoryIdByPath = await createMissingDirectories(diff);
->>>>>>> v0.11.0
 
 			// ── 6. Upload added + modified files ──
 			const filesToUpload = manifest.filter(
@@ -837,11 +770,8 @@
 		currentPage = 1;
 		selectedFileId = null;
 		selectedFile = null;
-<<<<<<< HEAD
-=======
 		selectedFileContent = '';
 		loadingFileContent = false;
->>>>>>> v0.11.0
 		getItemsPage();
 	};
 
@@ -1106,37 +1036,6 @@
 			return;
 		}
 
-<<<<<<< HEAD
-		const handleUploadingFileFolder = (items) => {
-			for (const item of items) {
-				if (item.isFile) {
-					item.file((file) => {
-						uploadFileHandler(file);
-					});
-					continue;
-				}
-
-				// Not sure why you have to call webkitGetAsEntry and isDirectory seperate, but it won't work if you try item.webkitGetAsEntry().isDirectory
-				const wkentry = item.webkitGetAsEntry();
-				const isDirectory = wkentry.isDirectory;
-				if (isDirectory) {
-					// Read the directory
-					wkentry.createReader().readEntries(
-						(entries) => {
-							handleUploadingFileFolder(entries);
-						},
-						(error) => {
-							console.error('Error reading directory entries:', error);
-						}
-					);
-				} else {
-					uploadFileHandler(item.getAsFile());
-				}
-			}
-		};
-
-=======
->>>>>>> v0.11.0
 		if (e.dataTransfer?.types?.includes('Files')) {
 			if (e.dataTransfer?.files) {
 				const inputItems = e.dataTransfer?.items;
@@ -1440,200 +1339,6 @@
 						</div>
 					</div>
 
-<<<<<<< HEAD
-					<Dropdown align="end">
-						<button
-							class="p-1.5 mr-1 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-							type="button"
-						>
-							<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
-						</button>
-
-						<div slot="content">
-							<div
-								class="min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-							>
-								<button
-									class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									type="button"
-									on:click={() => {
-										includeContent = !includeContent;
-									}}
-								>
-									<Checkbox
-										state={includeContent ? 'checked' : 'unchecked'}
-										on:change={(e) => {
-											includeContent = e.detail === 'checked';
-										}}
-									/>
-									{$i18n.t('File content')}
-								</button>
-							</div>
-						</div>
-					</Dropdown>
-
-					{#if knowledge?.write_access}
-						<div>
-							<AddContentMenu
-								onUpload={(data) => {
-									if (data.type === 'directory') {
-										uploadDirectoryHandler();
-									} else if (data.type === 'new_directory') {
-										showNewDirectoryModal = true;
-									} else if (data.type === 'web') {
-										showAddWebpageModal = true;
-									} else if (data.type === 'text') {
-										showAddTextContentModal = true;
-									} else {
-										document.getElementById('files-input').click();
-									}
-								}}
-								onSync={async () => {
-									pendingSyncFiles = await collectDirectoryFiles();
-									if (pendingSyncFiles?.length) {
-										showSyncConfirmModal = true;
-									}
-								}}
-								onReset={() => {
-									showResetConfirm = true;
-								}}
-							/>
-						</div>
-					{/if}
-				</div>
-			</div>
-
-			<div class="px-3 flex justify-between">
-				<div
-					class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
-					on:wheel={(e) => {
-						if (e.deltaY !== 0) {
-							e.preventDefault();
-							e.currentTarget.scrollLeft += e.deltaY;
-						}
-					}}
-				>
-					<div
-						class="flex gap-3 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
-					>
-						<DropdownOptions
-							align="start"
-							className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
-							bind:value={viewOption}
-							items={[
-								{ value: null, label: $i18n.t('All') },
-								{ value: 'created', label: $i18n.t('Created by you') },
-								{ value: 'shared', label: $i18n.t('Shared with you') }
-							]}
-							onChange={(value) => {
-								if (value) {
-									localStorage.workspaceViewOption = value;
-								} else {
-									delete localStorage.workspaceViewOption;
-								}
-							}}
-						/>
-
-						<DropdownOptions
-							align="start"
-							bind:value={sortKey}
-							placeholder={$i18n.t('Sort')}
-							items={[
-								{ value: 'name', label: $i18n.t('Name') },
-								{ value: 'created_at', label: $i18n.t('Created At') },
-								{ value: 'updated_at', label: $i18n.t('Updated At') }
-							]}
-						/>
-
-						{#if sortKey}
-							<DropdownOptions
-								align="start"
-								bind:value={direction}
-								items={[
-									{ value: 'asc', label: $i18n.t('Asc') },
-									{ value: null, label: $i18n.t('Desc') }
-								]}
-							/>
-						{/if}
-					</div>
-				</div>
-			</div>
-
-			{#if currentDirectoryId !== null}
-				<div class="px-5 mt-2">
-					<KnowledgeBreadcrumbs
-						rootLabel={knowledge.name}
-						{breadcrumbs}
-						onNavigate={(dirId) => navigateToDirectory(dirId)}
-						onMoveFile={(fileId, dirId) => moveFileToDirectoryHandler(fileId, dirId)}
-						onMoveDir={(dirId, targetId) => moveDirectoryHandler(dirId, targetId)}
-					/>
-				</div>
-			{/if}
-
-			{#if syncing}
-				<div class="mx-2.5 mt-2.5 -mb-0.5">
-					<div class="flex items-center gap-2.5 rounded-xl py-2 px-3 bg-gray-50 dark:bg-gray-850">
-						<Spinner className="size-3.5 shrink-0" />
-						<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
-							{syncing}
-						</div>
-					</div>
-				</div>
-			{/if}
-
-			{#if fileItems !== null && fileItemsTotal !== null}
-				<div class="flex flex-row flex-1 gap-3 px-2.5 mt-2">
-					<div class="flex-1 flex">
-						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-							<div class="w-full h-full flex flex-col min-h-full">
-								{#if fileItems.length > 0 || directoryItems.length > 0}
-									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										<Files
-											files={fileItems}
-											directories={directoryItems}
-											{knowledge}
-											{selectedFileId}
-											onClick={(fileId) => {
-												selectedFileId = fileId;
-
-												if (fileItems) {
-													const file = fileItems.find((file) => file.id === selectedFileId);
-													if (file) {
-														fileSelectHandler(file);
-													} else {
-														selectedFile = null;
-													}
-												}
-											}}
-											onDelete={(fileId) => {
-												selectedFileId = null;
-												selectedFile = null;
-
-												deleteFileHandler(fileId);
-											}}
-											onRename={(fileId, name) => renameFileHandler(fileId, name)}
-											onNavigateDirectory={(dirId) => navigateToDirectory(dirId)}
-											onRenameDirectory={(id, name) => renameDirectoryHandler(id, name)}
-											onDeleteDirectory={(id) => confirmDeleteDirectory(id)}
-											onMoveFileToDirectory={(fileId, dirId) =>
-												moveFileToDirectoryHandler(fileId, dirId)}
-											onMoveDirectoryToDirectory={(dirId, targetId) =>
-												moveDirectoryHandler(dirId, targetId)}
-										/>
-									</div>
-
-									{#if fileItemsTotal > 30}
-										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
-									{/if}
-								{:else}
-									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-										<div>
-											{$i18n.t('No content found')}
-										</div>
-									</div>
-								{/if}
-=======
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
 						<div>
 							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Mapped Source')}</div>
@@ -1645,7 +1350,6 @@
 							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Auth Mode')}</div>
 							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
 								{$i18n.t('Admin-managed service account')}
->>>>>>> v0.11.0
 							</div>
 						</div>
 					</div>
@@ -1682,19 +1386,6 @@
 									<div class="text-gray-500 mt-1">
 										{externalTestResult.metadatas?.[idx]?.source ?? ''}
 									</div>
-<<<<<<< HEAD
-
-									{#key selectedFile.id}
-										<textarea
-											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
-											bind:value={selectedFileContent}
-											disabled={!knowledge?.write_access}
-											aria-label={$i18n.t('File content')}
-											placeholder={$i18n.t('Add content here')}
-										></textarea>
-									{/key}
-=======
->>>>>>> v0.11.0
 								</div>
 							{/each}
 						</div>

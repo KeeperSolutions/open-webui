@@ -34,13 +34,8 @@
 
 	export let onSubmit: Function;
 	export let edit = false;
-<<<<<<< HEAD
-	export let prompt = null;
-	export const clone = false;
-=======
 	export let prompt: any = null;
 	export let clone = false;
->>>>>>> v0.11.0
 	export let disabled = false;
 	export let modal = false;
 	export let onCancel: Function = () => {};

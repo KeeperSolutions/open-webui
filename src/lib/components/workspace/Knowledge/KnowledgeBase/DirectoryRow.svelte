@@ -11,10 +11,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-<<<<<<< HEAD
-=======
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
->>>>>>> v0.11.0
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -120,14 +117,10 @@
 	<button
 		class="relative flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 		type="button"
-<<<<<<< HEAD
-		on:click={() => onNavigate(directory.id)}
-=======
 		on:click={() => {
 			if (editing) return;
 			onNavigate(directory.id);
 		}}
->>>>>>> v0.11.0
 	>
 		<div>
 			<div class="flex gap-2 items-center line-clamp-1">
@@ -136,12 +129,6 @@
 					<input
 						bind:this={editInput}
 						bind:value={editName}
-<<<<<<< HEAD
-						class="text-sm w-full bg-transparent border-none outline-hidden"
-						on:keydown={(e) => {
-							if (e.key === 'Enter') submitRename();
-							if (e.key === 'Escape') cancelRename();
-=======
 						class="text-xs w-full bg-transparent border-none outline-hidden"
 						on:keydown={(e) => {
 							if (e.key === 'Enter') submitRename();
@@ -150,18 +137,13 @@
 						}}
 						on:keyup={(e) => {
 							if (e.key === ' ') e.stopPropagation();
->>>>>>> v0.11.0
 						}}
 						on:blur={submitRename}
 						on:click={(e) => e.stopPropagation()}
 						autofocus
 					/>
 				{:else}
-<<<<<<< HEAD
-					<div class="line-clamp-1 text-sm">
-=======
 					<div class="line-clamp-1 text-xs">
->>>>>>> v0.11.0
 						{directory.name}
 					</div>
 				{/if}
@@ -190,19 +172,10 @@
 				</button>
 
 				<div slot="content">
-<<<<<<< HEAD
-					<div
-						class="min-w-[140px] rounded-2xl p-1 z-[9999999] bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
-					>
-						<button
-							type="button"
-							class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2 text-sm"
-=======
 					<DropdownMenu className="min-w-[140px] z-[9999999]">
 						<button
 							type="button"
 							class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs transition hover:text-gray-900 dark:hover:text-gray-100"
->>>>>>> v0.11.0
 							on:click={() => startRename()}
 						>
 							<Pencil className="size-3.5" />
@@ -210,21 +183,13 @@
 						</button>
 						<button
 							type="button"
-<<<<<<< HEAD
-							class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2 text-sm"
-=======
 							class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs transition hover:text-gray-900 dark:hover:text-gray-100"
->>>>>>> v0.11.0
 							on:click={() => onDelete(directory.id)}
 						>
 							<GarbageBin className="size-3.5" />
 							{$i18n.t('Delete')}
 						</button>
-<<<<<<< HEAD
-					</div>
-=======
 					</DropdownMenu>
->>>>>>> v0.11.0
 				</div>
 			</Dropdown>
 		</div>

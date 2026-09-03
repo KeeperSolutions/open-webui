@@ -271,54 +271,10 @@ class Tools:
 						</Tooltip>
 					{/if}
 
-<<<<<<< HEAD
-				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
-					<CodeEditor
-						bind:this={codeEditor}
-						value={content}
-						lang="python"
-						{boilerplate}
-						onChange={(e) => {
-							_content = e;
-							if (!edit) {
-								const fm = extractFrontmatter(e);
-								if (fm.title && !name) {
-									name = formatSkillName(fm.title);
-									id = nameToId(fm.title);
-								}
-								if (fm.description && !meta.description) {
-									meta = { ...meta, description: fm.description };
-								}
-							}
-						}}
-						onSave={async () => {
-							if (formElement) {
-								formElement.requestSubmit();
-							}
-						}}
-					/>
-				</div>
-
-				<div class="pb-3 flex justify-between">
-					<div class="flex-1 pr-3">
-						<div class="text-xs text-gray-500 line-clamp-2">
-							<span class=" font-semibold dark:text-gray-200">{$i18n.t('Warning:')}</span>
-							{$i18n.t('Tools are a function calling system with arbitrary code execution')} <br />—
-							<span class=" font-medium dark:text-gray-400"
-								>{$i18n.t(`don't install random tools from sources you don't trust.`)}</span
-							>
-						</div>
-					</div>
-
-					<button
-						class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-						type="submit"
-=======
 					<Tooltip
 						className="flex min-w-0 flex-1 items-center"
 						content={$i18n.t('e.g. Tools for performing various operations')}
 						placement="top-start"
->>>>>>> v0.11.0
 					>
 						<input
 							class="w-full bg-transparent outline-hidden"

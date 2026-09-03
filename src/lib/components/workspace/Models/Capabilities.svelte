@@ -63,25 +63,9 @@
 		}
 	};
 
-<<<<<<< HEAD
-	export let capabilities: {
-		file_context?: boolean;
-		vision?: boolean;
-		file_upload?: boolean;
-		web_search?: boolean;
-		image_generation?: boolean;
-		code_interpreter?: boolean;
-		terminal?: boolean;
-		usage?: boolean;
-		citations?: boolean;
-		status_updates?: boolean;
-		builtin_tools?: boolean;
-	} = {};
-=======
 	type Capability = keyof typeof capabilityLabels;
 
 	export let capabilities: Partial<Record<Capability, boolean>> = {};
->>>>>>> v0.11.0
 
 	// Hide file_context when file_upload is disabled
 	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {

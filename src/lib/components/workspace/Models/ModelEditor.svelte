@@ -32,19 +32,13 @@
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-<<<<<<< HEAD
-=======
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
->>>>>>> v0.11.0
 	import DefaultFiltersSelector from './DefaultFiltersSelector.svelte';
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
 	import TerminalSelector from './TerminalSelector.svelte';
-<<<<<<< HEAD
-=======
 	import TTSVoiceInput from './TTSVoiceInput.svelte';
->>>>>>> v0.11.0
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
 	import { extractInputVariables } from '$lib/utils';
@@ -408,16 +402,6 @@
 	};
 
 	onMount(async () => {
-<<<<<<< HEAD
-		// Clear any preview on component mount
-		previewImageUrl = null;
-
-		await tools.set(await getTools(localStorage.token));
-		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
-		await functions.set(await getFunctions(localStorage.token));
-		const knowledgeData = await getKnowledgeBases(localStorage.token);
-		await knowledgeCollections.set(knowledgeData?.items ? [...knowledgeData.items] : []);
-=======
 		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
 		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
 		if (!$functions) {
@@ -429,7 +413,6 @@
 		if (voices.length === 0) {
 			await loadVoices();
 		}
->>>>>>> v0.11.0
 
 		// Fetch admin-configured default model metadata so the editor
 		// reflects the actual defaults rather than hardcoded values
@@ -541,237 +524,6 @@
 		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
 	/>
 
-<<<<<<< HEAD
-	{#if onBack}
-		<button
-			class="flex space-x-1"
-			on:click={() => {
-				onBack();
-			}}
-		>
-			<div class=" self-center">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 20 20"
-					fill="currentColor"
-					class="h-4 w-4"
-				>
-					<path
-						fill-rule="evenodd"
-						d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-						clip-rule="evenodd"
-					/>
-				</svg>
-			</div>
-			<div class=" self-center text-sm font-medium">{$i18n.t('Back')}</div>
-		</button>
-	{/if}
-
-	<div class="w-full max-h-full flex justify-center">
-		<input
-			bind:this={filesInputElement}
-			bind:files={inputFiles}
-			type="file"
-			hidden
-			accept="image/*"
-			on:change={() => {
-				let reader = new FileReader();
-				reader.onload = (event) => {
-					let originalImageUrl = `${event.target.result}`;
-
-					const img = new Image();
-					img.src = originalImageUrl;
-
-					img.onload = function () {
-						const canvas = document.createElement('canvas');
-						const ctx = canvas.getContext('2d');
-
-						// Calculate the aspect ratio of the image
-						const aspectRatio = img.width / img.height;
-
-						// Calculate the new width and height to fit within 100x100
-						let newWidth, newHeight;
-						if (aspectRatio > 1) {
-							newWidth = 250 * aspectRatio;
-							newHeight = 250;
-						} else {
-							newWidth = 250;
-							newHeight = 250 / aspectRatio;
-						}
-
-						// Set the canvas size
-						canvas.width = 250;
-						canvas.height = 250;
-
-						// Calculate the position to center the image
-						const offsetX = (250 - newWidth) / 2;
-						const offsetY = (250 - newHeight) / 2;
-
-						// Draw the image on the canvas
-						ctx.drawImage(img, offsetX, offsetY, newWidth, newHeight);
-
-						// Get the base64 representation of the compressed image
-						const compressedSrc = canvas.toDataURL();
-
-						// Display the compressed image
-						info.meta.profile_image_url = compressedSrc;
-						previewImageUrl = compressedSrc; // Show data URL immediately
-
-						inputFiles = null;
-						filesInputElement.value = '';
-					};
-				};
-
-				if (
-					inputFiles &&
-					inputFiles.length > 0 &&
-					['image/gif', 'image/webp', 'image/jpeg', 'image/png', 'image/svg+xml'].includes(
-						inputFiles[0]['type']
-					)
-				) {
-					reader.readAsDataURL(inputFiles[0]);
-				} else {
-					toast.error(`Unsupported File Type '${inputFiles[0]['type']}'.`);
-					inputFiles = null;
-				}
-			}}
-		/>
-
-		{#if !edit || (edit && model)}
-			<form
-				class="flex flex-col md:flex-row w-full gap-3 md:gap-6"
-				on:submit|preventDefault={() => {
-					submitHandler();
-				}}
-			>
-				<div class="w-full px-1">
-					<div class="flex flex-row gap-4 md:gap-6 w-full">
-						<div class="self-start flex justify-center my-2 shrink-0">
-							<div class="self-center">
-								<button
-									class="rounded-2xl flex shrink-0 items-center bg-white dark:bg-gray-850 shadow-xl group relative"
-									type="button"
-									aria-label={$i18n.t('Upload profile image')}
-									on:click={() => {
-										filesInputElement.click();
-									}}
-								>
-									{#if edit && info.id}
-										{#if previewImageUrl}
-											<!-- Show preview when local changes made -->
-											<img
-												src={previewImageUrl}
-												alt="model profile"
-												class="rounded-xl size-20 md:size-48 object-cover shrink-0"
-											/>
-										{:else}
-											<!-- Show current saved image from API -->
-											<img
-												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${info.id}&theme=${resolveTheme($theme)}`}
-												alt="model profile"
-												class="rounded-xl size-20 md:size-48 object-cover shrink-0"
-											/>
-										{/if}
-									{:else if info.meta.profile_image_url}
-										<!-- Create mode: show local state -->
-										<img
-											src={info.meta.profile_image_url}
-											alt="model profile"
-											class="rounded-xl size-20 md:size-48 object-cover shrink-0"
-										/>
-									{:else}
-										<!-- Fallback -->
-										<img
-											src="/static/favicon.png"
-											alt="model profile"
-											class=" rounded-xl size-20 md:size-48 object-cover shrink-0"
-										/>
-									{/if}
-
-							<div class="absolute bottom-0 right-0 z-10">
-								<div class="m-1.5">
-									<div
-										class="shadow-xl p-1 rounded-full border-2 border-white bg-gray-800 text-white group-hover:bg-gray-600 transition dark:border-black dark:bg-white dark:group-hover:bg-gray-200 dark:text-black"
-									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="size-5"
-										>
-											<path
-												fill-rule="evenodd"
-												d="M2 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4Zm10.5 5.707a.5.5 0 0 0-.146-.353l-1-1a.5.5 0 0 0-.708 0L9.354 9.646a.5.5 0 0 1-.708 0L6.354 7.354a.5.5 0 0 0-.708 0l-2 2a.5.5 0 0 0-.146.353V12a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V9.707ZM12 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"
-												clip-rule="evenodd"
-											/>
-										</svg>
-									</div>
-								</div>
-							</div>
-
-							<div
-								class="absolute top-0 bottom-0 left-0 right-0 bg-white dark:bg-black rounded-lg opacity-0 group-hover:opacity-20 transition"
-							></div>
-						</button>
-
-						<div class="flex w-full mt-1 justify-end">
-							<button
-								class="px-2 py-1 text-gray-500 rounded-lg text-xs"
-								on:click={() => {
-									info.meta.profile_image_url = `${WEBUI_BASE_URL}/static/favicon.png`;
-
-									// Fetch preview of what image will be after reset
-									const previewUrl = `${WEBUI_API_BASE_URL}/models/model/profile/image/preview?id=${info.id}&theme=${currentTheme}&profile_image_url=${encodeURIComponent('/static/favicon.png')}&t=${Date.now()}`;
-
-									previewImageUrl = previewUrl;
-								}}
-								type="button"
-							>
-								{$i18n.t('Reset Image')}</button
-							>
-						</div>
-					</div>
-
-					<div class="flex flex-col w-full flex-1">
-						<div class="flex justify-between items-start my-2">
-							<div class=" flex flex-col w-full">
-								<div class="flex-1 w-full">
-									<input
-										class="text-3xl w-full bg-transparent outline-hidden"
-										placeholder={$i18n.t('Model Name')}
-										bind:value={name}
-										required
-									/>
-								</div>
-
-									<div class="flex-1 w-full">
-										<div>
-											<input
-												class="text-xs w-full bg-transparent outline-hidden"
-												placeholder={$i18n.t('Model ID')}
-												bind:value={id}
-												disabled={edit}
-												required
-											/>
-										</div>
-									</div>
-								</div>
-
-								<div class="shrink-0">
-									<button
-										class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-										type="button"
-										on:click={() => {
-											showAccessControlModal = true;
-										}}
-									>
-										<LockClosed strokeWidth="2.5" className="size-3.5 shrink-0" />
-
-										<div class="text-sm font-medium shrink-0">
-											{$i18n.t('Access')}
-										</div>
-									</button>
-=======
 	<div class="flex h-full min-h-0 w-full flex-col">
 		{#if onBack}
 			<button
@@ -952,7 +704,6 @@
 											required
 										/>
 									</div>
->>>>>>> v0.11.0
 								</div>
 							</div>
 
@@ -1029,21 +780,6 @@
 								/>
 							</div>
 						</div>
-<<<<<<< HEAD
-					</div>
-				</div>
-
-				<hr class=" border-gray-100 dark:border-gray-850 my-1.5" />
-
-					<div class="my-2">
-						<div class="flex w-full justify-between">
-							<div class=" self-center text-sm font-semibold">{$i18n.t('Model Params')}</div>
-						</div>
-
-						<div class="mt-2">
-							<div class="my-1">
-								<div class=" text-xs font-semibold mb-2">{$i18n.t('System Prompt')}</div>
-=======
 
 						<section class="mt-2.5">
 							<div class="mb-2 text-xs text-gray-400 dark:text-gray-600">
@@ -1051,7 +787,6 @@
 							</div>
 
 							<div class="space-y-2.5">
->>>>>>> v0.11.0
 								<div>
 									<div class="mb-1 text-xs text-gray-600 dark:text-gray-400">
 										{$i18n.t('System Prompt')}
@@ -1081,12 +816,6 @@
 												{/if}
 											</div>
 
-<<<<<<< HEAD
-							<div class="flex w-full justify-between">
-								<div class=" self-center text-xs font-semibold">
-									{$i18n.t('Advanced Params')}
-								</div>
-=======
 											{#if chatVariablesPreview.fields.length > 0}
 												<div class="mb-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
 													{$i18n.t('Chat Variables')}
@@ -1103,7 +832,6 @@
 													{/each}
 												</div>
 											{/if}
->>>>>>> v0.11.0
 
 											{#if chatVariablesPreview.userFields.length > 0}
 												<div class="mb-1 mt-2 text-[0.6875rem] text-gray-400 dark:text-gray-600">
@@ -1131,15 +859,6 @@
 									{/if}
 								</div>
 
-<<<<<<< HEAD
-					<hr class=" border-gray-100 dark:border-gray-850 my-1" />
-
-					<div class="my-2">
-						<div class="flex w-full justify-between items-center">
-							<div class="flex w-full justify-between items-center">
-								<div class=" self-center text-sm font-semibold">
-									{$i18n.t('Prompt suggestions')}
-=======
 								<div class="flex h-7 w-full justify-between">
 									<div class="self-center text-xs text-gray-600 dark:text-gray-400">
 										{$i18n.t('Advanced Params')}
@@ -1174,7 +893,6 @@
 							<div class="flex w-full items-center justify-between">
 								<div class="self-center text-xs text-gray-400 dark:text-gray-600">
 									{$i18n.t('Prompts')}
->>>>>>> v0.11.0
 								</div>
 
 								<button
@@ -1216,11 +934,6 @@
 						{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
 							<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
 
-<<<<<<< HEAD
-					<div class="my-4">
-						<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
-					</div>
-=======
 							{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0}
 								<div class="my-3">
 									<FiltersSelector
@@ -1228,7 +941,6 @@
 										filters={($functions ?? []).filter((func) => func.type === 'filter')}
 									/>
 								</div>
->>>>>>> v0.11.0
 
 								{@const toggleableFilters = $functions.filter(
 									(func) =>
@@ -1263,27 +975,6 @@
 							<Capabilities bind:capabilities />
 						</div>
 
-<<<<<<< HEAD
-					{#if capabilities.terminal}
-						<div class="my-4">
-							<TerminalSelector bind:terminalId />
-						</div>
-					{/if}
-
-					<div class="my-4">
-						<div class="flex w-full justify-between mb-1">
-							<div class="self-center text-xs font-medium text-gray-500">
-								{$i18n.t('TTS Voice')}
-							</div>
-						</div>
-						<input
-							class="w-full text-sm bg-transparent outline-hidden"
-							type="text"
-							bind:value={tts.voice}
-							placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
-						/>
-					</div>
-=======
 						{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}
 							{@const availableFeatures = Object.entries(capabilities)
 								.filter(
@@ -1291,7 +982,6 @@
 										value && ['web_search', 'code_interpreter', 'image_generation'].includes(key)
 								)
 								.map(([key, value]) => key)}
->>>>>>> v0.11.0
 
 							{#if availableFeatures.length > 0}
 								<div class="my-3">
@@ -1300,17 +990,11 @@
 							{/if}
 						{/if}
 
-<<<<<<< HEAD
-					<div class="my-2 text-gray-300 dark:text-gray-700 pb-20">
-						<div class="flex w-full justify-between mb-2">
-							<div class=" self-center text-sm font-semibold">{$i18n.t('JSON Preview')}</div>
-=======
 						{#if capabilities.builtin_tools}
 							<div class="my-3">
 								<BuiltinTools bind:builtinTools />
 							</div>
 						{/if}
->>>>>>> v0.11.0
 
 						{#if capabilities.terminal}
 							<div class="my-3">
@@ -1357,17 +1041,6 @@
 							</button>
 						</div>
 
-<<<<<<< HEAD
-						{#if showPreview}
-							<div>
-								<textarea
-									class="text-sm w-full bg-transparent outline-hidden resize-none"
-									rows="10"
-									value={JSON.stringify(info, null, 2)}
-									disabled
-									readonly
-								></textarea>
-=======
 						<div class="my-2 text-gray-300 dark:text-gray-700 pb-20">
 							<div class="flex w-full justify-between mb-2">
 								<div class=" self-center text-sm font-normal">{$i18n.t('JSON Preview')}</div>
@@ -1385,7 +1058,6 @@
 										<span class="ml-2 self-center">{$i18n.t('Show')}</span>
 									{/if}
 								</button>
->>>>>>> v0.11.0
 							</div>
 
 							{#if showPreview}

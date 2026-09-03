@@ -129,70 +129,7 @@
 						<div class="shrink-0 truncate font-mono" title={id}>
 							{id}
 						</div>
-<<<<<<< HEAD
-
-						<div class="flex-1">
-							<Tooltip content={$i18n.t('e.g. Code Review Guidelines')} placement="top-start">
-								<input
-									class="w-full text-2xl bg-transparent outline-hidden"
-									type="text"
-									placeholder={$i18n.t('Skill Name')}
-									aria-label={$i18n.t('Skill Name')}
-									bind:value={name}
-									required
-									{disabled}
-								/>
-							</Tooltip>
-						</div>
-
-						<div class="self-center shrink-0">
-							{#if !disabled}
-								<button
-									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-									type="button"
-									on:click={() => (showAccessControlModal = true)}
-								>
-									<LockClosed strokeWidth="2.5" className="size-3.5" />
-
-									<div class="text-sm font-medium shrink-0">
-										{$i18n.t('Access')}
-									</div>
-								</button>
-							{:else}
-								<span
-									class="text-xs text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-full"
-									>{$i18n.t('Read Only')}</span
-								>
-							{/if}
-						</div>
-					</div>
-
-					<div class=" flex gap-2 px-1 items-center">
-						{#if edit}
-							<div class="text-sm text-gray-500 shrink-0">
-								{id}
-							</div>
-						{:else}
-							<Tooltip
-								className="w-full"
-								content={$i18n.t('e.g. code-review-guidelines')}
-								placement="top-start"
-							>
-								<input
-									class="w-full text-sm disabled:text-gray-500 bg-transparent outline-hidden"
-									type="text"
-									placeholder={$i18n.t('Skill ID')}
-									aria-label={$i18n.t('Skill ID')}
-									bind:value={id}
-									required
-									disabled={edit}
-								/>
-							</Tooltip>
-						{/if}
-
-=======
 					{:else}
->>>>>>> v0.11.0
 						<Tooltip
 							className="min-w-[8rem] flex-1"
 							content={$i18n.t('e.g. code-review-guidelines')}
@@ -201,54 +138,6 @@
 							<input
 								class="w-full bg-transparent font-mono outline-hidden disabled:text-gray-500"
 								type="text"
-<<<<<<< HEAD
-								placeholder={$i18n.t('Skill Description')}
-								aria-label={$i18n.t('Skill Description')}
-								bind:value={description}
-								{disabled}
-							/>
-						</Tooltip>
-					</div>
-				</div>
-
-				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
-					<div class="h-full flex flex-col">
-						<div
-							class="bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-100/50 dark:border-gray-850/50 flex-1 min-h-0 overflow-hidden flex flex-col"
-						>
-							{#if disabled}
-								<div class="px-4 py-3 overflow-y-auto flex-1">
-									<pre class="text-xs whitespace-pre-wrap font-mono">{content}</pre>
-								</div>
-							{:else}
-								<textarea
-									class="w-full flex-1 text-xs bg-transparent outline-hidden resize-none font-mono px-4 py-3"
-									bind:value={content}
-									on:input={handleContentInput}
-									placeholder={$i18n.t('Enter skill instructions in markdown...')}
-									aria-label={$i18n.t('Skill Instructions')}
-									required
-								></textarea>
-							{/if}
-						</div>
-					</div>
-				</div>
-
-				<div class="pb-3 flex justify-end">
-					{#if !disabled}
-						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap"
-							type="submit"
-							disabled={loading}
-						>
-							{$i18n.t(edit ? 'Save' : 'Save & Create')}
-							{#if loading}
-								<span class="shrink-0">
-									<Spinner />
-								</span>
-							{/if}
-						</button>
-=======
 								placeholder={$i18n.t('Skill ID')}
 								aria-label={$i18n.t('Skill ID')}
 								bind:value={id}
@@ -256,7 +145,6 @@
 								disabled={edit}
 							/>
 						</Tooltip>
->>>>>>> v0.11.0
 					{/if}
 
 					<Tooltip

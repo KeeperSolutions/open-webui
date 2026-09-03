@@ -13,10 +13,6 @@
 		};
 	};
 
-<<<<<<< HEAD
-	export let filters = [];
-	export let selectedFilterIds = [];
-=======
 	const i18n = getContext('i18n') as any;
 
 	export let filters: Filter[] = [];
@@ -32,7 +28,6 @@
 			? selectedFilterIds.filter((id) => id !== filter.id)
 			: [...selectedFilterIds, filter.id];
 	};
->>>>>>> v0.11.0
 </script>
 
 {#if filters.length > 0}
@@ -66,21 +61,13 @@
 
 		<!-- TODO: Filter order matters -->
 		<div class="flex flex-col">
-<<<<<<< HEAD
-			<div class=" flex items-center flex-wrap">
-				{#each filters as filter}
-=======
 			<div class=" flex items-center flex-wrap mt-1">
 				{#each selectedFilters as filter}
->>>>>>> v0.11.0
 					{@const isSelected = filter.is_global || selectedFilterIds.includes(filter.id)}
 					<div class=" flex items-center gap-2 mr-3">
 						<div class="self-center flex items-center">
 							<Checkbox
-<<<<<<< HEAD
-=======
 								ariaLabel={filter.name}
->>>>>>> v0.11.0
 								state={isSelected ? 'checked' : 'unchecked'}
 								disabled={filter.is_global}
 								on:change={(e) => {
@@ -97,13 +84,8 @@
 							/>
 						</div>
 
-<<<<<<< HEAD
-						<div class=" py-0.5 text-sm w-full capitalize font-medium">
-							<Tooltip content={filter.meta.description}>
-=======
 						<div class=" py-0.5 text-xs capitalize">
 							<Tooltip content={filter.meta?.description ?? filter.id}>
->>>>>>> v0.11.0
 								{filter.name}
 							</Tooltip>
 						</div>

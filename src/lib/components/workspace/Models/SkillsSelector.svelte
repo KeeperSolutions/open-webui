@@ -4,43 +4,16 @@
 	import TypeaheadSelector from './TypeaheadSelector.svelte';
 	import { getContext } from 'svelte';
 
-<<<<<<< HEAD
-	export let skills = [];
-
-	let _skills = {};
-	let searchQuery = '';
-=======
 	type Skill = {
 		id: string;
 		name?: string;
 		description?: string;
 		is_active?: boolean;
 	};
->>>>>>> v0.11.0
 
 	export let skills: Skill[] = [];
 	export let selectedSkillIds: string[] = [];
 
-<<<<<<< HEAD
-	const i18n = getContext('i18n');
-
-	$: filteredSkillKeys = Object.keys(_skills).filter((id) => {
-		if (!searchQuery.trim()) return true;
-		const q = searchQuery.toLowerCase();
-		return _skills[id].name?.toLowerCase().includes(q) || _skills[id].id?.toLowerCase().includes(q);
-	});
-
-	onMount(() => {
-		_skills = skills.reduce((acc, skill) => {
-			acc[skill.id] = {
-				...skill,
-				selected: selectedSkillIds.includes(skill.id)
-			};
-
-			return acc;
-		}, {});
-	});
-=======
 	const i18n = getContext('i18n') as any;
 
 	$: activeSkills = skills.filter((skill) => skill.is_active !== false);
@@ -51,7 +24,6 @@
 			? selectedSkillIds.filter((id) => id !== skill.id)
 			: [...selectedSkillIds, skill.id];
 	};
->>>>>>> v0.11.0
 </script>
 
 <div>
@@ -79,27 +51,10 @@
 		{/if}
 	</div>
 
-	{#if Object.keys(_skills).length > 10}
-		<div class="mb-2">
-			<input
-				class="w-full text-sm bg-transparent outline-none border border-gray-100 dark:border-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400"
-				type="text"
-				placeholder={$i18n.t('Search skills...')}
-				bind:value={searchQuery}
-			/>
-		</div>
-	{/if}
-
 	<div class="flex flex-col mb-1">
-<<<<<<< HEAD
-		{#if skills.length > 0}
-			<div class=" flex items-center flex-wrap">
-				{#each filteredSkillKeys as skill, skillIdx}
-=======
 		{#if activeSkills.length > 0}
 			<div class=" flex items-center flex-wrap mt-1">
 				{#each selectedSkills as skill, skillIdx}
->>>>>>> v0.11.0
 					<div class=" flex items-center gap-2 mr-3">
 						<div class="self-center flex items-center">
 							<Checkbox

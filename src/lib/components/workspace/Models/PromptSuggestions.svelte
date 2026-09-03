@@ -178,18 +178,14 @@
 								rows="1"
 								use:autosize={prompt.content}
 								bind:value={prompt.content}
-							></textarea>
+							/>
 						</Tooltip>
 					</div>
 
 					<button
 						class="flex size-6 shrink-0 items-center justify-center text-gray-400 opacity-70 transition hover:text-gray-700 hover:opacity-100 dark:text-gray-600 dark:hover:text-gray-300"
 						type="button"
-<<<<<<< HEAD
-						aria-label={$i18n.t('Remove')}
-=======
 						aria-label={$i18n.t('Remove prompt suggestion')}
->>>>>>> v0.11.0
 						on:click={() => {
 							promptSuggestions.splice(promptIdx, 1);
 							promptSuggestions = promptSuggestions;

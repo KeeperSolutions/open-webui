@@ -531,19 +531,12 @@
 
 										<Tooltip content={$i18n.t('Valves')}>
 											<button
-<<<<<<< HEAD
-												aria-label={$i18n.t('Valves')}
-												class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-												type="button"
-												on:click={() => {
-=======
 												class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition dark:text-gray-500"
 												type="button"
 												aria-label={$i18n.t('Valves')}
 												on:click={(e) => {
 													e.preventDefault();
 													e.stopPropagation();
->>>>>>> v0.11.0
 													selectedTool = tool;
 													showValvesModal = true;
 												}}

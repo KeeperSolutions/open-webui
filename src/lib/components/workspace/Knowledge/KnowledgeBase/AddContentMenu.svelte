@@ -36,11 +36,7 @@
 >
 	<Tooltip content={$i18n.t('Add Content')}>
 		<button
-<<<<<<< HEAD
-			class=" p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1"
-=======
 			class="p-1.5 rounded-xl bg-transparent transition text-xs flex items-center space-x-1 hover:text-gray-900 dark:hover:text-gray-100"
->>>>>>> v0.11.0
 			aria-label={$i18n.t('Add Content')}
 			on:click={(e) => {
 				e.stopPropagation();
@@ -148,11 +144,7 @@
 			<hr class="my-1 border-gray-100 dark:border-gray-800" />
 
 			<button
-<<<<<<< HEAD
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-=======
 				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
->>>>>>> v0.11.0
 				on:click={() => {
 					onReset();
 					show = false;
@@ -161,10 +153,6 @@
 				<ArrowUturnLeft strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Reset')}</div>
 			</button>
-<<<<<<< HEAD
-		</div>
-=======
 		</DropdownMenu>
->>>>>>> v0.11.0
 	</div>
 </Dropdown>

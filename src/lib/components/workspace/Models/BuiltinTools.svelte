@@ -62,13 +62,10 @@
 		calendar: {
 			label: $i18n.t('Calendar'),
 			description: $i18n.t('List calendars, search, create, update, and delete calendar events')
-<<<<<<< HEAD
-=======
 		},
 		subagents: {
 			label: $i18n.t('Sub-agents'),
 			description: $i18n.t('Delegate focused work to parallel sub-agents')
->>>>>>> v0.11.0
 		}
 	};
 
@@ -81,25 +78,8 @@
 	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Builtin Tools')}</div>
 	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
 		{#each allTools as tool}
-<<<<<<< HEAD
-			<div class="flex items-center gap-2 mr-3">
-				<Checkbox
-					state={builtinTools[tool] !== false ? 'checked' : 'unchecked'}
-					on:change={(e) => {
-						if (e.detail === 'checked') {
-							delete builtinTools[tool];
-						} else {
-							builtinTools[tool] = false;
-						}
-						builtinTools = builtinTools;
-					}}
-				/>
-
-				<div class="py-0.5 text-sm">
-=======
 			<div class="flex min-h-6 items-center justify-between gap-2.5">
 				<div class="min-w-0 text-xs text-gray-600 dark:text-gray-400">
->>>>>>> v0.11.0
 					<Tooltip content={marked.parse(toolLabels[tool].description)}>
 						<span class="truncate">{$i18n.t(toolLabels[tool].label)}</span>
 					</Tooltip>
