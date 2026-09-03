@@ -28,7 +28,7 @@ ARG GID=0
 FROM node:22-alpine3.20 AS build
 ARG BUILD_HASH
 ARG DEPLOY_ENVIRONMENT=production
-ENV NODE_OPTIONS=--max_old_space_size=4096
+ENV NODE_OPTIONS=--max_old_space_size=8192
 
 # Set Node.js options (heap limit Allocation failed - JavaScript heap out of memory)
 # ENV NODE_OPTIONS="--max-old-space-size=4096"
@@ -48,7 +48,7 @@ ENV PUBLIC_DEPLOY_ENVIRONMENT=${DEPLOY_ENVIRONMENT}
 RUN npm run build
 
 ######## WebUI backend ########
-FROM python:3.11.14-slim-bookworm AS base
+FROM python:3.11-slim-bookworm AS base
 
 # Use args
 ARG USE_CUDA
@@ -140,6 +140,9 @@ RUN apt-get update && \
 # install python dependencies
 COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 
+# Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
+ENV UV_LINK_MODE=copy
+
 RUN set -e; \
     pip3 install --no-cache-dir uv; \
     if [ "$USE_CUDA" = "true" ]; then \
@@ -179,7 +182,7 @@ RUN if [ "$USE_OLLAMA" = "true" ]; then \
 # COPY --from=build /app/onnx /root/.cache/chroma/onnx_models/all-MiniLM-L6-v2/onnx
 
 # copy built frontend files
-# Cache bust: 2026-01-14 - Force rebuild to pick up correct version from package.json
+# Cache bust: 2026-07-10 - Force rebuild to apply alembic upgrade on start + migration fix
 COPY --chown=$UID:$GID --from=build /app/build /app/build
 COPY --chown=$UID:$GID --from=build /app/CHANGELOG.md /app/CHANGELOG.md
 COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json

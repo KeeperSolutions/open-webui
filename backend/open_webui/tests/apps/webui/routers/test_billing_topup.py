@@ -1,6 +1,6 @@
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,14 +73,14 @@ def billing_enabled():
 class TestCreateTopup:
     def test_topup_requires_paid_or_team_plan(self):
         override_user(_user())
-        with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", return_value=_billing(plan_tier="free")):
+        with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", new=AsyncMock(return_value=_billing(plan_tier="free"))):
             r = client.post("/api/v1/billing/topup", json={"top_up_id": "pack_basic"})
         assert r.status_code == 402
         clear_overrides()
 
     def test_topup_requires_active_subscription(self):
         override_user(_user())
-        with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", return_value=_billing(subscription_status="canceled")):
+        with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", new=AsyncMock(return_value=_billing(subscription_status="canceled"))):
             r = client.post("/api/v1/billing/topup", json={"top_up_id": "pack_basic"})
         assert r.status_code == 402
         clear_overrides()
@@ -89,7 +89,7 @@ class TestCreateTopup:
         override_user(_user())
         with patch("open_webui.routers.billing.TopupPacks", create=True) as TopupPacks:
             TopupPacks.get_by_id.return_value = None
-            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", return_value=_billing()):
+            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", new=AsyncMock(return_value=_billing())):
                 r = client.post("/api/v1/billing/topup", json={"top_up_id": "nope"})
         assert r.status_code == 400
         clear_overrides()
@@ -98,7 +98,7 @@ class TestCreateTopup:
         override_user(_user())
         with patch("open_webui.routers.billing.TopupPacks", create=True) as TopupPacks:
             TopupPacks.get_by_id.return_value = _pack()
-            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", return_value=_billing(stripe_customer_id=None)):
+            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", new=AsyncMock(return_value=_billing(stripe_customer_id=None))):
                 r = client.post("/api/v1/billing/topup", json={"top_up_id": "pack_basic"})
         assert r.status_code == 400
         clear_overrides()
@@ -107,8 +107,8 @@ class TestCreateTopup:
         override_user(_user())
         with patch("open_webui.routers.billing.TopupPacks", create=True) as TopupPacks:
             TopupPacks.get_by_id.return_value = _pack()
-            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", return_value=_billing(plan_tier="team")):
-                with patch("open_webui.routers.billing.Teams.get_by_owner_user_id", return_value=_team(stripe_customer_id=None)):
+            with patch("open_webui.routers.billing.StripeBillings.get_by_user_id", new=AsyncMock(return_value=_billing(plan_tier="team"))):
+                with patch("open_webui.routers.billing.Teams.get_by_owner_user_id", new=AsyncMock(return_value=_team(stripe_customer_id=None))):
                     r = client.post("/api/v1/billing/topup", json={"top_up_id": "pack_basic"})
         assert r.status_code == 400
         clear_overrides()

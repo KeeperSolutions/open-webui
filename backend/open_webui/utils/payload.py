@@ -1,19 +1,19 @@
-from open_webui.utils.task import prompt_template, prompt_variables_template
-from open_webui.utils.misc import (
-    deep_update,
-    add_or_update_system_message,
-    replace_system_message_content,
-)
-
-from typing import Callable, Optional
 import copy
 import json
+from typing import Callable, Optional
+
+from open_webui.utils.misc import (
+    add_or_update_system_message,
+    deep_update,
+    replace_system_message_content,
+)
+from open_webui.utils.task import prompt_template, prompt_variables_template
 
 
 # What goes out cannot be taken back. Let it be shaped
 # well before it leaves this place.
 # inplace function: form_data is modified
-def apply_system_prompt_to_body(
+async def apply_system_prompt_to_body(
     system: Optional[str],
     form_data: dict,
     metadata: Optional[dict] = None,
@@ -30,7 +30,7 @@ def apply_system_prompt_to_body(
             system = prompt_variables_template(system, variables)
 
     # Legacy (API Usage)
-    system = prompt_template(system, user)
+    system = await prompt_template(system, user)
 
     if replace:
         form_data['messages'] = replace_system_message_content(system, form_data.get('messages', []))
@@ -203,6 +203,11 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
     for message in messages:
         # Initialize the new message structure with the role
         new_message = {'role': message['role']}
+
+        # Preserve Ollama-native 'thinking' field (used by reasoning models,
+        # may be injected by filter inlet functions).
+        if 'thinking' in message:
+            new_message['thinking'] = message['thinking']
 
         content = message.get('content', [])
         tool_calls = message.get('tool_calls', None)

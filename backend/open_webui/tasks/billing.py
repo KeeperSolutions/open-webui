@@ -172,7 +172,7 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     if new_unpriced:
         try:
             from open_webui.utils.email import send_unpriced_models_email
-            admin = Users.get_super_admin_user()
+            admin = asyncio.run(Users.get_super_admin_user())
             if admin and admin.email:
                 sent = send_unpriced_models_email(to=admin.email, model_names=sorted(new_unpriced))
                 if sent:
@@ -198,7 +198,7 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     if newly_recovered:
         try:
             from open_webui.utils.email import send_model_pricing_recovered_email
-            admin = Users.get_super_admin_user()
+            admin = asyncio.run(Users.get_super_admin_user())
             if admin and admin.email:
                 sent = send_model_pricing_recovered_email(to=admin.email, model_names=sorted(newly_recovered))
                 if sent:
@@ -219,7 +219,7 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
                     from open_webui.models.users import Users
                     from open_webui.utils.email import send_ecb_unreachable_email
 
-                    admin = Users.get_super_admin_user()
+                    admin = asyncio.run(Users.get_super_admin_user())
                     if admin and admin.email:
                         startup_time = datetime.datetime.fromtimestamp(
                             _poller_started_at, tz=datetime.timezone.utc

@@ -6,7 +6,8 @@ export const uploadFile = async (
 	file: File,
 	metadata?: object | null,
 	process?: boolean | null,
-	piiMasking?: boolean | null
+	piiMasking?: boolean | null,
+	stream: boolean = true
 ) => {
 	const data = new FormData();
 	data.append('file', file);
@@ -46,7 +47,7 @@ export const uploadFile = async (
 		throw error;
 	}
 
-	if (res) {
+	if (res && stream) {
 		const status = await getFileProcessStatus(token, res.id);
 
 		if (status && status.ok) {
@@ -300,6 +301,35 @@ export const getFileContentById = async (id: string) => {
 			error = err.detail;
 			console.error(err);
 
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const renameFileById = async (token: string, id: string, filename: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/rename`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ filename })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
 			return null;
 		});
 

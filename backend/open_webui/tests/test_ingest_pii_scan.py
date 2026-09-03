@@ -104,14 +104,14 @@ def test_process_file_persists_detections(monkeypatch):
     import open_webui.routers.retrieval as R
 
     saved = {}
-    def fake_update(file_id, data, db=None):
+    async def fake_update(file_id, data, db=None):
         saved.setdefault(file_id, {}).update(data); return SimpleNamespace(id=file_id)
     monkeypatch.setattr(R.Files, "update_file_data_by_id", staticmethod(fake_update))
     async def fake_scan(request, content, *, file_id, user, models=None, features=None):
         return [{"type": "HR_OIB", "start": 4, "end": 15}]
     monkeypatch.setattr(R, "scan_file_content_for_pii", fake_scan)
 
-    R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user())
+    asyncio.run(R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user()))
     assert saved["f1"]["pii_detections"] == [{"type": "HR_OIB", "start": 4, "end": 15}]
     assert "content" not in saved["f1"]  # only the detections key is written here
 
@@ -122,9 +122,11 @@ def test_store_ingest_pii_detections_swallows_scan_error(monkeypatch):
     async def raising_scan(request, content, *, file_id, user, models=None, features=None):
         raise RuntimeError("presidio down")
     monkeypatch.setattr(R, "scan_file_content_for_pii", raising_scan)
-    monkeypatch.setattr(R.Files, "update_file_data_by_id", staticmethod(lambda *a, **k: None))
+    async def noop_update(*a, **k):
+        return None
+    monkeypatch.setattr(R.Files, "update_file_data_by_id", staticmethod(noop_update))
     # must not raise
-    R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user())
+    asyncio.run(R._store_ingest_pii_detections(MagicMock(), "f1", "OIB 11111111111", _user()))
 
 
 def test_content_endpoint_returns_detections(monkeypatch):
@@ -134,7 +136,9 @@ def test_content_endpoint_returns_detections(monkeypatch):
         id="f1", user_id="u1",
         data={"content": "OIB 11111111111", "pii_detections": [{"type": "HR_OIB", "start": 4, "end": 15}]},
     )
-    monkeypatch.setattr(F.Files, "get_file_by_id", staticmethod(lambda id, db=None: file_obj))
+    async def fake_get(id, db=None):
+        return file_obj
+    monkeypatch.setattr(F.Files, "get_file_by_id", staticmethod(fake_get))
     out = asyncio.run(F.get_file_data_content_by_id("f1", user=_user(), db=None))
     assert out["content"] == "OIB 11111111111"
     assert out["pii_detections"] == [{"type": "HR_OIB", "start": 4, "end": 15}]
@@ -144,7 +148,9 @@ def test_content_endpoint_detections_default_empty(monkeypatch):
     """A file with no stored detections returns an empty list, not a missing key."""
     import open_webui.routers.files as F
     file_obj = SimpleNamespace(id="f1", user_id="u1", data={"content": "hello"})
-    monkeypatch.setattr(F.Files, "get_file_by_id", staticmethod(lambda id, db=None: file_obj))
+    async def fake_get(id, db=None):
+        return file_obj
+    monkeypatch.setattr(F.Files, "get_file_by_id", staticmethod(fake_get))
     out = asyncio.run(F.get_file_data_content_by_id("f1", user=_user(), db=None))
     assert out["content"] == "hello"
     assert out["pii_detections"] == []

@@ -1,4 +1,11 @@
+import logging
+import os
+import shutil
+from typing import Optional
+
+import aiohttp
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
     File,
@@ -7,30 +14,94 @@ from fastapi import (
     Request,
     UploadFile,
     status,
-    APIRouter,
 )
-import aiohttp
-import os
-import logging
-import shutil
-from pydantic import BaseModel
-from starlette.responses import FileResponse
-from typing import Optional
-
+from open_webui.config import CACHE_DIR, PII_MASKING_ENFORCED_PERMISSION
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     PII_FILTER_IDS,
 )
-from open_webui.config import CACHE_DIR
-from open_webui.constants import ERROR_MESSAGES
-
-
 from open_webui.routers.openai import get_all_models_responses
-
 from open_webui.utils.auth import get_admin_user
+from open_webui.utils.access_control import has_permission
+from pydantic import BaseModel
+from starlette.responses import FileResponse
 
 log = logging.getLogger(__name__)
+
+
+##################################
+#
+# Team PII masking policy — mandatory masking
+#
+##################################
+
+# The permission key (PII_MASKING_ENFORCED_PERMISSION) is defined in config.py,
+# beside its default. Named as a RESTRICTION on purpose: True means "masking is
+# mandatory for this user", never "user may switch it off". Multi-group
+# permissions merge with `permissions[key] or value`, so a restriction yields
+# "strictest wins" while a freedom would yield "loosest wins" — the same line of
+# code, the opposite security outcome.
+
+# Attribute holding the per-request memo. Keyed by user id rather than stored
+# as a bare bool so a single request can never hand one user another user's
+# resolved policy.
+_PII_POLICY_MEMO_ATTR = '_pii_masking_enforced_memo'
+
+
+async def resolve_pii_masking_enforced(request, user) -> bool:
+    """Whether team policy makes PII masking mandatory for this user.
+
+    Read-only overlay: this NEVER writes to user.settings. The user's own
+    stored preference stays untouched underneath the policy and returns by
+    itself when the policy is switched off.
+
+    FAIL-CLOSED: any failure to determine the policy — unreachable DB,
+    malformed `group.permissions`, anything — is treated as ENFORCED. Same
+    rule that already governs PiiMaskingUnavailableError: when masking cannot
+    be reasoned about, PII does not get to leave unmasked.
+
+    Memoized per request. The eight task-generator endpoints are each their own
+    HTTP request, so this resolves to one lookup per request rather than one
+    per inlet call.
+
+    NOTE: there is deliberately NO `user.role == 'admin'` bypass here,
+    unlike the sibling `temporary_enforced` permission. That one governs UX;
+    this one governs whether unmasked PII leaves the infrastructure. An admin
+    who needs the policy lifted lifts it on the group — visibly, and with an
+    audit trail — instead of bypassing it silently.
+    """
+    user_id = getattr(user, 'id', None)
+    state = getattr(request, 'state', None)
+
+    memo = getattr(state, _PII_POLICY_MEMO_ATTR, None) if state is not None else None
+    if isinstance(memo, dict) and user_id in memo:
+        # `in`, not truthiness — a memoized False must not be recomputed.
+        return memo[user_id]
+
+    try:
+        enforced = await has_permission(
+            user_id,
+            PII_MASKING_ENFORCED_PERMISSION,
+            request.app.state.config.USER_PERMISSIONS,
+        )
+    except Exception as e:
+        # Do not swallow this quietly: a DB outage would otherwise surface as
+        # every user's toggle mysteriously locking, with nothing in the log.
+        log.warning(
+            f'[pii_policy] could not resolve masking policy for user_id={user_id}; '
+            f'failing closed (enforced=True): {e}'
+        )
+        enforced = True
+
+    if state is not None:
+        if not isinstance(memo, dict):
+            memo = {}
+            setattr(state, _PII_POLICY_MEMO_ATTR, memo)
+        memo[user_id] = enforced
+
+    return enforced
 
 
 ##################################
@@ -74,25 +145,32 @@ def resolve_request_pii_masking(payload) -> Optional[bool]:
     return value if isinstance(value, bool) else None
 
 
-def assert_pii_masking_available(payload, model_id, models) -> None:
+def assert_pii_masking_available(payload, model_id, models, policy_enforced=False) -> None:
     """FAIL-CLOSED guard for Mechanism 2 (registry pruning).
 
-    When PII masking is requested for this request (features.pii_masking=True) but
-    NO PII filter is present in the resolved filters — e.g. the pipeline is down
-    and its filter was pruned from `app.state.MODELS` because its `/models` fetch
-    returned None — the inlet loop would silently skip masking and PII would reach
-    the LLM. Refuse the request instead.
+    When PII masking is required for this request but NO PII filter is present in
+    the resolved filters — e.g. the pipeline is down and its filter was pruned
+    from `app.state.MODELS` because its `/models` fetch returned None — the inlet
+    loop would silently skip masking and PII would reach the LLM. Refuse the
+    request instead.
+
+    "Required" means REQUESTED **or** MANDATED. `policy_enforced` carries the team
+    policy. Reading only the payload here would leave a silent hole: under an
+    enforcing policy a user who switches the in-chat toggle off sends
+    features.pii_masking=False, this guard would no-op, and if the pipeline is
+    down the loop below has nothing to iterate — so the message would go out
+    unmasked with no error at all.
 
     No-ops (does NOT block) when:
       * enforcement is disabled (`PII_FILTER_IDS` empty), or
-      * masking is not explicitly requested (features.pii_masking is not True) —
-        so a chat with masking OFF is never blocked by pipeline unavailability, or
+      * masking is neither requested nor mandated — so a chat with masking OFF and
+        no policy is never blocked by pipeline unavailability, or
       * a PII filter IS present in the resolved filters (normal path; if the call
         then fails, the inlet's own fail-closed re-raise handles it).
     """
     if not PII_FILTER_IDS:
         return
-    if resolve_request_pii_masking(payload) is not True:
+    if not policy_enforced and resolve_request_pii_masking(payload) is not True:
         return
     resolved_ids = {f.get("id") for f in get_sorted_filters(model_id, models)}
     if not (resolved_ids & PII_FILTER_IDS):
@@ -155,14 +233,24 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     model_id = payload["model"]
     sorted_filters = get_sorted_filters(model_id, models)
 
+    # Team policy, resolved ONCE per inlet call and memoized per request, so the
+    # eight task-generator endpoints cost one lookup each rather than one per
+    # filter. Fail-closed: if the policy cannot be determined at all,
+    # the resolver returns True. Read-only — never written back to user.settings.
+    policy_enforced = await resolve_pii_masking_enforced(request, user)
+
     # FAIL-CLOSED guard (Mechanism 2), enforced HERE — the single chokepoint every
     # inlet caller flows through (main chat AND all task generators). If PII
-    # masking is requested for this request but no PII filter is present in the
+    # masking is required for this request but no PII filter is present in the
     # resolved filters (e.g. the pipeline is down and its filter was pruned from
     # app.state.MODELS because its /models fetch returned None), the loop below
     # would silently skip masking and PII would reach the LLM. Refuse first.
-    # No-op when masking is OFF/unspecified or no PII filter is configured.
-    assert_pii_masking_available(payload, model_id, models)
+    # `policy_enforced` is passed so "required" covers MANDATED, not just
+    # requested — without it an enforced user who toggled masking off in chat
+    # would slip through this guard entirely.
+    # No-op when masking is neither requested nor mandated, or no PII filter is
+    # configured.
+    assert_pii_masking_available(payload, model_id, models, policy_enforced)
 
     model = models[model_id]
 
@@ -202,6 +290,13 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
 
+            # Team policy wins over both the stored valve and the per-request
+            # override, so it is applied LAST. Reversing these two blocks hands
+            # the user's False the final word over the policy — the same lines of
+            # code, the opposite outcome.
+            if policy_enforced and filter_id in PII_FILTER_IDS:
+                per_filter_valves = {**per_filter_valves, "pii_masking_enabled": True}
+
             log.debug(
                 f"[pii_toggle] filter_id={filter_id} "
                 f"pii_masking_enabled={per_filter_valves.get('pii_masking_enabled')}"
@@ -224,9 +319,24 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
                     response.raise_for_status()
                     payload = await response.json()
             except aiohttp.ClientResponseError as e:
-                res = await response.json() if response.content_type == 'application/json' else {}
-                if 'detail' in res:
-                    raise Exception(response.status, res['detail'])
+                try:
+                    res = await response.json() if 'application/json' in response.content_type else {}
+                    if 'detail' in res:
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=res['detail'],
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=e.message,
+                )
+            except HTTPException:
+                raise
             except Exception as e:
                 log.exception(f'Connection error: {e}')
                 # FAIL-CLOSED for PII filters (Mechanism 1): a connection error
@@ -291,9 +401,21 @@ async def process_pipeline_outlet_filter(request, payload, user, models):
                 try:
                     res = await response.json() if 'application/json' in response.content_type else {}
                     if 'detail' in res:
-                        raise Exception(response.status, res)
+                        raise HTTPException(
+                            status_code=response.status,
+                            detail=res['detail'],
+                        )
+                except HTTPException:
+                    raise
                 except Exception:
                     pass
+
+                raise HTTPException(
+                    status_code=response.status,
+                    detail=e.message,
+                )
+            except HTTPException:
+                raise
             except Exception as e:
                 log.exception(f'Connection error: {e}')
 

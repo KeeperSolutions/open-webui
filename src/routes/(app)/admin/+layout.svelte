@@ -102,6 +102,14 @@
 						>
 
 						<a
+							draggable="false"
+							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/pii-dashboard')
+								? ''
+								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+							href="/admin/pii-dashboard">{$i18n.t('PII Dashboard')}</a
+						>
+
+						<a
 							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/langfuse')
 								? ''
 								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"

@@ -105,68 +105,69 @@ class TestModelProfileImageLogic:
             # Should return None for unknown patterns
             assert logo is None, f"Expected None for unknown model, got {logo}"
 
-    def test_model_creation_with_custom_profile_image(self):
+    @pytest.mark.asyncio
+    async def test_model_creation_with_custom_profile_image(self):
         """Test creating a model with custom profile image."""
-        with get_db() as db:
-            # Clean up any existing test model
-            existing = Models.get_model_by_id("test-custom-logo-model", db=db)
-            if existing:
-                Models.delete_model_by_id("test-custom-logo-model", db=db)
+        # Clean up any existing test model
+        existing = await Models.get_model_by_id("test-custom-logo-model")
+        if existing:
+            await Models.delete_model_by_id("test-custom-logo-model")
 
-            # Create model with custom profile image
-            model_form = ModelForm(
-                id="test-custom-logo-model",
-                base_model_id=None,
-                name="Test Custom Logo",
-                meta=ModelMeta(
-                    profile_image_url="https://example.com/custom-logo.png",
-                    description="Test model with custom logo",
-                    capabilities=None,
-                ),
-                params={}
-            )
+        # Create model with custom profile image
+        model_form = ModelForm(
+            id="test-custom-logo-model",
+            base_model_id=None,
+            name="Test Custom Logo",
+            meta=ModelMeta(
+                profile_image_url="https://example.com/custom-logo.png",
+                description="Test model with custom logo",
+                capabilities=None,
+            ),
+            params={}
+        )
 
-            model = Models.insert_new_model(model_form, "test-user", db=db)
+        model = await Models.insert_new_model(model_form, "test-user")
 
-            assert model is not None
-            assert model.id == "test-custom-logo-model"
-            assert model.meta.profile_image_url == "https://example.com/custom-logo.png"
+        assert model is not None
+        assert model.id == "test-custom-logo-model"
+        assert model.meta.profile_image_url == "https://example.com/custom-logo.png"
 
-            # Cleanup
-            Models.delete_model_by_id("test-custom-logo-model", db=db)
+        # Cleanup
+        await Models.delete_model_by_id("test-custom-logo-model")
 
-    def test_model_with_default_favicon_uses_provider_detection(self):
+    @pytest.mark.asyncio
+    async def test_model_with_default_favicon_uses_provider_detection(self):
         """Test that models with default favicon fall through to provider detection."""
+        # Clean up any existing test model
+        model_id = "gpt-4-test-default"  # Use valid GPT pattern
+        existing = await Models.get_model_by_id(model_id)
+        if existing:
+            await Models.delete_model_by_id(model_id)
+
+        # Create GPT model with default favicon
+        model_form = ModelForm(
+            id=model_id,
+            base_model_id=None,
+            name="Test GPT Default",
+            meta=ModelMeta(
+                profile_image_url="/static/favicon.png",  # Default - should trigger provider detection
+                description="Test model",
+                capabilities=None,
+            ),
+            params={}
+        )
+
+        model = await Models.insert_new_model(model_form, "test-user")
+
+        # Verify model was created with default favicon
+        assert model.meta.profile_image_url == "/static/favicon.png"
+
+        # Provider detection should find OpenAI logo for gpt-* pattern (Providers is still sync)
         with get_db() as db:
-            # Clean up any existing test model
-            model_id = "gpt-4-test-default"  # Use valid GPT pattern
-            existing = Models.get_model_by_id(model_id, db=db)
-            if existing:
-                Models.delete_model_by_id(model_id, db=db)
-
-            # Create GPT model with default favicon
-            model_form = ModelForm(
-                id=model_id,
-                base_model_id=None,
-                name="Test GPT Default",
-                meta=ModelMeta(
-                    profile_image_url="/static/favicon.png",  # Default - should trigger provider detection
-                    description="Test model",
-                    capabilities=None,
-                ),
-                params={}
-            )
-
-            model = Models.insert_new_model(model_form, "test-user", db=db)
-
-            # Verify model was created with default favicon
-            assert model.meta.profile_image_url == "/static/favicon.png"
-
-            # Provider detection should find OpenAI logo for gpt-* pattern
             logo = Providers.detect_provider_logo(model.id, "openai", "light", db=db)
-            assert logo is not None, f"Expected logo for {model_id} to match OpenAI provider"
-            assert "openai" in logo.lower() or logo.startswith("/static/providers/"), \
-                f"Expected OpenAI logo path, got {logo}"
+        assert logo is not None, f"Expected logo for {model_id} to match OpenAI provider"
+        assert "openai" in logo.lower() or logo.startswith("/static/providers/"), \
+            f"Expected OpenAI logo path, got {logo}"
 
-            # Cleanup
-            Models.delete_model_by_id(model_id, db=db)
+        # Cleanup
+        await Models.delete_model_by_id(model_id)

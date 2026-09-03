@@ -14,6 +14,7 @@
 	import { resolveTheme } from '$lib/utils';
 
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
 	import { getFunctions } from '$lib/apis/functions';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
 	import { getModelsDefaults } from '$lib/apis/configs';
@@ -32,6 +33,7 @@
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
+	import TerminalSelector from './TerminalSelector.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import { updateModelAccessGrants } from '$lib/apis/models';
@@ -105,6 +107,7 @@
 	let knowledge = [];
 	let toolIds = [];
 	let skillIds = [];
+	let skillsList = [];
 
 	let filterIds = [];
 	let defaultFilterIds = [];
@@ -115,6 +118,7 @@
 
 	let actionIds = [];
 	let accessGrants = [];
+	let terminalId = '';
 	let tts = { voice: '' };
 
 	const addUsage = (base_model_id) => {
@@ -232,6 +236,14 @@
 			}
 		}
 
+		if (terminalId) {
+			info.meta.terminalId = terminalId;
+		} else {
+			if (info.meta.terminalId) {
+				delete info.meta.terminalId;
+			}
+		}
+
 		if (tts.voice !== '') {
 			if (!info.meta.tts) info.meta.tts = {};
 			info.meta.tts.voice = tts.voice;
@@ -270,6 +282,7 @@
 		previewImageUrl = null;
 
 		await tools.set(await getTools(localStorage.token));
+		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
 		await functions.set(await getFunctions(localStorage.token));
 		const knowledgeData = await getKnowledgeBases(localStorage.token);
 		await knowledgeCollections.set(knowledgeData?.items ? [...knowledgeData.items] : []);
@@ -348,6 +361,7 @@
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 			defaultFeatureIds = model?.meta?.defaultFeatureIds ?? defaultFeatureIds;
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
+			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
 			accessGrants = model?.access_grants ?? [];
@@ -802,7 +816,7 @@
 					</div>
 
 					<div class="my-4">
-						<SkillsSelector bind:selectedSkillIds={skillIds} />
+						<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
 					</div>
 
 					{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
@@ -867,6 +881,12 @@
 					{#if capabilities.builtin_tools}
 						<div class="my-4">
 							<BuiltinTools bind:builtinTools />
+						</div>
+					{/if}
+
+					{#if capabilities.terminal}
+						<div class="my-4">
+							<TerminalSelector bind:terminalId />
 						</div>
 					{/if}
 

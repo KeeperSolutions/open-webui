@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import logging
 import socket
 import ssl
@@ -11,38 +12,44 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Literal,
     Optional,
     Sequence,
     Union,
-    Literal,
 )
 
-from fastapi.concurrency import run_in_threadpool
 import aiohttp
+import aiohttp.resolver
 import certifi
+import requests
+import urllib3.connection
+import urllib3.connectionpool
 import validators
+from requests.adapters import HTTPAdapter
+from fastapi.concurrency import run_in_threadpool
 from langchain_community.document_loaders import PlaywrightURLLoader, WebBaseLoader
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
-
-from open_webui.retrieval.loaders.tavily import TavilyLoader
-from open_webui.retrieval.loaders.external_web import ExternalWebLoader
-from open_webui.constants import ERROR_MESSAGES
 from open_webui.config import (
     ENABLE_RAG_LOCAL_WEB_FETCH,
-    PLAYWRIGHT_WS_URL,
-    PLAYWRIGHT_TIMEOUT,
-    WEB_LOADER_ENGINE,
-    WEB_LOADER_TIMEOUT,
+    EXTERNAL_WEB_LOADER_API_KEY,
+    EXTERNAL_WEB_LOADER_URL,
     FIRECRAWL_API_BASE_URL,
     FIRECRAWL_API_KEY,
     FIRECRAWL_TIMEOUT,
+    PLAYWRIGHT_TIMEOUT,
+    PLAYWRIGHT_WS_URL,
     TAVILY_API_KEY,
     TAVILY_EXTRACT_DEPTH,
-    EXTERNAL_WEB_LOADER_URL,
-    EXTERNAL_WEB_LOADER_API_KEY,
     WEB_FETCH_FILTER_LIST,
+    WEB_LOADER_ENGINE,
+    WEB_LOADER_TIMEOUT,
 )
+from open_webui.constants import ERROR_MESSAGES
+from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL, USER_AGENT
+from open_webui.retrieval.loaders.external_web import ExternalWebLoader
+from open_webui.retrieval.loaders.tavily import TavilyLoader
+from open_webui.retrieval.web.firecrawl import scrape_firecrawl_url
 from open_webui.utils.misc import is_string_allowed
 
 log = logging.getLogger(__name__)
@@ -64,6 +71,14 @@ def validate_url(url: Union[str, Sequence[str]]):
         if isinstance(validators.url(url), validators.ValidationError):
             raise ValueError(ERROR_MESSAGES.INVALID_URL)
 
+        # Reject parser-confusing chars: urlparse and requests/aiohttp split
+        # on these differently, e.g. http://127.0.0.1\@1.1.1.1 → urlparse
+        # extracts 1.1.1.1 (public, passes filter) while requests connects
+        # to 127.0.0.1 (internal). Same shape with tab/CR/LF.
+        if any(ch in url for ch in ('\\', '\t', '\n', '\r')):
+            log.warning(f'Blocked URL with parser-confusing char: {url!r}')
+            raise ValueError(ERROR_MESSAGES.INVALID_URL)
+
         parsed_url = urllib.parse.urlparse(url)
 
         # Protocol validation - only allow http/https
@@ -83,12 +98,10 @@ def validate_url(url: Union[str, Sequence[str]]):
             # Get IPv4 and IPv6 addresses
             ipv4_addresses, ipv6_addresses = resolve_hostname(parsed_url.hostname)
             # Check if any of the resolved addresses are private
-            # This is technically still vulnerable to DNS rebinding attacks, as we don't control WebBaseLoader
-            for ip in ipv4_addresses:
-                if validators.ipv4(ip, private=True):
-                    raise ValueError(ERROR_MESSAGES.INVALID_URL)
-            for ip in ipv6_addresses:
-                if validators.ipv6(ip, private=True):
+            # DNS rebinding is mitigated at the connection layer; see _SSRFSafeResolver / _SSRFSafeAdapter
+            for ip in ipv4_addresses + ipv6_addresses:
+                addr = ipaddress.ip_address(ip)
+                if not addr.is_global:
                     raise ValueError(ERROR_MESSAGES.INVALID_URL)
         return True
     elif isinstance(url, Sequence):
@@ -107,6 +120,81 @@ def safe_validate_urls(url: Sequence[str]) -> Sequence[str]:
             log.debug(f'Invalid URL {u}: {str(e)}')
             continue
     return valid_urls
+
+
+def _ssrf_safe_new_conn(self):
+    """Resolve DNS, validate all IPs are global, connect to validated IP.
+
+    Replaces urllib3's _new_conn so the DNS lookup that feeds the actual TCP
+    connect is the same one we validate — no second resolution, no rebinding
+    window.
+    """
+    host = getattr(self, '_dns_host', self.host)
+    port = self.port
+    infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    if not infos:
+        raise OSError(f'getaddrinfo for {host!r} returned empty list')
+    if not ENABLE_RAG_LOCAL_WEB_FETCH:
+        for _, _, _, _, sa in infos:
+            if not ipaddress.ip_address(sa[0]).is_global:
+                raise ValueError(ERROR_MESSAGES.INVALID_URL)
+    err = None
+    for fam, typ, proto, _, sa in infos:
+        sock = None
+        try:
+            sock = socket.socket(fam, typ, proto)
+            if self.timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                sock.settimeout(self.timeout)
+            if getattr(self, 'source_address', None):
+                sock.bind(self.source_address)
+            for opt in getattr(self, 'socket_options', None) or ():
+                sock.setsockopt(*opt)
+            sock.connect(sa)
+            return sock
+        except OSError as exc:
+            err = exc
+            if sock is not None:
+                sock.close()
+    raise err or OSError(f'connect to {host!r}:{port} failed')
+
+
+class _SafeHTTPConn(urllib3.connection.HTTPConnection):
+    _new_conn = _ssrf_safe_new_conn
+
+
+class _SafeHTTPSConn(urllib3.connection.HTTPSConnection):
+    _new_conn = _ssrf_safe_new_conn
+
+
+class _SafeHTTPPool(urllib3.connectionpool.HTTPConnectionPool):
+    ConnectionCls = _SafeHTTPConn
+
+
+class _SafeHTTPSPool(urllib3.connectionpool.HTTPSConnectionPool):
+    ConnectionCls = _SafeHTTPSConn
+
+
+class _SSRFSafeAdapter(HTTPAdapter):
+    """requests transport adapter that validates resolved IPs at connect time."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = {
+            'http': _SafeHTTPPool,
+            'https': _SafeHTTPSPool,
+        }
+
+
+class _SSRFSafeResolver(aiohttp.resolver.DefaultResolver):
+    """aiohttp resolver that rejects non-global IPs unless local fetch is on."""
+
+    async def resolve(self, host, port=0, family=socket.AF_INET):
+        results = await super().resolve(host, port, family)
+        if not ENABLE_RAG_LOCAL_WEB_FETCH:
+            for entry in results:
+                if not ipaddress.ip_address(entry['host']).is_global:
+                    raise ValueError(ERROR_MESSAGES.INVALID_URL)
+        return results
 
 
 def extract_metadata(soup, url):
@@ -193,27 +281,6 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         proxy: Optional[Dict[str, str]] = None,
         params: Optional[Dict] = None,
     ):
-        """Concurrent document loader for FireCrawl operations.
-
-        Executes multiple FireCrawlLoader instances concurrently using thread pooling
-        to improve bulk processing efficiency.
-        Args:
-            web_paths: List of URLs/paths to process.
-            verify_ssl: If True, verify SSL certificates.
-            trust_env: If True, use proxy settings from environment variables.
-            requests_per_second: Number of requests per second to limit to.
-            continue_on_failure (bool): If True, continue loading other URLs on failure.
-            api_key: API key for FireCrawl service. Defaults to None
-                (uses FIRE_CRAWL_API_KEY environment variable if not provided).
-            api_url: Base URL for FireCrawl API. Defaults to official API endpoint.
-            mode: Operation mode selection:
-                - 'crawl': Website crawling mode
-                - 'scrape': Direct page scraping (default)
-                - 'map': Site map generation
-            proxy: Proxy override settings for the FireCrawl API.
-            params: The parameters to pass to the Firecrawl API.
-                For more details, visit: https://docs.firecrawl.dev/sdks/python#batch-scrape
-        """
         proxy_server = proxy.get('server') if proxy else None
         if trust_env and not proxy_server:
             env_proxies = urllib.request.getproxies()
@@ -230,86 +297,38 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         self.trust_env = trust_env
         self.continue_on_failure = continue_on_failure
         self.api_key = api_key
-        self.api_url = api_url
+        self.api_url = (api_url or 'https://api.firecrawl.dev').rstrip('/')
         self.timeout = timeout
         self.mode = mode
         self.params = params or {}
 
     def lazy_load(self) -> Iterator[Document]:
-        """Load documents using FireCrawl batch_scrape."""
-        log.debug(
-            'Starting FireCrawl batch scrape for %d URLs, mode: %s, params: %s',
-            len(self.web_paths),
-            self.mode,
-            self.params,
-        )
         try:
-            from firecrawl import FirecrawlApp
-
-            firecrawl = FirecrawlApp(api_key=self.api_key, api_url=self.api_url)
-            result = firecrawl.batch_scrape(
-                self.web_paths,
-                formats=['markdown'],
-                skip_tls_verification=not self.verify_ssl,
-                ignore_invalid_urls=True,
-                remove_base64_images=True,
-                max_age=300000,  # 5 minutes https://docs.firecrawl.dev/features/fast-scraping#common-maxage-values
-                wait_timeout=self.timeout if self.timeout else len(self.web_paths) * 3,
-                **self.params,
-            )
-
-            if result.status != 'completed':
-                raise RuntimeError(f'FireCrawl batch scrape did not complete successfully. result: {result}')
-
-            for data in result.data:
-                metadata = data.metadata or {}
-                yield Document(
-                    page_content=data.markdown or '',
-                    metadata={'source': metadata.url or metadata.source_url or ''},
+            for url in self.web_paths:
+                doc = scrape_firecrawl_url(
+                    self.api_url,
+                    self.api_key,
+                    url,
+                    verify_ssl=self.verify_ssl,
+                    timeout=self.timeout,
+                    params=self.params,
                 )
-
+                if doc is not None:
+                    yield doc
         except Exception as e:
             if self.continue_on_failure:
-                log.exception(f'Error extracting content from URLs: {e}')
+                log.warning(f'Error extracting content from URLs with Firecrawl: {e}')
             else:
                 raise e
 
     async def alazy_load(self):
-        """Async version of lazy_load."""
-        log.debug(
-            'Starting FireCrawl batch scrape for %d URLs, mode: %s, params: %s',
-            len(self.web_paths),
-            self.mode,
-            self.params,
-        )
         try:
-            from firecrawl import FirecrawlApp
-
-            firecrawl = FirecrawlApp(api_key=self.api_key, api_url=self.api_url)
-            result = firecrawl.batch_scrape(
-                self.web_paths,
-                formats=['markdown'],
-                skip_tls_verification=not self.verify_ssl,
-                ignore_invalid_urls=True,
-                remove_base64_images=True,
-                max_age=300000,  # 5 minutes https://docs.firecrawl.dev/features/fast-scraping#common-maxage-values
-                wait_timeout=self.timeout if self.timeout else len(self.web_paths) * 3,
-                **self.params,
-            )
-
-            if result.status != 'completed':
-                raise RuntimeError(f'FireCrawl batch scrape did not complete successfully. result: {result}')
-
-            for data in result.data:
-                metadata = data.metadata or {}
-                yield Document(
-                    page_content=data.markdown or '',
-                    metadata={'source': metadata.url or metadata.source_url or ''},
-                )
-
+            docs = await run_in_threadpool(lambda: list(self.lazy_load()))
+            for doc in docs:
+                yield doc
         except Exception as e:
             if self.continue_on_failure:
-                log.exception(f'Error extracting content from URLs: {e}')
+                log.warning(f'Error extracting content from URLs with Firecrawl: {e}')
             else:
                 raise e
 
@@ -481,6 +500,62 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
         self.trust_env = trust_env
         self.playwright_timeout = playwright_timeout
 
+    def _intercept_navigation_sync(self, route, request=None):
+        req = request or route.request
+
+        if req.resource_type != 'document':
+            route.continue_()
+            return
+
+        try:
+            validate_url(req.url)
+        except Exception:
+            route.abort()
+            return
+
+        if AIOHTTP_CLIENT_ALLOW_REDIRECTS:
+            resp = route.fetch()
+        else:
+            try:
+                resp = route.fetch(max_redirects=0)
+            except TypeError:
+                route.abort()
+                return
+
+            if 300 <= resp.status < 400:
+                route.abort()
+                return
+
+        route.fulfill(response=resp)
+
+    async def _intercept_navigation(self, route, request=None):
+        req = request or route.request
+
+        if req.resource_type != 'document':
+            await route.continue_()
+            return
+
+        try:
+            await run_in_threadpool(validate_url, req.url)
+        except Exception:
+            await route.abort()
+            return
+
+        if AIOHTTP_CLIENT_ALLOW_REDIRECTS:
+            resp = await route.fetch()
+        else:
+            try:
+                resp = await route.fetch(max_redirects=0)
+            except TypeError:
+                await route.abort()
+                return
+
+            if 300 <= resp.status < 400:
+                await route.abort()
+                return
+
+        await route.fulfill(response=resp)
+
     def lazy_load(self) -> Iterator[Document]:
         """Safely load URLs synchronously with support for remote browser."""
         from playwright.sync_api import sync_playwright
@@ -496,6 +571,7 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 try:
                     self._safe_process_url_sync(url)
                     page = browser.new_page()
+                    page.route('**/*', self._intercept_navigation_sync)
                     response = page.goto(url, timeout=self.playwright_timeout)
                     if response is None:
                         raise ValueError(f'page.goto() returned None for url {url}')
@@ -525,6 +601,7 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 try:
                     await self._safe_process_url(url)
                     page = await browser.new_page()
+                    await page.route('**/*', self._intercept_navigation)
                     response = await page.goto(url, timeout=self.playwright_timeout)
                     if response is None:
                         raise ValueError(f'page.goto() returned None for url {url}')
@@ -552,8 +629,32 @@ class SafeWebBaseLoader(WebBaseLoader):
         super().__init__(*args, **kwargs)
         self.trust_env = trust_env
 
+        # Propagate USER_AGENT env var so that both the sync _scrape() and
+        # async _fetch() paths present a real UA instead of python-requests/2.x
+        # which gets blocked by Cloudflare, Wikipedia, and similar bot-detection.
+        # _fetch() forwards self.session.headers to the aiohttp session, so
+        # setting it here covers both code-paths.
+        if USER_AGENT:
+            self.session.headers['User-Agent'] = USER_AGENT
+
+        # Prevent redirect-based SSRF on the synchronous _scrape() path.
+        # validate_url() is called once on the originally-submitted URL, but the
+        # parent WebBaseLoader's _scrape() invokes self.session.get(url, **self.requests_kwargs)
+        # which by default follows redirects. Without the override below, an attacker
+        # can submit a public URL that 302-redirects to an internal address (RFC1918,
+        # 127.0.0.1, 169.254.169.254, etc.) and the redirected target is fetched without
+        # re-validation. Matches the policy enforced on the async _fetch() path below.
+        self.requests_kwargs = {
+            **(self.requests_kwargs or {}),
+            'allow_redirects': AIOHTTP_CLIENT_ALLOW_REDIRECTS,
+        }
+
+        self.session.mount('http://', _SSRFSafeAdapter())
+        self.session.mount('https://', _SSRFSafeAdapter())
+
     async def _fetch(self, url: str, retries: int = 3, cooldown: int = 2, backoff: float = 1.5) -> str:
-        async with aiohttp.ClientSession(trust_env=self.trust_env) as session:
+        connector = aiohttp.TCPConnector(resolver=_SSRFSafeResolver())
+        async with aiohttp.ClientSession(trust_env=self.trust_env, connector=connector) as session:
             for i in range(retries):
                 try:
                     kwargs: Dict = dict(
@@ -562,11 +663,12 @@ class SafeWebBaseLoader(WebBaseLoader):
                     )
                     if not self.session.verify:
                         kwargs['ssl'] = False
+                    else:
+                        kwargs['ssl'] = AIOHTTP_CLIENT_SESSION_SSL
 
                     async with session.get(
                         url,
                         **(self.requests_kwargs | kwargs),
-                        allow_redirects=False,
                     ) as response:
                         if self.raise_for_status:
                             response.raise_for_status()

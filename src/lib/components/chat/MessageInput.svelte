@@ -27,6 +27,7 @@
 		config,
 		showCallOverlay,
 		tools,
+		skills,
 		toolServers,
 		terminalServers,
 		user as _user,
@@ -61,6 +62,7 @@
 	import { getChatById } from '$lib/apis/chats';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
+	import { getSkills } from '$lib/apis/skills';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
@@ -72,6 +74,7 @@
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
+	import SkillsModal from './SkillsModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -83,6 +86,7 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Keyframes from '../icons/Keyframes.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -109,6 +113,7 @@
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
+	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -131,10 +136,16 @@
 	export let history;
 	export let taskIds = null;
 
+	$: isActive =
+		(taskIds && taskIds.length > 0) ||
+		(history.currentId && history.messages[history.currentId]?.done != true) ||
+		generating;
+
 	export let prompt = '';
 	export let files = [];
 
 	export let selectedToolIds = [];
+	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 
 	export let imageGenerationEnabled = false;
@@ -149,6 +160,8 @@
 	export let onQueueSendNow: (id: string) => void = () => {};
 	export let onQueueEdit: (id: string) => void = () => {};
 	export let onQueueDelete: (id: string) => void = () => {};
+
+	export let chatTasks = [];
 
 	let inputContent = null;
 
@@ -178,6 +191,7 @@
 				};
 			}),
 		selectedToolIds,
+		selectedSkillIds,
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
@@ -344,7 +358,9 @@
 			}
 
 			chatInputElement?.setText(text);
-			chatInputElement?.focus();
+			if (!$showCallOverlay) {
+				chatInputElement?.focus();
+			}
 
 			if (text !== '') {
 				text = await inputVariableHandler(text);
@@ -413,11 +429,27 @@
 	let command = '';
 	export let showCommands = false;
 	$: showCommands =
-		['/', '#', '@', '$'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
+		['/', '#', '@', '$', ':'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
 	let suggestions = null;
 
 	let showTools = false;
 	export let piiMaskingEnabled = true;
+	let showSkills = false;
+
+	/**
+	 * Team policy makes masking mandatory for this user.
+	 *
+	 * ⚠️ Deliberately a SEPARATE prop, not folded into `piiMaskingEnabled`. The
+	 * policy decides what is DISPLAYED; `piiMaskingEnabled` stays the user's own
+	 * value and is never written by the policy — the same policy-never-writes
+	 * invariant as in Privacy.svelte, enforced here by there being no assignment
+	 * path at all.
+	 */
+	export let piiMaskingLocked = false;
+
+	// What the control shows. Under policy this is ON regardless of the user's
+	// own value, which stays untouched underneath.
+	$: piiMaskingDisplayed = piiMaskingLocked || piiMaskingEnabled;
 
 	let loaded = false;
 	let recording = false;
@@ -495,6 +527,11 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
 	);
 
+	let terminalCapableModels = [];
+	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
+		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	);
+
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
 		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
@@ -502,6 +539,9 @@
 
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
+
+	let showSkillsButton = false;
+	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
@@ -528,6 +568,11 @@
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
 		codeInterpreterEnabled = false;
+	}
+
+	// Clear selected terminal when model doesn't support terminal
+	$: if ($selectedTerminalId && terminalCapableModels.length === 0) {
+		selectedTerminalId.set(null);
 	}
 
 	const scrollToBottom = () => {
@@ -623,7 +668,13 @@
 				}
 
 				// During the file upload, file content is automatically extracted.
-				const uploadedFile = await uploadFile(localStorage.token, file, metadata, process, piiMaskingEnabled);
+				const uploadedFile = await uploadFile(
+					localStorage.token,
+					file,
+					metadata,
+					process,
+					piiMaskingEnabled
+				);
 
 				if (uploadedFile) {
 					console.log('File upload completed:', {
@@ -1040,6 +1091,25 @@
 					insertTextHandler: insertTextAtCursor,
 					onUpload: () => {}
 				})
+			},
+			{
+				char: ':',
+				allowSpaces: false,
+				command: ({ editor, range, props }) => {
+					// Convert the Unicode hex codepoint (e.g. "1F44B") to the actual emoji character (👋)
+					const codepoint = props.id;
+					const emoji = String.fromCodePoint(parseInt(codepoint, 16));
+					editor.chain().focus().deleteRange(range).insertContent(emoji).run();
+				},
+				render: getSuggestionRenderer(CommandSuggestionList, {
+					i18n,
+					onSelect: (e) => {
+						document.getElementById('chat-input')?.focus();
+					},
+
+					insertTextHandler: insertTextAtCursor,
+					onUpload: () => {}
+				})
 			}
 		];
 		loaded = true;
@@ -1069,6 +1139,7 @@
 			}
 
 			tools.set(await getTools(localStorage.token));
+			skills.set(await getSkills(localStorage.token));
 		};
 		initialize();
 
@@ -1091,6 +1162,7 @@
 </script>
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
+<SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
@@ -1228,6 +1300,13 @@
 							aria-label="Generate message pair"
 							on:click={() => createMessagePair(prompt)}
 						></button>
+
+						<!-- Task list display -->
+						{#if isActive && chatTasks.length > 0}
+							<div class="mx-1">
+								<TaskList tasks={chatTasks} />
+							</div>
+						{/if}
 
 						<!-- Queued messages display -->
 						{#if messageQueue.length > 0}
@@ -1626,15 +1705,21 @@
 											chatInput?.focus();
 										}}
 									>
-										<div
+										<button
+											type="button"
 											id="input-menu-button"
 											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											aria-label={$i18n.t('More')}
 										>
 											<HgIconPlus class="w-5 h-5 text-hg-text-tertiary dark:text-gray-400" />
-										</div>
+										</button>
 									</InputMenu>
 
-									<div class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"></div>
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+										<div
+											class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"
+										></div>
+									{/if}
 
 									<Tooltip content={$i18n.t('Settings')} placement="top">
 										<button
@@ -1655,6 +1740,7 @@
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
 											bind:selectedToolIds
+											bind:selectedSkillIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
@@ -1674,12 +1760,14 @@
 												chatInput?.focus();
 											}}
 										>
-											<div
+											<button
+												type="button"
 												id="integration-menu-button"
 												class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												aria-label={$i18n.t('Integrations')}
 											>
 												<Component className="size-4.5" strokeWidth="1.5" />
-											</div>
+											</button>
 										</IntegrationsMenu>
 									{/if}
 
@@ -1726,13 +1814,48 @@
 											</Tooltip>
 										{/if}
 
+										{#if (selectedSkillIds ?? []).length > 0}
+											<Tooltip
+												content={$i18n.t('{{COUNT}} Available Skills', {
+													COUNT: (selectedSkillIds ?? []).length
+												})}
+											>
+												<button
+													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+													aria-label="Available Skills"
+													type="button"
+													on:click={() => {
+														showSkills = !showSkills;
+													}}
+												>
+													<Keyframes className="size-4" strokeWidth="1.75" />
+
+													<span class="text-sm">
+														{(selectedSkillIds ?? []).length}
+													</span>
+												</button>
+											</Tooltip>
+										{/if}
+
 										{#each selectedFilterIds as filterId (filterId)}
 											{@const filter = toggleFilters.find((f) => f.id === filterId)}
 											{#if filter}
 												<Tooltip content={filter?.name} placement="top">
 													<button
 														on:click|preventDefault={() => {
-															selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
+															if (
+																filter?.has_user_valves &&
+																($_user?.role === 'admin' ||
+																	($_user?.permissions?.chat?.valves ?? true))
+															) {
+																selectedValvesType = 'function';
+																selectedValvesItemId = filterId;
+																showValvesModal = true;
+															} else {
+																selectedFilterIds = selectedFilterIds.filter(
+																	(id) => id !== filterId
+																);
+															}
 														}}
 														type="button"
 														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
@@ -1755,7 +1878,18 @@
 														{:else}
 															<Sparkles className="size-4" strokeWidth="1.75" />
 														{/if}
-														<div class="hidden group-hover:block">
+														<!-- svelte-ignore a11y-click-events-have-key-events -->
+														<!-- svelte-ignore a11y-no-static-element-interactions -->
+														<div
+															class="hidden group-hover:block"
+															on:click={(e) => {
+																e.stopPropagation();
+																e.preventDefault();
+																selectedFilterIds = selectedFilterIds.filter(
+																	(id) => id !== filterId
+																);
+															}}
+														>
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>
 													</button>
@@ -1849,7 +1983,7 @@
 								</div>
 
 								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
-									{#if (taskIds && taskIds.length > 0) || (history.currentId && history.messages[history.currentId]?.done != true) || generating}
+									{#if isActive && prompt === '' && files.length === 0}
 										<Tooltip content={$i18n.t('Stop')}>
 											<button
 												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
@@ -1873,20 +2007,43 @@
 											</button>
 										</Tooltip>
 									{:else}
-									<!-- PII Masking toggle (stub) -->
+										<!-- PII Masking toggle (stub) -->
 										<Tooltip
-											content={$i18n.t(
-												'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
-											)}
+											content={piiMaskingLocked
+												? $i18n.t(
+														'PII masking is enforced by your organisation’s policy and cannot be turned off. Contact your administrator if this needs to change.'
+													)
+												: $i18n.t(
+														'Keeps your personal data private by masking names, phone numbers, IBANs and other personal information before sending your message to the LLM.'
+													)}
 											placement="top"
 										>
+											<!--
+												Locked by team policy. A native `disabled` is the right
+												mechanism here — unlike Privacy.svelte, this is our own
+												<button>, so it blocks pointer AND keyboard and is exposed
+												to assistive tech without wrapping anything in `inert`.
+												The control is NOT hidden: a toggle that vanished
+												overnight reads as a bug, a locked one reads as a policy.
+											-->
 											<button
 												type="button"
 												role="switch"
-												aria-checked={piiMaskingEnabled}
-												class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition"
-												on:click={() => (piiMaskingEnabled = !piiMaskingEnabled)}
+												disabled={piiMaskingLocked}
+												aria-checked={piiMaskingDisplayed}
+												class="flex items-center gap-3 px-1 rounded-full hover:bg-hg-bg-muted dark:hover:bg-gray-700 transition disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-transparent dark:disabled:hover:bg-transparent"
+												on:click={() => {
+													// `disabled` already stops real clicks, but the handler
+													// guards too: this is the only line that can write the
+													// user's own value, so it must not depend on the
+													// attribute surviving. Any synthetic dispatch would
+													// otherwise flip a locked toggle and corrupt the value
+													// the policy is layered on top of.
+													if (piiMaskingLocked) return;
+													piiMaskingEnabled = !piiMaskingEnabled;
+												}}
 												aria-label="Toggle PII Masking"
+												data-testid="pii-masking-toggle"
 											>
 												<div class="flex items-center gap-1">
 													<HgIconShield class="w-4 h-4 text-hg-text-primary dark:text-gray-400" />
@@ -1897,12 +2054,12 @@
 												</div>
 												<div class="relative w-5 h-5">
 													<HgIconToggleOn
-														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-blue dark:text-white transition-opacity duration-200 ease-in-out {piiMaskingDisplayed
 															? 'opacity-100'
 															: 'opacity-0'}"
 													/>
 													<HgIconToggleOff
-														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingEnabled
+														class="absolute inset-0 w-5 h-5 scale-x-[-1] text-hg-text-tertiary dark:text-gray-600 transition-opacity duration-200 ease-in-out {piiMaskingDisplayed
 															? 'opacity-0'
 															: 'opacity-100'}"
 													/>
@@ -1910,68 +2067,71 @@
 											</button>
 										</Tooltip>
 
-									{#if prompt !== '' && !history?.currentId && !$selectedTerminalId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
-										<!-- {$i18n.t('Create Note')}  -->
-										<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
-											<button
-												id="create-note-button"
-												class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
-												type="button"
-												disabled={prompt === '' && files.length === 0}
-												on:click={() => {
-													createNote();
-												}}
-											>
-												<Note className="size-4.5 translate-y-[0.5px]" />
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if !history?.currentId || history.messages[history.currentId]?.done == true}
-										<!-- Terminal Server Selector -->
-										{#if ($terminalServers ?? []).length > 0 || ($settings?.terminalServers ?? []).some((s) => s.url)}
-											<TerminalMenu bind:show={showTerminalMenu} />
-										{/if}
-
-										{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
-											<Tooltip content={$i18n.t('Dictate')}>
+										{#if prompt !== '' && !history?.currentId && !$selectedTerminalId && ($config?.features?.enable_notes ?? false) && ($_user?.role === 'admin' || ($_user?.permissions?.features?.notes ?? true))}
+											<!-- {$i18n.t('Create Note')}  -->
+											<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
 												<button
-													id="voice-input-button"
-													class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+													id="create-note-button"
+													class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
 													type="button"
-													on:click={async () => {
-														try {
-															let stream = await navigator.mediaDevices
-																.getUserMedia({ audio: true })
-																.catch(function (err) {
-																	toast.error(
-																		$i18n.t(
-																			`Permission denied when accessing microphone: {{error}}`,
-																			{
-																				error: err
-																			}
-																		)
-																	);
-																	return null;
-																});
-
-															if (stream) {
-																recording = true;
-																const tracks = stream.getTracks();
-																tracks.forEach((track) => track.stop());
-															}
-															stream = null;
-														} catch {
-															toast.error($i18n.t('Permission denied when accessing microphone'));
-														}
+													disabled={prompt === '' && files.length === 0}
+													on:click={() => {
+														createNote();
 													}}
-													aria-label="Voice Input"
 												>
-													<HgIconMic class="w-5 h-5" />
+													<Note className="size-4.5 translate-y-[0.5px]" />
 												</button>
 											</Tooltip>
 										{/if}
-									{/if}
+
+										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
+											<!-- Terminal Server Selector -->
+											{@const hasDirectToolServerAccess =
+												$_user?.role === 'admin' ||
+												($_user?.permissions?.features?.direct_tool_servers ?? true)}
+											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
+												<TerminalMenu bind:show={showTerminalMenu} />
+											{/if}
+
+											{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
+												<Tooltip content={$i18n.t('Dictate')}>
+													<button
+														id="voice-input-button"
+														class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+														type="button"
+														on:click={async () => {
+															try {
+																let stream = await navigator.mediaDevices
+																	.getUserMedia({ audio: true })
+																	.catch(function (err) {
+																		toast.error(
+																			$i18n.t(
+																				`Permission denied when accessing microphone: {{error}}`,
+																				{
+																					error: err
+																				}
+																			)
+																		);
+																		return null;
+																	});
+
+																if (stream) {
+																	recording = true;
+																	const tracks = stream.getTracks();
+																	tracks.forEach((track) => track.stop());
+																}
+																stream = null;
+															} catch {
+																toast.error($i18n.t('Permission denied when accessing microphone'));
+															}
+														}}
+														aria-label="Voice Input"
+													>
+														<HgIconMic class="w-5 h-5" />
+													</button>
+												</Tooltip>
+											{/if}
+										{/if}
 
 										{#if prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">

@@ -6,12 +6,85 @@ vi.mock('$lib/apis', () => ({
 }));
 
 import { getPipelines, getPipelinesList } from '$lib/apis';
+import { config } from '$lib/stores';
 import {
 	getPiiMaskingDefault,
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
-	scopeCardDetections
+	scopeCardDetections,
+	piiFilterIds,
+	getStoredPiiMasking,
+	piiMaskingForRequest,
+	PII_FILTER_IDS
 } from './pii';
+
+/** Puts a features payload into the config store, as /api/config would. */
+const setConfig = (features: unknown) =>
+	config.set(features === undefined ? undefined : ({ features } as never));
+
+describe('piiFilterIds', () => {
+	beforeEach(() => config.set(undefined));
+
+	it('uses the list the backend serves', () => {
+		setConfig({ pii_filter_ids: ['only_this_one'] });
+		expect(piiFilterIds()).toEqual(['only_this_one']);
+	});
+
+	it('falls back to the built-in list when config has not loaded', () => {
+		expect(piiFilterIds()).toEqual(PII_FILTER_IDS);
+	});
+
+	it('falls back when the field is absent — an older backend', () => {
+		setConfig({ enable_admin_analytics: true });
+		expect(piiFilterIds()).toEqual(PII_FILTER_IDS);
+	});
+
+	it('falls back on an empty list rather than granting nothing', () => {
+		setConfig({ pii_filter_ids: [] });
+		expect(piiFilterIds()).toEqual(PII_FILTER_IDS);
+	});
+
+	it.each([
+		['a string instead of a list', 'pii_filter'],
+		['a list with a non-string', ['pii_filter', 7]],
+		['a list with a blank id', ['pii_filter', '   ']],
+		['null', null]
+	])('falls back on %s', (_label, value) => {
+		setConfig({ pii_filter_ids: value });
+		expect(piiFilterIds()).toEqual(PII_FILTER_IDS);
+	});
+});
+
+describe('getPiiMaskingDefault reads the served list', () => {
+	beforeEach(() => config.set(undefined));
+
+	it('honours a valve for an id only the backend knows about', () => {
+		setConfig({ pii_filter_ids: ['custom_filter'] });
+		expect(
+			getPiiMaskingDefault({
+				pipelines: { valves: { custom_filter: { pii_masking_enabled: false } } }
+			})
+		).toBe(false);
+	});
+
+	it('ignores a valve for an id the backend no longer lists', () => {
+		// The operator narrowed PII_FILTER_IDS; a stale valve must not decide.
+		setConfig({ pii_filter_ids: ['pii_filter_pipeline'] });
+		expect(
+			getPiiMaskingDefault({
+				pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } }
+			})
+		).toBe(true);
+	});
+
+	it('uses the built-in list when config is unavailable', () => {
+		expect(
+			getPiiMaskingDefault({
+				pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } }
+			})
+		).toBe(false);
+	});
+});
 
 describe('getPiiMaskingDefault', () => {
 	it('defaults to true when settings is empty', () => {
@@ -105,6 +178,9 @@ describe('isPiiPipelineConfigured', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		resetPiiPipelineConfiguredCache();
+		// These cases assert against the built-in list; an earlier describe may
+		// have left a config behind.
+		config.set(undefined);
 	});
 
 	it('returns true when a source hosts the pii_filter pipeline', async () => {
@@ -117,6 +193,32 @@ describe('isPiiPipelineConfigured', () => {
 	it('returns true for the pii_filter_pipeline id', async () => {
 		mockList.mockResolvedValue([{ url: 'http://cloud', idx: 1 }]);
 		mockGet.mockResolvedValue([{ id: 'pii_filter_pipeline' }]);
+
+		expect(await isPiiPipelineConfigured('tok')).toBe(true);
+	});
+
+	it('detects an id only the served list knows about', async () => {
+		setConfig({ pii_filter_ids: ['custom_filter'] });
+		mockList.mockResolvedValue([{ url: 'http://local', idx: 0 }]);
+		mockGet.mockResolvedValue([{ id: 'custom_filter' }]);
+
+		expect(await isPiiPipelineConfigured('tok')).toBe(true);
+	});
+
+	it('ignores a built-in id the served list no longer contains', async () => {
+		// Operator narrowed PII_FILTER_IDS; a pipeline outside that list is not
+		// the one enforcement runs on, so it must not count as configured.
+		setConfig({ pii_filter_ids: ['pii_filter_pipeline'] });
+		mockList.mockResolvedValue([{ url: 'http://local', idx: 0 }]);
+		mockGet.mockResolvedValue([{ id: 'pii_filter' }]);
+
+		expect(await isPiiPipelineConfigured('tok')).toBe(false);
+	});
+
+	it('falls back to the built-in list when config carries no field', async () => {
+		setConfig({ enable_admin_analytics: true });
+		mockList.mockResolvedValue([{ url: 'http://local', idx: 0 }]);
+		mockGet.mockResolvedValue([{ id: 'pii_filter' }]);
 
 		expect(await isPiiPipelineConfigured('tok')).toBe(true);
 	});
@@ -213,5 +315,80 @@ describe('scopeCardDetections', () => {
 
 	it('returns [] for nullish input', () => {
 		expect(scopeCardDetections(undefined as never, new Set(), new Set())).toEqual([]);
+	});
+});
+
+describe('piiMaskingForRequest', () => {
+	// The value SENT to the server. Team policy wins over the per-conversation
+	// toggle. The backend enforces the same rule independently; this keeps the
+	// frontend from quietly disagreeing.
+
+	it('policy ON overrides a user who switched masking off', () => {
+		expect(piiMaskingForRequest(true, false)).toBe(true);
+	});
+
+	it('policy OFF lets the user switch masking off', () => {
+		expect(piiMaskingForRequest(false, false)).toBe(false);
+	});
+
+	it('policy OFF lets the user keep masking on', () => {
+		expect(piiMaskingForRequest(false, true)).toBe(true);
+	});
+
+	it('policy ON with the user already on stays on', () => {
+		expect(piiMaskingForRequest(true, true)).toBe(true);
+	});
+
+	it('never returns false while the policy is enforced', () => {
+		for (const userChoice of [true, false]) {
+			expect(piiMaskingForRequest(true, userChoice)).toBe(true);
+		}
+	});
+});
+
+describe('getStoredPiiMasking', () => {
+	beforeEach(() => setConfig(undefined));
+
+	it("reports 'unset' when the user never stored anything", () => {
+		expect(getStoredPiiMasking({})).toBe('unset');
+		expect(getStoredPiiMasking({ pipelines: { valves: {} } })).toBe('unset');
+	});
+
+	it('reports a stored false as false, not as unset', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } } })
+		).toBe(false);
+	});
+
+	it('reports a stored true as true', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } })
+		).toBe(true);
+	});
+
+	it('ignores non-boolean values, treating them as never stored', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { pii_filter: { pii_masking_enabled: 'yes' } } } })
+		).toBe('unset');
+	});
+
+	it('falls through to the second configured filter id', () => {
+		expect(
+			getStoredPiiMasking({
+				pipelines: { valves: { pii_filter_pipeline: { pii_masking_enabled: false } } }
+			})
+		).toBe(false);
+	});
+
+	it('ignores a valve for an id outside the configured list', () => {
+		expect(
+			getStoredPiiMasking({ pipelines: { valves: { other: { pii_masking_enabled: false } } } })
+		).toBe('unset');
+	});
+
+	it('leaves getPiiMaskingDefault untouched: it still collapses unset to true', () => {
+		// The two answer different questions and must not converge.
+		expect(getPiiMaskingDefault({})).toBe(true);
+		expect(getStoredPiiMasking({})).toBe('unset');
 	});
 });

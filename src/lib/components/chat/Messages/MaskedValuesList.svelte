@@ -58,9 +58,10 @@
 	});
 </script>
 
-<!-- not-prose: this list renders inside a `.markdown-prose` message (via the PII
-	popover, which is NOT portalled), so prose heading/list styles would otherwise
-	leak in and blow up the <h3> section titles. Opt the whole subtree out. -->
+<!-- not-prose: kept as a guard. The PII popover is portalled to <body> today, but
+	this component is meant to be droppable into a `.markdown-prose` message subtree
+	(side panel / drawer), where prose heading and list styles would otherwise leak
+	in and blow up the <h3> section titles. -->
 <div
 	class="not-prose flex flex-col w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(70vh,28rem)] font-hg-body text-hg-text-primary dark:text-gray-100"
 >

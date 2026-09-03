@@ -24,7 +24,9 @@ export const DEFAULT_PERMISSIONS = {
 		skills: false,
 		public_skills: false,
 		notes: false,
-		public_notes: false
+		public_notes: false,
+		public_chats: false,
+		public_calendars: false
 	},
 	access_grants: {
 		allow_users: true
@@ -49,7 +51,11 @@ export const DEFAULT_PERMISSIONS = {
 		call: true,
 		multiple_models: true,
 		temporary: true,
-		temporary_enforced: false
+		temporary_enforced: false,
+		// Named as a restriction ("masking is mandatory"), never as a
+		// freedom — the multi-group merge is OR, so a restriction gives
+		// "strictest wins" and a freedom would give "loosest wins".
+		pii_masking_enforced: false
 	},
 	features: {
 		api_keys: false,
@@ -60,7 +66,9 @@ export const DEFAULT_PERMISSIONS = {
 		web_search: true,
 		image_generation: true,
 		code_interpreter: true,
-		memories: true
+		memories: true,
+		automations: false,
+		calendar: true
 	},
 	settings: {
 		interface: true

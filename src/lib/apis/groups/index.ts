@@ -198,7 +198,15 @@ export const deleteGroupById = async (token: string, id: string) => {
 	return res;
 };
 
-export const addUserToGroup = async (token: string, id: string, userIds: string[]) => {
+// `reason` is recorded in the PII policy audit log, and only for groups that
+// enforce PII masking. The route REQUIRES it when removing
+// someone from such a group; everywhere else it is ignored.
+export const addUserToGroup = async (
+	token: string,
+	id: string,
+	userIds: string[],
+	reason?: string
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/users/add`, {
@@ -209,7 +217,8 @@ export const addUserToGroup = async (token: string, id: string, userIds: string[
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			user_ids: userIds
+			user_ids: userIds,
+			...(reason ? { reason } : {})
 		})
 	})
 		.then(async (res) => {
@@ -233,7 +242,12 @@ export const addUserToGroup = async (token: string, id: string, userIds: string[
 	return res;
 };
 
-export const removeUserFromGroup = async (token: string, id: string, userIds: string[]) => {
+export const removeUserFromGroup = async (
+	token: string,
+	id: string,
+	userIds: string[],
+	reason?: string
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/users/remove`, {
@@ -244,7 +258,8 @@ export const removeUserFromGroup = async (token: string, id: string, userIds: st
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			user_ids: userIds
+			user_ids: userIds,
+			...(reason ? { reason } : {})
 		})
 	})
 		.then(async (res) => {
@@ -257,6 +272,34 @@ export const removeUserFromGroup = async (token: string, id: string, userIds: st
 		.catch((err) => {
 			error = err.detail;
 
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getGroupPreview = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/groups/id/${id}/preview`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
 			console.error(err);
 			return null;
 		});

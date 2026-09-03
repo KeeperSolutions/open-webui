@@ -5,3 +5,4 @@ import os
 os.environ.setdefault("WEBUI_URL", "http://localhost:8080")
 os.environ.setdefault("DATABASE_URL", f"sqlite:////tmp/open_webui_test_{os.getpid()}.db")
 os.environ.setdefault("CREDITS_PER_EUR_CENT", "1.82")
+os.environ.setdefault("WEBUI_SECRET_KEY", "test-secret-key-for-pytest-only")
