@@ -22,10 +22,6 @@ from typing import (
 import aiohttp
 import aiohttp.resolver
 import certifi
-<<<<<<< HEAD
-import requests
-=======
->>>>>>> v0.11.0
 import urllib3.connection
 import urllib3.connectionpool
 import validators
@@ -35,22 +31,15 @@ from langchain_community.document_loaders import PlaywrightURLLoader, WebBaseLoa
 from langchain_community.document_loaders.base import BaseLoader
 from langchain_core.documents import Document
 from open_webui.config import (
-<<<<<<< HEAD
-    ENABLE_RAG_LOCAL_WEB_FETCH,
-=======
     ENABLE_LOCAL_WEB_FETCH,
->>>>>>> v0.11.0
     EXTERNAL_WEB_LOADER_API_KEY,
     EXTERNAL_WEB_LOADER_URL,
     FIRECRAWL_API_BASE_URL,
     FIRECRAWL_API_KEY,
     FIRECRAWL_TIMEOUT,
-<<<<<<< HEAD
-=======
     MICROSOFT_WEB_IQ_API_BASE_URL,
     MICROSOFT_WEB_IQ_API_KEY,
     MICROSOFT_WEB_IQ_LANGUAGE,
->>>>>>> v0.11.0
     PLAYWRIGHT_TIMEOUT,
     PLAYWRIGHT_WS_URL,
     TAVILY_API_KEY,
@@ -60,13 +49,6 @@ from open_webui.config import (
     WEB_LOADER_TIMEOUT,
 )
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL, USER_AGENT
-from open_webui.retrieval.loaders.external_web import ExternalWebLoader
-from open_webui.retrieval.loaders.tavily import TavilyLoader
-from open_webui.retrieval.web.firecrawl import scrape_firecrawl_url
-from open_webui.utils.misc import is_string_allowed
-=======
 from open_webui.env import (
     AIOHTTP_CLIENT_ALLOW_REDIRECTS,
     AIOHTTP_CLIENT_SESSION_SSL,
@@ -78,7 +60,6 @@ from open_webui.retrieval.loaders.microsoft_web_iq import MicrosoftWebIQLoader
 from open_webui.retrieval.loaders.tavily import TavilyLoader
 from open_webui.retrieval.web.firecrawl import scrape_firecrawl_url
 from open_webui.utils.misc import is_host_allowed
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 
@@ -158,12 +139,7 @@ def validate_url(url: Union[str, Sequence[str]]):
             # Check if any of the resolved addresses are private
             # DNS rebinding is mitigated at the connection layer; see _SSRFSafeResolver / _SSRFSafeAdapter
             for ip in ipv4_addresses + ipv6_addresses:
-<<<<<<< HEAD
-                addr = ipaddress.ip_address(ip)
-                if not addr.is_global:
-=======
                 if not _is_global_addr(ip):
->>>>>>> v0.11.0
                     raise ValueError(ERROR_MESSAGES.INVALID_URL)
         return True
     elif isinstance(url, Sequence):
@@ -196,15 +172,9 @@ def _ssrf_safe_new_conn(self):
     infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     if not infos:
         raise OSError(f'getaddrinfo for {host!r} returned empty list')
-<<<<<<< HEAD
-    if not ENABLE_RAG_LOCAL_WEB_FETCH:
-        for _, _, _, _, sa in infos:
-            if not ipaddress.ip_address(sa[0]).is_global:
-=======
     if not ENABLE_LOCAL_WEB_FETCH:
         for _, _, _, _, sa in infos:
             if not _is_global_addr(sa[0]):
->>>>>>> v0.11.0
                 raise ValueError(ERROR_MESSAGES.INVALID_URL)
     err = None
     for fam, typ, proto, _, sa in infos:
@@ -216,14 +186,11 @@ def _ssrf_safe_new_conn(self):
             if getattr(self, 'source_address', None):
                 sock.bind(self.source_address)
             for opt in getattr(self, 'socket_options', None) or ():
-<<<<<<< HEAD
-=======
                 if len(opt) == 4 and isinstance(opt[3], str):
                     # urllib3-future per-protocol form: (level, optname, value, "tcp"/"udp")
                     if opt[3].lower() == 'tcp':
                         sock.setsockopt(*opt[:3])
                     continue
->>>>>>> v0.11.0
                 sock.setsockopt(*opt)
             sock.connect(sa)
             return sock
@@ -266,21 +233,13 @@ class _SSRFSafeResolver(aiohttp.resolver.DefaultResolver):
 
     async def resolve(self, host, port=0, family=socket.AF_INET):
         results = await super().resolve(host, port, family)
-<<<<<<< HEAD
-        if not ENABLE_RAG_LOCAL_WEB_FETCH:
-            for entry in results:
-                if not ipaddress.ip_address(entry['host']).is_global:
-=======
         if not ENABLE_LOCAL_WEB_FETCH:
             for entry in results:
                 if not _is_global_addr(entry['host']):
->>>>>>> v0.11.0
                     raise ValueError(ERROR_MESSAGES.INVALID_URL)
         return results
 
 
-<<<<<<< HEAD
-=======
 def get_ssrf_safe_session() -> aiohttp.ClientSession:
     """A one-off aiohttp session that re-validates the connect-time IP via _SSRFSafeResolver,
     defeating DNS rebinding. Use for validate_url-gated fetches of user-supplied URLs that must
@@ -294,7 +253,6 @@ def get_ssrf_safe_session() -> aiohttp.ClientSession:
     )
 
 
->>>>>>> v0.11.0
 def extract_metadata(soup, url):
     metadata = {'source': url}
     if title := soup.find('title'):
@@ -401,14 +359,9 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
         self.params = params or {}
 
     def lazy_load(self) -> Iterator[Document]:
-<<<<<<< HEAD
-        try:
-            for url in self.web_paths:
-=======
         for url in self.web_paths:
             try:
                 self._sync_wait_for_rate_limit()
->>>>>>> v0.11.0
                 doc = scrape_firecrawl_url(
                     self.api_url,
                     self.api_key,
@@ -419,24 +372,6 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                 )
                 if doc is not None:
                     yield doc
-<<<<<<< HEAD
-        except Exception as e:
-            if self.continue_on_failure:
-                log.warning(f'Error extracting content from URLs with Firecrawl: {e}')
-            else:
-                raise e
-
-    async def alazy_load(self):
-        try:
-            docs = await run_in_threadpool(lambda: list(self.lazy_load()))
-            for doc in docs:
-                yield doc
-        except Exception as e:
-            if self.continue_on_failure:
-                log.warning(f'Error extracting content from URLs with Firecrawl: {e}')
-            else:
-                raise e
-=======
             except Exception as e:
                 if self.continue_on_failure:
                     log.warning(f'Error extracting content from {url} with Firecrawl: {e}')
@@ -463,7 +398,6 @@ class SafeFireCrawlLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
                     log.warning(f'Error extracting content from {url} with Firecrawl: {e}')
                     continue
                 raise
->>>>>>> v0.11.0
 
 
 class SafeTavilyLoader(BaseLoader, RateLimitMixin, URLProcessingMixin):
@@ -699,14 +633,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
     def _intercept_navigation_sync(self, route, request=None):
         req = request or route.request
 
-<<<<<<< HEAD
-        if req.resource_type != 'document':
-            route.continue_()
-            return
-
-        try:
-            validate_url(req.url)
-=======
         try:
             validate_url(req.url)
             resp = route.fetch(max_redirects=0)
@@ -729,40 +655,15 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 else:
                     route.abort()
                     return
->>>>>>> v0.11.0
         except Exception:
             route.abort()
             return
 
-<<<<<<< HEAD
-        if AIOHTTP_CLIENT_ALLOW_REDIRECTS:
-            resp = route.fetch()
-        else:
-            try:
-                resp = route.fetch(max_redirects=0)
-            except TypeError:
-                route.abort()
-                return
-
-            if 300 <= resp.status < 400:
-                route.abort()
-                return
-
-=======
->>>>>>> v0.11.0
         route.fulfill(response=resp)
 
     async def _intercept_navigation(self, route, request=None):
         req = request or route.request
 
-<<<<<<< HEAD
-        if req.resource_type != 'document':
-            await route.continue_()
-            return
-
-        try:
-            await run_in_threadpool(validate_url, req.url)
-=======
         try:
             await run_in_threadpool(validate_url, req.url)
             resp = await route.fetch(max_redirects=0)
@@ -785,27 +686,10 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 else:
                     await route.abort()
                     return
->>>>>>> v0.11.0
         except Exception:
             await route.abort()
             return
 
-<<<<<<< HEAD
-        if AIOHTTP_CLIENT_ALLOW_REDIRECTS:
-            resp = await route.fetch()
-        else:
-            try:
-                resp = await route.fetch(max_redirects=0)
-            except TypeError:
-                await route.abort()
-                return
-
-            if 300 <= resp.status < 400:
-                await route.abort()
-                return
-
-=======
->>>>>>> v0.11.0
         await route.fulfill(response=resp)
 
     def lazy_load(self) -> Iterator[Document]:
@@ -819,16 +703,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
             else:
                 browser = p.chromium.launch(headless=self.headless, proxy=self.proxy)
 
-<<<<<<< HEAD
-            for url in self.urls:
-                try:
-                    self._safe_process_url_sync(url)
-                    page = browser.new_page()
-                    page.route('**/*', self._intercept_navigation_sync)
-                    response = page.goto(url, timeout=self.playwright_timeout)
-                    if response is None:
-                        raise ValueError(f'page.goto() returned None for url {url}')
-=======
             with browser:
                 for url in self.urls:
                     try:
@@ -839,7 +713,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                             response = page.goto(url, timeout=self.playwright_timeout)
                             if response is None:
                                 raise ValueError(f'page.goto() returned None for url {url}')
->>>>>>> v0.11.0
 
                             text = self.evaluator.evaluate(page, browser, response)
                             metadata = {'source': url}
@@ -861,16 +734,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
             else:
                 browser = await p.chromium.launch(headless=self.headless, proxy=self.proxy)
 
-<<<<<<< HEAD
-            for url in self.urls:
-                try:
-                    await self._safe_process_url(url)
-                    page = await browser.new_page()
-                    await page.route('**/*', self._intercept_navigation)
-                    response = await page.goto(url, timeout=self.playwright_timeout)
-                    if response is None:
-                        raise ValueError(f'page.goto() returned None for url {url}')
-=======
             async with browser:
                 for url in self.urls:
                     try:
@@ -881,7 +744,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                             response = await page.goto(url, timeout=self.playwright_timeout)
                             if response is None:
                                 raise ValueError(f'page.goto() returned None for url {url}')
->>>>>>> v0.11.0
 
                             text = await self.evaluator.evaluate_async(page, browser, response)
                             metadata = {'source': url}

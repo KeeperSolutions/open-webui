@@ -37,23 +37,9 @@ from open_webui.env import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
-<<<<<<< HEAD
-from open_webui.models.knowledge import Knowledges
-from open_webui.models.notes import Notes
-from open_webui.models.users import UserModel
-from open_webui.retrieval.loaders.youtube import YoutubeLoader
-from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-from open_webui.retrieval.vector.main import GetResult
-from open_webui.retrieval.web.utils import get_web_loader
-from open_webui.utils.access_control.files import has_access_to_file
-from open_webui.utils.headers import include_user_info_headers
-from open_webui.utils.misc import get_message_list
-=======
 from open_webui.models.folders import Folders
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.notes import Notes
-from open_webui.models.config import Config
 from open_webui.models.users import UserModel
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
@@ -65,7 +51,6 @@ from open_webui.utils.access_control.files import get_owner_accessible_folder_fi
 from open_webui.utils.access_control.folders import has_folder_access
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.misc import get_content_from_message, get_message_list
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 
@@ -81,67 +66,78 @@ def is_youtube_url(url: str) -> bool:
     return re.match(youtube_regex, url) is not None
 
 
+# The fork keeps its ConfigVar/AppConfig backbone (Risk #1 in the
+# 0.9.6→0.11.0 upgrade runbook) rather than upstream's per-key
+# `await Config.get_many()` store, so this maps upstream's loader-config
+# names to the fork's ConfigVar attribute names instead of dotted keys.
 LOADER_CONFIG_KEYS = {
-    'youtube_language': 'rag.youtube_loader_language',
-    'youtube_proxy_url': 'rag.youtube_loader_proxy_url',
-    'web_loader_ssl_verification': 'web.loader.ssl_verification',
-    'web_loader_concurrent_requests': 'web.loader.concurrent_requests',
-    'web_search_trust_env': 'web.search.trust_env',
-    'web_loader_engine': 'web.loader.engine',
-    'web_loader_timeout': 'web.loader.timeout',
-    'playwright_ws_url': 'web.loader.playwright_ws_url',
-    'playwright_timeout': 'web.loader.playwright_timeout',
-    'firecrawl_api_key': 'web.loader.firecrawl_api_key',
-    'firecrawl_api_url': 'web.loader.firecrawl_api_url',
-    'firecrawl_timeout': 'web.loader.firecrawl_timeout',
-    'tavily_api_key': 'web.search.tavily_api_key',
-    'tavily_extract_depth': 'web.search.tavily_extract_depth',
-    'microsoft_web_iq_api_base_url': 'web.search.microsoft_web_iq_api_base_url',
-    'microsoft_web_iq_api_key': 'web.search.microsoft_web_iq_api_key',
-    'microsoft_web_iq_language': 'web.search.microsoft_web_iq_language',
-    'external_web_loader_url': 'web.loader.external_web_loader_url',
-    'external_web_loader_api_key': 'web.loader.external_web_loader_api_key',
-    'CONTENT_EXTRACTION_ENGINE': 'rag.content_extraction_engine',
-    'DATALAB_MARKER_API_KEY': 'rag.datalab_marker_api_key',
-    'DATALAB_MARKER_API_BASE_URL': 'rag.datalab_marker_api_base_url',
-    'DATALAB_MARKER_ADDITIONAL_CONFIG': 'rag.datalab_marker_additional_config',
-    'DATALAB_MARKER_SKIP_CACHE': 'rag.datalab_marker_skip_cache',
-    'DATALAB_MARKER_FORCE_OCR': 'rag.datalab_marker_force_ocr',
-    'DATALAB_MARKER_PAGINATE': 'rag.datalab_marker_paginate',
-    'DATALAB_MARKER_STRIP_EXISTING_OCR': 'rag.datalab_marker_strip_existing_ocr',
-    'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': 'rag.datalab_marker_disable_image_extraction',
-    'DATALAB_MARKER_FORMAT_LINES': 'rag.datalab_marker_format_lines',
-    'DATALAB_MARKER_USE_LLM': 'rag.datalab_marker_use_llm',
-    'DATALAB_MARKER_OUTPUT_FORMAT': 'rag.datalab_marker_output_format',
-    'EXTERNAL_DOCUMENT_LOADER_URL': 'rag.external_document_loader_url',
-    'EXTERNAL_DOCUMENT_LOADER_API_KEY': 'rag.external_document_loader_api_key',
-    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'rag.external_document_loader_headers',
-    'TIKA_SERVER_URL': 'rag.tika_server_url',
-    'DOCLING_SERVER_URL': 'rag.docling_server_url',
-    'DOCLING_API_KEY': 'rag.docling_api_key',
-    'DOCLING_PARAMS': 'rag.docling_params',
-    'PDF_EXTRACT_IMAGES': 'rag.pdf_extract_images',
-    'PDF_LOADER_MODE': 'rag.pdf_loader_mode',
-    'DOCUMENT_INTELLIGENCE_ENDPOINT': 'rag.document_intelligence_endpoint',
-    'DOCUMENT_INTELLIGENCE_KEY': 'rag.document_intelligence_key',
-    'DOCUMENT_INTELLIGENCE_MODEL': 'rag.document_intelligence_model',
-    'MISTRAL_OCR_API_BASE_URL': 'rag.mistral_ocr_api_base_url',
-    'MISTRAL_OCR_API_KEY': 'rag.mistral_ocr_api_key',
-    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
-    'PADDLEOCR_VL_BASE_URL': 'rag.paddleocr_vl_base_url',
-    'PADDLEOCR_VL_TOKEN': 'rag.paddleocr_vl_token',
-    'MINERU_API_MODE': 'rag.mineru_api_mode',
-    'MINERU_API_URL': 'rag.mineru_api_url',
-    'MINERU_API_KEY': 'rag.mineru_api_key',
-    'MINERU_API_TIMEOUT': 'rag.mineru_api_timeout',
-    'MINERU_PARAMS': 'rag.mineru_params',
-    'MINERU_FILE_EXTENSIONS': 'rag.mineru_file_extensions',
+    'youtube_language': 'YOUTUBE_LOADER_LANGUAGE',
+    'youtube_proxy_url': 'YOUTUBE_LOADER_PROXY_URL',
+    'web_loader_ssl_verification': 'ENABLE_WEB_LOADER_SSL_VERIFICATION',
+    'web_loader_concurrent_requests': 'WEB_LOADER_CONCURRENT_REQUESTS',
+    'web_search_trust_env': 'WEB_SEARCH_TRUST_ENV',
+    'web_loader_engine': 'WEB_LOADER_ENGINE',
+    'web_loader_timeout': 'WEB_LOADER_TIMEOUT',
+    'playwright_ws_url': 'PLAYWRIGHT_WS_URL',
+    'playwright_timeout': 'PLAYWRIGHT_TIMEOUT',
+    'firecrawl_api_key': 'FIRECRAWL_API_KEY',
+    'firecrawl_api_url': 'FIRECRAWL_API_BASE_URL',
+    'firecrawl_timeout': 'FIRECRAWL_TIMEOUT',
+    'tavily_api_key': 'TAVILY_API_KEY',
+    'tavily_extract_depth': 'TAVILY_EXTRACT_DEPTH',
+    'microsoft_web_iq_api_base_url': 'MICROSOFT_WEB_IQ_API_BASE_URL',
+    'microsoft_web_iq_api_key': 'MICROSOFT_WEB_IQ_API_KEY',
+    'microsoft_web_iq_language': 'MICROSOFT_WEB_IQ_LANGUAGE',
+    'external_web_loader_url': 'EXTERNAL_WEB_LOADER_URL',
+    'external_web_loader_api_key': 'EXTERNAL_WEB_LOADER_API_KEY',
+    'CONTENT_EXTRACTION_ENGINE': 'CONTENT_EXTRACTION_ENGINE',
+    'DATALAB_MARKER_API_KEY': 'DATALAB_MARKER_API_KEY',
+    'DATALAB_MARKER_API_BASE_URL': 'DATALAB_MARKER_API_BASE_URL',
+    'DATALAB_MARKER_ADDITIONAL_CONFIG': 'DATALAB_MARKER_ADDITIONAL_CONFIG',
+    'DATALAB_MARKER_SKIP_CACHE': 'DATALAB_MARKER_SKIP_CACHE',
+    'DATALAB_MARKER_FORCE_OCR': 'DATALAB_MARKER_FORCE_OCR',
+    'DATALAB_MARKER_PAGINATE': 'DATALAB_MARKER_PAGINATE',
+    'DATALAB_MARKER_STRIP_EXISTING_OCR': 'DATALAB_MARKER_STRIP_EXISTING_OCR',
+    'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': 'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION',
+    'DATALAB_MARKER_FORMAT_LINES': 'DATALAB_MARKER_FORMAT_LINES',
+    'DATALAB_MARKER_USE_LLM': 'DATALAB_MARKER_USE_LLM',
+    'DATALAB_MARKER_OUTPUT_FORMAT': 'DATALAB_MARKER_OUTPUT_FORMAT',
+    'EXTERNAL_DOCUMENT_LOADER_URL': 'EXTERNAL_DOCUMENT_LOADER_URL',
+    'EXTERNAL_DOCUMENT_LOADER_API_KEY': 'EXTERNAL_DOCUMENT_LOADER_API_KEY',
+    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'EXTERNAL_DOCUMENT_LOADER_HEADERS',
+    'TIKA_SERVER_URL': 'TIKA_SERVER_URL',
+    'DOCLING_SERVER_URL': 'DOCLING_SERVER_URL',
+    'DOCLING_API_KEY': 'DOCLING_API_KEY',
+    'DOCLING_PARAMS': 'DOCLING_PARAMS',
+    'PDF_EXTRACT_IMAGES': 'PDF_EXTRACT_IMAGES',
+    'PDF_LOADER_MODE': 'PDF_LOADER_MODE',
+    'DOCUMENT_INTELLIGENCE_ENDPOINT': 'DOCUMENT_INTELLIGENCE_ENDPOINT',
+    'DOCUMENT_INTELLIGENCE_KEY': 'DOCUMENT_INTELLIGENCE_KEY',
+    'DOCUMENT_INTELLIGENCE_MODEL': 'DOCUMENT_INTELLIGENCE_MODEL',
+    'MISTRAL_OCR_API_BASE_URL': 'MISTRAL_OCR_API_BASE_URL',
+    'MISTRAL_OCR_API_KEY': 'MISTRAL_OCR_API_KEY',
+    'MISTRAL_OCR_USE_BASE64': 'MISTRAL_OCR_USE_BASE64',
+    'PADDLEOCR_VL_BASE_URL': 'PADDLEOCR_VL_BASE_URL',
+    'PADDLEOCR_VL_TOKEN': 'PADDLEOCR_VL_TOKEN',
+    'MINERU_API_MODE': 'MINERU_API_MODE',
+    'MINERU_API_URL': 'MINERU_API_URL',
+    'MINERU_API_KEY': 'MINERU_API_KEY',
+    'MINERU_API_TIMEOUT': 'MINERU_API_TIMEOUT',
+    'MINERU_PARAMS': 'MINERU_PARAMS',
+    'MINERU_FILE_EXTENSIONS': 'MINERU_FILE_EXTENSIONS',
 }
 
 
 async def get_loader_config():
-    values = await Config.get_many(*LOADER_CONFIG_KEYS.values())
-    return {name: values.get(key) for name, key in LOADER_CONFIG_KEYS.items()}
+    # Resolve upstream's loader-config names against the fork's live
+    # ConfigVars (which read latest DB/env value on `.value` access).
+    from open_webui import config as _cfg
+
+    result = {}
+    for name, cv_attr in LOADER_CONFIG_KEYS.items():
+        cv = getattr(_cfg, cv_attr, None)
+        result[name] = getattr(cv, 'value', cv)
+    return result
 
 
 def get_loader(request, url: str, config: dict):
@@ -160,51 +156,6 @@ def get_loader(request, url: str, config: dict):
     )
 
 
-<<<<<<< HEAD
-def build_loader_from_config(request):
-    """Build a Loader instance with the admin's configured extraction engine settings."""
-    from open_webui.retrieval.loaders.main import Loader
-
-    config = request.app.state.config
-    return Loader(
-        engine=config.CONTENT_EXTRACTION_ENGINE,
-        DATALAB_MARKER_API_KEY=config.DATALAB_MARKER_API_KEY,
-        DATALAB_MARKER_API_BASE_URL=config.DATALAB_MARKER_API_BASE_URL,
-        DATALAB_MARKER_ADDITIONAL_CONFIG=config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-        DATALAB_MARKER_SKIP_CACHE=config.DATALAB_MARKER_SKIP_CACHE,
-        DATALAB_MARKER_FORCE_OCR=config.DATALAB_MARKER_FORCE_OCR,
-        DATALAB_MARKER_PAGINATE=config.DATALAB_MARKER_PAGINATE,
-        DATALAB_MARKER_STRIP_EXISTING_OCR=config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-        DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-        DATALAB_MARKER_FORMAT_LINES=config.DATALAB_MARKER_FORMAT_LINES,
-        DATALAB_MARKER_USE_LLM=config.DATALAB_MARKER_USE_LLM,
-        DATALAB_MARKER_OUTPUT_FORMAT=config.DATALAB_MARKER_OUTPUT_FORMAT,
-        EXTERNAL_DOCUMENT_LOADER_URL=config.EXTERNAL_DOCUMENT_LOADER_URL,
-        EXTERNAL_DOCUMENT_LOADER_API_KEY=config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-        TIKA_SERVER_URL=config.TIKA_SERVER_URL,
-        DOCLING_SERVER_URL=config.DOCLING_SERVER_URL,
-        DOCLING_API_KEY=config.DOCLING_API_KEY,
-        DOCLING_PARAMS=config.DOCLING_PARAMS,
-        PDF_EXTRACT_IMAGES=config.PDF_EXTRACT_IMAGES,
-        PDF_LOADER_MODE=config.PDF_LOADER_MODE,
-        DOCUMENT_INTELLIGENCE_ENDPOINT=config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        DOCUMENT_INTELLIGENCE_KEY=config.DOCUMENT_INTELLIGENCE_KEY,
-        DOCUMENT_INTELLIGENCE_MODEL=config.DOCUMENT_INTELLIGENCE_MODEL,
-        MISTRAL_OCR_API_BASE_URL=config.MISTRAL_OCR_API_BASE_URL,
-        MISTRAL_OCR_API_KEY=config.MISTRAL_OCR_API_KEY,
-        PADDLEOCR_VL_BASE_URL=config.PADDLEOCR_VL_BASE_URL,
-        PADDLEOCR_VL_TOKEN=config.PADDLEOCR_VL_TOKEN,
-        MINERU_API_MODE=config.MINERU_API_MODE,
-        MINERU_API_URL=config.MINERU_API_URL,
-        MINERU_API_KEY=config.MINERU_API_KEY,
-        MINERU_API_TIMEOUT=config.MINERU_API_TIMEOUT,
-        MINERU_PARAMS=config.MINERU_PARAMS,
-        MINERU_FILE_EXTENSIONS=config.MINERU_FILE_EXTENSIONS,
-    )
-
-
-def _extract_text_from_binary_response(request, response: requests.Response, url: str) -> tuple[str, list]:
-=======
 def build_loader_from_config(request, config: dict):
     """Build a Loader instance with the admin's configured extraction engine settings."""
     from open_webui.retrieval.loaders.main import Loader
@@ -219,7 +170,6 @@ def build_loader_from_config(request, config: dict):
 def _extract_text_from_binary_response(
     request, response: requests.Response, url: str, loader_config: dict
 ) -> tuple[str, list]:
->>>>>>> v0.11.0
     """Download response body to a temp file and extract text using the Loader pipeline."""
     import mimetypes
     import tempfile
@@ -248,11 +198,7 @@ def _extract_text_from_binary_response(
         tmp_path = tmp.name
 
     try:
-<<<<<<< HEAD
-        loader = build_loader_from_config(request)
-=======
         loader = build_loader_from_config(request, loader_config)
->>>>>>> v0.11.0
         docs = loader.load(filename, content_type, tmp_path)
         for doc in docs:
             doc.metadata['source'] = url
@@ -272,10 +218,6 @@ def _is_text_content_type(content_type: str) -> bool:
     return not ct  # empty / missing → assume HTML
 
 
-<<<<<<< HEAD
-def get_content_from_url(request, url: str) -> str:
-    from open_webui.retrieval.web.utils import validate_url
-=======
 async def get_content_from_url(request, url: str) -> str:
     loader_config = await get_loader_config()
 
@@ -287,7 +229,6 @@ async def get_content_from_url(request, url: str) -> str:
 
 def _get_content_from_url_sync(request, url: str, loader_config):
     from open_webui.retrieval.web.utils import validate_url, _SSRFSafeAdapter
->>>>>>> v0.11.0
 
     # Validate URL before making any request (blocks private IPs, non-HTTP, filter list)
     validate_url(url)
@@ -299,11 +240,7 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     # when allow_redirects=False, causing the binary-content path to run
     # and produce empty docs → HTTP 400.
     if is_youtube_url(url):
-<<<<<<< HEAD
-        loader = get_loader(request, url)
-=======
         loader = get_loader(request, url, loader_config)
->>>>>>> v0.11.0
         docs = loader.load()
         content = ' '.join([doc.page_content for doc in docs])
         return content, docs
@@ -314,15 +251,11 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     # re-validation would let an attacker reach private IPs (RFC1918, loopback,
     # cloud-metadata 169.254.169.254) via a public host that redirects internally.
     try:
-<<<<<<< HEAD
-        response = requests.get(url, stream=True, timeout=30, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS)
-=======
         # Probe through the connect-time SSRF guard; bare requests.get re-resolves (DNS-rebinding gap).
         session = requests.Session()
         session.mount('http://', _SSRFSafeAdapter())
         session.mount('https://', _SSRFSafeAdapter())
         response = session.get(url, stream=True, timeout=30, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS)
->>>>>>> v0.11.0
         response.raise_for_status()
         content_type = response.headers.get('Content-Type', '')
     except Exception:
@@ -333,22 +266,14 @@ def _get_content_from_url_sync(request, url: str, loader_config):
     if response is None or _is_text_content_type(content_type):
         if response is not None:
             response.close()
-<<<<<<< HEAD
-        loader = get_loader(request, url)
-=======
         loader = get_loader(request, url, loader_config)
->>>>>>> v0.11.0
         docs = loader.load()
         content = ' '.join([doc.page_content for doc in docs])
         return content, docs
 
     # Binary content (PDF, DOCX, XLSX, PPTX, etc.) — download and extract
     try:
-<<<<<<< HEAD
-        return _extract_text_from_binary_response(request, response, url)
-=======
         return _extract_text_from_binary_response(request, response, url, loader_config)
->>>>>>> v0.11.0
     finally:
         response.close()
 
@@ -766,15 +691,9 @@ async def query_collection(
     embedding_function,
     k: int,
 ) -> dict:
-    config = await Config.get_many(
-        'rag.enable_hybrid_search',
-        'rag.top_k_reranker',
-        'rag.relevance_threshold',
-        'rag.hybrid_bm25_weight',
-        'rag.enable_hybrid_search_enriched_texts',
-    )
+    config = request.app.state.config if request else None
     # When request is provided, try hybrid search + reranking if enabled
-    if request and config.get('rag.enable_hybrid_search'):
+    if config and config.ENABLE_RAG_HYBRID_SEARCH:
         try:
             reranking_function = (
                 (lambda query, documents: request.app.state.RERANKING_FUNCTION(query, documents))
@@ -787,10 +706,10 @@ async def query_collection(
                 embedding_function=embedding_function,
                 k=k,
                 reranking_function=reranking_function,
-                k_reranker=config.get('rag.top_k_reranker'),
-                r=config.get('rag.relevance_threshold'),
-                hybrid_bm25_weight=config.get('rag.hybrid_bm25_weight'),
-                enable_enriched_texts=config.get('rag.enable_hybrid_search_enriched_texts'),
+                k_reranker=config.RAG_TOP_K_RERANKER,
+                r=config.RAG_RELEVANCE_THRESHOLD,
+                hybrid_bm25_weight=config.RAG_HYBRID_BM25_WEIGHT,
+                enable_enriched_texts=config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
             )
         except Exception as e:
             log.debug(f'Hybrid search failed, falling back to vector search: {e}')
@@ -857,8 +776,6 @@ async def query_collection_with_hybrid_search(
 ) -> dict:
     results = []
     error = False
-<<<<<<< HEAD
-=======
 
     if not enable_enriched_texts:
 
@@ -881,7 +798,6 @@ async def query_collection_with_hybrid_search(
         if native_task_results and all(result is not None for result in native_task_results):
             return merge_and_sort_query_results(native_task_results, k=k)
 
->>>>>>> v0.11.0
     # Fetch every collection's contents once up front so the
     # per-query/per-document loop below can reuse them. Each fetch
     # offloads to a worker thread, so run them concurrently with
@@ -1362,11 +1278,7 @@ async def filter_accessible_collections(
       - any name with characters outside [A-Za-z0-9_-] → rejected
       - file-*          → validated via has_access_to_file
       - user-memory-*   → must match user's own memory collection
-<<<<<<< HEAD
-      - web-search-*    → ephemeral per-query collections, always allowed
-=======
       - web-search-*    → ephemeral per-query collections, owner-bound to web-search-{user.id}-*
->>>>>>> v0.11.0
       - knowledge-bases → always denied (system meta-collection)
       - everything else → if the name matches a knowledge base, validated
                           via Knowledges.check_access_by_user_id; if no
@@ -1401,17 +1313,10 @@ async def filter_accessible_collections(
             if name == f'user-memory-{user.id}':
                 validated.add(name)
         elif name.startswith('web-search-'):
-<<<<<<< HEAD
-            # Ephemeral collections created by process_web_search — safe
-            # to allow because they contain only transient web-search
-            # results scoped to the requesting user's session.
-            validated.add(name)
-=======
             # Ephemeral per-query collections, owner-bound: process_web_search mints
             # them as web-search-{user.id}-<hash>, so only the creator may read/write.
             if name.startswith(f'web-search-{user.id}-'):
                 validated.add(name)
->>>>>>> v0.11.0
         else:
             # May be a knowledge-base ID or a legacy/ephemeral collection.
             # If it IS a KB, enforce access control.  If no such KB
@@ -1443,7 +1348,7 @@ async def get_sources_from_items(
 ):
     log.debug('items: %s %s %s %s %s', items, queries, embedding_function, reranking_function, full_context)
 
-    bypass_embedding_and_retrieval = await Config.get('rag.bypass_embedding_and_retrieval')
+    bypass_embedding_and_retrieval = request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
     extracted_collections = []
     query_results = []
     folder_items = set()
@@ -1572,10 +1477,7 @@ async def get_sources_from_items(
                         user.role == 'admin'
                         or file_object.user_id == user.id
                         or await has_access_to_file(item.get('id'), 'read', user)
-<<<<<<< HEAD
-=======
                         or ('file', item.get('id')) in folder_items
->>>>>>> v0.11.0
                     ):
                         query_result = {
                             'documents': [[file_object.data.get('content', '')]],
@@ -1606,10 +1508,7 @@ async def get_sources_from_items(
                             user.role == 'admin'
                             or file_object.user_id == user.id
                             or await has_access_to_file(file_id, 'read', user)
-<<<<<<< HEAD
-=======
                             or ('file', file_id) in folder_items
->>>>>>> v0.11.0
                         ):
                             if item.get('legacy'):
                                 collection_names.append(f'{file_id}')
@@ -1631,20 +1530,6 @@ async def get_sources_from_items(
                 )
                 or ('collection', item.get('id')) in folder_items
             ):
-<<<<<<< HEAD
-                if item.get('context') == 'full' or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                    if knowledge_base and (
-                        user.role == 'admin'
-                        or knowledge_base.user_id == user.id
-                        or await AccessGrants.has_access(
-                            user_id=user.id,
-                            resource_type='knowledge',
-                            resource_id=knowledge_base.id,
-                            permission='read',
-                        )
-                    ):
-                        files = await Knowledges.get_files_by_id(knowledge_base.id)
-=======
                 if (knowledge_base.meta or {}).get('source') == 'external':
                     query_result = await retrieve_external_knowledge(
                         request,
@@ -1654,23 +1539,8 @@ async def get_sources_from_items(
                         user=user,
                     )
                     extracted_collections.append(knowledge_base.id)
->>>>>>> v0.11.0
 
                 else:
-<<<<<<< HEAD
-                    if item.get('legacy'):
-                        if BYPASS_RETRIEVAL_ACCESS_CONTROL:
-                            collection_names = item.get('collection_names', [])
-                        else:
-                            # Legacy KB: item.collection_names is client-supplied.
-                            # Validate against the KB's actual files to prevent
-                            # cross-tenant collection name substitution.
-                            files = await Knowledges.get_files_by_id(knowledge_base.id)
-                            owned_names = {f'file-{f.id}' for f in files}
-                            owned_names.add(knowledge_base.id)
-                            valid_names = [n for n in (item.get('collection_names') or []) if n in owned_names]
-                            collection_names = valid_names if valid_names else [knowledge_base.id]
-=======
                     if item.get('context') == 'full' or bypass_embedding_and_retrieval:
                         if knowledge_base and (
                             user.role == 'admin'
@@ -1701,7 +1571,6 @@ async def get_sources_from_items(
                                 'documents': [documents],
                                 'metadatas': [metadatas],
                             }
->>>>>>> v0.11.0
                     else:
                         if item.get('legacy'):
                             if BYPASS_RETRIEVAL_ACCESS_CONTROL:
@@ -1724,13 +1593,10 @@ async def get_sources_from_items(
                 'documents': [[doc.get('content') for doc in item.get('docs')]],
                 'metadatas': [[doc.get('metadata') for doc in item.get('docs')]],
             }
-<<<<<<< HEAD
-=======
         elif item.get('type') == 'web_search' and item.get('collection_name'):
             # Trusted server-generated collection; authorized by
             # filter_accessible_collections below (allowlists web-search-*).
             collection_names.append(item['collection_name'])
->>>>>>> v0.11.0
         elif item.get('collection_name'):
             if BYPASS_RETRIEVAL_ACCESS_CONTROL:
                 collection_names.append(item['collection_name'])
@@ -1756,11 +1622,7 @@ async def get_sources_from_items(
                 continue
 
             # Filter out collections the user cannot read
-<<<<<<< HEAD
-            if user:
-=======
             if user and (item.get('type'), item.get('id')) not in folder_items:
->>>>>>> v0.11.0
                 collection_names = await filter_accessible_collections(collection_names, user)
                 if not collection_names:
                     log.debug(f'access denied for all collections in item {item}')
