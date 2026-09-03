@@ -33,11 +33,7 @@
 	}}
 />
 
-<<<<<<< HEAD
-<div class="flex w-full gap-2 items-center">
-=======
 <div class="flex w-full items-center gap-3 text-xs text-gray-600 dark:text-gray-400">
->>>>>>> v0.11.0
 	<Tooltip className="w-full relative" content={''} placement="top-start">
 		<div class="flex w-full">
 			<div

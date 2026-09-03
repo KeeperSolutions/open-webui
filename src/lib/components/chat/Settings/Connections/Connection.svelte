@@ -40,11 +40,7 @@
 	}}
 />
 
-<<<<<<< HEAD
-<div class="flex w-full gap-2 items-center">
-=======
 <div class="flex w-full items-center gap-3">
->>>>>>> v0.11.0
 	<Tooltip
 		className="w-full relative"
 		content={$i18n.t(`WebUI will make requests to "{{url}}/chat/completions"`, {

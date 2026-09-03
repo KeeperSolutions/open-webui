@@ -38,10 +38,7 @@
 
 	let showFolderModal = false;
 	let showCreateSubFolderModal = false;
-<<<<<<< HEAD
-=======
 	let showShareModal = false;
->>>>>>> v0.11.0
 	let showDeleteConfirm = false;
 	let deleteFolderContents = true;
 
@@ -181,11 +178,8 @@
 		onSubmit={createSubFolderHandler}
 	/>
 
-<<<<<<< HEAD
-=======
 	<FolderShareModal bind:show={showShareModal} {folder} />
 
->>>>>>> v0.11.0
 	<DeleteConfirmDialog
 		bind:show={showDeleteConfirm}
 		title={$i18n.t('Delete folder?')}
@@ -251,28 +245,6 @@
 			</div>
 		</div>
 
-<<<<<<< HEAD
-		<div class="flex items-center translate-x-2.5">
-			<FolderMenu
-				align="end"
-				onEdit={() => {
-					showFolderModal = true;
-				}}
-				onDelete={() => {
-					showDeleteConfirm = true;
-				}}
-				onExport={() => {
-					exportHandler();
-				}}
-				onCreateSubFolder={() => {
-					showCreateSubFolderModal = true;
-				}}
-			>
-				<button
-					class="p-1.5 dark:hover:bg-gray-850 rounded-full touch-auto"
-					aria-label={$i18n.t('Folder options')}
-					on:click={(e) => {}}
-=======
 		{#if !readOnly}
 			<div class="flex items-center translate-x-2.5">
 				<FolderMenu
@@ -292,7 +264,6 @@
 					onCreateSubFolder={() => {
 						showCreateSubFolderModal = true;
 					}}
->>>>>>> v0.11.0
 				>
 					<button
 						class="p-1.5 dark:hover:bg-gray-850 rounded-full touch-auto"

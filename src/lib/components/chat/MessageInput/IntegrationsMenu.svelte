@@ -13,11 +13,7 @@
 		terminalServers
 	} from '$lib/stores';
 
-<<<<<<< HEAD
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
-=======
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
->>>>>>> v0.11.0
 	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
@@ -31,11 +27,7 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
-<<<<<<< HEAD
-	import Keyframes from '$lib/components/icons/Keyframes.svelte';
-=======
 	import Cube from '$lib/components/icons/Cube.svelte';
->>>>>>> v0.11.0
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
@@ -65,12 +57,8 @@
 
 	export let onShowValves: Function;
 	export let onClose: Function;
-<<<<<<< HEAD
-	export const closeOnOutsideClick = true;
-=======
 	export let onWebSearchToggle: Function = () => {};
 	export let closeOnOutsideClick = true;
->>>>>>> v0.11.0
 
 	let show = false;
 	let tab = '';
@@ -183,20 +171,12 @@
 
 						{#if skills && Object.keys(skills).length > 0}
 							<button
-<<<<<<< HEAD
-								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-=======
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
->>>>>>> v0.11.0
 								on:click={() => {
 									tab = 'skills';
 								}}
 							>
-<<<<<<< HEAD
-								<Keyframes className="size-4" strokeWidth="1.75" />
-=======
 								<Cube className="size-3.5" strokeWidth="1.75" />
->>>>>>> v0.11.0
 
 								<div class="flex items-center w-full justify-between">
 									<div class=" line-clamp-1">
@@ -519,11 +499,7 @@
 			{:else if tab === 'skills' && skills}
 				<div in:fly={{ x: 20, duration: 150 }}>
 					<button
-<<<<<<< HEAD
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-=======
 						class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
->>>>>>> v0.11.0
 						on:click={() => {
 							tab = '';
 						}}
@@ -540,11 +516,7 @@
 
 					{#each Object.keys(skills) as skillId}
 						<button
-<<<<<<< HEAD
-							class="relative flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-=======
 							class="relative flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
->>>>>>> v0.11.0
 							on:click={async () => {
 								skills[skillId].enabled = !skills[skillId].enabled;
 
@@ -562,11 +534,7 @@
 								<div class="flex flex-1 gap-2 items-center">
 									<Tooltip content={skills[skillId]?.name ?? ''} placement="top">
 										<div class="shrink-0">
-<<<<<<< HEAD
-											<Keyframes className="size-4" strokeWidth="1.75" />
-=======
 											<Cube className="size-3.5" strokeWidth="1.75" />
->>>>>>> v0.11.0
 										</div>
 									</Tooltip>
 									<Tooltip content={skills[skillId]?.description ?? ''} placement="top-start">

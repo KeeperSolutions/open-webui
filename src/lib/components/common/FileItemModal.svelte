@@ -261,19 +261,11 @@
 		<div class=" pb-2">
 			<div class="flex items-start justify-between">
 				<div>
-<<<<<<< HEAD
-					<div class=" font-medium text-lg dark:text-gray-100">
-						<button
-							type="button"
-							class="hover:underline line-clamp-1 text-left"
-							on:click={() => {
-=======
 					<div class=" font-normal text-lg dark:text-gray-100">
 						<a
 							href="#"
 							class="hover:underline line-clamp-1"
 							on:click|preventDefault={() => {
->>>>>>> v0.11.0
 								if (item.type === 'file' || item.url) {
 									let fileId = item?.id ?? item?.tempId;
 									window.open(
@@ -606,7 +598,6 @@
 											aria-label={$i18n.t('Previous slide')}
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === 0}
-											aria-label={$i18n.t('Previous')}
 											on:click={() => (pptxCurrentSlide = Math.max(0, pptxCurrentSlide - 1))}
 										>
 											<svg
@@ -627,7 +618,6 @@
 											aria-label={$i18n.t('Next slide')}
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === pptxSlides.length - 1}
-											aria-label={$i18n.t('Next')}
 											on:click={() =>
 												(pptxCurrentSlide = Math.min(pptxSlides.length - 1, pptxCurrentSlide + 1))}
 										>

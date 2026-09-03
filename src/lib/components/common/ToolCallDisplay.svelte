@@ -83,10 +83,6 @@
 		}
 	}
 
-<<<<<<< HEAD
-	$: args = decode(attributes?.arguments ?? '');
-=======
->>>>>>> v0.11.0
 	export let resultContent: string = '';
 
 	$: result = resultContent || decode(attributes?.result ?? '');
@@ -205,11 +201,7 @@
 							{:else}
 								<div class="tool-call-body w-full max-w-none!">
 									<pre
-<<<<<<< HEAD
-										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2.5 overflow-x-auto">{formatJSONString(
-=======
 										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2 overflow-x-auto">{formatJSONString(
->>>>>>> v0.11.0
 											args
 										)}</pre>
 								</div>
@@ -228,11 +220,7 @@
 							<div class="w-full max-w-none!">
 								{#if typeof parsedResult === 'object' && parsedResult !== null}
 									<pre
-<<<<<<< HEAD
-										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2.5 overflow-x-auto">{JSON.stringify(
-=======
 										class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre font-mono bg-gray-50 dark:bg-gray-900 rounded-lg p-2 overflow-x-auto">{JSON.stringify(
->>>>>>> v0.11.0
 											parsedResult,
 											null,
 											2

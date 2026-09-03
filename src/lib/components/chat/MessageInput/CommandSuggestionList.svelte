@@ -4,10 +4,7 @@
 	import Knowledge from './Commands/Knowledge.svelte';
 	import Skills from './Commands/Skills.svelte';
 	import Emojis from './Commands/Emojis.svelte';
-<<<<<<< HEAD
-=======
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
->>>>>>> v0.11.0
 
 	export let char = '';
 	export let query = '';
@@ -162,33 +159,6 @@
 						} else if (type === 'knowledge') {
 							insertTextHandler('');
 
-<<<<<<< HEAD
-						onSelect({
-							type: 'skill',
-							data: data
-						});
-					}
-				}}
-			/>
-		{:else if char === ':'}
-			<Emojis
-				bind:this={suggestionElement}
-				{query}
-				bind:filteredItems
-				onSelect={(e) => {
-					const { type, data } = e;
-
-					if (type === 'emoji') {
-						command({
-							id: data.name,
-							label: data.shortCodes[0]
-						});
-					}
-				}}
-			/>
-		{/if}
-	</div>
-=======
 							onUpload({
 								type: 'file',
 								data: data
@@ -243,5 +213,4 @@
 			{/if}
 		</div>
 	</DropdownMenu>
->>>>>>> v0.11.0
 </div>

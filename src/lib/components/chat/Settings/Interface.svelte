@@ -805,21 +805,12 @@
 			</div>
 
 			<div>
-<<<<<<< HEAD
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="render-markdown-user-label" class=" self-center text-xs">
-						{$i18n.t('Render Markdown in User Messages')}
-					</div>
-
-					<div class="flex items-center gap-2 p-1">
-=======
 				<div class={settingRowClass}>
 					<div id="render-markdown-user-label" class={settingLabelClass}>
 						{$i18n.t('Render Markdown in User Messages')}
 					</div>
 
 					<div class={settingControlClass}>
->>>>>>> v0.11.0
 						<Switch
 							ariaLabelledbyId="render-markdown-user-label"
 							tooltip={true}
@@ -830,17 +821,6 @@
 						/>
 					</div>
 				</div>
-<<<<<<< HEAD
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="render-markdown-assistant-label" class=" self-center text-xs">
-						{$i18n.t('Render Markdown in Assistant Messages')}
-					</div>
-
-					<div class="flex items-center gap-2 p-1">
-=======
 				<p class={settingDescriptionClass}>
 					{$i18n.t('Format Markdown syntax in your own messages.')}
 				</p>
@@ -853,7 +833,6 @@
 					</div>
 
 					<div class={settingControlClass}>
->>>>>>> v0.11.0
 						<Switch
 							ariaLabelledbyId="render-markdown-assistant-label"
 							tooltip={true}
@@ -864,13 +843,6 @@
 						/>
 					</div>
 				</div>
-<<<<<<< HEAD
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="auto-generation-label" class=" self-center text-xs">
-=======
 				<p class={settingDescriptionClass}>
 					{$i18n.t('Format Markdown syntax in assistant responses.')}
 				</p>
@@ -879,7 +851,6 @@
 			<div>
 				<div class={settingRowClass}>
 					<div id="auto-generation-label" class={settingLabelClass}>
->>>>>>> v0.11.0
 						{$i18n.t('Title Auto-Generation')}
 					</div>
 
@@ -1230,13 +1201,8 @@
 			</div>
 
 			<div>
-<<<<<<< HEAD
-				<div class=" py-0.5 flex w-full justify-between">
-					<span class=" self-center text-xs">
-=======
 				<div class={settingRowClass}>
 					<label id="floating-action-buttons-label" class={settingLabelClass}>
->>>>>>> v0.11.0
 						{$i18n.t('Floating Quick Actions')}
 					</span>
 

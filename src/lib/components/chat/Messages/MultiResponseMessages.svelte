@@ -18,10 +18,7 @@
 	import ProfileImage from './ProfileImage.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
-<<<<<<< HEAD
-=======
 	import { formatMessageTimestamp, formatMessageTimestampFull } from '$lib/utils';
->>>>>>> v0.11.0
 	const i18n = getContext('i18n');
 
 	export let chatId;
@@ -346,18 +343,6 @@
 							groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 						<div
-<<<<<<< HEAD
-							class=" snap-center w-full max-w-full m-1 border {history.messages[messageId]
-								?.modelIdx == modelIdx
-								? `bg-gray-50 dark:bg-gray-850 border-gray-100 dark:border-gray-800 border-2 ${
-										$mobile ? 'min-w-full' : 'min-w-80'
-									}`
-								: `border-gray-100/30 dark:border-gray-850/30 border-dashed ${
-										$mobile ? 'min-w-full' : 'min-w-80'
-									}`} transition-all p-5 rounded-2xl"
-							role="button"
-							tabindex="0"
-=======
 							class="snap-center w-full max-w-full transition-all {compactPreview
 								? ''
 								: `m-1 border p-5 rounded-2xl ${
@@ -369,7 +354,6 @@
 													$mobile ? 'min-w-full' : 'min-w-80'
 												}`
 									}`}"
->>>>>>> v0.11.0
 							on:click={async () => {
 								onGroupClick(_messageId, modelIdx);
 							}}

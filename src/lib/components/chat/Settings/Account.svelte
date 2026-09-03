@@ -343,11 +343,7 @@
 		</section>
 
 		{#if $config?.features.enable_login_form && $config?.features.enable_password_change_form}
-<<<<<<< HEAD
-			<div class="mt-2">
-=======
 			<UserSettingSection title={$i18n.t('Password')}>
->>>>>>> v0.11.0
 				<UpdatePassword />
 			</UserSettingSection>
 		{/if}

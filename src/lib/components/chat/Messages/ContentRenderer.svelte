@@ -279,19 +279,6 @@
 </script>
 
 <div bind:this={contentContainerElement}>
-<<<<<<< HEAD
-	{#if $settings?.renderMarkdownInAssistantMessages ?? true}
-		<Markdown
-			{id}
-			content={model?.info?.meta?.capabilities?.citations == false
-				? replaceOutsideCode(content, (segment) =>
-						segment.replace(/\s*(\[(?:\d+(?:#[^,\]\s]+)?(?:,\s*\d+(?:#[^,\]\s]+)?)*)\])+/g, '')
-					)
-				: content}
-			{model}
-			{save}
-			{preview}
-=======
 	{#if output?.length}
 		<StructuredOutputRenderer
 			{id}
@@ -300,47 +287,10 @@
 			{save}
 			{preview}
 			{compactPreview}
->>>>>>> v0.11.0
 			{done}
 			{editCodeBlock}
 			{topPadding}
 			{sourceIds}
-<<<<<<< HEAD
-			{onSourceClick}
-			{onTaskClick}
-			{onSave}
-			onUpdate={async (token) => {
-				const { lang, text: code } = token;
-
-				if (
-					($settings?.detectArtifacts ?? true) &&
-					(['html', 'svg'].includes(lang) || (lang === 'xml' && code.includes('svg'))) &&
-					!$mobile &&
-					$chatId
-				) {
-					await tick();
-					showArtifacts.set(true);
-					showControls.set(true);
-				}
-			}}
-			onPreview={async (value) => {
-				console.log('Preview', value);
-				await artifactCode.set(value);
-				await showControls.set(true);
-				await showArtifacts.set(true);
-				await showEmbeds.set(false);
-			}}
-		/>
-	{:else}
-		{@const extracted = extractDetailsBlocks(content)}
-
-		{#if extracted.detailsContent}
-			<!-- Render structural blocks (tool calls, reasoning, etc.) through Markdown -->
-			<Markdown {id} content={extracted.detailsContent} {done} />
-		{/if}
-		{#if extracted.plainContent}
-			<div class="whitespace-pre-wrap">{extracted.plainContent}</div>
-=======
 			renderMarkdown={$settings?.renderMarkdownInAssistantMessages ?? true}
 			{formatMessageContent}
 			{onSourceClick}
@@ -380,7 +330,6 @@
 		{/if}
 		{#if extracted.plainContent}
 			<div class="whitespace-pre-wrap text-[0.9375rem]">{extracted.plainContent}</div>
->>>>>>> v0.11.0
 		{/if}
 	{/if}
 </div>

@@ -69,11 +69,7 @@
 				{#if $user?.role === 'admin' && model?.owned_by === 'ollama'}
 					<button
 						type="button"
-<<<<<<< HEAD
-						class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
-=======
 						class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
->>>>>>> v0.11.0
 						on:click={(e) => {
 							e.stopPropagation();
 							e.preventDefault();
@@ -88,11 +84,7 @@
 							viewBox="0 0 24 24"
 							stroke-width="1.5"
 							stroke="currentColor"
-<<<<<<< HEAD
-							class="size-4"
-=======
 							class="size-3.5"
->>>>>>> v0.11.0
 						>
 							<path
 								stroke-linecap="round"
@@ -105,11 +97,7 @@
 					</button>
 				{/if}
 
-<<<<<<< HEAD
-				<hr class="border-gray-50 dark:border-gray-800/30 my-1" />
-=======
 				<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
->>>>>>> v0.11.0
 			{/if}
 
 			<button

@@ -19,13 +19,10 @@
 	import Markdown from './Markdown.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-<<<<<<< HEAD
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
+	import SubagentResultRow from './SubagentResultRow.svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
-=======
-	import SubagentResultRow from './SubagentResultRow.svelte';
->>>>>>> v0.11.0
 
 	const i18n = getContext('i18n');
 	export let user;
@@ -73,7 +70,6 @@
 			}
 		}
 	}
-<<<<<<< HEAD
 
 	// Keeper PII card: detections live on the child (assistant) message; read them
 	// from live history so the card sits on the user message it describes.
@@ -92,8 +88,6 @@
 		history?.messages?.[messageId]?.content ??
 		'';
 
-=======
->>>>>>> v0.11.0
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
 		if (res) {
@@ -190,31 +184,6 @@
 					{:else}
 						{$i18n.t('You')}
 					{/if}
-<<<<<<< HEAD
-
-					{#if message.timestamp}
-						<div
-							class="self-center text-xs font-medium first-letter:capitalize ml-0.5 translate-y-[1px] {($settings?.highContrastMode ??
-							false)
-								? 'dark:text-gray-100 text-gray-900'
-								: 'invisible group-hover:visible transition'}"
-						>
-							<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
-								<!-- $i18n.t('Today at {{LOCALIZED_TIME}}') -->
-								<!-- $i18n.t('Yesterday at {{LOCALIZED_TIME}}') -->
-								<!-- $i18n.t('{{LOCALIZED_DATE}} at {{LOCALIZED_TIME}}') -->
-
-								<span class="line-clamp-1"
-									>{$i18n.t(formatDate(message.timestamp * 1000), {
-										LOCALIZED_TIME: dayjs(message.timestamp * 1000).format('LT'),
-										LOCALIZED_DATE: dayjs(message.timestamp * 1000).format('L')
-									})}</span
-								>
-							</Tooltip>
-						</div>
-					{/if}
-=======
->>>>>>> v0.11.0
 				</Name>
 			</div>
 		{/if}
@@ -276,7 +245,6 @@
 													? ''
 													: 'group-hover:visible invisible transition'}"
 												type="button"
-												aria-label={$i18n.t('Remove')}
 												on:click={() => {
 													editedFiles.splice(fileIdx, 1);
 
@@ -435,16 +403,6 @@
 						>
 							{#if message.content}
 								{#if $settings?.renderMarkdownInUserMessages ?? true}
-<<<<<<< HEAD
-									<Markdown
-										id={`${chatId}-${message.id}`}
-										content={message.content}
-										{editCodeBlock}
-										{topPadding}
-									/>
-								{:else}
-									<div class="whitespace-pre-wrap" dir={$settings?.chatDirection ?? 'auto'}>
-=======
 									<div class="markdown-prose">
 										<Markdown
 											id={`${chatId}-${message.id}`}
@@ -458,7 +416,6 @@
 										class="whitespace-pre-wrap text-[0.9375rem]"
 										dir={$settings?.chatDirection ?? 'auto'}
 									>
->>>>>>> v0.11.0
 										{message.content}
 									</div>
 								{/if}
@@ -499,7 +456,6 @@
 								<button
 									aria-label={$i18n.t('Previous message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -568,7 +524,6 @@
 								<button
 									aria-label={$i18n.t('Next message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}
@@ -657,10 +612,6 @@
 									class="{($settings?.highContrastMode ?? false)
 										? ''
 										: 'invisible group-hover:visible'} p-1 rounded-sm dark:hover:text-white hover:text-black transition"
-<<<<<<< HEAD
-									aria-label={$i18n.t('Delete')}
-=======
->>>>>>> v0.11.0
 									on:click={(e) => {
 										if (e.shiftKey) {
 											deleteMessageHandler();
@@ -688,19 +639,14 @@
 						{/if}
 					{/if}
 
-<<<<<<< HEAD
 					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
 
-					{#if $settings?.chatBubble ?? true}
-=======
 					{#if !compactPreview && ($settings?.chatBubble ?? true)}
->>>>>>> v0.11.0
 						{#if siblings.length > 1}
 							<div class="flex self-center" dir="ltr">
 								<button
 									aria-label={$i18n.t('Previous message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -769,7 +715,6 @@
 								<button
 									aria-label={$i18n.t('Next message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}

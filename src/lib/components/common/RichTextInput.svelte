@@ -759,10 +759,7 @@
 				StarterKit.configure({
 					link: link,
 					code: false, // Disabled in favor of FixedCode (see workaround above)
-<<<<<<< HEAD
-=======
 					...(messageInput ? { italic: false } : {}),
->>>>>>> v0.11.0
 					// When rich text is on, ListKit + CodeBlockLowlight provide these.
 					// Disable StarterKit's equivalents to avoid duplicate extension names.
 					...(richText

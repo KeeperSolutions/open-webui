@@ -71,11 +71,7 @@
 			e.preventDefault();
 			toggleOpen();
 		}
-<<<<<<< HEAD
-		function handleKeydown(e) {
-=======
 		function handleKeydown(e: KeyboardEvent) {
->>>>>>> v0.11.0
 			if (e.key === 'Enter' || e.key === ' ') {
 				e.preventDefault();
 				toggleOpen();
@@ -351,12 +347,9 @@
 		bind:this={contentEl}
 		class={contentClass}
 		role="menu"
-<<<<<<< HEAD
-=======
 		tabindex="-1"
 		style:max-height={resolvedMaxHeight}
 		style:overflow-y="auto"
->>>>>>> v0.11.0
 		transition:flyAndScale
 		on:click={(e) => e.stopPropagation()}
 		on:pointerdown={(e) => e.stopPropagation()}

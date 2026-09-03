@@ -220,11 +220,7 @@
 						className="w-full"
 					>
 						<button
-<<<<<<< HEAD
-							class="flex gap-2 w-full items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-=======
 							class="flex gap-2 w-full items-center h-[1.6875rem] px-2 text-[13px] font-normal select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl {!fileUploadEnabled
->>>>>>> v0.11.0
 								? 'opacity-50'
 								: ''}"
 							on:click={() => {
@@ -530,30 +526,7 @@
 					<Notes {onSelect} />
 				</div>
 			{:else if tab === 'files'}
-<<<<<<< HEAD
-				<div in:fly={{ x: 20, duration: 150 }}>
-					<button
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm select-none cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-						on:click={() => {
-							tab = '';
-						}}
-					>
-						<ChevronLeft />
-
-						<div class="flex items-center w-full justify-between">
-							<div>
-								{$i18n.t('Files')}
-							</div>
-						</div>
-					</button>
-
-					<Files {onSelect} />
-				</div>
-			{:else if tab === 'chats'}
-				<div in:fly={{ x: 20, duration: 150 }}>
-=======
 				<div class="flex max-h-72 flex-col overflow-hidden" in:fly={{ x: 20, duration: 150 }}>
->>>>>>> v0.11.0
 					<button
 						class="flex w-full shrink-0 justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 						on:click={() => {

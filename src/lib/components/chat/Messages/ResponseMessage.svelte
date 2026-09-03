@@ -66,10 +66,7 @@
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
-<<<<<<< HEAD
-=======
 	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
->>>>>>> v0.11.0
 
 	interface MessageType {
 		id: string;
@@ -253,16 +250,10 @@
 		stopAudio();
 		speakAbort = new AbortController();
 		const { signal } = speakAbort;
-<<<<<<< HEAD
 
 		speaking = true;
 		const content = removeAllDetails(message.content);
 
-=======
-
-		speaking = true;
-
->>>>>>> v0.11.0
 		if ($config.audio.tts.engine === '') {
 			let voices = [];
 			const getVoicesLoop = setInterval(() => {
@@ -421,32 +412,21 @@
 
 		if (!editedOutput && editTextAreaElement) {
 			const messagesContainer = document.getElementById('messages-container');
-<<<<<<< HEAD
-			const savedScrollTop = messagesContainer?.scrollTop;
-=======
 			const savedScrollTop = messagesContainer?.scrollTop ?? 0;
->>>>>>> v0.11.0
 
 			editTextAreaElement.style.height = '';
 			editTextAreaElement.style.height = `${editTextAreaElement.scrollHeight}px`;
 
 			if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
-<<<<<<< HEAD
-=======
 			editTextAreaElement?.focus({ preventScroll: true });
->>>>>>> v0.11.0
 		}
 	};
 
 	const editMessageConfirmHandler = async () => {
 		if (editedOutput) {
-<<<<<<< HEAD
 			// Structured edit: keep original rich content for immediate display;
 			// backend will re-derive content from output on save.
 			editMessage(message.id, { content: message.content, output: editedOutput }, false);
-=======
-			editMessage(message.id, { output: editedOutput }, false);
->>>>>>> v0.11.0
 		} else {
 			// Legacy text edit
 			const messageContent = postprocessAfterEditing(editedContent ?? '');
@@ -462,11 +442,7 @@
 
 	const saveAsCopyHandler = async () => {
 		if (editedOutput) {
-<<<<<<< HEAD
 			editMessage(message.id, { content: message.content, output: editedOutput });
-=======
-			editMessage(message.id, { output: editedOutput });
->>>>>>> v0.11.0
 		} else {
 			const messageContent = postprocessAfterEditing(editedContent ?? '');
 			editMessage(message.id, { content: messageContent });
@@ -701,13 +677,8 @@
 	>
 		<div class={`shrink-0 ltr:mr-2 rtl:ml-2 hidden @lg:flex mt-0.5 `}>
 			<ProfileImage
-<<<<<<< HEAD
 				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
 				className={'size-8 assistant-message-profile-image'}
-=======
-				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-				className={'size-7 assistant-message-profile-image'}
->>>>>>> v0.11.0
 			/>
 		</div>
 
@@ -787,16 +758,6 @@
 									<textarea
 										id="message-edit-{message.id}"
 										bind:this={editTextAreaElement}
-<<<<<<< HEAD
-										class=" bg-transparent outline-hidden w-full resize-none"
-										bind:value={editedContent}
-										on:input={(e) => {
-											const messagesContainer = document.getElementById('messages-container');
-											const savedScrollTop = messagesContainer?.scrollTop;
-
-											e.target.style.height = '';
-											e.target.style.height = `${e.target.scrollHeight}px`;
-=======
 										class=" bg-transparent outline-hidden w-full resize-none text-[0.9375rem]"
 										bind:value={editedContent}
 										on:input={(e) => {
@@ -806,7 +767,6 @@
 
 											textarea.style.height = '';
 											textarea.style.height = `${textarea.scrollHeight}px`;
->>>>>>> v0.11.0
 
 											if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
 										}}
@@ -818,21 +778,12 @@
 											const isCmdOrCtrlPressed = e.metaKey || e.ctrlKey;
 											const isEnterPressed = e.key === 'Enter';
 
-<<<<<<< HEAD
-										if (isCmdOrCtrlPressed && isEnterPressed) {
-											document.getElementById('confirm-edit-message-button')?.click();
-										}
-									}}
-								/>
-							{/if}
-=======
 											if (isCmdOrCtrlPressed && isEnterPressed) {
 												document.getElementById('confirm-edit-message-button')?.click();
 											}
 										}}
 									></textarea>
 								{/if}
->>>>>>> v0.11.0
 
 								<div class=" mt-2 flex justify-between text-sm font-normal">
 									<div>
@@ -1588,17 +1539,12 @@
 													id="delete-response-button"
 													class="{isLastMessage || ($settings?.highContrastMode ?? false)
 														? 'visible'
-<<<<<<< HEAD
-														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
-													on:click={(e) => {
-=======
 														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition disabled:opacity-50 disabled:hover:bg-transparent"
 													disabled={!allowDelete}
 													on:click={(e) => {
 														if (!allowDelete) {
 															return;
 														}
->>>>>>> v0.11.0
 														if (e.shiftKey) {
 															deleteMessageHandler();
 														} else {
@@ -1636,27 +1582,8 @@
 												datetime={new Date(message.timestamp * 1000).toISOString()}
 												class="invisible group-hover:visible ml-1 shrink-0 whitespace-nowrap text-[0.6875rem] tabular-nums text-gray-400 dark:text-gray-600 select-none"
 											>
-<<<<<<< HEAD
-												{#if action?.icon}
-													<div class="size-4">
-														<img
-															src={action.icon}
-															class="w-4 h-4 {action.icon.includes('data:image/svg')
-																? 'dark:invert-[80%]'
-																: ''}"
-															style="fill: currentColor;"
-															alt={action.name}
-															draggable="false"
-														/>
-													</div>
-												{:else}
-													<Sparkles strokeWidth="2.1" className="size-4" />
-												{/if}
-											</button>
-=======
 												{formatMessageTimestamp(message.timestamp * 1000)}
 											</time>
->>>>>>> v0.11.0
 										</Tooltip>
 									{/if}
 								{/if}

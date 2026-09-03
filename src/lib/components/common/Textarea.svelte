@@ -38,11 +38,7 @@
 			// Find all ancestors that currently have an active scroll offset.
 			// This is extremely fast because reading `scrollTop` on a clean layout doesn't trigger reflow,
 			// and it makes the fix 100% robust without relying on hardcoded CSS classes.
-<<<<<<< HEAD
-			let activeScrollParents = [];
-=======
 			const activeScrollParents: { el: HTMLElement; top: number }[] = [];
->>>>>>> v0.11.0
 			let p = textareaElement.parentNode;
 			while (p && p !== document.body) {
 				if (p instanceof HTMLElement && p.scrollTop > 0) {

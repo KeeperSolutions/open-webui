@@ -227,36 +227,6 @@
 						</Tooltip>
 					{/if}
 
-<<<<<<< HEAD
-					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}
-						<Menu
-							{chat}
-							{shareEnabled}
-							{scrollToTop}
-							shareHandler={() => {
-								showShareChatModal = !showShareChatModal;
-							}}
-							archiveChatHandler={() => {
-								archiveChatHandler(chat.id);
-							}}
-							deleteChatHandler={() => {
-								deleteChatHandler(chat.id);
-							}}
-							{moveChatHandler}
-						>
-							<button
-								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								id="chat-context-menu-button"
-							>
-								<div class=" m-auto self-center">
-									<EllipsisHorizontal className=" size-5" strokeWidth="1.5" />
-								</div>
-							</button>
-						</Menu>
-					{/if}
-
-=======
->>>>>>> v0.11.0
 					{#if $user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true)}
 						<Tooltip content={$i18n.t('Controls')}>
 							<button
@@ -270,37 +240,6 @@
 							</button>
 						</Tooltip>
 					{/if}
-<<<<<<< HEAD
-
-					{#if $user !== undefined && $user !== null}
-						<UserMenu
-							className="w-[240px]"
-							role={$user?.role}
-							help={true}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
-						>
-							<button
-								type="button"
-								class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								aria-label={$i18n.t('User menu')}
-							>
-								<div class=" self-center">
-									<img
-										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class="size-6 object-cover rounded-full"
-										alt=""
-										draggable="false"
-									/>
-								</div>
-							</button>
-						</UserMenu>
-					{/if}
-=======
->>>>>>> v0.11.0
 				</div>
 			</div>
 		</div>

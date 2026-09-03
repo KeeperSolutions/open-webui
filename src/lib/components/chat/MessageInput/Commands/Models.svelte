@@ -87,12 +87,7 @@
 					<img
 						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
 						alt={model?.name ?? model.id}
-<<<<<<< HEAD
-						class="rounded-full size-5 items-center mr-2"
-						loading="lazy"
-=======
 						class="mr-2 size-4.5 rounded-full object-cover"
->>>>>>> v0.11.0
 						on:error={(e) => {
 							e.currentTarget.src = '/favicon.png';
 						}}

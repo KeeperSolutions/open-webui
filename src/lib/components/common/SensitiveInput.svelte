@@ -15,11 +15,8 @@
 	export let screenReader = true;
 	export let autocomplete = 'off';
 	export let name: string | undefined = undefined;
-<<<<<<< HEAD
-=======
 	let className = '';
 	export { className as class };
->>>>>>> v0.11.0
 
 	let show = false;
 

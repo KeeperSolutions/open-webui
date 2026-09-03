@@ -126,21 +126,11 @@
 														bind:value={variableValues[variable]}
 														id="input-variable-{idx}"
 													>
-<<<<<<< HEAD
-														{#if variables[variable]?.placeholder}
-															<option value="" disabled selected>
-																{variables[variable].placeholder}
-															</option>
-														{/if}
-														{#each variables[variable]?.options ?? [] as option}
-															<option value={option} selected={option === variableValues[variable]}>
-=======
 														<option value="" disabled>
 															{variables[variable]?.placeholder ?? $i18n.t('Select an option')}
 														</option>
 														{#each variables[variable]?.options ?? [] as option}
 															<option value={option}>
->>>>>>> v0.11.0
 																{option}
 															</option>
 														{/each}

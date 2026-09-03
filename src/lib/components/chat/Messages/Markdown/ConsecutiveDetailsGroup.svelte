@@ -31,10 +31,7 @@
 
 	export let messageDone = true;
 	export let allowEmbeds = true;
-<<<<<<< HEAD
-=======
 	export let compactPreview = false;
->>>>>>> v0.11.0
 
 	let open = $settings?.expandDetails ?? false;
 

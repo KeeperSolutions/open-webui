@@ -15,18 +15,12 @@
 		user,
 		models as _models,
 		temporaryChatEnabled,
-<<<<<<< HEAD
 		selectedFolder,
-		chats,
-		currentChatPage,
 		theme
 	} from '$lib/stores';
+	import type { Model } from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
-=======
-		selectedFolder
-	} from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
->>>>>>> v0.11.0
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
@@ -144,15 +138,9 @@
 										}}
 									>
 										<img
-<<<<<<< HEAD
 											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
-											class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
-											alt={model?.name ?? model?.id ?? ''}
-=======
-											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
 											class=" size-9 @sm:size-10 rounded-2xl"
-											aria-hidden="true"
->>>>>>> v0.11.0
+											alt={model?.name ?? model?.id ?? ''}
 											draggable="false"
 											on:error={(e) => {
 												e.currentTarget.src = '/favicon.png';
@@ -233,37 +221,6 @@
 			{/if}
 
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
-<<<<<<< HEAD
-				<MessageInput
-					bind:this={messageInput}
-					{history}
-					{selectedModels}
-					bind:files
-					bind:prompt
-					bind:autoScroll
-					bind:selectedToolIds
-					bind:selectedSkillIds
-					bind:selectedFilterIds
-					bind:imageGenerationEnabled
-					bind:codeInterpreterEnabled
-					bind:webSearchEnabled
-					bind:piiMaskingEnabled
-					{piiMaskingLocked}
-					bind:atSelectedModel
-					bind:showCommands
-					bind:dragged
-					{pendingOAuthTools}
-					{toolServers}
-					{stopResponse}
-					{createMessagePair}
-					placeholder={$i18n.t('How can I help you today?')}
-					{onChange}
-					{onUpload}
-					on:submit={(e) => {
-						dispatch('submit', e.detail);
-					}}
-				/>
-=======
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
 						bind:this={messageInput}
@@ -278,6 +235,8 @@
 						bind:imageGenerationEnabled
 						bind:codeInterpreterEnabled
 						bind:webSearchEnabled
+						bind:piiMaskingEnabled
+						{piiMaskingLocked}
 						bind:atSelectedModel
 						bind:showCommands
 						bind:dragged
@@ -295,7 +254,6 @@
 						}}
 					/>
 				{/if}
->>>>>>> v0.11.0
 			</div>
 		</div>
 	</div>

@@ -319,8 +319,4 @@ print("${endTag}")
 	});
 </script>
 
-<<<<<<< HEAD
-<div id="code-textarea-{id}" class="h-full w-full text-sm"></div>
-=======
 <div id="code-textarea-{id}" class="{className} h-full w-full min-w-0 overflow-hidden" />
->>>>>>> v0.11.0

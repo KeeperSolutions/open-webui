@@ -21,11 +21,7 @@
 	const i18n = getContext('i18n');
 
 	let _src = '';
-<<<<<<< HEAD
-	$: _src = safeImageUrl(src.startsWith('/') ? `${WEBUI_BASE_URL}${src}` : src);
-=======
 	$: _src = safeImageUrl(src.startsWith('/') ? `${WEBUI_BASE_URL}${src}` : src, allowExternal);
->>>>>>> v0.11.0
 
 	let showImagePreview = false;
 </script>

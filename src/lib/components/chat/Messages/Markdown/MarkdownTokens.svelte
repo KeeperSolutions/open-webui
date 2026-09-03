@@ -386,10 +386,7 @@
 			id={`${id}-${tokenIdx}-detail-group`}
 			tokens={token.items}
 			messageDone={done}
-<<<<<<< HEAD
-=======
 			{compactPreview}
->>>>>>> v0.11.0
 			{allowEmbeds}
 		>
 			<div slot="content">
@@ -403,12 +400,8 @@
 							resultContent={getDetailTextContent(detailToken)}
 							grouped={true}
 							open={$settings?.expandDetails ?? false}
-<<<<<<< HEAD
-							className="w-full space-y-1"
-=======
 							className="w-full"
 							buttonClassName={detailButtonClassName}
->>>>>>> v0.11.0
 						/>
 					{:else if textContent.length > 0}
 						<Collapsible
@@ -460,12 +453,8 @@
 				attributes={token.attributes}
 				resultContent={getDetailTextContent(token)}
 				open={$settings?.expandDetails ?? false}
-<<<<<<< HEAD
-				className="w-full space-y-1"
-=======
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
->>>>>>> v0.11.0
 			/>
 		{:else if textContent.length > 0}
 			<Collapsible
@@ -587,11 +576,7 @@
 			{onSourceClick}
 		/>
 	{:else if token.type === 'space'}
-<<<<<<< HEAD
-		<div class="my-2"></div>
-=======
 		<!-- skip -->
->>>>>>> v0.11.0
 	{:else}
 		{console.log('Unknown token', token)}
 	{/if}

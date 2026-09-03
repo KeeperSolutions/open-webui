@@ -257,7 +257,6 @@
 						aria-label={$i18n.t('Previous page')}
 						class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 						disabled={page === 0}
-						aria-label={$i18n.t('Previous')}
 						on:click={() => {
 							page--;
 							loadPage();
@@ -281,7 +280,6 @@
 						aria-label={$i18n.t('Next page')}
 						class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 						disabled={page >= totalPages - 1}
-						aria-label={$i18n.t('Next')}
 						on:click={() => {
 							page++;
 							loadPage();

@@ -248,31 +248,6 @@
 		return url ? { url, key } : null;
 	};
 
-<<<<<<< HEAD
-	// Discovers server features and the terminal's cwd for a newly-selected
-	// terminal or a chat switch. Defined as a plain function (not inline in
-	// the `$:` block below) so the `savedPath = dir` write — which targets a
-	// module-scope variable, not an instance-reactive one — doesn't happen
-	// inside reactive-statement code, where Svelte warns that dependent `$:`
-	// statements elsewhere would never see it.
-	const onTerminalChanged = async (
-		terminal: { url: string; key: string },
-		terminalChanged: boolean
-	) => {
-		if (terminalChanged) {
-			const config = await getTerminalConfig(terminal.url, terminal.key);
-			terminalEnabled = config?.features?.terminal !== false;
-		}
-
-		const rawCwd = await getCwd(terminal.url, terminal.key, chatId ?? undefined);
-		const cwd = rawCwd ? normalizePath(rawCwd) : null;
-		const dir = cwd ? (cwd.endsWith('/') ? cwd : cwd + '/') : '/';
-		savedPath = dir;
-		loadDir(dir);
-	};
-
-=======
->>>>>>> v0.11.0
 	// Detect terminal or chat changes — the explicit store references ensure
 	// Svelte re-runs this block when any of them update.
 	// The `mounted` flag prevents the initial run from racing with onMount.
@@ -288,11 +263,7 @@
 		const oldChatId = prevChatId;
 		if (chatChanged) prevChatId = chatId;
 
-<<<<<<< HEAD
-		const terminalChanged = !!terminal && terminal.url !== prevTerminalUrl;
-=======
 		const terminalChanged = terminal && terminal.url !== prevTerminalUrl;
->>>>>>> v0.11.0
 		if (terminalChanged) prevTerminalUrl = terminal.url;
 
 		if (mounted && terminal) {
@@ -306,9 +277,6 @@
 				loading = true;
 				error = null;
 				entries = [];
-<<<<<<< HEAD
-				onTerminalChanged(terminal, terminalChanged);
-=======
 				(async () => {
 					if (terminalChanged) {
 						const config = await getTerminalConfig(terminal.url, terminal.key);
@@ -318,7 +286,6 @@
 					savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
 					loadDir(savedPath);
 				})();
->>>>>>> v0.11.0
 			}
 		}
 	}
@@ -438,19 +405,11 @@
 		savedPath = directory;
 		pushNavHistory(directory);
 
-<<<<<<< HEAD
-		const result = await listFiles(terminal.url, terminal.key, path, chatId ?? undefined);
-		loading = false;
-
-		// Set working directory on the terminal server (fire-and-forget)
-		setCwd(terminal.url, terminal.key, path, chatId ?? undefined);
-=======
 		const result = await listFiles(terminal.url, terminal.key, directory, chatId ?? undefined);
 		loading = false;
 
 		// Set working directory on the terminal server (fire-and-forget)
 		setCwd(terminal.url, terminal.key, directory, chatId ?? undefined);
->>>>>>> v0.11.0
 
 		if (result === null) {
 			error =
@@ -568,20 +527,6 @@
 		const terminal = selectedTerminal;
 		if (!terminal || downloading) return;
 
-<<<<<<< HEAD
-		// Directories end with '/' — download as ZIP archive
-		const isDir = path.endsWith('/');
-		const result = isDir
-			? await archiveFromTerminal(terminal.url, terminal.key, [path.replace(/\/$/, '')])
-			: await downloadFileBlob(terminal.url, terminal.key, path, chatId ?? undefined);
-		if (!result) return;
-		const url = URL.createObjectURL(result.blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = result.filename;
-		a.click();
-		URL.revokeObjectURL(url);
-=======
 		downloading = true;
 		const toastId = toast.loading($i18n.t('Preparing download...'));
 		try {
@@ -604,7 +549,6 @@
 			toast.dismiss(toastId);
 			downloading = false;
 		}
->>>>>>> v0.11.0
 	};
 
 	// ── Drag-and-drop upload ─────────────────────────────────────────────
@@ -960,19 +904,6 @@
 		if (!handledDisplayFile && terminal) {
 			loading = true;
 
-<<<<<<< HEAD
-			// Discover server features on initial mount
-			const config = await getTerminalConfig(terminal.url, terminal.key);
-			terminalEnabled = config?.features?.terminal !== false;
-
-			if (chatId || savedPath === '/') {
-				// Fetch session-specific cwd from the server (or global default for new chats)
-				const rawCwd = await getCwd(terminal.url, terminal.key, chatId ?? undefined);
-				const cwd = rawCwd ? normalizePath(rawCwd) : null;
-				if (cwd) savedPath = cwd.endsWith('/') ? cwd : cwd + '/';
-			}
-			loadDir(savedPath);
-=======
 			void (async () => {
 				// Discover server features on initial mount
 				const config = await getTerminalConfig(terminal.url, terminal.key);
@@ -985,7 +916,6 @@
 				savedPath = clampToFileRoot(savedPath);
 				loadDir(savedPath);
 			})();
->>>>>>> v0.11.0
 		}
 
 		mounted = true;

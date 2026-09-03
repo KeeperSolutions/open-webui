@@ -9,36 +9,6 @@
 	import footnoteExtension from '$lib/utils/marked/footnote-extension';
 	import citationExtension from '$lib/utils/marked/citation-extension';
 
-<<<<<<< HEAD
-	export let id = '';
-	export let content;
-	export let done = true;
-	export let model = null;
-	export let save = false;
-	export let preview = false;
-
-	export let paragraphTag = 'p';
-	export let editCodeBlock = true;
-	export let topPadding = false;
-	export let allowEmbeds = true;
-
-	export let sourceIds = [];
-
-	export let onSave = () => {};
-	export let onUpdate = () => {};
-
-	export let onPreview = () => {};
-
-	export let onSourceClick = () => {};
-	export let onTaskClick = () => {};
-
-	let tokens = [];
-	let pendingUpdate = null;
-	let lastContent = '';
-	let lastParsedContent = '';
-
-=======
->>>>>>> v0.11.0
 	const options = {
 		throwOnError: false
 	};

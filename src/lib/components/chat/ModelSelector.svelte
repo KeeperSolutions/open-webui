@@ -31,7 +31,7 @@
 		toast.success($i18n.t('Default model updated'));
 	};
 
-	const pinModelHandler = async (modelId: string) => {
+	const pinModelHandler = async (modelId) => {
 		let pinnedModels = $settings?.pinnedModels ?? [];
 
 		if (pinnedModels.includes(modelId)) {
@@ -86,20 +86,5 @@
 				/>
 			</div>
 		</div>
-<<<<<<< HEAD
-	{/each}
-</div>
-
-{#if showSetDefault}
-	<div
-		class="relative text-left mt-px ml-1 text-[0.7rem] text-gray-600 dark:text-gray-400 font-primary"
-	>
-		{#if JSON.stringify(selectedModels) === JSON.stringify($settings?.models ?? [])}
-			<span>{$i18n.t('Default model')}</span>
-		{:else}
-			<button on:click={saveDefaultModel}>{$i18n.t('Set as default')}</button>
-		{/if}
-=======
->>>>>>> v0.11.0
 	</div>
 </div>
