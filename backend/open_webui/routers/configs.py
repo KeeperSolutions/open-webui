@@ -2,59 +2,37 @@ from __future__ import annotations
 
 import copy
 import logging
-<<<<<<< HEAD
-=======
 from typing import Optional
->>>>>>> v0.11.0
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mcp.shared.auth import OAuthMetadata
-<<<<<<< HEAD
 from open_webui.config import BannerModel, async_save_config, get_config, save_config
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
-=======
-from open_webui.config import BannerModel
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_custom_headers
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.oauth import (
     OAuthClientInformationFull,
-<<<<<<< HEAD
-=======
     apply_connection_oauth_options,
->>>>>>> v0.11.0
     decrypt_data,
     encrypt_data,
     get_discovery_urls,
     get_oauth_client_info_with_dynamic_client_registration,
     get_oauth_client_info_with_static_credentials,
-<<<<<<< HEAD
-    resolve_oauth_client_info,
-)
-from open_webui.utils.tools import (
-=======
     recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
 )
 from open_webui.utils.tools import (
     bearer_auth_header,
->>>>>>> v0.11.0
     get_tool_server_data,
     get_tool_server_url,
     set_terminal_servers,
     set_tool_servers,
 )
-<<<<<<< HEAD
 from pydantic import BaseModel, ConfigDict, Field
-=======
-from pydantic import BaseModel, ConfigDict
->>>>>>> v0.11.0
 
 router = APIRouter()
 
@@ -100,12 +78,21 @@ SUBAGENTS_CONFIG_KEYS = {
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
-    values = await Config.get_many(*key_map.values())
-    return {field: values[storage_key] for field, storage_key in key_map.items() if storage_key in values}
+    from open_webui import config as _cfg
+
+    return {field: getattr(getattr(_cfg, field, None), 'value', None) for field in key_map}
 
 
 def config_updates(data: dict, key_map: dict[str, str]) -> dict:
-    return {key_map[field]: value for field, value in data.items() if field in key_map}
+    from open_webui import config as _cfg
+
+    for field, value in data.items():
+        if field in key_map:
+            cv = getattr(_cfg, field, None)
+            if cv is not None:
+                cv.value = value
+                cv.commit()
+    return {}
 
 
 ############################
@@ -121,12 +108,8 @@ class ImportConfigForm(BaseModel):
 
 @router.post('/import', response_model=dict)
 async def import_config(request: Request, form_data: ImportConfigForm, user=Depends(get_admin_user)):
-<<<<<<< HEAD
     await async_save_config(form_data.config)
     request.app.state.config._sync_to_redis()
-    return get_config()
-=======
-    await Config.upsert(form_data.config)
     await publish_event(
         request,
         EVENTS.CONFIG_IMPORTED,
@@ -134,8 +117,7 @@ async def import_config(request: Request, form_data: ImportConfigForm, user=Depe
         subject_id='import',
         data={'keys': list(form_data.config.keys())},
     )
-    return await Config.get_all()
->>>>>>> v0.11.0
+    return get_config()
 
 
 ############################
@@ -145,12 +127,14 @@ async def import_config(request: Request, form_data: ImportConfigForm, user=Depe
 
 @router.get('/export', response_model=dict)
 async def export_config(user=Depends(get_admin_user)):
-    return await Config.get_all()
+    return get_config()
 
 
 @router.get('/namespace/{namespace}', response_model=dict)
 async def get_config_namespace(namespace: str, user=Depends(get_admin_user)):
-    return await Config.get_namespace(namespace)
+    blob = get_config()
+    prefix = namespace.rstrip('.') + '.'
+    return {k: v for k, v in blob.items() if k == namespace or k.startswith(prefix)}
 
 
 ############################
@@ -174,7 +158,7 @@ async def set_connections_config(
     form_data: ConnectionsConfigForm,
     user=Depends(get_admin_user),
 ):
-    await Config.upsert(config_updates(form_data.model_dump(), CONNECTIONS_CONFIG_KEYS))
+    config_updates(form_data.model_dump(), CONNECTIONS_CONFIG_KEYS)
     values = await get_config_values(CONNECTIONS_CONFIG_KEYS)
     await publish_event(
         request,
@@ -193,10 +177,7 @@ class OAuthClientRegistrationForm(BaseModel):
     client_name: str | None = None
     client_secret: str | None = None
     oauth_server_url: str | None = None
-<<<<<<< HEAD
-=======
     oauth_scope: str | None = None
->>>>>>> v0.11.0
 
 
 @router.post('/oauth/clients/register')
@@ -225,11 +206,7 @@ async def register_oauth_client(
             )
         else:
             oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
-<<<<<<< HEAD
-                request, oauth_client_id, oauth_server_url
-=======
                 request, oauth_client_id, oauth_server_url, oauth_scope=form_data.oauth_scope
->>>>>>> v0.11.0
             )
         return {
             'status': True,
@@ -267,7 +244,7 @@ class ToolServersConfigForm(BaseModel):
 
 @router.get('/tool_servers', response_model=ToolServersConfigForm)
 async def get_tool_servers_config(request: Request, user=Depends(get_admin_user)):
-    return {'TOOL_SERVER_CONNECTIONS': await Config.get('tool_server.connections')}
+    return {'TOOL_SERVER_CONNECTIONS': request.app.state.config.TOOL_SERVER_CONNECTIONS}
 
 
 @router.post('/tool_servers', response_model=ToolServersConfigForm)
@@ -276,7 +253,7 @@ async def set_tool_servers_config(
     form_data: ToolServersConfigForm,
     user=Depends(get_admin_user),
 ):
-    existing_connections = await Config.get('tool_server.connections', []) or []
+    existing_connections = request.app.state.config.TOOL_SERVER_CONNECTIONS or []
     for connection in existing_connections:
         server_type = connection.get('type', 'openapi')
         auth_type = connection.get('auth_type', 'none')
@@ -293,7 +270,7 @@ async def set_tool_servers_config(
 
     # Set new tool server connections
     connections = [connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS]
-    await Config.upsert({'tool_server.connections': connections})
+    request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
 
     await set_tool_servers(request)
 
@@ -306,11 +283,8 @@ async def set_tool_servers_config(
             if auth_type in ('oauth_2.1', 'oauth_2.1_static') and server_id:
                 try:
                     oauth_client_info = resolve_oauth_client_info(connection)
-<<<<<<< HEAD
-=======
                     oauth_client_info = await recover_static_oauth_client_metadata(connection, oauth_client_info)
                     oauth_client_info = apply_connection_oauth_options(connection, oauth_client_info)
->>>>>>> v0.11.0
                     request.app.state.oauth_client_manager.add_client(
                         f'{server_type}:{server_id}',
                         OAuthClientInformationFull(**oauth_client_info),
@@ -344,15 +318,10 @@ class TerminalServerConnection(BaseModel):
 
     config: dict | None = None
 
-<<<<<<< HEAD
     # Orchestrator policy fields
     server_type: str | None = None  # "orchestrator", "terminal"
     policy_id: str | None = None
     policy: dict | None = None  # cached policy data
-=======
-    server_type: str | None = None
-    policy_id: str | None = None
->>>>>>> v0.11.0
 
     model_config = ConfigDict(extra='allow')
 
@@ -363,7 +332,7 @@ class TerminalServersConfigForm(BaseModel):
 
 @router.get('/terminal_servers')
 async def get_terminal_servers_config(request: Request, user=Depends(get_admin_user)):
-    return {'TERMINAL_SERVER_CONNECTIONS': await Config.get('terminal_server.connections')}
+    return {'TERMINAL_SERVER_CONNECTIONS': request.app.state.config.TERMINAL_SERVER_CONNECTIONS}
 
 
 @router.post('/terminal_servers')
@@ -375,7 +344,7 @@ async def set_terminal_servers_config(
     connections = [
         connection.model_dump(exclude={'policy', 'lifecycle'}) for connection in form_data.TERMINAL_SERVER_CONNECTIONS
     ]
-    await Config.upsert({'terminal_server.connections': connections})
+    request.app.state.config.TERMINAL_SERVER_CONNECTIONS = connections
 
     await set_terminal_servers(request)
 
@@ -484,17 +453,12 @@ async def put_terminal_server_policy(
             timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
         ) as session:
             policy_url = f'{base_url}/api/v1/policies/{form_data.policy_id}'
-<<<<<<< HEAD
-            async with session.put(
-                policy_url, headers=headers, json=form_data.policy_data, ssl=AIOHTTP_CLIENT_SESSION_SSL
-=======
             async with session.request(
                 'GET' if form_data.policy_data is None else 'PUT',
                 policy_url,
                 headers=headers,
                 json=form_data.policy_data,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
->>>>>>> v0.11.0
             ) as resp:
                 if resp.ok:
                     return await resp.json()
@@ -663,11 +627,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
                     if form_data.headers and isinstance(form_data.headers, dict):
                         if headers is None:
                             headers = {}
-<<<<<<< HEAD
-                        custom_headers = get_custom_headers(form_data.headers, user)
-=======
                         custom_headers = await get_custom_headers(form_data.headers, user)
->>>>>>> v0.11.0
                         headers.update(custom_headers)
 
                     await client.connect(form_data.url, headers=headers)
@@ -712,11 +672,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
             if form_data.headers and isinstance(form_data.headers, dict):
                 if headers is None:
                     headers = {}
-<<<<<<< HEAD
-                custom_headers = get_custom_headers(form_data.headers, user)
-=======
                 custom_headers = await get_custom_headers(form_data.headers, user)
->>>>>>> v0.11.0
                 headers.update(custom_headers)
 
             url = get_tool_server_url(form_data.url, form_data.path)
@@ -761,7 +717,7 @@ async def get_code_execution_config(request: Request, user=Depends(get_admin_use
 async def set_code_execution_config(
     request: Request, form_data: CodeInterpreterConfigForm, user=Depends(get_admin_user)
 ):
-    await Config.upsert(config_updates(form_data.model_dump(), CODE_EXECUTION_CONFIG_KEYS))
+    config_updates(form_data.model_dump(), CODE_EXECUTION_CONFIG_KEYS)
     values = await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
     await publish_event(
         request,
@@ -786,7 +742,6 @@ class ModelsConfigForm(BaseModel):
     DEFAULT_MODELS: str | None
     DEFAULT_PINNED_MODELS: str | None
     MODEL_ORDER_LIST: list[str | None]
-<<<<<<< HEAD
     FEATURED_MODELS: list = Field(default_factory=list)
     DEFAULT_MODEL_METADATA: dict | None = None
     DEFAULT_MODEL_PARAMS: dict | None = None
@@ -795,24 +750,16 @@ class ModelsConfigForm(BaseModel):
 @router.get('/models/featured')
 async def get_featured_models(request: Request, user=Depends(get_verified_user)):
     return {'FEATURED_MODELS': request.app.state.config.FEATURED_MODELS}
-=======
-    DEFAULT_MODEL_METADATA: dict | None = None
-    DEFAULT_MODEL_PARAMS: dict | None = None
->>>>>>> v0.11.0
 
 
 @router.get('/models/defaults')
 async def get_models_defaults(request: Request, user=Depends(get_verified_user)):
     return {
-<<<<<<< HEAD
         'DEFAULT_MODELS': request.app.state.config.DEFAULT_MODELS,
         'DEFAULT_PINNED_MODELS': request.app.state.config.DEFAULT_PINNED_MODELS,
         'MODEL_ORDER_LIST': request.app.state.config.MODEL_ORDER_LIST,
         'FEATURED_MODELS': request.app.state.config.FEATURED_MODELS,
         'DEFAULT_MODEL_METADATA': request.app.state.config.DEFAULT_MODEL_METADATA,
-=======
-        'DEFAULT_MODEL_METADATA': await Config.get('models.default_metadata'),
->>>>>>> v0.11.0
     }
 
 
@@ -823,13 +770,20 @@ async def get_models_config(request: Request, user=Depends(get_admin_user)):
 
 @router.post('/models', response_model=ModelsConfigForm)
 async def set_models_config(request: Request, form_data: ModelsConfigForm, user=Depends(get_admin_user)):
-<<<<<<< HEAD
     request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
     request.app.state.config.DEFAULT_PINNED_MODELS = form_data.DEFAULT_PINNED_MODELS
     request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
     request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS or []
     request.app.state.config.DEFAULT_MODEL_METADATA = form_data.DEFAULT_MODEL_METADATA
     request.app.state.config.DEFAULT_MODEL_PARAMS = form_data.DEFAULT_MODEL_PARAMS
+    await publish_event(
+        request,
+        EVENTS.CONFIG_MODELS_UPDATED,
+        actor=user,
+        subject_id='models',
+        subject_type='config',
+        data={'default_models': request.app.state.config.DEFAULT_MODELS},
+    )
     return {
         'DEFAULT_MODELS': request.app.state.config.DEFAULT_MODELS,
         'DEFAULT_PINNED_MODELS': request.app.state.config.DEFAULT_PINNED_MODELS,
@@ -838,57 +792,6 @@ async def set_models_config(request: Request, form_data: ModelsConfigForm, user=
         'DEFAULT_MODEL_METADATA': request.app.state.config.DEFAULT_MODEL_METADATA,
         'DEFAULT_MODEL_PARAMS': request.app.state.config.DEFAULT_MODEL_PARAMS,
     }
-=======
-    await Config.upsert(config_updates(form_data.model_dump(), MODELS_CONFIG_KEYS))
-    values = await get_config_values(MODELS_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_MODELS_UPDATED,
-        actor=user,
-        subject_id='models',
-        subject_type='config',
-        data={
-            'default_models': values.get('DEFAULT_MODELS'),
-            'default_pinned_models': values.get('DEFAULT_PINNED_MODELS'),
-            'model_order_count': len(values.get('MODEL_ORDER_LIST') or []),
-        },
-    )
-    return values
-
-
-class SubagentsConfigForm(BaseModel):
-    ENABLE_SUBAGENTS: bool
-    SUBAGENTS_BACKGROUND_ENABLED: bool
-    SUBAGENTS_MAX_CONCURRENT: int
-    SUBAGENTS_MAX_ASYNC: int
-    SUBAGENTS_MAX_ITERATIONS: int
-    SUBAGENTS_MAX_OUTPUT: int
-    SUBAGENTS_SYSTEM_PROMPT: str
-
-
-@router.get('/subagents', response_model=SubagentsConfigForm)
-async def get_subagents_config(user=Depends(get_admin_user)):
-    return await get_config_values(SUBAGENTS_CONFIG_KEYS)
-
-
-@router.post('/subagents', response_model=SubagentsConfigForm)
-async def set_subagents_config(
-    request: Request,
-    form_data: SubagentsConfigForm,
-    user=Depends(get_admin_user),
-):
-    await Config.upsert(config_updates(form_data.model_dump(), SUBAGENTS_CONFIG_KEYS))
-    values = await get_config_values(SUBAGENTS_CONFIG_KEYS)
-    await publish_event(
-        request,
-        EVENTS.CONFIG_UPDATED,
-        actor=user,
-        subject_id='subagents',
-        subject_type='config',
-        data={'enabled': values.get('ENABLE_SUBAGENTS')},
-    )
-    return values
->>>>>>> v0.11.0
 
 
 class PromptSuggestion(BaseModel):
@@ -907,8 +810,8 @@ async def set_default_suggestions(
     user=Depends(get_admin_user),
 ):
     data = form_data.model_dump()
-    await Config.upsert({'ui.prompt_suggestions': data['suggestions']})
-    suggestions = await Config.get('ui.prompt_suggestions')
+    request.app.state.config.DEFAULT_PROMPT_SUGGESTIONS = data['suggestions']
+    suggestions = request.app.state.config.DEFAULT_PROMPT_SUGGESTIONS
     await publish_event(
         request,
         EVENTS.CONFIG_SUGGESTIONS_UPDATED,
@@ -936,8 +839,8 @@ async def set_banners(
     user=Depends(get_admin_user),
 ):
     data = form_data.model_dump()
-    await Config.upsert({'ui.banners': data['banners']})
-    banners = await Config.get('ui.banners')
+    request.app.state.config.WEBUI_BANNERS = data['banners']
+    banners = request.app.state.config.WEBUI_BANNERS
     await publish_event(
         request,
         EVENTS.CONFIG_BANNERS_UPDATED,
@@ -954,4 +857,4 @@ async def get_banners(
     request: Request,
     user=Depends(get_verified_user),
 ):
-    return await Config.get('ui.banners')
+    return request.app.state.config.WEBUI_BANNERS
