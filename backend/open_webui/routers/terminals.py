@@ -13,22 +13,13 @@ import aiohttp
 from fastapi import APIRouter, Depends, Request, Response, WebSocket
 from fastapi.responses import JSONResponse, StreamingResponse
 from open_webui.config import TERMINAL_PROXY_HEADERS
-<<<<<<< HEAD
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
-from open_webui.models.groups import Groups
-from open_webui.models.users import Users
-from open_webui.utils.access_control import has_connection_access
-from open_webui.utils.auth import get_verified_user
-=======
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL
-from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.utils.access_control import has_connection_access
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.terminals import get_terminal_server_url
 from open_webui.utils.tools import bearer_auth_header, normalize_bearer_token
->>>>>>> v0.11.0
 from starlette.background import BackgroundTask
 
 log = logging.getLogger(__name__)
@@ -54,8 +45,6 @@ def _sanitize_proxy_path(path: str) -> str | None:
         if once == decoded:
             break
         decoded = once
-<<<<<<< HEAD
-=======
     # Fail closed: still encoded after the cap means the upstream would decode further into traversal.
     if unquote(decoded) != decoded:
         return None
@@ -63,7 +52,6 @@ def _sanitize_proxy_path(path: str) -> str | None:
     # Upstreams that treat '\' as a separator would resolve it, so reject outright.
     if '\\' in decoded:
         return None
->>>>>>> v0.11.0
     had_trailing_slash = decoded.endswith('/')
     normalized = posixpath.normpath(decoded)
     # Remove any leading slashes that would reset the base
@@ -80,11 +68,7 @@ def _sanitize_proxy_path(path: str) -> str | None:
 @router.get('/')
 async def list_terminal_servers(request: Request, user=Depends(get_verified_user)):
     """Return terminal servers the authenticated user has access to."""
-<<<<<<< HEAD
     connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
-=======
-    connections = await Config.get('terminal_server.connections', []) or []
->>>>>>> v0.11.0
     user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
 
     return [
@@ -109,18 +93,15 @@ async def proxy_terminal(
     user=Depends(get_verified_user),
 ):
     """Proxy a request to the admin terminal server identified by *server_id*."""
-    connections = await Config.get('terminal_server.connections', []) or []
+    connections = ws.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
     connection = next((c for c in connections if c.get('id') == server_id), None)
 
     if connection is None:
         return JSONResponse({'error': f"Terminal server '{server_id}' not found"}, status_code=404)
 
-<<<<<<< HEAD
-=======
     if not connection.get('enabled', True):
         return JSONResponse({'error': 'Terminal server disabled'}, status_code=403)
 
->>>>>>> v0.11.0
     user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
     if not await has_connection_access(user, connection, user_group_ids):
         return JSONResponse({'error': 'Access denied'}, status_code=403)
@@ -241,11 +222,7 @@ async def _resolve_authenticated_connection(ws: WebSocket, server_id: str):
     import asyncio
     import json
 
-<<<<<<< HEAD
-    from open_webui.utils.auth import decode_token
-=======
     from open_webui.utils.auth import get_verified_user_by_token
->>>>>>> v0.11.0
 
     # First-message authentication
     try:
@@ -254,16 +231,7 @@ async def _resolve_authenticated_connection(ws: WebSocket, server_id: str):
         if payload.get('type') != 'auth':
             await ws.close(code=4001, reason='Expected auth message')
             return None
-<<<<<<< HEAD
-        token = payload.get('token', '')
-        data = decode_token(token)
-        if data is None or 'id' not in data:
-            await ws.close(code=4001, reason='Invalid token')
-            return None
-        user = await Users.get_user_by_id(data['id'])
-=======
         user = await get_verified_user_by_token(payload.get('token', ''), getattr(ws.app.state, 'redis', None))
->>>>>>> v0.11.0
         if user is None:
             await ws.close(code=4001, reason='Invalid token')
             return None
@@ -275,20 +243,17 @@ async def _resolve_authenticated_connection(ws: WebSocket, server_id: str):
         return None
 
     # Resolve terminal server
-    connections = await Config.get('terminal_server.connections', []) or []
+    connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
     connection = next((c for c in connections if c.get('id') == server_id), None)
 
     if connection is None:
         await ws.close(code=4004, reason='Terminal server not found')
         return None
 
-<<<<<<< HEAD
-=======
     if not connection.get('enabled', True):
         await ws.close(code=4003, reason='Terminal server disabled')
         return None
 
->>>>>>> v0.11.0
     user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id)}
     if not await has_connection_access(user, connection, user_group_ids):
         await ws.close(code=4003, reason='Access denied')

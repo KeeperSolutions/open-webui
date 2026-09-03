@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 import asyncio
-=======
->>>>>>> v0.11.0
 import logging
 import re
 from typing import Optional
@@ -20,13 +17,8 @@ from open_webui.config import (
     DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
 )
 from open_webui.constants import ERROR_MESSAGES, TASKS
-<<<<<<< HEAD
 from open_webui.routers.billing import check_billing_access
 from open_webui.routers.pipelines import process_pipeline_inlet_filter, process_pipeline_outlet_filter
-=======
-from open_webui.models.config import Config
-from open_webui.routers.pipelines import process_pipeline_inlet_filter
->>>>>>> v0.11.0
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.task import (
@@ -69,12 +61,22 @@ TASK_CONFIG_KEYS = {
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
-    values = await Config.get_many(*key_map.values())
-    return {field: values[storage_key] for field, storage_key in key_map.items() if storage_key in values}
+    # Risk #1: the fork keeps its ConfigVar backbone; resolve FIELD → live ConfigVar.
+    from open_webui import config as _cfg
+
+    return {field: getattr(getattr(_cfg, field, None), 'value', None) for field in key_map}
 
 
 def config_updates(data: dict, key_map: dict[str, str]) -> dict:
-    return {key_map[field]: value for field, value in data.items() if field in key_map}
+    from open_webui import config as _cfg
+
+    for field, value in data.items():
+        if field in key_map:
+            cv = getattr(_cfg, field, None)
+            if cv is not None:
+                cv.value = value
+                cv.commit()
+    return {}
 
 
 # Matches the placeholder shape minted by the PII pipeline ([PERSON_1], [HR_OIB_2],
@@ -228,7 +230,6 @@ def _apply_restored_content(response, restored_content):
 
 @router.get('/config')
 async def get_task_config(request: Request, user=Depends(get_verified_user)):
-<<<<<<< HEAD
     return {
         'TASK_MODEL': request.app.state.config.TASK_MODEL,
         'TASK_MODEL_EXTERNAL': request.app.state.config.TASK_MODEL_EXTERNAL,
@@ -248,9 +249,6 @@ async def get_task_config(request: Request, user=Depends(get_verified_user)):
         'ENABLE_VOICE_MODE_PROMPT': request.app.state.config.ENABLE_VOICE_MODE_PROMPT,
         'VOICE_MODE_PROMPT_TEMPLATE': request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE,
     }
-=======
-    return await get_config_values(TASK_CONFIG_KEYS)
->>>>>>> v0.11.0
 
 
 class TaskConfigForm(BaseModel):
@@ -276,7 +274,6 @@ class TaskConfigForm(BaseModel):
 
 @router.post('/config/update')
 async def update_task_config(request: Request, form_data: TaskConfigForm, user=Depends(get_admin_user)):
-<<<<<<< HEAD
     request.app.state.config.TASK_MODEL = form_data.TASK_MODEL
     request.app.state.config.TASK_MODEL_EXTERNAL = form_data.TASK_MODEL_EXTERNAL
     request.app.state.config.ENABLE_TITLE_GENERATION = form_data.ENABLE_TITLE_GENERATION
@@ -327,15 +324,6 @@ async def update_task_config(request: Request, form_data: TaskConfigForm, user=D
 @router.post('/title/completions')
 async def generate_title(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_TITLE_GENERATION:
-=======
-    await Config.upsert(config_updates(form_data.model_dump(), TASK_CONFIG_KEYS))
-    return await get_config_values(TASK_CONFIG_KEYS)
-
-
-@router.post('/title/completions')
-async def generate_title(request: Request, form_data: dict, user=Depends(get_verified_user)):
-    if not await Config.get('task.title.enable'):
->>>>>>> v0.11.0
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Title generation is disabled'},
@@ -365,14 +353,14 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating chat title using model {task_model_id} for user {user.email} ')
 
-    title_template = await Config.get('task.title.prompt_template')
+    title_template = request.app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE
     if title_template != '':
         template = title_template
     else:
@@ -425,13 +413,8 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @router.post('/follow_up/completions')
-<<<<<<< HEAD
 async def generate_follow_ups(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_FOLLOW_UP_GENERATION:
-=======
-async def generate_follow_ups(request: Request, form_data: dict, user=Depends(get_verified_user)):
-    if not await Config.get('task.follow_up.enable'):
->>>>>>> v0.11.0
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Follow-up generation is disabled'},
@@ -456,14 +439,14 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating chat title using model {task_model_id} for user {user.email} ')
 
-    follow_up_template = await Config.get('task.follow_up.prompt_template')
+    follow_up_template = request.app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
     if follow_up_template != '':
         template = follow_up_template
     else:
@@ -507,13 +490,8 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
 
 @router.post('/tags/completions')
-<<<<<<< HEAD
 async def generate_chat_tags(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_TAGS_GENERATION:
-=======
-async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get_verified_user)):
-    if not await Config.get('task.tags.enable'):
->>>>>>> v0.11.0
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={'detail': 'Tags generation is disabled'},
@@ -538,14 +516,14 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating chat tags using model {task_model_id} for user {user.email} ')
 
-    tags_template = await Config.get('task.tags.prompt_template')
+    tags_template = request.app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE
     if tags_template != '':
         template = tags_template
     else:
@@ -609,14 +587,14 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating image prompt using model {task_model_id} for user {user.email} ')
 
-    image_prompt_template = await Config.get('task.image.prompt_template')
+    image_prompt_template = request.app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
     if image_prompt_template != '':
         template = image_prompt_template
     else:
@@ -660,13 +638,13 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
 async def generate_queries(request: Request, form_data: dict, user=Depends(check_billing_access)):
     type = form_data.get('type')
     if type == 'web_search':
-        if not await Config.get('task.query.search.enable'):
+        if not request.app.state.config.ENABLE_SEARCH_QUERY_GENERATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.FEATURE_DISABLED('Search query generation'),
             )
     elif type == 'retrieval':
-        if not await Config.get('task.query.retrieval.enable'):
+        if not request.app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.FEATURE_DISABLED('Query generation'),
@@ -695,14 +673,14 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(check
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating {type} queries using model {task_model_id} for user {user.email}')
 
-    query_template = await Config.get('task.query.prompt_template')
+    query_template = request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE
     if query_template.strip() != '':
         template = query_template
     else:
@@ -744,13 +722,8 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(check
 
 
 @router.post('/auto/completions')
-<<<<<<< HEAD
 async def generate_autocompletion(request: Request, form_data: dict, user=Depends(check_billing_access)):
     if not request.app.state.config.ENABLE_AUTOCOMPLETE_GENERATION:
-=======
-async def generate_autocompletion(request: Request, form_data: dict, user=Depends(get_verified_user)):
-    if not await Config.get('task.autocomplete.enable'):
->>>>>>> v0.11.0
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.FEATURE_DISABLED('Autocompletion generation'),
@@ -760,16 +733,12 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     prompt = form_data.get('prompt')
     messages = form_data.get('messages')
 
-    autocomplete_input_max_length = await Config.get('task.autocomplete.input_max_length')
+    autocomplete_input_max_length = request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
     if autocomplete_input_max_length > 0:
         if len(prompt) > autocomplete_input_max_length:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-<<<<<<< HEAD
                 detail=ERROR_MESSAGES.INPUT_TOO_LONG(request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH),
-=======
-                detail=ERROR_MESSAGES.INPUT_TOO_LONG(autocomplete_input_max_length),
->>>>>>> v0.11.0
             )
 
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
@@ -791,14 +760,14 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 
     log.debug(f'generating autocompletion using model {task_model_id} for user {user.email}')
 
-    autocomplete_template = await Config.get('task.autocomplete.prompt_template')
+    autocomplete_template = request.app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
     if autocomplete_template.strip() != '':
         template = autocomplete_template
     else:
@@ -861,8 +830,8 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(check_b
     # If the user has a custom task model, use that model
     task_model_id = get_task_model_id(
         model_id,
-        await Config.get('task.model.default'),
-        await Config.get('task.model.external'),
+        request.app.state.config.TASK_MODEL,
+        request.app.state.config.TASK_MODEL_EXTERNAL,
         models,
     )
 

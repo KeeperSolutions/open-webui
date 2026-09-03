@@ -5,13 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-=======
 from open_webui.events import EVENTS, publish_event
->>>>>>> v0.11.0
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.prompt_history import (
     PromptHistories,
@@ -154,13 +150,13 @@ async def create_new_prompt(
         await has_permission(
             user.id,
             'workspace.prompts',
-            await Config.get('user.permissions'),
+            request.app.state.config.USER_PERMISSIONS,
             db=db,
         )
         or await has_permission(
             user.id,
             'workspace.prompts_import',
-            await Config.get('user.permissions'),
+            request.app.state.config.USER_PERMISSIONS,
             db=db,
         )
     ):
@@ -170,11 +166,7 @@ async def create_new_prompt(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -297,11 +289,7 @@ async def update_prompt_by_id(
             )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -481,11 +469,7 @@ async def update_prompt_access_by_id(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -494,9 +478,6 @@ async def update_prompt_access_by_id(
 
     await AccessGrants.set_access_grants('prompt', prompt_id, form_data.access_grants, db=db)
 
-<<<<<<< HEAD
-    return await Prompts.get_prompt_by_id(prompt_id, db=db)
-=======
     updated_prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
     await publish_event(
         request,
@@ -506,7 +487,6 @@ async def update_prompt_access_by_id(
         data={'name': updated_prompt.name if updated_prompt else None},
     )
     return updated_prompt
->>>>>>> v0.11.0
 
 
 ############################
@@ -516,14 +496,10 @@ async def update_prompt_access_by_id(
 
 @router.post('/id/{prompt_id}/toggle', response_model=PromptModel | None)
 async def toggle_prompt_active(
-<<<<<<< HEAD
-    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
-=======
     request: Request,
     prompt_id: str,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
->>>>>>> v0.11.0
 ):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
@@ -573,14 +549,10 @@ async def toggle_prompt_active(
 
 @router.delete('/id/{prompt_id}/delete', response_model=bool)
 async def delete_prompt_by_id(
-<<<<<<< HEAD
-    prompt_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
-=======
     request: Request,
     prompt_id: str,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
->>>>>>> v0.11.0
 ):
     prompt = await Prompts.get_prompt_by_id(prompt_id, db=db)
 
@@ -607,8 +579,6 @@ async def delete_prompt_by_id(
         )
 
     result = await Prompts.delete_prompt_by_id(prompt.id, db=db)
-<<<<<<< HEAD
-=======
     if result:
         await publish_event(
             request,
@@ -617,7 +587,6 @@ async def delete_prompt_by_id(
             subject_id=prompt.id,
             data={'name': prompt.name, 'command': prompt.command},
         )
->>>>>>> v0.11.0
     return result
 
 

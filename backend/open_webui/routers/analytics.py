@@ -67,12 +67,9 @@ async def get_model_analytics(
     counts = await ChatMessages.get_message_count_by_model(
         start_date=start_date, end_date=end_date, group_id=group_id, db=db
     )
-<<<<<<< HEAD
-=======
     unique_counts = await ChatMessages.get_unique_counts_by_model(
         start_date=start_date, end_date=end_date, group_id=group_id, db=db
     )
->>>>>>> v0.11.0
     models = [
         ModelAnalyticsEntry(
             model_id=model_id,
@@ -308,12 +305,7 @@ async def get_model_chats(
     if direction in {'asc', 'desc'}:
         filter['direction'] = direction
 
-<<<<<<< HEAD
-    # Get chat IDs that used this model
-    chat_ids = await ChatMessages.get_chat_ids_by_model_id(
-=======
     result = await Chats.get_chats_by_model_id(
->>>>>>> v0.11.0
         model_id=model_id,
         filter=filter,
         skip=skip,
@@ -321,57 +313,10 @@ async def get_model_chats(
         db=db,
     )
 
-<<<<<<< HEAD
-    if not chat_ids:
-        return ModelChatsResponse(chats=[], total=0)
-
-    # Get chat details from messages only
-    chats_data = []
-    for chat_id in chat_ids:
-        messages = await ChatMessages.get_messages_by_chat_id(chat_id, db=db)
-        if not messages:
-            continue
-
-        # Get user_id from first user message
-        first_user_msg = next((m for m in messages if m.role == 'user'), None)
-        user_id = first_user_msg.user_id if first_user_msg else None
-
-        # Extract first message content as preview
-        first_message = None
-        if first_user_msg and first_user_msg.content:
-            content = first_user_msg.content
-            if isinstance(content, str):
-                first_message = content[:200]
-            elif isinstance(content, list):
-                text_parts = [b.get('text', '') for b in content if isinstance(b, dict)]
-                first_message = ' '.join(text_parts)[:200]
-
-        # Get user info
-        user_name = None
-        if user_id:
-            user_info = await Users.get_user_by_id(user_id, db=db)
-            user_name = user_info.name if user_info else None
-
-        # Timestamps from messages
-        updated_at = max(m.created_at for m in messages) if messages else 0
-
-        chats_data.append(
-            ModelChatEntry(
-                chat_id=chat_id,
-                user_id=user_id,
-                user_name=user_name,
-                first_message=first_message,
-                updated_at=updated_at,
-            )
-        )
-
-    return ModelChatsResponse(chats=chats_data, total=len(chats_data))
-=======
     return ModelChatsResponse(
         chats=[ModelChatEntry.model_validate(chat) for chat in result['items']],
         total=result['total'] or 0,
     )
->>>>>>> v0.11.0
 
 
 ####################
@@ -420,33 +365,6 @@ async def get_model_overview(
         db=db,
     )
 
-<<<<<<< HEAD
-    # Get feedback history per day
-    history_counts: dict[str, dict] = defaultdict(lambda: {'won': 0, 'lost': 0})
-
-    # Calculate start date for history
-    now = datetime.now()
-    start_dt = None
-    if days > 0:
-        start_dt = now - timedelta(days=days)
-
-    for chat_id in chat_ids:
-        feedbacks = await Feedbacks.get_feedbacks_by_chat_id(chat_id, db=db)
-        for fb in feedbacks:
-            if fb.data and 'rating' in fb.data:
-                rating = fb.data['rating']
-                fb_date = datetime.fromtimestamp(fb.created_at)
-
-                # Filter by date range
-                if start_dt and fb_date < start_dt:
-                    continue
-
-                date_str = fb_date.strftime('%Y-%m-%d')
-                if rating == 1:
-                    history_counts[date_str]['won'] += 1
-                elif rating == -1:
-                    history_counts[date_str]['lost'] += 1
-=======
     history_rows = await Feedbacks.get_model_feedback_counts_by_day(
         model_id=model_id,
         start_date=int(start_dt.timestamp()) if start_dt else None,
@@ -459,7 +377,6 @@ async def get_model_overview(
         }
         for entry in history_rows
     }
->>>>>>> v0.11.0
 
     # Fill in missing days
     history = []
@@ -488,12 +405,6 @@ async def get_model_overview(
 
     # Get chat tags
     tag_counts: dict[str, int] = defaultdict(int)
-<<<<<<< HEAD
-    for chat_id in chat_ids:
-        chat = await Chats.get_chat_by_id(chat_id, db=db)
-        if chat and chat.meta:
-            for tag in chat.meta.get('tags', []):
-=======
     if chat_ids:
         chat_metas = await Chats.get_chat_metas_by_chat_ids(
             chat_ids,
@@ -502,7 +413,6 @@ async def get_model_overview(
         )
         for meta in chat_metas:
             for tag in meta.get('tags', []):
->>>>>>> v0.11.0
                 tag_counts[tag] += 1
 
     # Sort by count and take top 10

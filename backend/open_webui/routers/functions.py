@@ -10,12 +10,8 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
-=======
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT, ENABLE_PLUGINS
 from open_webui.events import EVENTS, build_event, dispatch_event_functions, publish_event, schedule_webhook_dispatch
->>>>>>> v0.11.0
 from open_webui.internal.db import get_async_session
 from open_webui.models.functions import (
     FunctionForm,
@@ -27,10 +23,7 @@ from open_webui.models.functions import (
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.plugin import (
-<<<<<<< HEAD
-=======
     get_functions_cache,
->>>>>>> v0.11.0
     get_function_module_from_cache,
     load_function_module_by_id,
     replace_imports,
@@ -53,23 +46,17 @@ router = APIRouter()
 
 @router.get('/', response_model=list[FunctionResponse])
 async def get_functions(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         return []
 
->>>>>>> v0.11.0
     return await Functions.get_functions(db=db)
 
 
 @router.get('/list', response_model=list[FunctionUserResponse])
 async def get_function_list(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         return []
 
->>>>>>> v0.11.0
     return await Functions.get_function_list(db=db)
 
 
@@ -84,12 +71,9 @@ async def get_functions(
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-<<<<<<< HEAD
-=======
     if not ENABLE_PLUGINS:
         return []
 
->>>>>>> v0.11.0
     return await Functions.get_functions(include_valves=include_valves, db=db)
 
 
@@ -160,14 +144,10 @@ async def load_function_from_url(request: Request, form_data: LoadUrlForm, user=
     except HTTPException:
         raise
     except Exception as e:
-<<<<<<< HEAD
-        raise HTTPException(status_code=500, detail=ERROR_MESSAGES.DEFAULT(e))
-=======
         raise HTTPException(
             status_code=500,
             detail=ERROR_MESSAGES.DEFAULT(e, 'Error fetching function'),
         )
->>>>>>> v0.11.0
 
 
 ############################
@@ -305,11 +285,6 @@ async def get_function_by_id(id: str, user=Depends(get_admin_user), db: AsyncSes
 
 
 @router.post('/id/{id}/toggle', response_model=FunctionModel | None)
-<<<<<<< HEAD
-async def toggle_function_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    function = await Functions.get_function_by_id(id, db=db)
-    if function:
-=======
 async def toggle_function_by_id(
     request: Request,
     id: str,
@@ -334,7 +309,6 @@ async def toggle_function_by_id(
         )
         schedule_webhook_dispatch(request.app, lifecycle_event)
 
->>>>>>> v0.11.0
         function = await Functions.update_function_by_id(id, {'is_active': not function.is_active}, db=db)
 
         if function:
@@ -365,16 +339,12 @@ async def toggle_function_by_id(
 
 
 @router.post('/id/{id}/toggle/global', response_model=FunctionModel | None)
-<<<<<<< HEAD
-async def toggle_global_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-=======
 async def toggle_global_by_id(
     request: Request,
     id: str,
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
->>>>>>> v0.11.0
     function = await Functions.get_function_by_id(id, db=db)
     if function:
         function = await Functions.update_function_by_id(id, {'is_global': not function.is_global}, db=db)
@@ -562,15 +532,12 @@ async def update_function_valves_by_id(
 
                 valves_dict = valves.model_dump(exclude_unset=True)
                 await Functions.update_function_valves_by_id(id, valves_dict, db=db)
-<<<<<<< HEAD
-=======
                 await publish_event(
                     request,
                     EVENTS.FUNCTION_VALVES_UPDATED,
                     actor=user,
                     subject_id=id,
                 )
->>>>>>> v0.11.0
                 return valves_dict
             except Exception as e:
                 log.exception(f'Error updating function values by id {id}: {e}')
@@ -663,8 +630,6 @@ async def update_function_user_valves_by_id(
                 user_valves = UserValves(**form_data)
                 user_valves_dict = user_valves.model_dump(exclude_unset=True)
                 await Functions.update_user_valves_by_id_and_user_id(id, user.id, user_valves_dict, db=db)
-<<<<<<< HEAD
-=======
                 await publish_event(
                     request,
                     EVENTS.FUNCTION_VALVES_UPDATED,
@@ -672,7 +637,6 @@ async def update_function_user_valves_by_id(
                     subject_id=id,
                     data={'scope': 'user'},
                 )
->>>>>>> v0.11.0
                 return user_valves_dict
             except Exception as e:
                 log.exception(f'Error updating function user valves by id {id}: {e}')

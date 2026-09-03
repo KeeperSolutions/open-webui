@@ -4,13 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.internal.db import get_async_session
-=======
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.feedbacks import (
     FeedbackForm,
     FeedbackIdResponse,
@@ -38,8 +33,9 @@ EVALUATION_CONFIG_KEYS = {
 
 
 async def get_config_values(key_map: dict[str, str]) -> dict:
-    values = await Config.get_many(*key_map.values())
-    return {field: values[storage_key] for field, storage_key in key_map.items() if storage_key in values}
+    from open_webui import config as _cfg
+
+    return {field: getattr(getattr(_cfg, field, None), 'value', None) for field in key_map}
 
 
 # Leaderboard Elo Rating Computation
@@ -292,10 +288,11 @@ async def update_config(
 ):
     updates = {}
     if form_data.ENABLE_EVALUATION_ARENA_MODELS is not None:
+        request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS = form_data.ENABLE_EVALUATION_ARENA_MODELS
         updates['evaluation.arena.enable'] = form_data.ENABLE_EVALUATION_ARENA_MODELS
     if form_data.EVALUATION_ARENA_MODELS is not None:
+        request.app.state.config.EVALUATION_ARENA_MODELS = form_data.EVALUATION_ARENA_MODELS
         updates['evaluation.arena.models'] = form_data.EVALUATION_ARENA_MODELS
-    await Config.upsert(updates)
     values = await get_config_values(EVALUATION_CONFIG_KEYS)
     await publish_event(
         request,
@@ -322,10 +319,6 @@ async def get_all_feedback_ids(user=Depends(get_admin_user), db: AsyncSession = 
 
 
 @router.delete('/feedbacks/all')
-<<<<<<< HEAD
-async def delete_all_feedbacks(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
-    success = await Feedbacks.delete_all_feedbacks(db=db)
-=======
 async def delete_all_feedbacks(
     request: Request,
     user=Depends(get_admin_user),
@@ -339,7 +332,6 @@ async def delete_all_feedbacks(
             actor=user,
             subject_id='all',
         )
->>>>>>> v0.11.0
     return success
 
 
@@ -371,10 +363,6 @@ async def get_user_feedbacks(
 
 
 @router.delete('/feedbacks', response_model=bool)
-<<<<<<< HEAD
-async def delete_feedbacks(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    success = await Feedbacks.delete_feedbacks_by_user_id(user.id, db=db)
-=======
 async def delete_feedbacks(
     request: Request,
     user=Depends(get_verified_user),
@@ -389,7 +377,6 @@ async def delete_feedbacks(
             subject_id=user.id,
             subject_type='user',
         )
->>>>>>> v0.11.0
     return success
 
 
@@ -484,14 +471,10 @@ async def update_feedback_by_id(
 
 @router.delete('/feedback/{id}')
 async def delete_feedback_by_id(
-<<<<<<< HEAD
-    id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
-=======
     request: Request,
     id: str,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
->>>>>>> v0.11.0
 ):
     if user.role == 'admin':
         success = await Feedbacks.delete_feedback_by_id(id=id, db=db)

@@ -4,15 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.internal.db import get_async_session
-from open_webui.models.access_grants import AccessGrants
-=======
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.groups import Groups
 from open_webui.models.skills import (
     SkillAccessListResponse,
@@ -143,7 +137,7 @@ async def export_skills(
     if user.role != 'admin' and not await has_permission(
         user.id,
         'workspace.skills_export',
-        await Config.get('user.permissions'),
+        request.app.state.config.USER_PERMISSIONS,
         db=db,
     ):
         raise HTTPException(
@@ -169,14 +163,8 @@ async def create_new_skill(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-<<<<<<< HEAD
     if user.role != 'admin' and not await has_permission(
         user.id, 'workspace.skills', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-    if user.role != 'admin' and not (
-        await has_permission(user.id, 'workspace.skills', await Config.get('user.permissions'), db=db)
-        or await has_permission(user.id, 'workspace.skills_import', await Config.get('user.permissions'), db=db)
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -198,11 +186,7 @@ async def create_new_skill(
     # grants in the create payload, bypassing the sharing.public_skills gate
     # that the dedicated /access/update endpoint already enforces.
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -324,11 +308,7 @@ async def update_skill_by_id(
     # they may set, so a non-admin owner cannot make their own skill publicly
     # readable/writable without sharing.public_skills permission.
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -406,11 +386,7 @@ async def update_skill_access_by_id(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -419,9 +395,6 @@ async def update_skill_access_by_id(
 
     await AccessGrants.set_access_grants('skill', id, form_data.access_grants, db=db)
 
-<<<<<<< HEAD
-    return await Skills.get_skill_by_id(id, db=db)
-=======
     skill = await Skills.get_skill_by_id(id, db=db)
     await publish_event(
         request,
@@ -431,7 +404,6 @@ async def update_skill_access_by_id(
         data={'access_updated': True, 'name': skill.name if skill else None},
     )
     return skill
->>>>>>> v0.11.0
 
 
 ############################
@@ -440,16 +412,12 @@ async def update_skill_access_by_id(
 
 
 @router.post('/id/{id}/toggle', response_model=Optional[SkillModel])
-<<<<<<< HEAD
-async def toggle_skill_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-=======
 async def toggle_skill_by_id(
     request: Request,
     id: str,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
->>>>>>> v0.11.0
     skill = await Skills.get_skill_by_id(id, db=db)
     if skill:
         if (
@@ -527,8 +495,6 @@ async def delete_skill_by_id(
         )
 
     result = await Skills.delete_skill_by_id(id, db=db)
-<<<<<<< HEAD
-=======
     if result:
         await publish_event(
             request,
@@ -537,5 +503,4 @@ async def delete_skill_by_id(
             subject_id=id,
             data={'name': skill.name},
         )
->>>>>>> v0.11.0
     return result
