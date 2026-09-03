@@ -10,16 +10,10 @@ from open_webui.config import (
     ENABLE_ADMIN_EXPORT,
 )
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.internal.db import get_async_session
-from open_webui.models.access_grants import AccessGrants
-=======
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import ChatForm, ChatResponse, Chats
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.groups import Groups
 from open_webui.models.notes import (
     NoteForm,
@@ -75,11 +69,7 @@ async def get_notes(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -127,11 +117,7 @@ async def get_pinned_notes(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -172,11 +158,7 @@ async def search_notes(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -229,11 +211,7 @@ async def create_new_note(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -241,11 +219,7 @@ async def create_new_note(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -255,8 +229,6 @@ async def create_new_note(
 
     try:
         note = await Notes.insert_new_note(user.id, form_data, db=db)
-<<<<<<< HEAD
-=======
         await publish_event(
             request,
             EVENTS.NOTE_CREATED,
@@ -264,7 +236,6 @@ async def create_new_note(
             subject_id=note.id,
             data={'title': note.title},
         )
->>>>>>> v0.11.0
         return note
     except Exception as e:
         log.exception(e)
@@ -288,11 +259,7 @@ async def get_note_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -335,8 +302,6 @@ async def get_note_by_id(
         **{**note.model_dump(), 'is_pinned': note.id in pinned_note_ids},
         write_access=write_access,
     )
-<<<<<<< HEAD
-=======
 
 
 @router.get('/{id}/chat', response_model=ChatResponse)
@@ -348,7 +313,7 @@ async def get_note_chat_by_id(
 ):
     log.info('[note-chat] get-or-create requested note_id=%s user_id=%s', id, user.id)
     if user.role != 'admin' and not await has_permission(
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
+        user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -443,7 +408,7 @@ async def get_note_chats_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
+        user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -506,7 +471,7 @@ async def create_note_chat_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
+        user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -560,7 +525,6 @@ async def create_note_chat_by_id(
 
     log.info('[note-chat] created hidden chat note_id=%s chat_id=%s user_id=%s', note.id, chat.id, user.id)
     return chat
->>>>>>> v0.11.0
 
 
 ############################
@@ -577,11 +541,7 @@ async def update_note_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -605,11 +565,7 @@ async def update_note_by_id(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -622,15 +578,12 @@ async def update_note_by_id(
         pinned_note_ids = await Notes.get_pinned_note_ids(user.id, db=db)
         note.is_pinned = note.id in pinned_note_ids
 
-<<<<<<< HEAD
-=======
         event_data = note.model_dump()
         if form_data.data is not None:
             event_data['data'] = {
                 key: note.data.get(key) for key in form_data.data.keys() if note.data is not None and key in note.data
             }
 
->>>>>>> v0.11.0
         await sio.emit(
             'events:note',
             event_data,
@@ -668,11 +621,7 @@ async def update_note_access_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -696,11 +645,7 @@ async def update_note_access_by_id(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -712,15 +657,12 @@ async def update_note_access_by_id(
     note = await Notes.get_note_by_id(id, db=db)
     pinned_note_ids = await Notes.get_pinned_note_ids(user.id, db=db)
     note.is_pinned = note.id in pinned_note_ids
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.NOTE_ACCESS_UPDATED,
         actor=user,
         subject_id=note.id,
     )
->>>>>>> v0.11.0
     return note
 
 
@@ -737,11 +679,7 @@ async def pin_note_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -767,8 +705,6 @@ async def pin_note_by_id(
     note = await Notes.toggle_note_pinned_by_id(id, user.id, db=db)
     pinned_note_ids = await Notes.get_pinned_note_ids(user.id, db=db)
     note.is_pinned = note.id in pinned_note_ids
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.NOTE_PINNED if note.is_pinned else EVENTS.NOTE_UNPINNED,
@@ -776,7 +712,6 @@ async def pin_note_by_id(
         subject_id=note.id,
         subject_type='note',
     )
->>>>>>> v0.11.0
     return note
 
 
@@ -793,11 +728,7 @@ async def delete_note_by_id(
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
-=======
-        user.id, 'features.notes', await Config.get('user.permissions'), db=db
->>>>>>> v0.11.0
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -822,15 +753,12 @@ async def delete_note_by_id(
 
     try:
         note = await Notes.delete_note_by_id(id, db=db)
-<<<<<<< HEAD
-=======
         await publish_event(
             request,
             EVENTS.NOTE_DELETED,
             actor=user,
             subject_id=id,
         )
->>>>>>> v0.11.0
         return True
     except Exception as e:
         log.exception(e)
