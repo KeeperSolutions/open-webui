@@ -6,11 +6,11 @@ Create Date: 2026-07-23 00:00:00.000000
 
 """
 
-import json
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.orm import Session
 
 revision: str = '9a1b2c3d4e5f'
 down_revision: Union[str, None] = '856c5b02fb54'
@@ -27,10 +27,21 @@ def upgrade() -> None:
     if 'current_message_id' not in columns:
         op.add_column('chat', sa.Column('current_message_id', sa.Text(), nullable=True))
 
+    # chat.chat is an EncryptedJSONField (TRAU-434). Reading it as a raw Core
+    # column (`sa.column('chat', sa.Text())`) bypasses the TypeDecorator and
+    # returns ciphertext, which parses to nothing — so every encrypted/legacy
+    # chat would silently get current_message_id left NULL. Query the real ORM
+    # `Chat` class so decryption happens, matching the 8452d01d26d7 /
+    # shared_chat migration fixes. yield_per is intentionally small: some chats
+    # carry 30-44MB of decrypted JSON and buffering hundreds of them OOM-killed
+    # a 2Gi container.
+    from open_webui.models.chats import Chat
+
+    session = Session(bind=conn)
+
     chat = sa.table(
         'chat',
         sa.column('id', sa.String()),
-        sa.column('chat', sa.Text()),
         sa.column('current_message_id', sa.Text()),
     )
     chat_message = sa.table(
@@ -42,15 +53,21 @@ def upgrade() -> None:
     )
 
     has_chat_message = 'chat_message' in inspector.get_table_names()
-    result = conn.execute(
-        sa.select(chat.c.id, chat.c.chat, chat.c.current_message_id).execution_options(
-            yield_per=BATCH_SIZE,
-            stream_results=True,
-        )
+    query = session.query(Chat.id, Chat.chat, Chat.current_message_id).execution_options(
+        yield_per=BATCH_SIZE,
+        stream_results=True,
     )
 
-    while True:
-        rows = result.fetchmany(BATCH_SIZE)
+    row_iter = iter(query)
+    exhausted = False
+    while not exhausted:
+        rows = []
+        for _ in range(BATCH_SIZE):
+            try:
+                rows.append(next(row_iter))
+            except StopIteration:
+                exhausted = True
+                break
         if not rows:
             break
 
@@ -59,27 +76,28 @@ def upgrade() -> None:
         current_by_chat: dict[str, str | None] = {}
         json_messages_by_chat: dict[str, dict[str, dict]] = {}
 
-        for row in rows:
-            values = row._mapping
-            chat_id = values['id']
+        for chat_id, chat_data, current_message_id in rows:
             prefix = f'{chat_id}-'
             batch_chat_ids.append(chat_id)
-            current_by_chat[chat_id] = values['current_message_id']
+            current_by_chat[chat_id] = current_message_id
 
-            chat_data = {}
-            if isinstance(values['chat'], dict):
-                chat_data = values['chat']
-            elif isinstance(values['chat'], str):
+            # EncryptedJSONField.process_result_value returns a dict already;
+            # guard against any legacy string rows just in case.
+            if isinstance(chat_data, str):
+                import json
+
                 try:
-                    parsed = json.loads(values['chat'])
+                    parsed = json.loads(chat_data)
                     chat_data = parsed if isinstance(parsed, dict) else {}
                 except (TypeError, ValueError, json.JSONDecodeError):
-                    pass
+                    chat_data = {}
+            elif not isinstance(chat_data, dict):
+                chat_data = {}
 
             history = chat_data.get('history') if isinstance(chat_data.get('history'), dict) else {}
             candidates_by_chat[chat_id] = []
             for candidate in (
-                values['current_message_id'],
+                current_message_id,
                 history.get('currentId'),
                 chat_data.get('currentId'),
                 chat_data.get('branchPointMessageId'),
