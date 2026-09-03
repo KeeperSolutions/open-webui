@@ -1151,6 +1151,15 @@ DEFAULT_ARENA_MODEL = {
 
 WEBHOOK_URL = ConfigVar('WEBHOOK_URL', 'webhook_url', os.getenv('WEBHOOK_URL', ''))
 
+# v0.11.0 event-webhook system (open_webui/events.py). Upstream kept the list in
+# its per-key Config store; the fork keeps it as a ConfigVar (Risk #1).
+try:
+    _event_webhooks_default = json.loads(os.getenv('EVENT_WEBHOOKS', '[]'))
+except Exception as e:
+    log.exception(f'Error loading EVENT_WEBHOOKS: {e}')
+    _event_webhooks_default = []
+EVENT_WEBHOOKS = ConfigVar('EVENT_WEBHOOKS', 'events.webhooks', _event_webhooks_default)
+
 ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
 ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = (

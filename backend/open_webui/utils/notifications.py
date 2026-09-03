@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from open_webui.events import EVENT_DEFINITIONS_BY_NAME, NOTIFICATION_EVENTS
-from open_webui.models.config import Config
+from open_webui.config import ENABLE_USER_WEBHOOKS
 from open_webui.models.users import Users
 from open_webui.retrieval.web.utils import validate_url
 from open_webui.utils.webhook import post_webhook
@@ -378,7 +378,7 @@ async def notify_target(
 
 
 async def dispatch_notification_event(app: Any, event: Any) -> None:
-    if event.event not in VALID_EVENTS or not await Config.get('ui.enable_user_webhooks'):
+    if event.event not in VALID_EVENTS or not ENABLE_USER_WEBHOOKS.value:
         return
 
     from open_webui.events import event_user_ids

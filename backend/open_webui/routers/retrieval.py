@@ -60,7 +60,6 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_db, get_async_session
 from open_webui.models.files import FileModel, Files, FileUpdateForm
 from open_webui.models.knowledge import Knowledges
-from open_webui.models.config import Config
 
 # Document loaders
 from open_webui.retrieval.loaders.youtube import YoutubeLoader

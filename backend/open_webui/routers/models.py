@@ -26,7 +26,6 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
     ModelAccessListResponse,
@@ -113,32 +112,6 @@ def _safe_static_redirect_path(url: str) -> str | None:
 
 def is_valid_model_id(model_id: str) -> bool:
     return bool(model_id) and len(model_id) <= 256
-
-
-async def _verify_knowledge_file_access(
-    knowledge_items: list | None,
-    user,
-    db: AsyncSession,
-) -> None:
-    """Raise 403 if any knowledge item references a file the caller cannot read."""
-    if not knowledge_items or user.role == 'admin':
-        return
-    for item in knowledge_items:
-        if not isinstance(item, dict) or item.get('type') != 'file':
-            continue
-        file_id = item.get('id')
-        if not file_id:
-            continue
-        if not await has_access_to_file(file_id, 'read', user, db=db):
-            log.warning(
-                'knowledge file access denied: user %s cannot read file %s',
-                user.id,
-                file_id,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
 
 
 async def _verify_knowledge_file_access(

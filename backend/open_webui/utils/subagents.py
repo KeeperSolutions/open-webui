@@ -12,7 +12,6 @@ from fastapi.security import HTTPAuthorizationCredentials
 from open_webui.internal.db import get_async_db
 from open_webui.models.chat_messages import ChatMessages
 from open_webui.models.chats import Chat, ChatForm, Chats
-from open_webui.models.config import Config
 from open_webui.models.users import UserModel, Users
 from open_webui.tasks import create_task, has_active_tasks
 from open_webui.utils.auth import create_token
@@ -286,14 +285,24 @@ async def delegate(
     if not parent_chat_id or not user_data.get('id'):
         return 'Error: chat and user context are required.'
 
-    config = await Config.get_many(
-        'subagents.background_enabled',
-        'subagents.max_concurrent',
-        'subagents.max_async',
-        'subagents.max_iterations',
-        'subagents.max_output',
-        'subagents.system_prompt',
+    from open_webui.config import (
+        CODE_INTERPRETER_ENGINE,
+        SUBAGENTS_BACKGROUND_ENABLED,
+        SUBAGENTS_MAX_ASYNC,
+        SUBAGENTS_MAX_CONCURRENT,
+        SUBAGENTS_MAX_ITERATIONS,
+        SUBAGENTS_MAX_OUTPUT,
+        SUBAGENTS_SYSTEM_PROMPT,
     )
+
+    config = {
+        'subagents.background_enabled': SUBAGENTS_BACKGROUND_ENABLED.value,
+        'subagents.max_concurrent': SUBAGENTS_MAX_CONCURRENT.value,
+        'subagents.max_async': SUBAGENTS_MAX_ASYNC.value,
+        'subagents.max_iterations': SUBAGENTS_MAX_ITERATIONS.value,
+        'subagents.max_output': SUBAGENTS_MAX_OUTPUT.value,
+        'subagents.system_prompt': SUBAGENTS_SYSTEM_PROMPT.value,
+    }
     max_concurrent = int(config.get('subagents.max_concurrent') or 20)
     max_async = int(config.get('subagents.max_async') or 20)
     max_iterations = int(config.get('subagents.max_iterations') or 30)
@@ -310,7 +319,7 @@ async def delegate(
     if (
         background
         and features.get('code_interpreter')
-        and await Config.get('code_interpreter.engine', 'pyodide') != 'jupyter'
+        and ((CODE_INTERPRETER_ENGINE.value or 'pyodide') != 'jupyter')
     ):
         features.pop('code_interpreter')
     run = {

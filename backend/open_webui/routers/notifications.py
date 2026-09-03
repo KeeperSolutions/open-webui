@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.models.config import Config
+from open_webui.config import ENABLE_USER_WEBHOOKS, USER_PERMISSIONS
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.notifications import (
@@ -32,11 +32,11 @@ class NotificationTargetForm(BaseModel):
 
 
 async def _check_notifications_access(user) -> None:
-    if not await Config.get('ui.enable_user_webhooks'):
+    if not ENABLE_USER_WEBHOOKS.value:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     if user.role != 'admin' and not await has_permission(
-        user.id, 'features.webhooks', await Config.get('user.permissions')
+        user.id, 'features.webhooks', USER_PERMISSIONS.value
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
 

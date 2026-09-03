@@ -25,9 +25,6 @@ PLACEHOLDER_HASH = bcrypt.hashpw(b'placeholder', bcrypt.gensalt()).decode('utf-8
 class Auth(Base):  # credential ↔ user linkage
     """Maps a user ID to an email/password pair with an active flag."""
 
-class Auth(Base):  # credential ↔ user linkage
-    """Maps a user ID to an email/password pair with an active flag."""
-
     __tablename__ = 'auth'
 
     id = Column(String, primary_key=True, unique=True)  # mirrors User.id

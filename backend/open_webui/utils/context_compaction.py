@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 from open_webui.models.chats import Chats
-from open_webui.models.config import Config
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.misc import get_content_from_message, get_last_user_message, get_message_list
 from open_webui.utils.task import (
@@ -196,13 +195,21 @@ async def compact_chat_branch(request, user, chat: Any, model_id: str, models: d
 
 
 async def _load_config() -> dict:
-    values = await Config.get_many(
-        'chat.context_compaction.enable',
-        'chat.context_compaction.token_threshold',
-        'chat.context_compaction.token_cap',
-        'chat.context_compaction.retention_percentage',
-        'chat.context_compaction.prompt_template',
+    from open_webui.config import (
+        CONTEXT_COMPACTION_PROMPT_TEMPLATE,
+        CONTEXT_COMPACTION_RETENTION_PERCENTAGE,
+        CONTEXT_COMPACTION_TOKEN_CAP,
+        CONTEXT_COMPACTION_TOKEN_THRESHOLD,
+        ENABLE_CONTEXT_COMPACTION,
     )
+
+    values = {
+        'chat.context_compaction.enable': ENABLE_CONTEXT_COMPACTION.value,
+        'chat.context_compaction.token_threshold': CONTEXT_COMPACTION_TOKEN_THRESHOLD.value,
+        'chat.context_compaction.token_cap': CONTEXT_COMPACTION_TOKEN_CAP.value,
+        'chat.context_compaction.retention_percentage': CONTEXT_COMPACTION_RETENTION_PERCENTAGE.value,
+        'chat.context_compaction.prompt_template': CONTEXT_COMPACTION_PROMPT_TEMPLATE.value,
+    }
     token_threshold = _parse_positive_int(values.get('chat.context_compaction.token_threshold')) or 80000
     return {
         'enable': bool(values.get('chat.context_compaction.enable', False)),
@@ -364,11 +371,13 @@ async def _generate_summary(
 ) -> str:
     from open_webui.utils.chat import generate_chat_completion
 
-    task_config = await Config.get_many(
-        'task.model.default',
-        'task.model.external',
-        'chat.context_compaction.model',
-    )
+    from open_webui.config import CONTEXT_COMPACTION_MODEL, TASK_MODEL, TASK_MODEL_EXTERNAL
+
+    task_config = {
+        'task.model.default': TASK_MODEL.value,
+        'task.model.external': TASK_MODEL_EXTERNAL.value,
+        'chat.context_compaction.model': CONTEXT_COMPACTION_MODEL.value,
+    }
     context_compaction_model = task_config.get('chat.context_compaction.model')
     task_model_id = (
         context_compaction_model

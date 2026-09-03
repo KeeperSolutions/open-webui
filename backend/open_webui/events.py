@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from typing import Any
 
 from open_webui.env import ENABLE_PLUGINS, VERSION
-from open_webui.models.config import Config
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from open_webui.retrieval.web.utils import validate_url
 from open_webui.utils.webhook import post_webhook
@@ -17,8 +16,6 @@ from open_webui.utils.webhook import post_webhook
 log = logging.getLogger(__name__)
 
 MAX_STRING_LENGTH = 1000
-EVENT_WEBHOOKS_CONFIG_KEY = 'events.webhooks'
-LEGACY_WEBHOOK_CONFIG_KEY = 'webhook_url'
 DEFAULT_WEBHOOK_ID = 'default'
 
 
@@ -830,7 +827,9 @@ async def event_webhook_matches(webhook: dict[str, Any], event: 'Event') -> bool
 
 
 async def get_event_webhooks() -> list[dict[str, Any]]:
-    webhooks = await Config.get(EVENT_WEBHOOKS_CONFIG_KEY, []) or []
+    from open_webui.config import EVENT_WEBHOOKS
+
+    webhooks = EVENT_WEBHOOKS.value or []
     if not isinstance(webhooks, list):
         return []
 
@@ -851,7 +850,9 @@ async def migrate_legacy_webhook_config() -> list[dict[str, Any]]:
         return webhooks
 
     now = int(time.time())
-    legacy_url = await Config.get(LEGACY_WEBHOOK_CONFIG_KEY) or ''
+    from open_webui.config import WEBHOOK_URL
+
+    legacy_url = WEBHOOK_URL.value or ''
     if not legacy_url:
         return webhooks
 
@@ -868,7 +869,10 @@ async def migrate_legacy_webhook_config() -> list[dict[str, Any]]:
         },
         *webhooks,
     ]
-    await Config.upsert({EVENT_WEBHOOKS_CONFIG_KEY: webhooks})
+    from open_webui.config import EVENT_WEBHOOKS
+
+    EVENT_WEBHOOKS.value = webhooks
+    EVENT_WEBHOOKS.commit()
     return webhooks
 
 
@@ -898,7 +902,10 @@ async def upsert_event_webhook(webhook: dict[str, Any]) -> dict[str, Any]:
     if not replaced:
         next_webhooks.append(normalized)
 
-    await Config.upsert({EVENT_WEBHOOKS_CONFIG_KEY: next_webhooks})
+    from open_webui.config import EVENT_WEBHOOKS
+
+    EVENT_WEBHOOKS.value = next_webhooks
+    EVENT_WEBHOOKS.commit()
     return next(webhook for webhook in next_webhooks if webhook.get('id') == normalized['id'])
 
 
@@ -908,11 +915,13 @@ async def delete_event_webhook(webhook_id: str) -> bool:
     if len(next_webhooks) == len(webhooks):
         return False
 
-    values = {EVENT_WEBHOOKS_CONFIG_KEY: next_webhooks}
-    if webhook_id == DEFAULT_WEBHOOK_ID:
-        values[LEGACY_WEBHOOK_CONFIG_KEY] = ''
+    from open_webui.config import EVENT_WEBHOOKS, WEBHOOK_URL
 
-    await Config.upsert(values)
+    EVENT_WEBHOOKS.value = next_webhooks
+    EVENT_WEBHOOKS.commit()
+    if webhook_id == DEFAULT_WEBHOOK_ID:
+        WEBHOOK_URL.value = ''
+        WEBHOOK_URL.commit()
     return True
 
 

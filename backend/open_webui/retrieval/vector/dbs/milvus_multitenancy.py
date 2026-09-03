@@ -59,30 +59,6 @@ def _escape_milvus_string(value: str) -> str:
         raise TypeError(f'Expected str for Milvus expression value, got {type(value).__name__}')
     return value.replace('\\', '\\\\').replace("'", "\\'")
 
-# Milvus expressions are SQL-like strings with no parameterized-query API;
-# values get interpolated into single-quoted literals. Reject anything that
-# can't be a legitimate Open WebUI collection name.
-_SAFE_RESOURCE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,255}$')
-_SAFE_METADATA_KEY_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
-
-
-def _validate_resource_id(resource_id: str) -> str:
-    if not isinstance(resource_id, str) or not _SAFE_RESOURCE_ID_RE.match(resource_id):
-        raise ValueError(f'Invalid Milvus resource_id (collection name): {resource_id!r}')
-    return resource_id
-
-
-def _validate_metadata_key(key: str) -> str:
-    if not isinstance(key, str) or not _SAFE_METADATA_KEY_RE.match(key):
-        raise ValueError(f'Invalid Milvus metadata filter key: {key!r}')
-    return key
-
-
-def _escape_milvus_string(value: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f'Expected str for Milvus expression value, got {type(value).__name__}')
-    return value.replace('\\', '\\\\').replace("'", "\\'")
-
 
 class MilvusClient(VectorDBBase):
     def __init__(self):

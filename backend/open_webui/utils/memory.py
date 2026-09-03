@@ -8,7 +8,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from open_webui.models.config import Config
 from open_webui.models.memories import Memories
 from open_webui.utils.misc import add_or_update_system_message, get_content_from_message
 
@@ -370,7 +369,12 @@ async def add_memory_context(request, form_data: dict, user, model: dict | None 
     if not parts:
         return form_data
 
-    config = await Config.get_many('memories.user_char_limit', 'memories.context_char_limit')
+    from open_webui.config import MEMORIES_CONTEXT_CHAR_LIMIT, MEMORIES_USER_CHAR_LIMIT
+
+    config = {
+        'memories.user_char_limit': MEMORIES_USER_CHAR_LIMIT,
+        'memories.context_char_limit': MEMORIES_CONTEXT_CHAR_LIMIT,
+    }
     try:
         user_limit = max(250, int(config.get('memories.user_char_limit') or 2000))
     except Exception:
@@ -426,10 +430,12 @@ async def review_memory_after_turn(
     if not isinstance(assistant_content, str) or not assistant_content.strip():
         return
 
-    config = await Config.get_many(
-        'memories.background_review.enable',
-        'memories.review_interval_turns',
-    )
+    from open_webui.config import ENABLE_MEMORY_BACKGROUND_REVIEW, MEMORIES_REVIEW_INTERVAL_TURNS
+
+    config = {
+        'memories.background_review.enable': ENABLE_MEMORY_BACKGROUND_REVIEW,
+        'memories.review_interval_turns': MEMORIES_REVIEW_INTERVAL_TURNS,
+    }
     if not config.get('memories.background_review.enable'):
         return
 

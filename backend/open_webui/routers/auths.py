@@ -1299,6 +1299,25 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     attribute_for_groups: str = 'memberOf'
 
 
+class LdapServerConfig(BaseModel):
+    label: str
+    host: str
+    port: int | None = None
+    attribute_for_mail: str = 'mail'
+    attribute_for_username: str = 'uid'
+    app_dn: str
+    app_dn_password: str
+    search_base: str
+    search_filters: str = ''
+    use_tls: bool = True
+    certificate_path: str | None = None
+    validate_cert: bool = True
+    ciphers: str | None = 'ALL'
+    enable_group_management: bool = False
+    enable_group_creation: bool = False
+    attribute_for_groups: str = 'memberOf'
+
+
 @router.get('/admin/config/ldap/server', response_model=LdapServerConfig)
 async def get_ldap_server(request: Request, user=Depends(get_admin_user)):
     return await get_config_values(LDAP_SERVER_CONFIG_KEYS)

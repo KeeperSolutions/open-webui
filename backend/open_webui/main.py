@@ -896,6 +896,10 @@ if ENABLE_OTEL:
 ########################################
 
 
+app.state.config.ENABLE_OLLAMA_API = ENABLE_OLLAMA_API
+app.state.config.OLLAMA_BASE_URLS = OLLAMA_BASE_URLS
+app.state.config.OLLAMA_API_CONFIGS = OLLAMA_API_CONFIGS
+
 app.state.OLLAMA_MODELS = {}
 
 ########################################
@@ -905,6 +909,11 @@ app.state.OLLAMA_MODELS = {}
 ########################################
 
 
+app.state.config.ENABLE_OPENAI_API = ENABLE_OPENAI_API
+app.state.config.OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
+app.state.config.OPENAI_API_KEYS = OPENAI_API_KEYS
+app.state.config.OPENAI_API_CONFIGS = OPENAI_API_CONFIGS
+
 app.state.OPENAI_MODELS = {}
 
 ########################################
@@ -913,6 +922,7 @@ app.state.OPENAI_MODELS = {}
 #
 ########################################
 
+app.state.config.TOOL_SERVER_CONNECTIONS = TOOL_SERVER_CONNECTIONS
 app.state.TOOL_SERVERS = []
 
 ########################################
@@ -921,6 +931,7 @@ app.state.TOOL_SERVERS = []
 #
 ########################################
 
+app.state.config.TERMINAL_SERVER_CONNECTIONS = TERMINAL_SERVER_CONNECTIONS
 app.state.TERMINAL_SERVERS = []
 
 ########################################
@@ -929,6 +940,7 @@ app.state.TERMINAL_SERVERS = []
 #
 ########################################
 
+app.state.config.ENABLE_DIRECT_CONNECTIONS = ENABLE_DIRECT_CONNECTIONS
 
 ########################################
 #
@@ -945,6 +957,7 @@ app.state.SCIM_TOKEN = SCIM_TOKEN
 #
 ########################################
 
+app.state.config.ENABLE_BASE_MODELS_CACHE = ENABLE_BASE_MODELS_CACHE
 app.state.BASE_MODELS = []
 
 ########################################
