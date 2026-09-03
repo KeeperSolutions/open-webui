@@ -8,17 +8,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-from open_webui.env import STATIC_DIR
-from open_webui.internal.db import get_async_session
-from open_webui.models.access_grants import AccessGrants, has_public_read_access_grant, has_public_write_access_grant
-=======
 from open_webui.events import EVENTS, publish_event
 from open_webui.env import STATIC_DIR
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants, has_public_read_access_grant, has_public_write_access_grant
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.channels import (
     ChannelForm,
     ChannelModel,
@@ -39,10 +32,6 @@ from open_webui.models.messages import (
 from open_webui.models.users import (
     UserIdNameResponse,
     UserIdNameStatusResponse,
-<<<<<<< HEAD
-    UserListResponse,
-=======
->>>>>>> v0.11.0
     UserModel,
     UserModelResponse,
     UserNameResponse,
@@ -62,10 +51,6 @@ from open_webui.utils.models import (
     get_all_models,
     get_filtered_models,
 )
-<<<<<<< HEAD
-from open_webui.utils.webhook import post_webhook
-=======
->>>>>>> v0.11.0
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,7 +124,7 @@ def get_channel_permitted_group_and_user_ids(
 
 async def check_channels_access(request: Request, user: Optional[UserModel] = None):
     """Dependency to ensure channels are globally enabled."""
-    if not await Config.get('channels.enable'):
+    if not request.app.state.config.ENABLE_CHANNELS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.FEATURE_DISABLED('Channels'),
@@ -147,11 +132,7 @@ async def check_channels_access(request: Request, user: Optional[UserModel] = No
 
     if user:
         if user.role != 'admin' and not await has_permission(
-<<<<<<< HEAD
             user.id, 'features.channels', request.app.state.config.USER_PERMISSIONS
-=======
-            user.id, 'features.channels', await Config.get('user.permissions')
->>>>>>> v0.11.0
         ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -312,11 +293,7 @@ async def create_new_channel(
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -338,8 +315,6 @@ async def create_new_channel(
                 await enter_room_for_users(f'channel:{existing_channel.id}', participant_ids)
 
                 await Channels.update_member_active_status(existing_channel.id, user.id, True, db=db)
-<<<<<<< HEAD
-=======
                 await publish_event(
                     request,
                     EVENTS.CHANNEL_MEMBER_ACTIVE_UPDATED,
@@ -347,7 +322,6 @@ async def create_new_channel(
                     subject_id=existing_channel.id,
                     data={'is_active': True},
                 )
->>>>>>> v0.11.0
                 return ChannelModel(**existing_channel.model_dump())
 
         channel = await Channels.insert_new_channel(form_data, user.id, db=db)
@@ -547,11 +521,7 @@ async def get_channel_members_by_id(
         total = len(fetched_users)
 
         return {
-<<<<<<< HEAD
-            'users': [UserModelResponse(**u.model_dump(), is_active=Users.is_active(u)) for u in fetched_users],
-=======
             'users': [serialize_channel_member(u) for u in fetched_users],
->>>>>>> v0.11.0
             'total': total,
         }
     else:
@@ -579,11 +549,7 @@ async def get_channel_members_by_id(
         total = result['total']
 
         return {
-<<<<<<< HEAD
-            'users': [UserModelResponse(**u.model_dump(), is_active=Users.is_active(u)) for u in fetched_users],
-=======
             'users': [serialize_channel_member(u) for u in fetched_users],
->>>>>>> v0.11.0
             'total': total,
         }
 
@@ -614,8 +580,6 @@ async def update_is_active_member_by_id_and_user_id(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     await Channels.update_member_active_status(channel.id, user.id, form_data.is_active, db=db)
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CHANNEL_MEMBER_ACTIVE_UPDATED,
@@ -623,7 +587,6 @@ async def update_is_active_member_by_id_and_user_id(
         subject_id=channel.id,
         data={'is_active': form_data.is_active},
     )
->>>>>>> v0.11.0
     return True
 
 
@@ -736,11 +699,7 @@ async def update_channel_by_id(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
@@ -749,8 +708,6 @@ async def update_channel_by_id(
 
     try:
         channel = await Channels.update_channel_by_id(id, form_data, db=db)
-<<<<<<< HEAD
-=======
         await publish_event(
             request,
             EVENTS.CHANNEL_UPDATED,
@@ -758,7 +715,6 @@ async def update_channel_by_id(
             subject_id=id,
             data={'name': channel.name, 'type': channel.type},
         )
->>>>>>> v0.11.0
         return ChannelModel(**channel.model_dump())
     except Exception as e:
         log.exception(e)
@@ -788,8 +744,6 @@ async def delete_channel_by_id(
 
     try:
         await Channels.delete_channel_by_id(id, db=db)
-<<<<<<< HEAD
-=======
         await publish_event(
             request,
             EVENTS.CHANNEL_DELETED,
@@ -797,7 +751,6 @@ async def delete_channel_by_id(
             subject_id=id,
             data={'name': channel.name, 'type': channel.type},
         )
->>>>>>> v0.11.0
         return True
     except Exception as e:
         log.exception(e)
@@ -853,13 +806,6 @@ async def get_channel_messages(
     # Batch fetch all users in a single query (fixes N+1 problem)
     user_ids = list(set(m.user_id for m in message_list))
     fetched_users = {u.id: u for u in await Users.get_users_by_user_ids(user_ids, db=db)}
-<<<<<<< HEAD
-
-    messages = []
-    for message in message_list:
-        thread_replies = await Messages.get_thread_replies_by_message_id(message.id, db=db)
-        latest_thread_reply_at = thread_replies[0].created_at if thread_replies else None
-=======
 
     # Batch fetch reactions and reply counts in 2 queries (fixes N+1)
     message_ids = [m.id for m in message_list]
@@ -869,7 +815,6 @@ async def get_channel_messages(
     messages = []
     for message in message_list:
         reply_count, latest_reply_at = all_reply_counts.get(message.id, (0, None))
->>>>>>> v0.11.0
 
         # Use message.user if present (for webhooks), otherwise look up by user_id
         user_info = message.user
@@ -880,15 +825,9 @@ async def get_channel_messages(
             MessageUserResponse(
                 **{
                     **message.model_dump(),
-<<<<<<< HEAD
-                    'reply_count': len(thread_replies),
-                    'latest_reply_at': latest_thread_reply_at,
-                    'reactions': await Messages.get_reactions_by_message_id(message.id, db=db),
-=======
                     'reply_count': reply_count,
                     'latest_reply_at': latest_reply_at,
                     'reactions': all_reactions.get(message.id, []),
->>>>>>> v0.11.0
                     'user': user_info,
                 }
             )
@@ -936,13 +875,10 @@ async def get_pinned_channel_messages(
     # Batch fetch all users in a single query (fixes N+1 problem)
     user_ids = list(set(m.user_id for m in message_list))
     fetched_users = {u.id: u for u in await Users.get_users_by_user_ids(user_ids, db=db)}
-<<<<<<< HEAD
-=======
 
     # Batch fetch reactions in 1 query (fixes N+1)
     message_ids = [m.id for m in message_list]
     all_reactions = await Messages.get_reactions_by_message_ids(message_ids, db=db)
->>>>>>> v0.11.0
 
     messages = []
     for message in message_list:
@@ -963,11 +899,7 @@ async def get_pinned_channel_messages(
             MessageWithReactionsResponse(
                 **{
                     **message.model_dump(),
-<<<<<<< HEAD
-                    'reactions': await Messages.get_reactions_by_message_id(message.id, db=db),
-=======
                     'reactions': all_reactions.get(message.id, []),
->>>>>>> v0.11.0
                     'user': user_info,
                 }
             )
@@ -982,32 +914,8 @@ async def get_pinned_channel_messages(
 
 
 async def send_notification(request, channel, message, active_user_ids, db=None):
-<<<<<<< HEAD
-    name = request.app.state.WEBUI_NAME
     webui_url = request.app.state.WEBUI_URL
     enable_user_webhooks = request.app.state.config.ENABLE_USER_WEBHOOKS
-
-    users = await get_channel_users_with_access(channel, 'read', db=db)
-
-    for u in users:
-        if (u.id not in active_user_ids) and await Channels.is_user_channel_member(channel.id, u.id, db=db):
-            if enable_user_webhooks and u.settings:
-                webhook_url = u.settings.ui.get('notifications', {}).get('webhook_url', None)
-                if webhook_url:
-                    await post_webhook(
-                        name,
-                        webhook_url,
-                        f'#{channel.name} - {webui_url}/channels/{channel.id}\n\n{message.content}',
-                        {
-                            'action': 'channel',
-                            'message': message.content,
-                            'title': channel.name,
-                            'url': f'{webui_url}/channels/{channel.id}',
-                        },
-                    )
-=======
-    webui_url = await Config.get('webui.url')
-    enable_user_webhooks = await Config.get('ui.enable_user_webhooks')
 
     users = await get_channel_users_with_access(channel, 'read', db=db)
 
@@ -1036,7 +944,6 @@ async def send_notification(request, channel, message, active_user_ids, db=None)
                     },
                     message=channel.name,
                 )
->>>>>>> v0.11.0
 
     return True
 
@@ -1084,7 +991,7 @@ async def model_response_handler(request, channel, message, user, db=None):
                     message.parent_id
                     if message.parent_id
                     else (
-                        message.id if await Config.get('channels.model_response_mode', 'thread') == 'thread' else None
+                        message.id if request.app.state.config.CHANNEL_MODEL_RESPONSE_MODE == 'thread' else None
                     )
                 )
 
@@ -1175,11 +1082,7 @@ async def model_response_handler(request, channel, message, user, db=None):
                 )
 
                 tool_ids = _resolve_model_tool_ids(request.app, model_id)
-<<<<<<< HEAD
-                features = _resolve_model_features(request.app, model_id)
-=======
                 features = await _resolve_model_features(request.app, model_id)
->>>>>>> v0.11.0
                 filter_ids = _resolve_model_filter_ids(request.app, model_id)
 
                 # Build full form_data — same shape as frontend POST.
@@ -1473,11 +1376,7 @@ async def pin_channel_message(
         await Messages.update_is_pinned_by_id(message_id, form_data.is_pinned, user.id, db=db)
         message = await Messages.get_message_by_id(message_id, db=db)
         message_user = await Users.get_user_by_id(message.user_id, db=db)
-<<<<<<< HEAD
-        return MessageUserResponse(
-=======
         message_data = MessageUserResponse(
->>>>>>> v0.11.0
             **{
                 **message.model_dump(),
                 'user': UserNameResponse(**message_user.model_dump()) if message_user else None,
@@ -1548,13 +1447,10 @@ async def get_channel_thread_messages(
     # Batch fetch all users in a single query (fixes N+1 problem)
     user_ids = list(set(m.user_id for m in message_list))
     fetched_users = {u.id: u for u in await Users.get_users_by_user_ids(user_ids, db=db)}
-<<<<<<< HEAD
-=======
 
     # Batch fetch reactions in 1 query (fixes N+1)
     message_ids = [m.id for m in message_list]
     all_reactions = await Messages.get_reactions_by_message_ids(message_ids, db=db)
->>>>>>> v0.11.0
 
     messages = []
     for message in message_list:
@@ -1569,11 +1465,7 @@ async def get_channel_thread_messages(
                     **message.model_dump(),
                     'reply_count': 0,
                     'latest_reply_at': None,
-<<<<<<< HEAD
-                    'reactions': await Messages.get_reactions_by_message_id(message.id, db=db),
-=======
                     'reactions': all_reactions.get(message.id, []),
->>>>>>> v0.11.0
                     'user': user_info,
                 }
             )
@@ -1615,15 +1507,10 @@ async def update_message_by_id(
         if user.role != 'admin' and message.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-<<<<<<< HEAD
         if (
             user.role != 'admin'
             and message.user_id != user.id
             and not await channel_has_access(user.id, channel, permission='write', strict=False, db=db)
-=======
-        if user.role != 'admin' and not await channel_has_access(
-            user.id, channel, permission='write', strict=False, db=db
->>>>>>> v0.11.0
         ):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
         # Write access is not authorship — block cross-member edits.
@@ -1848,7 +1735,6 @@ async def delete_message_by_id(
         if user.role != 'admin' and message.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-<<<<<<< HEAD
         if (
             user.role != 'admin'
             and message.user_id != user.id
@@ -1859,14 +1745,6 @@ async def delete_message_by_id(
                 strict=False,
                 db=db,
             )
-=======
-        if user.role != 'admin' and not await channel_has_access(
-            user.id,
-            channel,
-            permission='write',
-            strict=False,
-            db=db,
->>>>>>> v0.11.0
         ):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
         # Write access is not authorship — block cross-member deletes.
@@ -2072,9 +1950,6 @@ async def delete_channel_webhook(
     if not webhook or webhook.channel_id != id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-<<<<<<< HEAD
-    return await Channels.delete_webhook_by_id(webhook_id, db=db)
-=======
     deleted = await Channels.delete_webhook_by_id(webhook_id, db=db)
     if deleted:
         await publish_event(
@@ -2085,7 +1960,6 @@ async def delete_channel_webhook(
             data={'channel_id': id},
         )
     return deleted
->>>>>>> v0.11.0
 
 
 ############################
