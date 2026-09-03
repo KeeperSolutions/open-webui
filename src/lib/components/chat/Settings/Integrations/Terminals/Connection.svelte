@@ -44,11 +44,7 @@
 		onDelete();
 		showConfigModal = false;
 	}}
-<<<<<<< HEAD
-	onSubmit={(c) => {
-=======
 	onSubmit={(c: TerminalServerConfig) => {
->>>>>>> v0.11.0
 		connection = c;
 		onSubmit(c);
 	}}

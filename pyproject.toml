@@ -17,17 +17,6 @@ dependencies = [
     "cryptography==48.0.0",
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
-<<<<<<< HEAD
-    "PyJWT[crypto]==2.11.0",
-    "authlib==1.6.10",
-
-    "requests==2.33.1",
-    "aiohttp==3.13.5", # do not update to 3.13.3 - broken
-    "async-timeout==5.0.1",
-    "aiocache==0.12.3",
-    "aiofiles==25.1.0",
-    "starlette-compress==1.7.0",
-=======
     "PyJWT[crypto]==2.13.0",
     "authlib==1.7.2",
     "joserfc==1.7.4",
@@ -39,32 +28,20 @@ dependencies = [
     "aiocache==0.12.3",
     "aiofiles==25.1.0",
     "starlette-compress==1.7.1",
->>>>>>> v0.11.0
     "Brotli==1.2.0",
     "brotlicffi==1.2.0.1",
     "httpx[socks,http2,zstd,cli,brotli]==0.28.1",
     "starsessions[redis]==2.2.1",
     "python-mimeparse==2.0.0",
 
-<<<<<<< HEAD
-    "sqlalchemy[asyncio]==2.0.48",
-    "aiosqlite==0.21.0",
-    "psycopg[binary]==3.2.9",
-=======
     "sqlalchemy[asyncio]==2.0.50",
     "aiosqlite==0.22.1",
     "psycopg[binary]==3.3.4",
->>>>>>> v0.11.0
     "alembic==1.18.4",
 
-<<<<<<< HEAD
-    "pycrdt==0.12.47",
-    "redis==7.4.0",
-=======
     "pycrdt==0.13.1",
     "redis==8.0.1",
     "hiredis==3.4.0",
->>>>>>> v0.11.0
     # "valkey-glide-sync==2.3.1",  # optional: install manually if VECTOR_DB=valkey
 
     "pytz==2026.2",
@@ -94,11 +71,7 @@ dependencies = [
     "boto3==1.42.62",
     
     "transformers==5.5.4",
-<<<<<<< HEAD
-    "sentence-transformers==5.4.0",
-=======
     "sentence-transformers==5.5.1",
->>>>>>> v0.11.0
     "accelerate==1.13.0",
     "pyarrow==20.0.0", # fix: pin pyarrow version to 20 for rpi compatibility #15897
     "einops==0.8.2",
@@ -134,11 +107,7 @@ dependencies = [
     "onnxruntime==1.26.0",
     "faster-whisper==1.2.1",
 
-<<<<<<< HEAD
-    "black==26.3.1",
-=======
     "black==26.5.1",
->>>>>>> v0.11.0
     "youtube-transcript-api==1.2.4",
     "pytube==15.0.0",
 
@@ -201,13 +170,8 @@ all = [
     "oracledb==3.4.2",
     "colbert-ai==0.2.22",
 
-<<<<<<< HEAD
-    "azure-search-documents==11.6.0",
-    "unstructured==0.18.31",
-=======
     "azure-search-documents==12.0.0",
     "unstructured==0.22.31",
->>>>>>> v0.11.0
 ]
 
 [project.scripts]

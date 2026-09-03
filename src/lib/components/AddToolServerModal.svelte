@@ -60,11 +60,8 @@
 	let oauthClientId = '';
 	let oauthClientSecret = '';
 	let oauthServerUrl = '';
-<<<<<<< HEAD
-=======
 	let oauthScope = '';
 	let oauthResourceParameter = 'auto';
->>>>>>> v0.11.0
 
 	let enable = true;
 	let loading = false;
@@ -101,17 +98,11 @@
 			client_id: string;
 			client_secret?: string;
 			oauth_server_url?: string;
-<<<<<<< HEAD
-		} = {
-			url: url,
-			client_id: id,
-=======
 			oauth_scope?: string;
 		} = {
 			url: url,
 			client_id: id,
 			...(oauthScope ? { oauth_scope: oauthScope } : {}),
->>>>>>> v0.11.0
 			...(auth_type === 'oauth_2.1_static'
 				? { client_secret: oauthClientSecret, oauth_server_url: oauthServerUrl }
 				: {})
@@ -408,11 +399,8 @@
 		oauthClientId = '';
 		oauthClientSecret = '';
 		oauthServerUrl = '';
-<<<<<<< HEAD
-=======
 		oauthScope = '';
 		oauthResourceParameter = 'auto';
->>>>>>> v0.11.0
 
 		enable = true;
 		functionNameFilterList = '';
@@ -440,11 +428,8 @@
 			oauthClientId = connection.info?.oauth_client_id ?? '';
 			oauthClientSecret = connection.info?.oauth_client_secret ?? '';
 			oauthServerUrl = connection.info?.oauth_server_url ?? '';
-<<<<<<< HEAD
-=======
 			oauthScope = connection.info?.oauth_scope ?? '';
 			oauthResourceParameter = connection.info?.oauth_resource_parameter ?? 'auto';
->>>>>>> v0.11.0
 
 			enable = connection.config?.enable ?? true;
 			functionNameFilterList = connection.config?.function_name_filter_list ?? '';
@@ -766,11 +751,7 @@
 												/>
 												<div class="flex flex-1 items-center">
 													<input
-<<<<<<< HEAD
-														class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-=======
 														class={`w-full text-sm ${inputClass}`}
->>>>>>> v0.11.0
 														type="text"
 														bind:value={oauthServerUrl}
 														placeholder={$i18n.t('OAuth Server URL')}
@@ -987,11 +968,7 @@
 								'MCP support is experimental and its specification changes often, which can lead to incompatibilities. OpenAPI specification support is directly maintained by the Open WebUI team, making it the more reliable option for compatibility.'
 							)}
 
-<<<<<<< HEAD
-							<a class="font-medium underline" href="https://docs.openwebui.com/" target="_blank"
-=======
 							<a class="font-normal underline" href="https://docs.openwebui.com/" target="_blank"
->>>>>>> v0.11.0
 								>{$i18n.t('Read more →')}</a
 							>
 						</div>

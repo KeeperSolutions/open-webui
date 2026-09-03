@@ -15,11 +15,7 @@
 
 {#if terminals.length > 0}
 	<div class="flex w-full justify-between mb-1">
-<<<<<<< HEAD
-		<div class="self-center text-xs font-medium text-gray-500">{$i18n.t('Terminal')}</div>
-=======
 		<div class="self-center text-xs font-normal text-gray-500">{$i18n.t('Terminal')}</div>
->>>>>>> v0.11.0
 	</div>
 
 	<select
