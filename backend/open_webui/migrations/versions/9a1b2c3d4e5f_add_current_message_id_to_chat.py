@@ -234,4 +234,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column('chat', 'current_message_id')
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('chat')]
+    if 'current_message_id' in columns:
+        op.drop_column('chat', 'current_message_id')
