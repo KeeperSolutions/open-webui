@@ -12,18 +12,10 @@ import asyncio
 import json
 import logging
 import time
-<<<<<<< HEAD
-from typing import Optional
-=======
 from typing import Literal, Optional
->>>>>>> v0.11.0
 
 from fastapi import HTTPException, Request
 
-<<<<<<< HEAD
-from open_webui.models.channels import Channel, ChannelMember, Channels
-from open_webui.models.chats import Chats
-=======
 from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
 from open_webui.env import (
     KNOWLEDGE_GREP_MAX_MATCHES,
@@ -32,8 +24,6 @@ from open_webui.env import (
 )
 from open_webui.models.channels import Channel, ChannelMember, Channels
 from open_webui.models.chats import Chats
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.groups import Groups
 from open_webui.models.memories import Memories
 from open_webui.models.messages import Message, Messages
@@ -49,11 +39,6 @@ from open_webui.routers.images import (
 )
 from open_webui.routers.memories import (
     AddMemoryForm,
-<<<<<<< HEAD
-    MemoryUpdateModel,
-    QueryMemoryForm,
-    query_memory,
-=======
     ListMemoryPathsForm,
     MemoryUpdateModel,
     ReadMemoryPathForm,
@@ -63,21 +48,17 @@ from open_webui.routers.memories import (
     read_memory_path as _read_memory_path,
     search_memories as _search_memories,
     update_memories as _update_memories,
->>>>>>> v0.11.0
     update_memory_by_id,
 )
 from open_webui.routers.memories import (
     add_memory as _add_memory,
 )
 from open_webui.routers.retrieval import search_web as _search_web
-<<<<<<< HEAD
-=======
 from open_webui.tasks import stop_item_tasks
 from open_webui.events import EVENTS, publish_event
 from open_webui.socket.main import sio
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.notifications import notify_target
->>>>>>> v0.11.0
 from open_webui.utils.sanitize import sanitize_code
 
 log = logging.getLogger(__name__)
@@ -85,8 +66,6 @@ log = logging.getLogger(__name__)
 MAX_KNOWLEDGE_BASE_SEARCH_ITEMS = 10_000
 
 
-<<<<<<< HEAD
-=======
 async def _has_write_access_to_note(note, user_id: str) -> bool:
     if note.user_id == user_id:
         return True
@@ -114,7 +93,6 @@ async def _emit_note_updated(request: Request, user: dict, note) -> None:
     )
 
 
->>>>>>> v0.11.0
 async def _has_read_access_to_file(
     file,
     user_id: str,
@@ -318,14 +296,10 @@ async def search_web(
         return json.dumps({'error': 'Request context not available'})
 
     try:
-        engine = await Config.get('web.search.engine')
+        engine = __request__.app.state.config.WEB_SEARCH_ENGINE
         user = UserModel(**__user__) if __user__ else None
 
-<<<<<<< HEAD
         configured = __request__.app.state.config.WEB_SEARCH_RESULT_COUNT
-=======
-        configured = await Config.get('web.search.result_count')
->>>>>>> v0.11.0
         max_count = 5 if configured is None else configured
         count = max(1, min(count, max_count)) if count is not None else max_count
 
@@ -363,11 +337,7 @@ async def fetch_url(
         # Truncate if configured (WEB_FETCH_MAX_CONTENT_LENGTH)
         # Guard: content may be None if the web loader silently failed
         if content is not None:
-<<<<<<< HEAD
             max_length = getattr(__request__.app.state.config, 'WEB_FETCH_MAX_CONTENT_LENGTH', None)
-=======
-            max_length = await Config.get('web.fetch.max_content_length')
->>>>>>> v0.11.0
             if max_length and max_length > 0 and len(content) > max_length:
                 content = content[:max_length] + '\n\n[Content truncated...]'
         else:
@@ -414,11 +384,7 @@ async def generate_image(
         image_files = [{'type': 'image', 'url': img['url']} for img in images]
 
         # Persist files to DB if chat context is available
-<<<<<<< HEAD
-        if __chat_id__ and __message_id__ and images:
-=======
         if is_saved_chat_id(__chat_id__) and __message_id__ and images:
->>>>>>> v0.11.0
             db_files = await Chats.add_message_files_by_id_and_message_id(
                 __chat_id__,
                 __message_id__,
@@ -486,11 +452,7 @@ async def edit_image(
         image_files = [{'type': 'image', 'url': img['url']} for img in images]
 
         # Persist files to DB if chat context is available
-<<<<<<< HEAD
-        if __chat_id__ and __message_id__ and images:
-=======
         if is_saved_chat_id(__chat_id__) and __message_id__ and images:
->>>>>>> v0.11.0
             db_files = await Chats.add_message_files_by_id_and_message_id(
                 __chat_id__,
                 __message_id__,
@@ -585,7 +547,7 @@ async def execute_code(
             )
             code = blocking_code + '\n' + code
 
-        engine = await Config.get('code_interpreter.engine', 'pyodide')
+        engine = __request__.app.state.config.CODE_INTERPRETER_ENGINE or 'pyodide'
         if engine == 'pyodide':
             # Execute via frontend pyodide using bidirectional event call
             if __event_call__ is None:
@@ -624,14 +586,14 @@ async def execute_code(
         elif engine == 'jupyter':
             from open_webui.utils.code_interpreter import execute_code_jupyter
 
-            jupyter_auth = await Config.get('code_interpreter.jupyter.auth')
+            jupyter_auth = __request__.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH
 
             output = await execute_code_jupyter(
-                await Config.get('code_interpreter.jupyter.url'),
+                __request__.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
                 code,
-                (await Config.get('code_interpreter.jupyter.auth_token') if jupyter_auth == 'token' else None),
-                (await Config.get('code_interpreter.jupyter.auth_password') if jupyter_auth == 'password' else None),
-                await Config.get('code_interpreter.jupyter.timeout'),
+                (__request__.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN if jupyter_auth == 'token' else None),
+                (__request__.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD if jupyter_auth == 'password' else None),
+                __request__.app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT,
             )
 
             stdout = output.get('stdout', '')
@@ -1150,14 +1112,6 @@ async def view_note(
 
         from open_webui.models.access_grants import AccessGrants
 
-<<<<<<< HEAD
-        if note.user_id != user_id and not await AccessGrants.has_access(
-            user_id=user_id,
-            resource_type='note',
-            resource_id=note.id,
-            permission='read',
-            user_group_ids=set(user_group_ids),
-=======
         if (
             __user__.get('role') != 'admin'
             and note.user_id != user_id
@@ -1168,7 +1122,6 @@ async def view_note(
                 permission='read',
                 user_group_ids=set(user_group_ids),
             )
->>>>>>> v0.11.0
         ):
             return json.dumps({'error': 'Access denied'})
 
@@ -1275,12 +1228,8 @@ async def replace_note_content(
             return json.dumps({'error': 'Note not found', 'code': 'not_found'})
 
         user_id = __user__.get('id')
-<<<<<<< HEAD
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-=======
         if __user__.get('role') != 'admin' and not await _has_write_access_to_note(note, user_id):
             return json.dumps({'error': 'Write access denied', 'code': 'write_access_denied'})
->>>>>>> v0.11.0
 
         current_content = ((note.data or {}).get('content') or {}).get('md') or ''
         applied_operation_count = 0
@@ -1288,23 +1237,12 @@ async def replace_note_content(
             if not isinstance(operations, list) or len(operations) == 0:
                 return json.dumps({'error': 'operations must be a non-empty list', 'code': 'invalid_operations'})
 
-<<<<<<< HEAD
-        if note.user_id != user_id and not await AccessGrants.has_access(
-            user_id=user_id,
-            resource_type='note',
-            resource_id=note.id,
-            permission='write',
-            user_group_ids=set(user_group_ids),
-        ):
-            return json.dumps({'error': 'Write access denied'})
-=======
             range_operations = []
             for idx, operation in enumerate(operations):
                 if not isinstance(operation, dict):
                     return json.dumps(
                         {'error': 'each operation must be an object', 'code': 'invalid_operation', 'index': idx}
                     )
->>>>>>> v0.11.0
 
                 action = operation.get('action')
                 replacement = operation.get('content')
@@ -2223,12 +2161,6 @@ async def search_knowledge_files(
         return json.dumps({'error': str(e)})
 
 
-<<<<<<< HEAD
-# Hard cap for view_file / view_knowledge_file output
-MAX_VIEW_FILE_CHARS = 100_000
-DEFAULT_VIEW_FILE_MAX_CHARS = 10_000
-MAX_GREP_RESULTS = 50
-=======
 async def _get_accessible_chat_files(
     files: Optional[list[dict]],
     user: dict,
@@ -2465,14 +2397,15 @@ async def query_chat_files(
             return json.dumps({'error': 'No accessible files found'})
 
         file_items = [{**item} for item, _ in accessible]
-        rag_config = await Config.get_many(
-            'rag.top_k',
-            'rag.top_k_reranker',
-            'rag.relevance_threshold',
-            'rag.hybrid_bm25_weight',
-            'rag.enable_hybrid_search',
-            'rag.full_context',
-        )
+        _cfg = __request__.app.state.config
+        rag_config = {
+            'rag.top_k': _cfg.RAG_TOP_K,
+            'rag.top_k_reranker': _cfg.RAG_TOP_K_RERANKER,
+            'rag.relevance_threshold': _cfg.RAG_RELEVANCE_THRESHOLD,
+            'rag.hybrid_bm25_weight': _cfg.RAG_HYBRID_BM25_WEIGHT,
+            'rag.enable_hybrid_search': _cfg.ENABLE_RAG_HYBRID_SEARCH,
+            'rag.full_context': _cfg.RAG_FULL_CONTEXT,
+        }
         top_k = rag_config.get('rag.top_k') or 5
         count = top_k if count is None else max(1, min(count, top_k))
         full_context = all(item.get('context') == 'full' for item in file_items) or rag_config.get('rag.full_context')
@@ -2530,7 +2463,6 @@ async def query_chat_files(
     except Exception as e:
         log.exception(f'query_chat_files error: {e}')
         return json.dumps({'error': str(e)})
->>>>>>> v0.11.0
 
 
 async def grep_knowledge_files(
@@ -2546,10 +2478,7 @@ async def grep_knowledge_files(
     Search for exact text across knowledge files. Returns matching lines with line numbers.
     Unlike query_knowledge_files (semantic/vector search), this performs exact string matching.
     Automatically detects regex patterns (e.g. "error|warn", "version \\d+").
-<<<<<<< HEAD
-=======
     Helpful for literal strings, identifiers, error messages, or regex-style searches.
->>>>>>> v0.11.0
 
     :param pattern: The text pattern to search for (regex auto-detected)
     :param file_id: Optional file ID to search within a single file only
@@ -2569,22 +2498,11 @@ async def grep_knowledge_files(
     try:
         from open_webui.models.files import Files
         from open_webui.models.knowledge import Knowledges
-<<<<<<< HEAD
-        from open_webui.tools.knowledge_fs import build_matcher
-=======
->>>>>>> v0.11.0
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
         user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
 
-<<<<<<< HEAD
-        _matches, err = build_matcher(pattern, case_insensitive)
-        if err:
-            return json.dumps({'error': err})
-
-=======
->>>>>>> v0.11.0
         # Collect files to search
         files_to_search = []
 
@@ -2660,47 +2578,7 @@ async def grep_knowledge_files(
         if not files_to_search:
             return json.dumps({'error': 'No accessible files found'})
 
-<<<<<<< HEAD
-        # Search
-        results = []
-        total_matches = 0
-        counts = []
-
-        for file in files_to_search:
-            content = ''
-            if file.data:
-                content = file.data.get('content', '')
-            if not content:
-                continue
-
-            lines = content.split('\n')
-            file_matches = 0
-
-            for i, line in enumerate(lines, 1):
-                if _matches(line):
-                    file_matches += 1
-                    total_matches += 1
-                    if not count_only and len(results) < MAX_GREP_RESULTS:
-                        results.append(f'{file.id}  {file.filename}:{i}: {line}')
-
-            if file_matches > 0 and count_only:
-                counts.append(f'{file.id}  {file.filename}: {file_matches}')
-
-        if count_only:
-            if not counts:
-                return f'No matches for "{pattern}"'
-            return '\n'.join(counts) + f'\n[{total_matches} total matches]'
-
-        if not results:
-            return f'No matches for "{pattern}"'
-
-        output = '\n'.join(results)
-        if total_matches > MAX_GREP_RESULTS:
-            output += f'\n[{MAX_GREP_RESULTS} of {total_matches} matches shown — use file_id to narrow]'
-        return output
-=======
         return _grep_file_models(files_to_search, pattern, case_insensitive, count_only)
->>>>>>> v0.11.0
 
     except Exception as e:
         log.exception(f'grep_knowledge_files error: {e}')
@@ -2710,11 +2588,7 @@ async def grep_knowledge_files(
 async def view_file(
     file_id: str,
     offset: int = 0,
-<<<<<<< HEAD
-    max_chars: int = DEFAULT_VIEW_FILE_MAX_CHARS,
-=======
     max_chars: int = VIEW_FILE_DEFAULT_MAX_CHARS,
->>>>>>> v0.11.0
     line_numbers: bool = False,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
@@ -2727,11 +2601,7 @@ async def view_file(
 
     :param file_id: The ID of the file to retrieve
     :param offset: Character offset to start reading from (default: 0)
-<<<<<<< HEAD
-    :param max_chars: Maximum characters to return (default: 10000, hard cap: 100000)
-=======
     :param max_chars: Maximum characters to return (a server-side hard cap applies)
->>>>>>> v0.11.0
     :param line_numbers: If true, prefix each line with its 1-indexed line number
     :param start_line: Optional 1-indexed start line (overrides offset/max_chars when set)
     :param end_line: Optional 1-indexed end line (inclusive)
@@ -2834,11 +2704,7 @@ async def view_file(
 async def view_knowledge_file(
     file_id: str,
     offset: int = 0,
-<<<<<<< HEAD
-    max_chars: int = DEFAULT_VIEW_FILE_MAX_CHARS,
-=======
     max_chars: int = VIEW_FILE_DEFAULT_MAX_CHARS,
->>>>>>> v0.11.0
     line_numbers: bool = False,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
@@ -2850,11 +2716,7 @@ async def view_knowledge_file(
 
     :param file_id: The ID of the file to retrieve
     :param offset: Character offset to start reading from (default: 0)
-<<<<<<< HEAD
-    :param max_chars: Maximum characters to return (default: 10000, hard cap: 100000)
-=======
     :param max_chars: Maximum characters to return (a server-side hard cap applies)
->>>>>>> v0.11.0
     :param line_numbers: If true, prefix each line with its 1-indexed line number
     :param start_line: Optional 1-indexed start line (overrides offset/max_chars when set)
     :param end_line: Optional 1-indexed end line (inclusive)
@@ -3175,10 +3037,7 @@ async def query_knowledge_files(
         from open_webui.models.files import Files
         from open_webui.models.knowledge import Knowledges
         from open_webui.models.notes import Notes
-<<<<<<< HEAD
-=======
         from open_webui.retrieval.external import retrieve_external_knowledge
->>>>>>> v0.11.0
         from open_webui.retrieval.utils import query_collection
 
         user_id = __user__.get('id')
@@ -3379,15 +3238,11 @@ async def query_knowledge_bases(
 
         user_id = __user__.get('id')
         user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-<<<<<<< HEAD
-        query_embedding = await __request__.app.state.EMBEDDING_FUNCTION(query)
-=======
         embedding_function = getattr(__request__.app.state, 'EMBEDDING_FUNCTION', None)
         if not embedding_function:
             return json.dumps({'error': 'Embedding function not configured'})
         user_model = UserModel.model_construct(id=user_id, role=__user__.get('role', 'user'))
         query_embedding = await embedding_function(query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user_model)
->>>>>>> v0.11.0
 
         # Min-heap of (distance, knowledge_base_id) - only holds top `count` results
         top_results_heap = []
@@ -3572,24 +3427,13 @@ async def create_tasks(
     __user__: dict = None,
 ) -> str:
     """
-<<<<<<< HEAD
-    Create a task checklist to track progress on multi-step work.
-    Call this once at the start to define all steps, then use
-    update_task to mark each task as you complete it.
-=======
     Create a visible task checklist for multi-step work so progress can be shown in chat.
->>>>>>> v0.11.0
 
     :param tasks: List of task items. Each item: content (string, required), status (pending|in_progress|completed|cancelled, default pending), id (optional, auto-generated).
     :return: JSON with the full task list and summary counts
     """
-<<<<<<< HEAD
-    if __chat_id__ is None:
-        return json.dumps({'error': 'Chat context not available'})
-=======
     if not is_saved_chat_id(__chat_id__):
         return json.dumps({'error': 'Saved chat context not available'})
->>>>>>> v0.11.0
 
     try:
         all_tasks = []
@@ -3634,25 +3478,14 @@ async def update_task(
     __user__: dict = None,
 ) -> str:
     """
-<<<<<<< HEAD
-    Mark a single task as completed, in_progress, pending, or cancelled.
-    Call this after finishing each step. You MUST call this for every
-    task, including the very last one.
-=======
     Mark a single visible task item as completed, in_progress, pending, or cancelled.
->>>>>>> v0.11.0
 
     :param id: The task ID to update
     :param status: New status: completed, in_progress, pending, or cancelled (default: completed)
     :return: JSON with the updated task list and summary counts
     """
-<<<<<<< HEAD
-    if __chat_id__ is None:
-        return json.dumps({'error': 'Chat context not available'})
-=======
     if not is_saved_chat_id(__chat_id__):
         return json.dumps({'error': 'Saved chat context not available'})
->>>>>>> v0.11.0
 
     try:
         status = status.strip().lower()
@@ -3690,8 +3523,6 @@ async def update_task(
 # =============================================================================
 
 
-<<<<<<< HEAD
-=======
 async def _validate_owned_automation_folder(user_id: str, folder_id: Optional[str]) -> Optional[str]:
     if not folder_id:
         return None
@@ -3703,15 +3534,11 @@ async def _validate_owned_automation_folder(user_id: str, folder_id: Optional[st
     return folder.id
 
 
->>>>>>> v0.11.0
 async def create_automation(
     name: str,
     prompt: str,
     rrule: str,
-<<<<<<< HEAD
-=======
     folder_id: Optional[str] = None,
->>>>>>> v0.11.0
     __request__: Request = None,
     __user__: dict = None,
     __metadata__: dict = None,
@@ -3734,10 +3561,7 @@ async def create_automation(
     :param name: A short descriptive name for the automation
     :param prompt: The prompt/instructions to execute on each run
     :param rrule: An iCalendar RRULE string defining the schedule
-<<<<<<< HEAD
-=======
     :param folder_id: Optional owner-owned folder ID for generated chats
->>>>>>> v0.11.0
     :return: JSON with the created automation details including id, next scheduled runs
     """
     if __request__ is None:
@@ -3749,10 +3573,7 @@ async def create_automation(
     try:
         from open_webui.models.automations import AutomationData, AutomationForm, Automations
         from open_webui.models.users import Users
-<<<<<<< HEAD
-=======
         from open_webui.routers.automations import check_automation_limits
->>>>>>> v0.11.0
         from open_webui.utils.automations import next_n_runs_ns, next_run_ns, validate_rrule
 
         user_id = __user__.get('id')
@@ -3768,25 +3589,17 @@ async def create_automation(
         if not model_id:
             return json.dumps({'error': 'Could not detect current model'})
 
-<<<<<<< HEAD
-=======
         try:
             folder_id = await _validate_owned_automation_folder(user_id, folder_id)
         except ValueError as e:
             return json.dumps({'error': str(e)})
 
->>>>>>> v0.11.0
         # Validate the RRULE
         try:
             validate_rrule(rrule, tz=user.timezone)
         except ValueError as e:
             return json.dumps({'error': f'Invalid schedule: {e}'})
 
-<<<<<<< HEAD
-        tz = user.timezone
-        form = AutomationForm(
-            name=name,
-=======
         try:
             await check_automation_limits(__request__, user, rrule, None, is_create=True)
         except HTTPException as e:
@@ -3796,7 +3609,6 @@ async def create_automation(
         form = AutomationForm(
             name=name,
             folder_id=folder_id,
->>>>>>> v0.11.0
             data=AutomationData(
                 prompt=prompt,
                 model_id=model_id,
@@ -3812,10 +3624,7 @@ async def create_automation(
                 'status': 'success',
                 'id': automation.id,
                 'name': automation.name,
-<<<<<<< HEAD
-=======
                 'folder_id': automation.folder_id,
->>>>>>> v0.11.0
                 'model_id': model_id,
                 'is_active': automation.is_active,
                 'next_runs': next_n_runs_ns(rrule, tz=tz),
@@ -3833,10 +3642,7 @@ async def update_automation(
     prompt: Optional[str] = None,
     rrule: Optional[str] = None,
     model_id: Optional[str] = None,
-<<<<<<< HEAD
-=======
     folder_id: Optional[str] = None,
->>>>>>> v0.11.0
     __request__: Request = None,
     __user__: dict = None,
 ) -> str:
@@ -3848,10 +3654,7 @@ async def update_automation(
     :param prompt: New prompt/instructions (optional)
     :param rrule: New iCalendar RRULE schedule string (optional). See create_automation for format examples.
     :param model_id: New model ID to use (optional)
-<<<<<<< HEAD
-=======
     :param folder_id: New owner-owned folder ID (optional); pass an empty string to clear
->>>>>>> v0.11.0
     :return: JSON with the updated automation details
     """
     if __request__ is None:
@@ -3863,19 +3666,13 @@ async def update_automation(
     try:
         from open_webui.models.automations import AutomationData, AutomationForm, Automations
         from open_webui.models.users import Users
-<<<<<<< HEAD
-=======
         from open_webui.routers.automations import check_automation_limits
->>>>>>> v0.11.0
         from open_webui.utils.automations import next_n_runs_ns, next_run_ns, validate_rrule
 
         user_id = __user__.get('id')
         user = await Users.get_user_by_id(user_id)
-<<<<<<< HEAD
-=======
         if not user:
             return json.dumps({'error': 'User not found'})
->>>>>>> v0.11.0
 
         automation = await Automations.get_by_id(automation_id)
         if not automation:
@@ -3888,8 +3685,6 @@ async def update_automation(
         new_prompt = prompt if prompt is not None else automation.data.get('prompt', '')
         new_model_id = model_id if model_id is not None else automation.data.get('model_id', '')
         new_rrule = rrule if rrule is not None else automation.data.get('rrule', '')
-<<<<<<< HEAD
-=======
         if folder_id is None:
             new_folder_id = automation.folder_id
         else:
@@ -3897,20 +3692,10 @@ async def update_automation(
                 new_folder_id = await _validate_owned_automation_folder(user_id, folder_id)
             except ValueError as e:
                 return json.dumps({'error': str(e)})
->>>>>>> v0.11.0
 
         # Validate RRULE if changed
         if rrule is not None:
             try:
-<<<<<<< HEAD
-                validate_rrule(new_rrule, tz=user.timezone if user else None)
-            except ValueError as e:
-                return json.dumps({'error': f'Invalid schedule: {e}'})
-
-        tz = user.timezone if user else None
-        form = AutomationForm(
-            name=new_name,
-=======
                 validate_rrule(new_rrule, tz=user.timezone)
             except ValueError as e:
                 return json.dumps({'error': f'Invalid schedule: {e}'})
@@ -3924,7 +3709,6 @@ async def update_automation(
         form = AutomationForm(
             name=new_name,
             folder_id=new_folder_id,
->>>>>>> v0.11.0
             data=AutomationData(
                 prompt=new_prompt,
                 model_id=new_model_id,
@@ -3940,10 +3724,7 @@ async def update_automation(
                 'status': 'success',
                 'id': updated.id,
                 'name': updated.name,
-<<<<<<< HEAD
-=======
                 'folder_id': updated.folder_id,
->>>>>>> v0.11.0
                 'model_id': new_model_id,
                 'is_active': updated.is_active,
                 'next_runs': next_n_runs_ns(new_rrule, tz=tz),
@@ -3957,10 +3738,7 @@ async def update_automation(
 
 async def list_automations(
     status: Optional[str] = None,
-<<<<<<< HEAD
-=======
     folder_id: Optional[str] = None,
->>>>>>> v0.11.0
     count: int = 10,
     __request__: Request = None,
     __user__: dict = None,
@@ -3969,10 +3747,7 @@ async def list_automations(
     List the user's scheduled automations.
 
     :param status: Filter by status: "active", "paused", or omit for all
-<<<<<<< HEAD
-=======
     :param folder_id: Optional owner-owned folder ID filter; pass an empty string to clear the folder filter
->>>>>>> v0.11.0
     :param count: Maximum number of automations to return (default: 10)
     :return: JSON list of automations with id, name, prompt snippet, schedule, status, and next runs
     """
@@ -3989,22 +3764,16 @@ async def list_automations(
 
         user_id = __user__.get('id')
         user = await Users.get_user_by_id(user_id)
-<<<<<<< HEAD
-=======
         if folder_id:
             try:
                 folder_id = await _validate_owned_automation_folder(user_id, folder_id)
             except ValueError as e:
                 return json.dumps({'error': str(e)})
->>>>>>> v0.11.0
 
         result = await Automations.search_automations(
             user_id=user_id,
             status=status,
-<<<<<<< HEAD
-=======
             folder_id=folder_id,
->>>>>>> v0.11.0
             skip=0,
             limit=count,
         )
@@ -4019,10 +3788,7 @@ async def list_automations(
                 {
                     'id': item.id,
                     'name': item.name,
-<<<<<<< HEAD
-=======
                     'folder_id': item.folder_id,
->>>>>>> v0.11.0
                     'prompt_snippet': snippet,
                     'model_id': item.data.get('model_id', ''),
                     'rrule': rrule,
@@ -4206,12 +3972,7 @@ async def search_calendar_events(
 ) -> str:
     """
     Search calendar events, reminders, and scheduled items by text and/or date range.
-<<<<<<< HEAD
-    Use this to check what's coming up, find a specific event or reminder, or list
-    the user's schedule for a time period.
-=======
     Helpful for finding upcoming events, reminders, or schedule items.
->>>>>>> v0.11.0
 
     :param query: Search text to match against event title, description, or location (optional)
     :param start: Only return events starting at or after this datetime, e.g. "2026-04-20 00:00" (optional)

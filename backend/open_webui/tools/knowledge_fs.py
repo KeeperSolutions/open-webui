@@ -7,30 +7,12 @@ for AI models to interact with knowledge bases using commands they already know.
 Re-exported through builtin.py for consistent imports.
 """
 
-<<<<<<< HEAD
-=======
 import contextvars
->>>>>>> v0.11.0
 import json
 import logging
 import re
 import shlex
 import time
-<<<<<<< HEAD
-from typing import Optional
-
-from fastapi import Request
-
-log = logging.getLogger(__name__)
-
-# Limits
-MAX_CAT_CHARS = 100_000
-DEFAULT_CAT_CHARS = 10_000
-MAX_GREP_FILES = 200
-DEFAULT_HEAD_LINES = 10
-DEFAULT_TAIL_LINES = 10
-MAX_GREP_MATCHES = 50
-=======
 from contextlib import contextmanager
 from typing import Optional
 
@@ -77,7 +59,6 @@ def match_budget():
         yield
     finally:
         _active_budget.reset(token)
->>>>>>> v0.11.0
 
 
 # =============================================================================
@@ -86,15 +67,9 @@ def match_budget():
 
 
 def is_regex_pattern(pattern: str) -> bool:
-<<<<<<< HEAD
-    """Detect if a pattern looks like regex (\|, .*, .+, \d, \w, \s, [...])."""
-    return (
-        '\|' in pattern
-=======
     """Detect if a pattern looks like regex (|, .*, .+, \d, \w, \s, [...])."""
     return (
         '|' in pattern
->>>>>>> v0.11.0
         or '.*' in pattern
         or '.+' in pattern
         or '.?' in pattern
@@ -118,13 +93,6 @@ def build_matcher(pattern: str, case_insensitive: bool = False, use_regex: bool 
     if use_regex:
         normalized = normalize_regex(pattern)
         try:
-<<<<<<< HEAD
-            re_flags = re.IGNORECASE if case_insensitive else 0
-            compiled = re.compile(normalized, re_flags)
-        except re.error as e:
-            return None, f'Invalid regex: {e}'
-        return (lambda line: bool(compiled.search(line))), None
-=======
             re_flags = regex.IGNORECASE if case_insensitive else 0
             compiled = regex.compile(normalized, re_flags)
         except regex.error as e:
@@ -145,7 +113,6 @@ def build_matcher(pattern: str, case_insensitive: bool = False, use_regex: bool 
                 budget.remaining -= time.monotonic() - started
 
         return matches, None
->>>>>>> v0.11.0
     else:
         sp = pattern.lower() if case_insensitive else pattern
         return (lambda line: sp in (line.lower() if case_insensitive else line)), None
@@ -564,14 +531,11 @@ async def _kb_ls(args: list[str], flags: set[str], user: dict, model_knowledge: 
     path_arg = args[0] if args else None
 
     kb_ids = await _get_accessible_kb_ids(user, model_knowledge, knowledge_id=None)
-<<<<<<< HEAD
-=======
     direct_files = (
         [f for f in await _get_accessible_files(user, model_knowledge) if not f.get('knowledge_id')]
         if model_knowledge
         else []
     )
->>>>>>> v0.11.0
 
     # If path_arg looks like a KB ID, scope to that KB
     target_kb_id = None
@@ -587,11 +551,7 @@ async def _kb_ls(args: list[str], flags: set[str], user: dict, model_knowledge: 
     if target_kb_id:
         kb_ids = [(kid, kn, kd) for kid, kn, kd in kb_ids if kid == target_kb_id]
 
-<<<<<<< HEAD
-    if not kb_ids:
-=======
     if not kb_ids and not direct_files:
->>>>>>> v0.11.0
         return 'No knowledge bases found.'
 
     lines = []
@@ -634,15 +594,12 @@ async def _kb_ls(args: list[str], flags: set[str], user: dict, model_knowledge: 
             lines.append('  (empty)')
         lines.append('')
 
-<<<<<<< HEAD
-=======
     if direct_files and not target_kb_id and not dir_path:
         lines.append('Attached Files:')
         for f in direct_files:
             lines.append(f'  {f["id"]}  {f["filename"]}  {_fmt_size(f)}  {_fmt_date(f)}')
         lines.append('')
 
->>>>>>> v0.11.0
     return '\n'.join(lines).rstrip()
 
 
@@ -671,28 +628,10 @@ async def _kb_cat(args: list[str], flags: set[str], user: dict, model_knowledge:
         return resolved['error']
 
     content = resolved['content']
-<<<<<<< HEAD
-    show_numbers = 'n' in flags
-
-    if len(content) > MAX_CAT_CHARS:
-        content = content[:MAX_CAT_CHARS]
-        truncated = True
-    else:
-        truncated = False
-
-    if show_numbers:
-        lines = content.split('\n')
-        content = '\n'.join(f'{i}: {line}' for i, line in enumerate(lines, 1))
-
-    if truncated:
-        content += f'\n[truncated at {MAX_CAT_CHARS:,} chars — use head/tail/sed/grep to navigate]'
-
-=======
     if 'n' in flags:
         lines = content.split('\n')
         content = '\n'.join(f'{i}: {line}' for i, line in enumerate(lines, 1))
 
->>>>>>> v0.11.0
     return content
 
 
@@ -785,24 +724,16 @@ async def _kb_grep(
 
     # Grep on piped input
     if piped_input is not None:
-<<<<<<< HEAD
-        lines = piped_input.split('\\n')
-=======
         lines = piped_input.split('\n')
->>>>>>> v0.11.0
         matched = []
         for i, line in enumerate(lines, 1):
             if _matches(line):
                 matched.append(f'{i}: {line}')
-<<<<<<< HEAD
-        return '\\n'.join(matched) if matched else f'No matches for "{pattern}"'
-=======
         if count_only:
             return str(len(matched))
         if filenames_only:
             return '(standard input)' if matched else f'No matches for "{pattern}"'
         return '\n'.join(matched) if matched else f'No matches for "{pattern}"'
->>>>>>> v0.11.0
 
     # Single file grep
     if file_ref and not dir_scope:
@@ -813,11 +744,7 @@ async def _kb_grep(
         elif 'error' in resolved:
             return resolved['error']
         else:
-<<<<<<< HEAD
-            lines = resolved['content'].split('\\n')
-=======
             lines = resolved['content'].split('\n')
->>>>>>> v0.11.0
             matched = []
             for i, line in enumerate(lines, 1):
                 if _matches(line):
@@ -830,11 +757,7 @@ async def _kb_grep(
 
             if not matched:
                 return f'No matches for "{pattern}" in {resolved["filename"]}'
-<<<<<<< HEAD
-            return '\\n'.join(matched)
-=======
             return '\n'.join(matched)
->>>>>>> v0.11.0
 
     # Cross-file grep (optionally scoped to directory)
     accessible = await _get_accessible_files(user, model_knowledge)
@@ -857,11 +780,7 @@ async def _kb_grep(
     if ext_filter:
         accessible = [f for f in accessible if f['filename'].endswith(f'.{ext_filter}')]
 
-<<<<<<< HEAD
-    if len(accessible) > MAX_GREP_FILES:
-=======
     if len(accessible) > KB_EXEC_MAX_GREP_FILES:
->>>>>>> v0.11.0
         return f'Too many files ({len(accessible)}). Scope your search: grep "{pattern}" docs/ or grep "{pattern}" *.py'
 
     from open_webui.models.files import Files
@@ -893,11 +812,7 @@ async def _kb_grep(
 
             if not count_only and not filenames_only:
                 for line_num, line_text in file_matches:
-<<<<<<< HEAD
-                    if len(results) < MAX_GREP_MATCHES:
-=======
                     if len(results) < KNOWLEDGE_GREP_MAX_MATCHES:
->>>>>>> v0.11.0
                         results.append(f'{file_info["id"]}  {file_info["filename"]}:{line_num}: {line_text.rstrip()}')
 
     if count_only:
@@ -916,13 +831,8 @@ async def _kb_grep(
         return f'No matches for "{pattern}" across {len(accessible)} files'
 
     output = '\n'.join(results)
-<<<<<<< HEAD
-    if total_matches > MAX_GREP_MATCHES:
-        output += f'\n[showing {MAX_GREP_MATCHES} of {total_matches} matches]'
-=======
     if total_matches > KNOWLEDGE_GREP_MAX_MATCHES:
         output += f'\n[showing {KNOWLEDGE_GREP_MAX_MATCHES} of {total_matches} matches]'
->>>>>>> v0.11.0
     return output
 
 
@@ -1101,16 +1011,12 @@ async def _kb_sed(
 async def _kb_tree(args: list[str], flags: set[str], user: dict, model_knowledge: list[dict] | None) -> str:
     """Show directory tree structure."""
     kb_ids = await _get_accessible_kb_ids(user, model_knowledge)
-<<<<<<< HEAD
-    if not kb_ids:
-=======
     direct_files = (
         [f for f in await _get_accessible_files(user, model_knowledge) if not f.get('knowledge_id')]
         if model_knowledge
         else []
     )
     if not kb_ids and not direct_files:
->>>>>>> v0.11.0
         return 'No knowledge bases found.'
 
     dir_scope = args[0].strip('/') if args else None
@@ -1159,8 +1065,6 @@ async def _kb_tree(args: list[str], flags: set[str], user: dict, model_knowledge
         output.append(f'\n  {total_dirs} directories, {total_files} files')
         output.append('')
 
-<<<<<<< HEAD
-=======
     if direct_files and not dir_scope:
         output.append('Attached Files:')
         for idx, f in enumerate(direct_files):
@@ -1169,7 +1073,6 @@ async def _kb_tree(args: list[str], flags: set[str], user: dict, model_knowledge
         output.append(f'\n  0 directories, {len(direct_files)} files')
         output.append('')
 
->>>>>>> v0.11.0
     return '\n'.join(output).rstrip()
 
 
@@ -1266,9 +1169,6 @@ async def kb_exec(
         if not segments:
             return 'Could not parse command. Run kb_exec("ls") to start.'
 
-<<<<<<< HEAD
-        return await _execute_pipeline(segments, __user__, __model_knowledge__)
-=======
         # One budget for the whole command: a per-search budget would multiply by segment count.
         with match_budget():
             output = await _execute_pipeline(segments, __user__, __model_knowledge__)
@@ -1278,7 +1178,6 @@ async def kb_exec(
                 ' — narrow the command with a path, glob, head/tail/sed or grep]'
             )
         return output
->>>>>>> v0.11.0
     except Exception as e:
         log.exception(f'kb_exec error: {e}')
         return f'Error: {e}'

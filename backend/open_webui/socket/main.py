@@ -5,11 +5,6 @@ import logging
 import random
 import sys
 import time
-<<<<<<< HEAD
-from typing import Dict
-=======
->>>>>>> v0.11.0
-
 import pycrdt as Y
 import socketio
 from open_webui.config import (
@@ -19,10 +14,6 @@ from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
     GLOBAL_LOG_LEVEL,
     REDIS_KEY_PREFIX,
-<<<<<<< HEAD
-    VERSION,
-=======
->>>>>>> v0.11.0
     WEBSOCKET_EVENT_CALLER_TIMEOUT,
     WEBSOCKET_MANAGER,
     WEBSOCKET_REDIS_CLUSTER,
@@ -39,23 +30,16 @@ from open_webui.env import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
-<<<<<<< HEAD
-=======
 from open_webui.models.folders import Folders
->>>>>>> v0.11.0
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import UserNameResponse, Users
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
 from open_webui.utils.access_control import has_permission
-<<<<<<< HEAD
-from open_webui.utils.auth import decode_token
-=======
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import SOCKETIO_JSON
 from open_webui.utils.misc import get_output_text
->>>>>>> v0.11.0
 from open_webui.utils.redis import (
     build_sentinel_url,
     get_redis_connection,
@@ -87,11 +71,7 @@ if WEBSOCKET_MANAGER == 'redis':
         if sentinel_hosts
         else WEBSOCKET_REDIS_URL
     )
-<<<<<<< HEAD
-    redis_manager = socketio.AsyncRedisManager(ws_redis_url, redis_options=WEBSOCKET_REDIS_OPTIONS)
-=======
     redis_manager = socketio.AsyncRedisManager(ws_redis_url, redis_options=WEBSOCKET_REDIS_OPTIONS, json=SOCKETIO_JSON)
->>>>>>> v0.11.0
     sio = socketio.AsyncServer(
         cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
         async_mode='asgi',
@@ -374,17 +354,10 @@ async def usage(sid, data):
 async def connect(sid, environ, auth):
     user = None
     if auth and 'token' in auth:
-<<<<<<< HEAD
-        data = decode_token(auth['token'])
-
-        if data is not None and 'id' in data:
-            user = await Users.get_user_by_id(data['id'])
-=======
         scope = (environ or {}).get('asgi.scope') or {}
         fastapi_app = scope.get('app')
         redis = getattr(getattr(fastapi_app, 'state', None), 'redis', None) or REDIS
         user = await get_verified_user_by_token(auth['token'], redis)
->>>>>>> v0.11.0
 
         if user:
             socket_user = {
@@ -410,19 +383,11 @@ async def user_join(sid, data):
     if not auth or 'token' not in auth:
         return
 
-<<<<<<< HEAD
-    token_data = decode_token(auth['token'])
-    if token_data is None or 'id' not in token_data:
-        return
-
-    user = await Users.get_user_by_id(token_data['id'])
-=======
     environ = sio.get_environ(sid) or {}
     scope = environ.get('asgi.scope') or {}
     fastapi_app = scope.get('app')
     redis = getattr(getattr(fastapi_app, 'state', None), 'redis', None) or REDIS
     user = await get_verified_user_by_token(auth['token'], redis)
->>>>>>> v0.11.0
     if not user:
         return
 
@@ -467,19 +432,11 @@ async def join_channel(sid, data):
     if not auth or 'token' not in auth:
         return
 
-<<<<<<< HEAD
-    data = decode_token(auth['token'])
-    if data is None or 'id' not in data:
-        return
-
-    user = await Users.get_user_by_id(data['id'])
-=======
     environ = sio.get_environ(sid) or {}
     scope = environ.get('asgi.scope') or {}
     fastapi_app = scope.get('app')
     redis = getattr(getattr(fastapi_app, 'state', None), 'redis', None) or REDIS
     user = await get_verified_user_by_token(auth['token'], redis)
->>>>>>> v0.11.0
     if not user:
         return
 
@@ -497,19 +454,11 @@ async def join_note(sid, data):
     if not auth or 'token' not in auth:
         return
 
-<<<<<<< HEAD
-    token_data = decode_token(auth['token'])
-    if token_data is None or 'id' not in token_data:
-        return
-
-    user = await Users.get_user_by_id(token_data['id'])
-=======
     environ = sio.get_environ(sid) or {}
     scope = environ.get('asgi.scope') or {}
     fastapi_app = scope.get('app')
     redis = getattr(getattr(fastapi_app, 'state', None), 'redis', None) or REDIS
     user = await get_verified_user_by_token(auth['token'], redis)
->>>>>>> v0.11.0
     if not user:
         return
 
@@ -564,11 +513,6 @@ async def channel_events(sid, data):
         await Channels.update_member_last_read_at(data['channel_id'], user['id'])
 
 
-<<<<<<< HEAD
-@sio.on('events:chat')
-async def chat_events(sid, data):
-    user = SESSION_POOL.get(sid)
-=======
 async def get_folder_unread_counts(user_id: str) -> dict[str, int]:
     folder_list = await Folders.get_folders_by_user_id(user_id)
     parent_by_id = {folder.id: folder.parent_id for folder in folder_list}
@@ -598,7 +542,6 @@ async def chat_events(sid, data):
     if not user:
         user = SESSION_POOL.get(sid)
 
->>>>>>> v0.11.0
     if not user:
         return
 
@@ -606,9 +549,6 @@ async def chat_events(sid, data):
     event_type = event_data.get('type')
 
     if event_type == 'last_read_at':
-<<<<<<< HEAD
-        await Chats.update_chat_last_read_at_by_id(data['chat_id'], user['id'])
-=======
         read_update = await Chats.update_chat_last_read_at_by_id(data['chat_id'], user['id'])
         if not read_update:
             return
@@ -637,7 +577,6 @@ async def chat_events(sid, data):
             await cancel_timers_for_chat(data['chat_id'], 'chat.read', user['id'])
         except Exception:
             log.exception('Failed to cancel chat.read timers for chat %s', data.get('chat_id'))
->>>>>>> v0.11.0
 
 
 def normalize_document_id(document_id: str) -> str:
@@ -886,10 +825,6 @@ async def yjs_document_leave(sid, data):
         return
     try:
         document_id = normalize_document_id(data['document_id'])
-<<<<<<< HEAD
-        user_id = data.get('user_id', sid)
-=======
->>>>>>> v0.11.0
 
         log.info(f'User {user["id"]} leaving document {document_id}')
 
@@ -972,18 +907,6 @@ async def _make_channel_emitter(request_info):
     state = {'last_emit_at': 0.0}
     THROTTLE_INTERVAL = 0.15  # ~6 updates/sec
 
-<<<<<<< HEAD
-    async def _emit_channel_update(content: str, done: bool = False):
-        from open_webui.models.messages import MessageForm, Messages
-
-        update_form = MessageForm(content=content)
-        if done:
-            # Merge done flag into existing meta (preserve model_id etc.)
-            msg = await Messages.get_message_by_id(message_id)
-            existing_meta = (msg.meta or {}) if msg else {}
-            update_form = MessageForm(
-                content=content,
-=======
     async def _emit_channel_update(content: str, done: bool = False, output: list | None = None):
         from open_webui.models.messages import MessageForm, Messages
 
@@ -998,7 +921,6 @@ async def _make_channel_emitter(request_info):
             update_form = MessageForm(
                 content=content,
                 data={'output': output} if output else None,
->>>>>>> v0.11.0
                 meta={**existing_meta, 'done': True},
             )
 
@@ -1023,28 +945,17 @@ async def _make_channel_emitter(request_info):
 
         if event_type == 'chat:completion':
             data = event_data.get('data', {})
-<<<<<<< HEAD
-            content = data.get('content', '')
-            done = data.get('done', False)
-
-            if not content and not done:
-=======
             output = data.get('output')
             content = data.get('content') or get_output_text(output)
             done = data.get('done', False)
 
             if not content and not output and not done:
->>>>>>> v0.11.0
                 return
 
             now = __import__('time').time()
             if done or (now - state['last_emit_at']) >= THROTTLE_INTERVAL:
                 state['last_emit_at'] = now
-<<<<<<< HEAD
-                await _emit_channel_update(content, done)
-=======
                 await _emit_channel_update(content, done, output if isinstance(output, list) else None)
->>>>>>> v0.11.0
 
         elif event_type == 'chat:message:error':
             error = event_data.get('data', {}).get('error', {})
@@ -1069,9 +980,6 @@ async def get_event_emitter(request_info, update_db=True):
         if internal and event_data.get('type') == 'notification':
             return
 
-<<<<<<< HEAD
-        if update_db and message_id and not (request_info.get('chat_id') or '').startswith('local:'):
-=======
         room = f'user:{user_id}'
         # Local rooms are authoritative; Redis may have listeners on another instance.
         if WEBSOCKET_MANAGER == 'redis' or room in sio.manager.rooms.get('/', {}):
@@ -1087,7 +995,6 @@ async def get_event_emitter(request_info, update_db=True):
             )
 
         if save_to_chat:
->>>>>>> v0.11.0
             event_type = event_data.get('type')
 
             if event_type == 'status':
@@ -1194,16 +1101,10 @@ async def get_event_call(request_info):
     async def __event_caller__(event_data):
         session_id = request_info['session_id']
 
-<<<<<<< HEAD
-        # Fast-fail if the client has disconnected.
-        if session_id not in SESSION_POOL:
-            log.warning(f'Event caller: session {session_id} no longer connected')
-=======
         # session_id is client-supplied; only the requesting user's own live session may be targeted.
         session = SESSION_POOL.get(session_id)
         if session is None or session.get('id') != request_info.get('user_id'):
             log.warning(f'Event caller: session {session_id} not owned by requesting user or disconnected')
->>>>>>> v0.11.0
             return {'error': 'Client session disconnected.'}
 
         try:
@@ -1219,14 +1120,11 @@ async def get_event_call(request_info):
             )
         except TimeoutError:
             log.warning(f'Event caller timed out for session {session_id}')
-<<<<<<< HEAD
-=======
             if SESSION_POOL.get(session_id) == session:
                 try:
                     del SESSION_POOL[session_id]
                 except KeyError:
                     pass
->>>>>>> v0.11.0
             return {'error': 'Event call timed out. The browser tab may be inactive or closed.'}
 
     if 'session_id' in request_info and 'chat_id' in request_info and 'message_id' in request_info:

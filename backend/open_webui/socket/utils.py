@@ -3,21 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-<<<<<<< HEAD
-import json
-import uuid
-
-import pycrdt as Y
-from open_webui.utils.redis import get_redis_connection
-from open_webui.env import REDIS_KEY_PREFIX
-=======
 import uuid
 
 import pycrdt as Y
 from open_webui.env import REDIS_KEY_PREFIX
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.redis import get_redis_connection
->>>>>>> v0.11.0
 
 YDOC_KEY_PREFIX = f'{REDIS_KEY_PREFIX}:ydoc:documents'
 
@@ -25,8 +16,6 @@ YDOC_KEY_PREFIX = f'{REDIS_KEY_PREFIX}:ydoc:documents'
 class RedisLock:
     """Distributed lock backed by a Redis SET with NX/EX semantics."""
 
-<<<<<<< HEAD
-=======
     _RENEW_SCRIPT = """
     if redis.call('get', KEYS[1]) == ARGV[1] then
         return redis.call('expire', KEYS[1], ARGV[2])
@@ -40,7 +29,6 @@ class RedisLock:
     return 0
     """
 
->>>>>>> v0.11.0
     def __init__(
         self,
         redis_url,
@@ -123,9 +111,6 @@ class RedisDict:
             return
 
         # Serialize values once — reused for both the fingerprint and the write.
-<<<<<<< HEAD
-        serialized = {k: json.dumps(v) for k, v in mapping.items()}
-=======
         serialized = {k: JSONCodec.dumps(v) for k, v in mapping.items()}
         digest = hashlib.sha256()
         for key in sorted(serialized):
@@ -134,16 +119,11 @@ class RedisDict:
             digest.update(serialized[key].encode())
             digest.update(b'\0')
         signature = digest.hexdigest()
->>>>>>> v0.11.0
 
         # Skip the write when the prepared mapping is identical to the last one
         # this process wrote.  The check is per-instance (not distributed), but
         # still eliminates the majority of redundant writes because each pod
         # typically produces the same model list on consecutive refreshes.
-<<<<<<< HEAD
-        signature = hashlib.sha256(json.dumps(serialized, sort_keys=True).encode()).hexdigest()
-=======
->>>>>>> v0.11.0
         if signature == self._last_signature:
             return
 
