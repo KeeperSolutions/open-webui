@@ -2,18 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-<<<<<<< HEAD
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from open_webui.constants import ERROR_MESSAGES
-from open_webui.internal.db import get_async_session
-from open_webui.models.memories import Memories, MemoryModel
-from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
-from open_webui.utils.access_control import has_permission
-from open_webui.utils.auth import get_verified_user
-=======
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -21,7 +9,6 @@ from open_webui.config import RAG_EMBEDDING_CONTENT_PREFIX, RAG_EMBEDDING_QUERY_
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
-from open_webui.models.config import Config
 from open_webui.models.memories import Memories, MemoryModel
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.utils.access_control import has_permission
@@ -35,7 +22,6 @@ from open_webui.utils.memory import (
     search_memory_rows,
     validate_memory_operations,
 )
->>>>>>> v0.11.0
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,15 +30,16 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def check_memories_permission(user):
-    config = await Config.get_many('memories.enable', 'user.permissions')
-    if not config.get('memories.enable'):
+async def check_memories_permission(request, user):
+    if not request.app.state.config.ENABLE_MEMORIES:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role != 'admin' and not await has_permission(user.id, 'features.memories', config.get('user.permissions')):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -72,17 +59,8 @@ async def get_memories(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-=======
->>>>>>> v0.11.0
     return await Memories.get_memories_by_user_id(user.id, db=db)
 
 
@@ -99,10 +77,6 @@ class AddMemoryForm(BaseModel):
 
 class MemoryUpdateModel(BaseModel):
     content: str | None = None
-<<<<<<< HEAD
-
-
-=======
     type: Literal['user', 'context'] | None = None
     path: str | None = None
 
@@ -150,7 +124,6 @@ def _memory_metadata(memory: MemoryModel) -> dict:
     }
 
 
->>>>>>> v0.11.0
 @router.post('/add', response_model=MemoryModel | None)
 async def add_memory(
     request: Request,
@@ -158,32 +131,12 @@ async def add_memory(
     user=Depends(get_verified_user),
 ):
     """Persist a new memory and embed it into the user's vector collection.
-<<<<<<< HEAD
 
     Does NOT use ``Depends(get_async_session)`` — database operations manage their
     own short-lived sessions so a connection is not held during the external
     embedding API call (``EMBEDDING_FUNCTION``), which can take 1-5+ seconds.
     """
-    if not request.app.state.config.ENABLE_MEMORIES:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    memory = await Memories.insert_new_memory(user.id, form_data.content)
-=======
-
-    Does NOT use ``Depends(get_async_session)`` — database operations manage their
-    own short-lived sessions so a connection is not held during the external
-    embedding API call (``EMBEDDING_FUNCTION``), which can take 1-5+ seconds.
-    """
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
     content = clean_memory_content(form_data.content)
     path = clean_memory_path(form_data.path)
@@ -194,7 +147,6 @@ async def add_memory(
         path=path,
         meta={'created_by': 'manual'},
     )
->>>>>>> v0.11.0
 
     vector = await request.app.state.EMBEDDING_FUNCTION(
         memory_vector_text(memory.content, memory.path), prefix=RAG_EMBEDDING_CONTENT_PREFIX, user=user
@@ -228,7 +180,7 @@ async def update_memories(
     form_data: UpdateMemoriesForm,
     user=Depends(get_verified_user),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
     operations = validate_memory_operations(form_data)
     metadata = getattr(request.state, 'metadata', {}) or {}
@@ -329,26 +281,13 @@ async def query_memory(
     # Database operations (get_memories_by_user_id) manage their own short-lived sessions.
     # This prevents holding a connection during EMBEDDING_FUNCTION()
     # which makes external embedding API calls (1-5+ seconds).
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-=======
->>>>>>> v0.11.0
     memories = await Memories.get_memories_by_user_id(user.id)
     if not memories:
         raise HTTPException(status_code=404, detail='No memories found for user')
 
-<<<<<<< HEAD
-    vector = await request.app.state.EMBEDDING_FUNCTION(form_data.content, RAG_EMBEDDING_QUERY_PREFIX, user=user)
-=======
     vector = await request.app.state.EMBEDDING_FUNCTION(form_data.content, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user)
->>>>>>> v0.11.0
 
     results = await ASYNC_VECTOR_DB_CLIENT.search(
         collection_name=f'user-memory-{user.id}',
@@ -362,11 +301,7 @@ async def query_memory(
     # same RELEVANCE_THRESHOLD used by RAG ensures only genuinely matching
     # memories are surfaced (distances are normalised to 0→1, higher is
     # better).
-<<<<<<< HEAD
-    relevance_threshold = getattr(request.app.state.config, 'RELEVANCE_THRESHOLD', 0.0)
-=======
-    relevance_threshold = await Config.get('rag.relevance_threshold', 0.0)
->>>>>>> v0.11.0
+    relevance_threshold = getattr(request.app.state.config, 'RAG_RELEVANCE_THRESHOLD', 0.0) or 0.0
     if results and relevance_threshold > 0.0 and results.distances and results.distances[0]:
         from open_webui.retrieval.vector.main import SearchResult
 
@@ -400,7 +335,7 @@ async def search_memories(
     form_data: SearchMemoriesForm,
     user=Depends(get_verified_user),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
     memories = await Memories.get_memories_by_user_id(user.id)
     return search_memory_rows(
@@ -418,7 +353,7 @@ async def list_memory_paths(
     form_data: ListMemoryPathsForm,
     user=Depends(get_verified_user),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
     memories = await Memories.get_memories_by_user_id(user.id)
     return list_memory_path_groups(
@@ -434,7 +369,7 @@ async def read_memory_path(
     form_data: ReadMemoryPathForm,
     user=Depends(get_verified_user),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
     memories = await Memories.get_memories_by_user_id(user.id)
     result = read_memory_path_rows(
@@ -466,21 +401,10 @@ async def reset_memory_from_vector_db(
     calls simultaneously. With a session held, this could block a connection
     for MINUTES, completely exhausting the connection pool.
     """
-    await check_memories_permission(user)
-
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
+    await check_memories_permission(request, user)
 
     await ASYNC_VECTOR_DB_CLIENT.delete_collection(f'user-memory-{user.id}')
 
-=======
-    await ASYNC_VECTOR_DB_CLIENT.delete_collection(f'user-memory-{user.id}')
-
->>>>>>> v0.11.0
     memories = await Memories.get_memories_by_user_id(user.id)
 
     # Generate vectors in parallel
@@ -528,17 +452,8 @@ async def delete_memory_by_user_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-=======
->>>>>>> v0.11.0
     result = await Memories.delete_memories_by_user_id(user.id, db=db)
 
     if result:
@@ -574,17 +489,8 @@ async def update_memory_by_id(
     # Database operations (update_memory_by_id_and_user_id) manage their own
     # short-lived sessions. This prevents holding a connection during
     # EMBEDDING_FUNCTION() which makes external API calls (1-5+ seconds).
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    memory = await Memories.update_memory_by_id_and_user_id(memory_id, user.id, form_data.content)
-=======
     content = clean_memory_content(form_data.content) if form_data.content is not None else None
     path = clean_memory_path(form_data.path)
     if content is None and form_data.type is None and form_data.path is None:
@@ -598,7 +504,6 @@ async def update_memory_by_id(
         update_path=form_data.path is not None,
         meta={'created_by': 'manual'},
     )
->>>>>>> v0.11.0
     if memory is None:
         raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
 
@@ -641,30 +546,18 @@ async def delete_memory_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    await check_memories_permission(user)
+    await check_memories_permission(request, user)
 
-<<<<<<< HEAD
-    if not await has_permission(user.id, 'features.memories', request.app.state.config.USER_PERMISSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-=======
->>>>>>> v0.11.0
     result = await Memories.delete_memory_by_id_and_user_id(memory_id, user.id, db=db)
 
     if result:
         await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=f'user-memory-{user.id}', ids=[memory_id])
-<<<<<<< HEAD
-=======
         await publish_event(
             request,
             EVENTS.MEMORY_DELETED,
             actor=user,
             subject_id=memory_id,
         )
->>>>>>> v0.11.0
         return True
 
     return False

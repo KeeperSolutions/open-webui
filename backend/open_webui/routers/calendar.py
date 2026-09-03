@@ -4,10 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.constants import ERROR_MESSAGES
-<<<<<<< HEAD
-=======
 from open_webui.events import EVENTS, publish_event
->>>>>>> v0.11.0
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.calendar import (
     CalendarEventAttendees,
@@ -23,10 +20,6 @@ from open_webui.models.calendar import (
     CalendarUpdateForm,
     RSVPForm,
 )
-<<<<<<< HEAD
-=======
-from open_webui.models.config import Config
->>>>>>> v0.11.0
 from open_webui.models.groups import Groups
 from open_webui.models.users import UserModel
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
@@ -42,23 +35,14 @@ SCHEDULED_TASKS_CALENDAR_ID = '__scheduled_tasks__'
 
 async def check_calendar_permission(request: Request, user):
     """Check global feature flag AND per-user permission for calendar access."""
-<<<<<<< HEAD
     if not request.app.state.config.ENABLE_CALENDAR:
-=======
-    config = await Config.get_many('calendar.enable', 'user.permissions')
-    if not config.get('calendar.enable'):
->>>>>>> v0.11.0
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
-<<<<<<< HEAD
     if user.role != 'admin' and not await has_permission(
         user.id, 'features.calendar', request.app.state.config.USER_PERMISSIONS
     ):
-=======
-    if user.role != 'admin' and not await has_permission(user.id, 'features.calendar', config.get('user.permissions')):
->>>>>>> v0.11.0
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -67,20 +51,11 @@ async def check_calendar_permission(request: Request, user):
 
 async def _user_has_automations(request: Request, user) -> bool:
     """Check if automations feature is available to this user."""
-<<<<<<< HEAD
     if not getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False):
         return False
     if user.role == 'admin':
         return True
     return await has_permission(user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS)
-=======
-    config = await Config.get_many('automations.enable', 'user.permissions')
-    if not config.get('automations.enable', False):
-        return False
-    if user.role == 'admin':
-        return True
-    return await has_permission(user.id, 'features.automations', config.get('user.permissions'))
->>>>>>> v0.11.0
 
 
 async def _check_calendar_access(calendar_id: str, user: UserModel, permission: str = 'write') -> CalendarModel:
@@ -142,19 +117,12 @@ async def create_calendar(request: Request, form_data: CalendarForm, user: UserM
     # could create a calendar with `principal_id='*' permission='read'|'write'`,
     # making their events readable or writable by any other verified user.
     form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
         request.app.state.config.USER_PERMISSIONS,
-=======
-        await Config.get('user.permissions'),
->>>>>>> v0.11.0
         user.id,
         user.role,
         form_data.access_grants,
         'sharing.public_calendars',
     )
-<<<<<<< HEAD
-    return await Calendars.insert_new_calendar(user.id, form_data)
-=======
     calendar = await Calendars.insert_new_calendar(user.id, form_data)
     await publish_event(
         request,
@@ -164,7 +132,6 @@ async def create_calendar(request: Request, form_data: CalendarForm, user: UserM
         data={'name': calendar.name},
     )
     return calendar
->>>>>>> v0.11.0
 
 
 ####################
@@ -305,9 +272,6 @@ async def get_events(
 async def create_event(request: Request, form_data: CalendarEventForm, user: UserModel = Depends(get_verified_user)):
     await check_calendar_permission(request, user)
     await _check_calendar_access(form_data.calendar_id, user, 'write')
-<<<<<<< HEAD
-    return await CalendarEvents.insert_new_event(user.id, form_data)
-=======
     event = await CalendarEvents.insert_new_event(user.id, form_data)
     await publish_event(
         request,
@@ -317,7 +281,6 @@ async def create_event(request: Request, form_data: CalendarEventForm, user: Use
         data={'calendar_id': event.calendar_id, 'title': event.title},
     )
     return event
->>>>>>> v0.11.0
 
 
 @router.get('/events/search', response_model=CalendarEventListResponse)
@@ -364,8 +327,6 @@ async def update_event(
     updated = await CalendarEvents.update_event_by_id(event_id, form_data)
     if not updated:
         raise HTTPException(status_code=500, detail='Failed to update')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_EVENT_UPDATED,
@@ -373,7 +334,6 @@ async def update_event(
         subject_id=updated.id,
         data={'calendar_id': updated.calendar_id, 'title': updated.title},
     )
->>>>>>> v0.11.0
     return updated
 
 
@@ -389,8 +349,6 @@ async def delete_event(request: Request, event_id: str, user: UserModel = Depend
     result = await CalendarEvents.delete_event_by_id(event_id)
     if not result:
         raise HTTPException(status_code=500, detail='Failed to delete')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_EVENT_DELETED,
@@ -398,7 +356,6 @@ async def delete_event(request: Request, event_id: str, user: UserModel = Depend
         subject_id=event_id,
         data={'calendar_id': event.calendar_id, 'title': event.title},
     )
->>>>>>> v0.11.0
     return {'status': True}
 
 
@@ -414,8 +371,6 @@ async def rsvp_event(
     result = await CalendarEventAttendees.update_rsvp(event_id, user.id, form_data.status)
     if not result:
         raise HTTPException(status_code=404, detail='Not an attendee of this event')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_EVENT_RSVP_UPDATED,
@@ -423,7 +378,6 @@ async def rsvp_event(
         subject_id=event_id,
         data={'status': result.status},
     )
->>>>>>> v0.11.0
     return {'status': True, 'rsvp': result.status}
 
 
@@ -457,11 +411,7 @@ async def update_calendar(
     # publicly readable/writable without the corresponding sharing permission.
     if form_data.access_grants is not None:
         form_data.access_grants = await filter_allowed_access_grants(
-<<<<<<< HEAD
             request.app.state.config.USER_PERMISSIONS,
-=======
-            await Config.get('user.permissions'),
->>>>>>> v0.11.0
             user.id,
             user.role,
             form_data.access_grants,
@@ -471,8 +421,6 @@ async def update_calendar(
     updated = await Calendars.update_calendar_by_id(calendar_id, form_data)
     if not updated:
         raise HTTPException(status_code=500, detail='Failed to update')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_UPDATED,
@@ -480,7 +428,6 @@ async def update_calendar(
         subject_id=updated.id,
         data={'name': updated.name},
     )
->>>>>>> v0.11.0
     return updated
 
 
@@ -505,8 +452,6 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     result = await Calendars.delete_calendar_by_id(calendar_id)
     if not result:
         raise HTTPException(status_code=500, detail='Failed to delete')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_DELETED,
@@ -514,7 +459,6 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
         subject_id=calendar_id,
         data={'name': cal.name},
     )
->>>>>>> v0.11.0
     return {'status': True}
 
 
@@ -524,8 +468,6 @@ async def set_default_calendar(request: Request, calendar_id: str, user: UserMod
     cal = await Calendars.set_default_calendar(user.id, calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
-<<<<<<< HEAD
-=======
     await publish_event(
         request,
         EVENTS.CALENDAR_DEFAULT_UPDATED,
@@ -533,5 +475,4 @@ async def set_default_calendar(request: Request, calendar_id: str, user: UserMod
         subject_id=cal.id,
         data={'name': cal.name},
     )
->>>>>>> v0.11.0
     return cal
