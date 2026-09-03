@@ -4,18 +4,16 @@ import re
 import time
 from typing import Any, Optional
 
-from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
-from open_webui.models.config import Config
+from open_webui.config import EXTERNAL_KNOWLEDGE_CONNECTIONS, RAG_EMBEDDING_QUERY_PREFIX
 from open_webui.models.knowledge import KnowledgeModel
 
 log = logging.getLogger(__name__)
 
-EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY = 'external_knowledge.connections'
 IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
 async def _get_external_connection(connection_id: str) -> Optional[dict]:
-    connections = await Config.get(EXTERNAL_KNOWLEDGE_CONNECTIONS_CONFIG_KEY, []) or []
+    connections = EXTERNAL_KNOWLEDGE_CONNECTIONS.value or []
     return next((connection for connection in connections if connection.get('id') == connection_id), None)
 
 

@@ -483,6 +483,27 @@ TOOL_SERVER_CONNECTIONS = ConfigVar(
     tool_server_connections,
 )
 
+
+####################################
+# EXTERNAL_KNOWLEDGE (v0.11.0)
+# Dynamic list of external vector-DB knowledge connections, managed via the
+# /knowledge/external/connections endpoints. Upstream stored this through its
+# per-key Config store; the fork keeps it as a ConfigVar (Risk #1).
+####################################
+
+try:
+    external_knowledge_connections = json.loads(os.getenv('EXTERNAL_KNOWLEDGE_CONNECTIONS', '[]'))
+except Exception as e:
+    log.exception(f'Error loading EXTERNAL_KNOWLEDGE_CONNECTIONS: {e}')
+    external_knowledge_connections = []
+
+
+EXTERNAL_KNOWLEDGE_CONNECTIONS = ConfigVar(
+    'EXTERNAL_KNOWLEDGE_CONNECTIONS',
+    'external_knowledge.connections',
+    external_knowledge_connections,
+)
+
 # v0.11.0 introduced OAUTH_CLIENT_TIMEOUT here as a plain env read; the fork
 # already exposes it as a ConfigVar, kept below.
 OAUTH_CLIENT_TIMEOUT = ConfigVar(
