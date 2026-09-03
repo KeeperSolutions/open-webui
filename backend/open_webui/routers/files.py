@@ -194,7 +194,11 @@ async def process_uploaded_file(
                     )
                     await process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id, collection_name=knowledge_id),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            collection_name=knowledge_id,
+                            pii_masking_enabled=pii_masking,
+                        ),
                         user=user,
                         db=db_session,
                     )

@@ -1608,6 +1608,15 @@ async def _store_ingest_pii_detections(request, file_id, text_content, user, pii
     effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(user)
     if not effective:
         return
+    # Idempotence guard. A single upload can reach process_file TWICE: once
+    # standalone and once more when the file is auto-linked into a knowledge
+    # collection (files.py passes collection_name on the second call). The
+    # extracted text is identical both times, so re-scanning only doubles the
+    # load on a remote, cold-start-prone pipeline. 'failed' and an unset status
+    # deliberately fall through so a retry still happens.
+    existing = await Files.get_file_by_id(file_id)
+    if existing and (existing.data or {}).get('pii_scan_status') == 'completed':
+        return
     await Files.update_file_data_by_id(file_id, {'pii_scan_status': 'running'})
     try:
         # Lazy import to avoid circular import at module init time
