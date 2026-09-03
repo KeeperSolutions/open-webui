@@ -100,16 +100,6 @@ class CommitSessionMiddleware:
             # Downstream did not complete successfully. Roll back any
             # pending sync writes, release the connection, and let the
             # exception propagate.
-<<<<<<< HEAD
-            try:
-                ScopedSession.rollback()
-            except Exception:
-                log.exception('CommitSessionMiddleware: rollback failed after downstream error')
-            finally:
-                ScopedSession.remove()
-            raise
-
-=======
             if ScopedSession.registry.has():
                 try:
                     ScopedSession.rollback()
@@ -124,7 +114,6 @@ class CommitSessionMiddleware:
         if not ScopedSession.registry.has():
             return
 
->>>>>>> v0.11.0
         # Downstream completed. Commit pending sync work.
         try:
             ScopedSession.commit()
@@ -154,13 +143,9 @@ class AuthTokenMiddleware:
     the middleware checks that instead and avoids the 401 short-circuit.
 
     Routes that depend on `get_verified_user` etc. read this state.
-<<<<<<< HEAD
     Also exposes `request.state.enable_api_keys` (snapshotted at request
     entry from runtime config) and stamps an `X-Process-Time` response
     header.
-=======
-    Also stamps an `X-Process-Time` response header.
->>>>>>> v0.11.0
     """
 
     def __init__(self, app: ASGIApp, *, fastapi_app) -> None:
@@ -186,22 +171,13 @@ class AuthTokenMiddleware:
                 token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=api_key)
 
         request.state.token = token
-<<<<<<< HEAD
         request.state.enable_api_keys = self._fastapi_app.state.config.ENABLE_API_KEYS
-
-        async def send_with_timing(message: Message) -> None:
-            if message['type'] == 'http.response.start':
-                process_time = int(time.monotonic() - start_time)
-                headers = MutableHeaders(scope=message)
-                headers['X-Process-Time'] = str(process_time)
-=======
 
         async def send_with_timing(message: Message) -> None:
             if message['type'] == 'http.response.start':
                 process_time = time.monotonic() - start_time
                 headers = MutableHeaders(scope=message)
                 headers['X-Process-Time'] = f'{process_time:.6f}'
->>>>>>> v0.11.0
             await send(message)
 
         await self.app(scope, receive, send_with_timing)
@@ -260,9 +236,6 @@ class RedirectMiddleware:
             return
 
         path = scope.get('path', '')
-<<<<<<< HEAD
-        query_string = scope.get('query_string', b'').decode('latin-1', errors='replace')
-=======
         raw_query = scope.get('query_string', b'')
         # This middleware only acts on /watch?v= and ?shared= URLs; skip the
         # decode + parse_qs work for every other GET. (A false positive on the
@@ -272,7 +245,6 @@ class RedirectMiddleware:
             return
 
         query_string = raw_query.decode('latin-1', errors='replace')
->>>>>>> v0.11.0
         query_params = parse_qs(query_string)
 
         redirect_params: dict[str, str] = {}

@@ -11,10 +11,6 @@ from aiocache import cached
 from fastapi import HTTPException, Request, status
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
 from open_webui.functions import generate_function_chat_completion
-<<<<<<< HEAD
-from open_webui.models.functions import Functions
-=======
->>>>>>> v0.11.0
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.routers.ollama import (
@@ -27,27 +23,11 @@ from open_webui.routers.pipelines import (
     process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
 )
-<<<<<<< HEAD
 from open_webui.models.chats import Chats as _Chats
-=======
->>>>>>> v0.11.0
 from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
     sio,
-<<<<<<< HEAD
-)
-from open_webui.utils.filter import (
-    get_sorted_filter_ids,
-    process_filter_functions,
-)
-from open_webui.utils.models import check_model_access, get_all_models
-from open_webui.utils.payload import convert_payload_openai_to_ollama
-from open_webui.utils.response import (
-    convert_response_ollama_to_openai,
-    convert_streaming_response_ollama_to_openai,
-)
-=======
 )
 from open_webui.utils.filter import (
     get_filter_functions,
@@ -59,7 +39,6 @@ from open_webui.utils.response import (
     convert_response_ollama_to_openai,
     convert_streaming_response_ollama_to_openai,
 )
->>>>>>> v0.11.0
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -200,15 +179,10 @@ async def generate_chat_completion(
         # Merge the direct connection model into server models so that
         # task functions (title, tags, etc.) can resolve a server-side
         # task model while still having the direct model available.
-<<<<<<< HEAD
-        models = {
-            **request.app.state.MODELS,
-=======
         # dict(...items()) is one HGETALL on a Redis-backed pool; ``{**pool}``
         # would issue HKEYS plus one HGET per model.
         models = {
             **dict(request.app.state.MODELS.items()),
->>>>>>> v0.11.0
             request.state.model['id']: request.state.model,
         }
         log.debug(f'direct connection to model: {request.state.model["id"]}')
@@ -222,11 +196,6 @@ async def generate_chat_completion(
     if model is None:
         raise Exception('Model not found')
 
-<<<<<<< HEAD
-    model = models[model_id]
-
-=======
->>>>>>> v0.11.0
     if getattr(request.state, 'direct', False) and model_id == getattr(request.state, 'model', {}).get('id'):
         return await generate_direct_chat_completion(request, form_data, user=user, models=models)
     else:
@@ -407,12 +376,7 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
     }
 
     try:
-<<<<<<< HEAD
-        filter_ids = await get_sorted_filter_ids(request, model, metadata.get('filter_ids', []))
-        filter_functions = await Functions.get_functions_by_ids(filter_ids)
-=======
         filter_functions = await get_filter_functions(request, model, metadata.get('filter_ids', []))
->>>>>>> v0.11.0
 
         result, _ = await process_filter_functions(
             request=request,
