@@ -298,17 +298,7 @@
 										{defaultPermissions}
 									/>
 								{:else if selectedTab == 'users'}
-<<<<<<< HEAD
-									<!-- Live switch position, not the saved one: the reason prompt
-									     must follow what the admin is about to save. -->
-									<Users
-										bind:userCount
-										groupId={group?.id}
-										piiEnforced={!!permissions?.chat?.pii_masking_enforced}
-									/>
-=======
 									<Users bind:userCount groupId={group?.id} />
->>>>>>> v0.11.0
 								{:else if selectedTab == 'preview'}
 									<GroupPreviewPanel groupId={group?.id} />
 								{/if}

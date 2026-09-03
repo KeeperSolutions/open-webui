@@ -23,11 +23,8 @@
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
-<<<<<<< HEAD
-=======
 	import ExternalKnowledge from './ExternalKnowledge.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
->>>>>>> v0.11.0
 
 	import {
 		getToolServerConnections,

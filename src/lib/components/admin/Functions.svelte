@@ -463,13 +463,6 @@
 				</div>
 			</div>
 
-<<<<<<< HEAD
-			{#if loaded && functions && (filteredItems ?? []).length !== 0}
-				<div class="px-3 my-2 gap-1 lg:gap-2 grid lg:grid-cols-2">
-					{#each filteredItems as func (func.id)}
-						<div
-							class=" flex space-x-4 cursor-pointer w-full px-2 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl"
-=======
 			{#if (filteredItems ?? []).length !== 0}
 				<div class="my-1">
 					<div
@@ -479,7 +472,6 @@
 							class="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left"
 							type="button"
 							on:click={() => setSortKey('name')}
->>>>>>> v0.11.0
 						>
 							{$i18n.t('Title')}
 							{#if sortKey === 'name'}
@@ -579,64 +571,6 @@
 									</div>
 								</div>
 
-<<<<<<< HEAD
-									<Tooltip content={$i18n.t('Valves')}>
-										<button
-											aria-label={$i18n.t('Valves')}
-											class="self-center w-fit text-sm px-2 py-2 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-											type="button"
-											on:click={() => {
-												selectedFunction = func;
-												showValvesModal = true;
-											}}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke-width="1.5"
-												stroke="currentColor"
-												class="size-4"
-											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-												/>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
-												/>
-											</svg>
-										</button>
-									</Tooltip>
-
-									<FunctionMenu
-										{func}
-										editHandler={() => {
-											goto(`/admin/functions/edit?id=${encodeURIComponent(func.id)}`);
-										}}
-										shareHandler={() => {
-											shareHandler(func);
-										}}
-										cloneHandler={() => {
-											cloneHandler(func);
-										}}
-										exportHandler={() => {
-											exportHandler(func);
-										}}
-										deleteHandler={async () => {
-											selectedFunction = func;
-											showDeleteConfirm = true;
-										}}
-										toggleGlobalHandler={() => {
-											if (['filter', 'action'].includes(func.type)) {
-												toggleGlobalHandler(func);
-											}
-										}}
-										onClose={() => {}}
-=======
 								<div
 									class="hidden max-w-44 shrink-0 self-center truncate text-right text-[11px] leading-5 text-gray-500 dark:text-gray-500 md:block"
 								>
@@ -644,7 +578,6 @@
 										content={func?.user?.email ?? $i18n.t('Deleted User')}
 										className="min-w-0"
 										placement="top-start"
->>>>>>> v0.11.0
 									>
 										<div class="truncate">
 											{capitalizeFirstLetter(
@@ -797,20 +730,11 @@
 						{/each}
 					</div>
 				</div>
-<<<<<<< HEAD
-			{:else if loaded && functions}
-				<div class=" w-full h-full flex flex-col justify-center items-center my-16 mb-24">
-					<div class="max-w-md text-center">
-						<div class=" text-3xl mb-3">😕</div>
-						<div class=" text-lg font-medium mb-1">{$i18n.t('No functions found')}</div>
-						<div class=" text-gray-500 text-center text-xs">
-=======
 			{:else}
 				<div class="flex w-full flex-col items-center justify-center py-16 pb-24">
 					<div class="max-w-sm text-center text-gray-900 dark:text-gray-100">
 						<div class="mb-1.5 text-sm">{$i18n.t('No functions found')}</div>
 						<div class="text-center text-xs leading-5 text-gray-500">
->>>>>>> v0.11.0
 							{$i18n.t('Try adjusting your search or filter to find what you are looking for.')}
 						</div>
 					</div>

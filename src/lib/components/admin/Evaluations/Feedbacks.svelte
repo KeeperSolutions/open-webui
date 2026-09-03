@@ -26,10 +26,7 @@
 	import FeedbackModal from './FeedbackModal.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
-<<<<<<< HEAD
-=======
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
->>>>>>> v0.11.0
 
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -220,109 +217,6 @@
 		<Spinner className="size-5" />
 	</div>
 {:else}
-<<<<<<< HEAD
-	<div class="flex flex-col gap-1 mt-0.5 mb-3">
-		<div class="flex justify-between items-center">
-			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
-				<div>
-					{$i18n.t('Feedback History')}
-				</div>
-
-				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
-					{total}
-				</div>
-			</div>
-
-			<div class="flex w-full justify-end gap-1.5">
-				{#if total > 0}
-					<Dropdown align="end">
-						<button
-							class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-						>
-							<div class="self-center font-medium line-clamp-1">
-								{$i18n.t('Export')}
-							</div>
-							<ChevronDown className="size-3" strokeWidth="2.5" />
-						</button>
-
-						<div slot="content">
-							<div
-								class="w-[170px] rounded-2xl p-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-							>
-								<button
-									class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-									type="button"
-									on:click={() => exportHandler('json')}
-								>
-									{$i18n.t('Export as JSON')}
-								</button>
-
-								<button
-									class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
-									type="button"
-									on:click={() => exportHandler('csv')}
-								>
-									{$i18n.t('Export as CSV')}
-								</button>
-							</div>
-						</div>
-					</Dropdown>
-				{/if}
-			</div>
-		</div>
-	</div>
-
-	<div
-		class="py-2 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30"
-	>
-		{#if modelIds.length > 0}
-			<div
-				class="px-2.5 flex w-full bg-transparent overflow-x-auto scrollbar-none mb-1"
-				on:wheel={(e) => {
-					if (e.deltaY !== 0) {
-						e.preventDefault();
-						e.currentTarget.scrollLeft += e.deltaY;
-					}
-				}}
-			>
-				<div
-					class="flex gap-0.5 w-fit text-center text-sm rounded-full bg-transparent whitespace-nowrap"
-				>
-					<Select
-						bind:value={selectedModelId}
-						items={[
-							{ value: '', label: $i18n.t('All') },
-							...modelIds.map((mid) => ({ value: mid, label: mid }))
-						]}
-						placeholder={$i18n.t('All')}
-						triggerClass="relative w-full flex items-center gap-0.5 px-2.5 py-1.5 bg-gray-50 dark:bg-gray-850 rounded-xl"
-						onChange={() => {
-							page = 1;
-							getFeedbacks();
-						}}
-					>
-						<svelte:fragment slot="trigger" let:selectedLabel>
-							<span
-								class="inline-flex h-input px-0.5 w-full outline-hidden bg-transparent truncate placeholder-gray-400 focus:outline-hidden"
-							>
-								{selectedLabel}
-							</span>
-							<ChevronDown className="size-3.5" strokeWidth="2.5" />
-						</svelte:fragment>
-
-						<svelte:fragment slot="item" let:item let:selected>
-							{item.label}
-							<div class="ml-auto {selected ? '' : 'invisible'}">
-								<Check />
-							</div>
-						</svelte:fragment>
-					</Select>
-				</div>
-			</div>
-		{/if}
-
-		<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full px-2">
-=======
 	<div>
 		{#if modelIds.length > 0 || total > 0}
 			<div class="flex h-8 flex-1 items-center w-full gap-2">
@@ -406,16 +300,11 @@
 		{/if}
 
 		<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
->>>>>>> v0.11.0
 			{#if (items ?? []).length === 0}
 				<div class="w-full h-full flex flex-col justify-center items-center my-16 mb-24">
 					<div class="max-w-md text-center">
 						<div class="text-3xl mb-3">😕</div>
-<<<<<<< HEAD
-						<div class="text-lg font-medium mb-1">{$i18n.t('No feedback found')}</div>
-=======
 						<div class="text-lg font-normal mb-1">{$i18n.t('No feedback found')}</div>
->>>>>>> v0.11.0
 						<div class="text-gray-500 text-center text-xs">
 							{$i18n.t('Try adjusting your search or filter to find what you are looking for.')}
 						</div>
@@ -429,11 +318,7 @@
 						<tr class=" border-b-[1.5px] border-gray-50 dark:border-gray-850/30">
 							<th
 								scope="col"
-<<<<<<< HEAD
-								class="px-2.5 py-2 cursor-pointer select-none w-3"
-=======
 								class="px-2.5 py-2 font-normal cursor-pointer select-none w-3"
->>>>>>> v0.11.0
 								on:click={() => setSortKey('user')}
 							>
 								<div class="flex gap-1.5 items-center justify-end">
@@ -456,11 +341,7 @@
 
 							<th
 								scope="col"
-<<<<<<< HEAD
-								class="px-2.5 py-2 cursor-pointer select-none"
-=======
 								class="px-2.5 py-2 font-normal cursor-pointer select-none"
->>>>>>> v0.11.0
 								on:click={() => setSortKey('model_id')}
 							>
 								<div class="flex gap-1.5 items-center">
@@ -483,11 +364,7 @@
 
 							<th
 								scope="col"
-<<<<<<< HEAD
-								class="px-2.5 py-2 text-right cursor-pointer select-none w-fit"
-=======
 								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-fit"
->>>>>>> v0.11.0
 								on:click={() => setSortKey('rating')}
 							>
 								<div class="flex gap-1.5 items-center justify-end">
@@ -510,11 +387,7 @@
 
 							<th
 								scope="col"
-<<<<<<< HEAD
-								class="px-2.5 py-2 text-right cursor-pointer select-none w-0"
-=======
 								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-0"
->>>>>>> v0.11.0
 								on:click={() => setSortKey('updated_at')}
 							>
 								<div class="flex gap-1.5 items-center justify-end">
@@ -535,31 +408,20 @@
 								</div>
 							</th>
 
-<<<<<<< HEAD
-							<th scope="col" class="px-2.5 py-2 text-right cursor-pointer select-none w-0"> </th>
-=======
 							<th
 								scope="col"
 								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-0"
 							>
 							</th>
->>>>>>> v0.11.0
 						</tr>
 					</thead>
 					<tbody class="">
 						{#each items as feedback (feedback.id)}
 							<tr
-<<<<<<< HEAD
-								class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition rounded-xl"
-								on:click={() => openFeedbackModal(feedback)}
-							>
-								<td class=" py-0.5 text-right font-medium">
-=======
 								class="dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition rounded-xl"
 								on:click={() => openFeedbackModal(feedback)}
 							>
 								<td class=" py-0.5 text-right font-normal">
->>>>>>> v0.11.0
 									<div class="flex justify-center">
 										<Tooltip content={feedback?.user?.name}>
 											<div class="shrink-0">
@@ -567,10 +429,6 @@
 													src={`${WEBUI_API_BASE_URL}/users/${feedback.user.id}/profile/image`}
 													alt={feedback?.user?.name}
 													class="size-5 rounded-full object-cover shrink-0"
-<<<<<<< HEAD
-													loading="lazy"
-=======
->>>>>>> v0.11.0
 												/>
 											</div>
 										</Tooltip>
@@ -583,11 +441,7 @@
 											{#if feedback.data?.sibling_model_ids}
 												<Tooltip content={feedback.data?.model_id} placement="top-start">
 													<div
-<<<<<<< HEAD
-														class="font-medium text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
-=======
 														class="font-normal text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
->>>>>>> v0.11.0
 													>
 														{feedback.data?.model_id}
 													</div>
@@ -611,11 +465,7 @@
 											{:else}
 												<Tooltip content={feedback.data?.model_id} placement="top-start">
 													<div
-<<<<<<< HEAD
-														class="text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
-=======
 														class="text-sm font-normal text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
->>>>>>> v0.11.0
 													>
 														{feedback.data?.model_id}
 													</div>
@@ -626,11 +476,7 @@
 								</td>
 
 								{#if feedback?.data?.rating}
-<<<<<<< HEAD
-									<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
-=======
 									<td class="px-3 py-1 text-right font-normal text-gray-900 dark:text-white w-max">
->>>>>>> v0.11.0
 										<div class=" flex justify-end">
 											{#if feedback?.data?.rating.toString() === '1'}
 												<Badge type="info" content={$i18n.t('Won')} />
@@ -643,19 +489,11 @@
 									</td>
 								{/if}
 
-<<<<<<< HEAD
-								<td class=" px-3 py-1 text-right font-medium">
-									{dayjs(feedback.updated_at * 1000).fromNow()}
-								</td>
-
-								<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
-=======
 								<td class=" px-3 py-1 text-right font-normal">
 									{dayjs(feedback.updated_at * 1000).fromNow()}
 								</td>
 
 								<td class=" px-3 py-1 text-right font-normal" on:click={(e) => e.stopPropagation()}>
->>>>>>> v0.11.0
 									<FeedbackMenu
 										on:delete={(e) => {
 											deleteFeedbackHandler(feedback.id);

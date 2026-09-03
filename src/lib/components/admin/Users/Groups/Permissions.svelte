@@ -474,15 +474,6 @@
 			</div>
 		{/if}
 
-<<<<<<< HEAD
-		{#if permissions.chat.share}
-			<div class="flex flex-col w-full">
-				<div class="flex w-full justify-between my-1">
-					<div class=" self-center text-xs font-medium">
-						{$i18n.t('Chats Public Sharing')}
-					</div>
-					<Switch bind:state={permissions.sharing.public_chats} />
-=======
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-normal">
@@ -509,7 +500,6 @@
 						bind:state={permissions.sharing.public_chats}
 						ariaLabel={$i18n.t('Chats Public Sharing')}
 					/>
->>>>>>> v0.11.0
 				</div>
 				{#if defaultPermissions?.sharing?.public_chats && !permissions.sharing.public_chats}
 					<div>
@@ -519,8 +509,6 @@
 					</div>
 				{/if}
 			</div>
-<<<<<<< HEAD
-=======
 
 			<div class="flex flex-col w-full">
 				<div class="flex w-full justify-between my-1">
@@ -540,18 +528,11 @@
 					</div>
 				{/if}
 			</div>
->>>>>>> v0.11.0
 		{/if}
 
 		{#if permissions.features.calendar}
 			<div class="flex flex-col w-full">
 				<div class="flex w-full justify-between my-1">
-<<<<<<< HEAD
-					<div class=" self-center text-xs font-medium">
-						{$i18n.t('Calendars Public Sharing')}
-					</div>
-					<Switch bind:state={permissions.sharing.public_calendars} />
-=======
 					<div class=" self-center text-xs font-normal">
 						{$i18n.t('Calendars Public Sharing')}
 					</div>
@@ -559,7 +540,6 @@
 						bind:state={permissions.sharing.public_calendars}
 						ariaLabel={$i18n.t('Calendars Public Sharing')}
 					/>
->>>>>>> v0.11.0
 				</div>
 				{#if defaultPermissions?.sharing?.public_calendars && !permissions.sharing.public_calendars}
 					<div>
@@ -1189,17 +1169,10 @@
 				)}
 				placement="top-start"
 			>
-<<<<<<< HEAD
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Automations')}
-				</div>
-				<Switch bind:state={permissions.features.automations} />
-=======
 				<div class=" self-center text-xs font-normal">
 					{$i18n.t('Automations')}
 				</div>
 				<Switch bind:state={permissions.features.automations} ariaLabel={$i18n.t('Automations')} />
->>>>>>> v0.11.0
 			</Tooltip>
 			{#if defaultPermissions?.features?.automations && !permissions.features.automations}
 				<div>
@@ -1212,17 +1185,10 @@
 
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
-<<<<<<< HEAD
-				<div class=" self-center text-xs font-medium">
-					{$i18n.t('Calendar')}
-				</div>
-				<Switch bind:state={permissions.features.calendar} />
-=======
 				<div class=" self-center text-xs font-normal">
 					{$i18n.t('Calendar')}
 				</div>
 				<Switch bind:state={permissions.features.calendar} ariaLabel={$i18n.t('Calendar')} />
->>>>>>> v0.11.0
 			</div>
 			{#if defaultPermissions?.features?.calendar && !permissions.features.calendar}
 				<div>
@@ -1232,8 +1198,6 @@
 				</div>
 			{/if}
 		</div>
-<<<<<<< HEAD
-=======
 
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
@@ -1250,7 +1214,6 @@
 				</div>
 			{/if}
 		</div>
->>>>>>> v0.11.0
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />

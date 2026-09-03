@@ -1,16 +1,10 @@
 <script lang="ts">
-<<<<<<< HEAD
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { WEBUI_NAME, config, user, showSidebar } from '$lib/stores';
+	import { WEBUI_NAME, adminUserCount, config, user, showSidebar } from '$lib/stores';
 	import { goto } from '$app/navigation';
 	// Aliased: `page` is already this component's pagination counter.
 	import { page as currentPage } from '$app/stores';
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
-=======
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import { adminUserCount, config, user } from '$lib/stores';
-	import { getContext, onDestroy } from 'svelte';
->>>>>>> v0.11.0
 
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -20,11 +14,7 @@
 
 	import { toast } from 'svelte-sonner';
 
-<<<<<<< HEAD
 	import { updateUserRole, getUsers, deleteUserById, locateUser } from '$lib/apis/users';
-=======
-	import { getUsers, deleteUserById } from '$lib/apis/users';
->>>>>>> v0.11.0
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -417,12 +407,11 @@
 						</button>
 					</th>
 
-<<<<<<< HEAD
-					<th scope="col" class="px-2.5 py-2 text-right"></th>
+					<th scope="col" class="px-2.5 py-1.5 font-normal text-right"></th>
 				</tr>
 			</thead>
 			<tbody class="">
-				{#each users as user, userIdx (user.id)}
+				{#each users as user (user.id)}
 					<tr
 						id="user-row-{user.id}"
 						class="dark:border-gray-850 text-xs transition-colors duration-700 {user.id ===
@@ -430,44 +419,12 @@
 							? 'bg-yellow-100 dark:bg-yellow-500/15'
 							: 'bg-white dark:bg-gray-900'}"
 					>
-						<td class="px-3 py-1 min-w-[7rem] w-28">
-							<button
-								class=" translate-y-0.5"
-								aria-label={$i18n.t('Change User Role')}
-								on:click={() => {
-									selectedUser = user;
-									showEditUserModal = !showEditUserModal;
-								}}
-							>
-								<Badge
-									type={user.role === 'admin' ? 'info' : user.role === 'user' ? 'success' : 'muted'}
-									content={$i18n.t(user.role)}
-								/>
-							</button>
-						</td>
-						<td class="px-3 py-1 font-medium text-gray-900 dark:text-white max-w-48">
-							<div class="flex items-center gap-2">
-								<ProfilePreview {user} side="right" align="center" sideOffset={6}>
-									<img
-										class="rounded-full w-6 min-w-6 h-6 object-cover mr-0.5 flex-shrink-0"
-										src={user.profile_image_url?.startsWith('data:image') ||
-										user.profile_image_url?.startsWith('http')
-											? user.profile_image_url
-											: `${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`}
-=======
-					<th scope="col" class="px-2.5 py-1.5 font-normal text-right"></th>
-				</tr>
-			</thead>
-			<tbody class="">
-				{#each users as user (user.id)}
-					<tr class="dark:border-gray-850 text-xs">
 						<td class="px-3 py-1 font-normal text-gray-900 dark:text-white max-w-48">
 							<div class="flex items-center gap-2">
 								<ProfilePreview {user} side="right" align="center" sideOffset={6}>
 									<img
 										class="rounded-full size-5.5 object-cover flex-shrink-0"
 										src={`${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`}
->>>>>>> v0.11.0
 										alt="user"
 										loading="lazy"
 										on:error={(e) => {
@@ -490,8 +447,6 @@
 								{/if}
 							</div>
 						</td>
-<<<<<<< HEAD
-=======
 						<td class="px-3 py-1 min-w-[5rem] w-20">
 							<button
 								class="text-xs font-normal leading-4 capitalize transition {roleClass(user.role)}"
@@ -504,7 +459,6 @@
 								{$i18n.t(user.role)}
 							</button>
 						</td>
->>>>>>> v0.11.0
 						<td class=" px-3 py-1 max-w-48 truncate"> {user.email} </td>
 
 						<td class=" px-3 py-1">
@@ -582,12 +536,8 @@
 
 								<Tooltip content={$i18n.t('Edit User')}>
 									<button
-<<<<<<< HEAD
-=======
-										class="self-center w-fit p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
->>>>>>> v0.11.0
 										aria-label={$i18n.t('Edit User')}
-										class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										class="self-center w-fit p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
 										on:click={async () => {
 											showEditUserModal = !showEditUserModal;
 											selectedUser = user;
@@ -600,12 +550,8 @@
 								{#if user.role !== 'admin'}
 									<Tooltip content={$i18n.t('Delete User')}>
 										<button
-<<<<<<< HEAD
-=======
-											class="self-center w-fit p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
->>>>>>> v0.11.0
 											aria-label={$i18n.t('Delete User')}
-											class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+											class="self-center w-fit p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg"
 											on:click={async () => {
 												showDeleteConfirmDialog = true;
 												selectedUser = user;

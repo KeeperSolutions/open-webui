@@ -1,11 +1,6 @@
 <script lang="ts">
-<<<<<<< HEAD
-	import { onMount, getContext } from 'svelte';
-	import { models, theme } from '$lib/stores';
-=======
 	import { getContext } from 'svelte';
-	import { adminLeaderboardCount, models } from '$lib/stores';
->>>>>>> v0.11.0
+	import { adminLeaderboardCount, models, theme } from '$lib/stores';
 	import { getLeaderboard } from '$lib/apis/evaluations';
 	import { resolveTheme } from '$lib/utils';
 	import ModelModal from './LeaderboardModal.svelte';
@@ -186,59 +181,10 @@
 								class="px-2.5 py-2 font-normal cursor-pointer select-none {col.class}"
 								on:click={() => toggleSort(col.key)}
 							>
-<<<<<<< HEAD
-								{$i18n.t(col.label)}
-								{#if orderBy === col.key}
-									{#if direction === 'asc'}<ChevronUp className="size-2" />{:else}<ChevronDown
-											className="size-2"
-										/>{/if}
-								{:else}
-									<span class="invisible"><ChevronUp className="size-2" /></span>
-								{/if}
-							</div>
-						</th>
-					{/each}
-				</tr>
-			</thead>
-			<tbody>
-				{#each sortedModels as model, idx (model.id)}
-					<tr
-						class="bg-white dark:bg-gray-900 text-xs group cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
-						on:click={() => openModal(model)}
-					>
-						<td class="px-3 py-1.5 font-medium text-gray-900 dark:text-white">
-							{model.rating !== '-' ? idx + 1 : '-'}
-						</td>
-						<td class="px-3 py-1.5">
-							<div class="flex items-center gap-2">
-								<img
-									src="{WEBUI_API_BASE_URL}/models/model/profile/image?id={model.id}&theme={resolveTheme($theme)}"
-									alt={model.name}
-									class="size-5 rounded-full object-cover shrink-0"
-									on:error={(e) => {
-										e.target.src = '/favicon.png';
-									}}
-								/>
-								<Tooltip content={`${model.name} (${model.id})`} placement="top-start">
-									<span class="font-medium text-gray-800 dark:text-gray-200 line-clamp-1"
-										>{model.name}</span
-									>
-								</Tooltip>
-							</div>
-						</td>
-						<td class="px-3 py-1.5 text-right font-medium text-gray-900 dark:text-white">
-							{model.rating}
-						</td>
-						<td class="px-3 py-1.5 text-right font-medium text-green-500 w-10">
-							{#if model.stats.won === '-'}-{:else}
-								<span class="hidden group-hover:inline"
-									>{((Number(model.stats.won) / model.stats.count) * 100).toFixed(1)}%</span
-=======
 								<div
 									class="flex gap-1.5 items-center {col.class.includes('right')
 										? 'justify-end'
 										: ''}"
->>>>>>> v0.11.0
 								>
 									{$i18n.t(col.label)}
 									{#if orderBy === col.key}
@@ -265,7 +211,7 @@
 							<td class="px-3 py-1.5">
 								<div class="flex items-center gap-2">
 									<img
-										src="{WEBUI_API_BASE_URL}/models/model/profile/image?id={model.id}"
+										src="{WEBUI_API_BASE_URL}/models/model/profile/image?id={model.id}&theme={resolveTheme($theme)}"
 										alt={model.name}
 										class="size-5 rounded-full object-cover shrink-0"
 										on:error={(e) => {

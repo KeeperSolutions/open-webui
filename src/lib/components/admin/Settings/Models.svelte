@@ -7,19 +7,7 @@
 	import { onMount, onDestroy, getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-<<<<<<< HEAD
-	import {
-		WEBUI_NAME,
-		config,
-		mobile,
-		models as _models,
-		settings,
-		user,
-		theme
-	} from '$lib/stores';
-=======
 	import { config, models as _models, settings, showSettings, user } from '$lib/stores';
->>>>>>> v0.11.0
 	import {
 		createNewModel,
 		deleteAllModels,
@@ -32,11 +20,6 @@
 		importModels
 	} from '$lib/apis/models';
 	import { copyToClipboard } from '$lib/utils';
-<<<<<<< HEAD
-	import { resolveTheme } from '$lib/utils/theme';
-	import { page } from '$app/stores';
-=======
->>>>>>> v0.11.0
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import { getModels } from '$lib/apis';
@@ -51,11 +34,8 @@
 	import { toast } from 'svelte-sonner';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import ManageModelsModal from './Models/ManageModelsModal.svelte';
-<<<<<<< HEAD
 	import FeaturedModelsModal from './Models/FeaturedModelsModal.svelte';
-=======
 	import ModelDefaultsPanel from './Models/ModelDefaultsPanel.svelte';
->>>>>>> v0.11.0
 	import ModelMenu from '$lib/components/admin/Settings/Models/ModelMenu.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
@@ -94,12 +74,6 @@
 	let modelListElement: HTMLDivElement;
 	let sortable = null;
 
-<<<<<<< HEAD
-	let models: any[] | null = null;
-
-	let workspaceModels: any[] | null = null;
-	let baseModels: any[] | null = null;
-=======
 	let models = null;
 	let modelsConfig = null;
 	let modelOrderList: string[] = [];
@@ -110,22 +84,18 @@
 
 	let workspaceModels: ModelListItem[] = [];
 	let baseModels: ModelListItem[] = [];
->>>>>>> v0.11.0
 
-	let filteredModels: any[] = [];
+	let filteredModels = [];
 	let selectedModelId = null;
 
 	let showManageModal = false;
-<<<<<<< HEAD
 	let showFeaturedModelsModal = false;
-=======
 	let showResetModal = false;
 	let savingModelOrder = false;
 	let savingModelsSettings = false;
 	let modelOrderDirty = false;
 	let modelDefaultsPanel = null;
 	let modelDefaultsDirty = false;
->>>>>>> v0.11.0
 
 	let viewOption = ''; // '' = All, 'enabled', 'disabled', 'visible', 'hidden'
 	let tags: string[] = [];
@@ -293,15 +263,10 @@
 		baseModels = await getModels(localStorage.token, null, true);
 		const workspaceModelIds = new Set<string>(workspaceModels.map((wm: ModelListItem) => wm.id));
 
-<<<<<<< HEAD
-		models = (baseModels || []).map((m) => {
-			const workspaceModel = (workspaceModels || []).find((wm) => wm.id === m.id);
-=======
 		models = baseModels
 			.filter((m: ModelListItem) => !selectedTag || workspaceModelIds.has(m.id))
 			.map((m: ModelListItem) => {
 				const workspaceModel = workspaceModels.find((wm: ModelListItem) => wm.id === m.id);
->>>>>>> v0.11.0
 
 				if (workspaceModel) {
 					return {
@@ -487,7 +452,7 @@
 	const upsertModelHandler = async (model, overrides = {}, showToast = true) => {
 		model = { ...model, base_model_id: null, ...overrides };
 
-		if (workspaceModels?.find((m) => m.id === model.id)) {
+		if (workspaceModels.find((m) => m.id === model.id)) {
 			const res = await updateModelById(localStorage.token, model.id, model).catch((error) => {
 				return null;
 			});
@@ -550,9 +515,6 @@
 			}
 		};
 
-<<<<<<< HEAD
-		upsertModelHandler(model, { meta: model.meta }, false);
-=======
 		await upsertModelHandler(updatedModel, { meta: updatedModel.meta }, false);
 		models = models.map((model) => (model.id === updatedModel.id ? updatedModel : model));
 		_models.set(
@@ -561,7 +523,6 @@
 				$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 			)
 		);
->>>>>>> v0.11.0
 
 		toast.success(
 			updatedModel.meta.hidden
@@ -780,212 +741,6 @@
 							bind:value={searchValue}
 							placeholder={$i18n.t('Search Models')}
 						/>
-<<<<<<< HEAD
-
-						<button
-							class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-							type="button"
-							on:click={() => {
-								showFeaturedModelsModal = true;
-							}}
-						>
-							<div class=" self-center font-medium line-clamp-1">
-								{$i18n.t('Featured Models')}
-							</div>
-						</button>
-
-						<button
-							class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-							disabled={modelsImportInProgress}
-							on:click={() => {
-								modelsImportInputElement.click();
-							}}
-						>
-							{#if modelsImportInProgress}
-								<Spinner className="size-3" />
-							{/if}
-							<div class=" self-center font-medium line-clamp-1">
-								{$i18n.t('Import')}
-							</div>
-						</button>
-
-						<button
-							class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-							on:click={async () => {
-								downloadModels(models);
-							}}
-						>
-							<div class=" self-center font-medium line-clamp-1">
-								{$i18n.t('Export')}
-							</div>
-						</button>
-					{/if}
-
-					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-						type="button"
-						on:click={() => {
-							showManageModal = true;
-						}}
-					>
-						<div class=" self-center font-medium line-clamp-1">
-							{$i18n.t('Manage')}
-						</div>
-					</button>
-
-					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black transition font-medium"
-						type="button"
-						on:click={() => {
-							showConfigModal = true;
-						}}
-					>
-						<div class=" self-center font-medium line-clamp-1">
-							{$i18n.t('Settings')}
-						</div>
-					</button>
-				</div>
-			</div>
-		</div>
-
-		<div
-			class="py-2 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30"
-		>
-			<div class="px-3.5 flex flex-1 items-center w-full space-x-2 py-0.5 pb-2">
-				<div class="flex flex-1 items-center">
-					<div class=" self-center ml-1 mr-3">
-						<Search className="size-3.5" />
-					</div>
-					<input
-						class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
-						bind:value={searchValue}
-						placeholder={$i18n.t('Search Models')}
-					/>
-					{#if searchValue}
-						<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">
-							<button
-								class="p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								on:click={() => {
-									searchValue = '';
-								}}
-							>
-								<XMark className="size-3" strokeWidth="2" />
-							</button>
-						</div>
-					{/if}
-				</div>
-			</div>
-
-			<div class="px-3 flex w-full items-center bg-transparent overflow-x-auto scrollbar-none">
-				<div
-					class="flex gap-0.5 w-fit text-center text-sm rounded-full bg-transparent whitespace-nowrap"
-				>
-					<AdminViewSelector bind:value={viewOption} />
-				</div>
-
-				<div class="flex-1"></div>
-
-				<Dropdown>
-					<Tooltip content={$i18n.t('Actions')}>
-						<button
-							class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-							type="button"
-						>
-							<EllipsisHorizontal className="size-4" />
-						</button>
-					</Tooltip>
-
-					<div slot="content">
-						<div
-							class="w-[170px] rounded-xl p-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
-						>
-							<button
-								class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-								type="button"
-								on:click={() => {
-									enableAllHandler();
-								}}
-							>
-								<CheckCircle className="size-4" />
-								<div class="flex items-center">{$i18n.t('Enable All')}</div>
-							</button>
-
-							<button
-								class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-								type="button"
-								on:click={() => {
-									disableAllHandler();
-								}}
-							>
-								<Minus className="size-4" />
-								<div class="flex items-center">{$i18n.t('Disable All')}</div>
-							</button>
-
-							<hr class="border-gray-100 dark:border-gray-800 my-1" />
-
-							<button
-								class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-								type="button"
-								on:click={() => {
-									showAllHandler();
-								}}
-							>
-								<Eye className="size-4" />
-								<div class="flex items-center">{$i18n.t('Show All')}</div>
-							</button>
-
-							<button
-								class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-								type="button"
-								on:click={() => {
-									hideAllHandler();
-								}}
-							>
-								<EyeSlash className="size-4" />
-								<div class="flex items-center">{$i18n.t('Hide All')}</div>
-							</button>
-						</div>
-					</div>
-				</Dropdown>
-			</div>
-
-			<div class="px-3 my-2" id="model-list">
-				{#if filteredModels.length > 0}
-					{#each filteredModels.slice((currentPage - 1) * perPage, currentPage * perPage) as model, modelIdx (`${model.id}-${modelIdx}`)}
-						<div
-							class=" flex space-x-4 cursor-pointer w-full px-3 py-2 dark:hover:bg-white/5 hover:bg-black/5 rounded-xl transition {model
-								?.meta?.hidden
-								? 'opacity-50 dark:opacity-50'
-								: ''}"
-							id="model-item-{model.id}"
-						>
-							<button
-								class=" flex flex-1 text-left space-x-3.5 cursor-pointer w-full"
-								type="button"
-								on:click={() => {
-									selectedModelId = model.id;
-								}}
-							>
-								<div class=" self-center w-9">
-									<div
-										class=" rounded-full object-cover {(model?.is_active ?? true)
-											? ''
-											: 'opacity-50 dark:opacity-50'} "
-									>
-										<img
-											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}`}
-											alt="modelfile profile"
-											class=" rounded-full w-full h-auto object-cover"
-											on:error={(e) => {
-												e.target.src = '/favicon.png';
-											}}
-										/>
-									</div>
-								</div>
-
-								<div
-									class=" flex-1 self-center {(model?.is_active ?? true) ? '' : 'text-gray-500'}"
-=======
 						{#if searchValue}
 							<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">
 								<button
@@ -994,7 +749,6 @@
 									on:click={() => {
 										searchValue = '';
 									}}
->>>>>>> v0.11.0
 								>
 									<XMark className="size-3" strokeWidth="2" />
 								</button>
@@ -1072,7 +826,6 @@
 									<button
 										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
-										aria-label={$i18n.t('Edit')}
 										on:click={() => {
 											showManageModal = true;
 										}}
@@ -1080,6 +833,19 @@
 										<Wrench className="size-3.5" />
 										<div class="flex items-center">{$i18n.t('Manage')}</div>
 									</button>
+
+									{#if $user?.role === 'admin'}
+										<button
+											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
+											type="button"
+											on:click={() => {
+												showFeaturedModelsModal = true;
+											}}
+										>
+											<Wrench className="size-3.5" />
+											<div class="flex items-center">{$i18n.t('Featured Models')}</div>
+										</button>
+									{/if}
 
 									<button
 										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
@@ -1464,14 +1230,9 @@
 			edit
 			model={models.find((m) => m.id === selectedModelId)}
 			preset={false}
-<<<<<<< HEAD
-			onSubmit={(model) => {
-				upsertModelHandler(model);
-=======
 			onSubmit={async (model) => {
 				console.log(model);
 				await upsertModelHandler(model);
->>>>>>> v0.11.0
 				selectedModelId = null;
 				await init();
 			}}

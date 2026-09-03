@@ -836,11 +836,7 @@
 						</div>
 						<Tooltip content={$i18n.t('Delete Model')} placement="top">
 							<button
-<<<<<<< HEAD
-								class="px-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition"
-=======
 								class={iconButtonClass}
->>>>>>> v0.11.0
 								aria-label={$i18n.t('Delete Model')}
 								on:click={() => {
 									showModelDeleteConfirm = true;
@@ -889,11 +885,7 @@
 						<div class="flex self-start">
 							<Tooltip content={$i18n.t('Create Model')} placement="top">
 								<button
-<<<<<<< HEAD
-									class="px-2.5 py-2.5 bg-gray-50 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-100 rounded-lg transition disabled:cursor-not-allowed"
-=======
 									class={iconButtonClass}
->>>>>>> v0.11.0
 									aria-label={$i18n.t('Create Model')}
 									on:click={() => {
 										createModelHandler();
