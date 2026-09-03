@@ -265,8 +265,6 @@ export const sanitizeHistory = (history) => {
 		}
 	}
 
-<<<<<<< HEAD
-=======
 	// Recover currentId before role reconstruction can make a malformed node
 	// look valid.
 	const currentMessage = history.messages?.[history.currentId];
@@ -284,7 +282,6 @@ export const sanitizeHistory = (history) => {
 		history.currentId = latestLeafId ?? Object.keys(history.messages)[0] ?? null;
 	}
 
->>>>>>> v0.11.0
 	// Reconstruct missing parentId and role
 	for (const [id, message] of Object.entries(history.messages)) {
 		// Well-formed: has role and explicit parentId (null is valid for root)
@@ -311,23 +308,6 @@ export const sanitizeHistory = (history) => {
 	for (const message of Object.values(history.messages)) {
 		message.childrenIds = message.childrenIds.filter((childId) => history.messages[childId]);
 	}
-<<<<<<< HEAD
-
-	// Recover currentId if it points to a missing or incomplete node
-	const currentMessage = history.messages?.[history.currentId];
-	if (!currentMessage?.id || !currentMessage?.role) {
-		let latestLeafId = null;
-		let latestTimestamp = -1;
-		for (const [id, message] of Object.entries(history.messages)) {
-			if (message.childrenIds.length === 0 && (message.timestamp ?? 0) > latestTimestamp) {
-				latestLeafId = id;
-				latestTimestamp = message.timestamp ?? 0;
-			}
-		}
-		history.currentId = latestLeafId ?? Object.keys(history.messages)[0] ?? null;
-	}
-=======
->>>>>>> v0.11.0
 };
 
 export const getGravatarURL = (email) => {
@@ -1993,76 +1973,11 @@ export const initMermaid = async () => {
 const cleanupMermaidTempElements = (id: string) => {
 	if (typeof document === 'undefined') {
 		return;
-<<<<<<< HEAD
 	}
 
 	document.getElementById(id)?.remove();
 	document.getElementById(`d${id}`)?.remove();
 	document.getElementById(`i${id}`)?.remove();
-};
-
-// Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,
-// HTML labels); strip active content before it reaches any innerHTML/{@html} sink.
-export const sanitizeSvg = (svg: string): string =>
-	DOMPurify.sanitize(svg, {
-		USE_PROFILES: { svg: true, svgFilters: true },
-		WHOLE_DOCUMENT: false,
-		ADD_TAGS: ['style', 'foreignObject'],
-		ADD_ATTR: [
-			'class',
-			'style',
-			'id',
-			'data-*',
-			'viewBox',
-			'preserveAspectRatio',
-			'markerWidth',
-			'markerHeight',
-			'markerUnits',
-			'refX',
-			'refY',
-			'orient',
-			'href',
-			'xlink:href',
-			'dominant-baseline',
-			'text-anchor',
-			'clipPathUnits',
-			'filterUnits',
-			'patternUnits',
-			'patternContentUnits',
-			'maskUnits',
-			'role',
-			'aria-label',
-			'aria-labelledby',
-			'aria-hidden',
-			'tabindex'
-		],
-		SANITIZE_DOM: true
-	});
-
-export const renderMermaidDiagram = async (
-	mermaid: typeof import('mermaid').default,
-	code: string,
-	renderId?: string
-) => {
-	const id = renderId ?? `mermaid-${uuidv4()}`;
-	try {
-		const parseResult = await mermaid.parse(code, { suppressErrors: false });
-		if (parseResult) {
-			const { svg } = await mermaid.render(id, code);
-			return sanitizeSvg(svg);
-		}
-		return '';
-	} finally {
-		// Mermaid can leave temporary d*/i* wrappers on error paths.
-		cleanupMermaidTempElements(id);
-	}
-=======
-	}
-
-	document.getElementById(id)?.remove();
-	document.getElementById(`d${id}`)?.remove();
-	document.getElementById(`i${id}`)?.remove();
->>>>>>> v0.11.0
 };
 
 // Mermaid runs with securityLevel:'loose', which emits unsanitized SVG (raw javascript: hrefs,

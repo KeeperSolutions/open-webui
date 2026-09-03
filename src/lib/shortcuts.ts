@@ -52,8 +52,6 @@ export enum Shortcut {
 
 	//Voice
 	TOGGLE_MUTE = 'toggleMute'
-<<<<<<< HEAD
-=======
 }
 
 export const CONFIGURABLE_SHORTCUTS = [
@@ -202,7 +200,6 @@ export function matchKeybinding(event: KeyboardEvent): ConfigurableShortcut | nu
 	const chord = eventToChord(event);
 	if (!chord) return null;
 	return buildReverseLookup(get(keybindings)).get(chord) ?? null;
->>>>>>> v0.11.0
 }
 
 export const shortcuts: ShortcutRegistry = {
@@ -357,12 +354,8 @@ export const shortcuts: ShortcutRegistry = {
 	[Shortcut.COPY_LAST_CODE_BLOCK]: {
 		name: 'Copy Last Code Block',
 		keys: ['mod', 'shift', ';'],
-<<<<<<< HEAD
-		category: 'Message'
-=======
 		category: 'Message',
 		configurable: true
->>>>>>> v0.11.0
 	},
 
 	//Voice

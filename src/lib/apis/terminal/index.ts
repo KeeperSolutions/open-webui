@@ -64,15 +64,9 @@ export const getCwd = async (
 	baseUrl: string,
 	apiKey: string,
 	sessionId?: string
-<<<<<<< HEAD
-): Promise<string | null> => {
-	const url = `${baseUrl.replace(/\/$/, '')}/files/cwd`;
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 ): Promise<TerminalCwd | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/cwd`;
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, { headers }).catch(() => null);
 	if (!res || !res.ok) return null;
@@ -93,11 +87,7 @@ export const listFiles = async (
 ): Promise<FileEntry[] | null> => {
 	// The endpoint uses `directory` as the query param name
 	const url = `${baseUrl.replace(/\/$/, '')}/files/list?directory=${encodeURIComponent(path)}`;
-<<<<<<< HEAD
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, { headers })
 		.then(async (res) => {
@@ -118,11 +108,7 @@ export const readFile = async (
 	sessionId?: string
 ): Promise<string | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/read?path=${encodeURIComponent(path)}`;
-<<<<<<< HEAD
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, { headers }).catch((err) => {
 		console.error('open-terminal readFile error:', err);
@@ -150,11 +136,7 @@ export const downloadFileBlob = async (
 	sessionId?: string
 ): Promise<{ blob: Blob; filename: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/view?path=${encodeURIComponent(path)}`;
-<<<<<<< HEAD
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, { headers }).catch(() => null);
 
@@ -174,11 +156,7 @@ export const archiveFromTerminal = async (
 ): Promise<{ blob: Blob; filename: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/archive`;
 	const headers: Record<string, string> = {
-<<<<<<< HEAD
-		Authorization: `Bearer ${apiKey}`,
-=======
 		...bearerHeaders(apiKey),
->>>>>>> v0.11.0
 		'Content-Type': 'application/json'
 	};
 	if (sessionId) headers['X-Session-Id'] = sessionId;
@@ -208,11 +186,7 @@ export const uploadToTerminal = async (
 	const url = `${baseUrl.replace(/\/$/, '')}/files/upload?directory=${encodeURIComponent(directory)}`;
 	const body = new FormData();
 	body.append('file', file);
-<<<<<<< HEAD
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, {
 		method: 'POST',
@@ -238,11 +212,7 @@ export const createDirectory = async (
 ): Promise<{ path: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/mkdir`;
 	const headers: Record<string, string> = {
-<<<<<<< HEAD
-		Authorization: `Bearer ${apiKey}`,
-=======
 		...bearerHeaders(apiKey),
->>>>>>> v0.11.0
 		'Content-Type': 'application/json'
 	};
 	if (sessionId) headers['X-Session-Id'] = sessionId;
@@ -269,11 +239,7 @@ export const deleteEntry = async (
 	sessionId?: string
 ): Promise<{ path: string; type: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/delete?path=${encodeURIComponent(path)}`;
-<<<<<<< HEAD
-	const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-=======
 	const headers: Record<string, string> = bearerHeaders(apiKey);
->>>>>>> v0.11.0
 	if (sessionId) headers['X-Session-Id'] = sessionId;
 	const res = await fetch(url, {
 		method: 'DELETE',
@@ -298,11 +264,7 @@ export const setCwd = async (
 ): Promise<{ cwd: string } | null> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/cwd`;
 	const headers: Record<string, string> = {
-<<<<<<< HEAD
-		Authorization: `Bearer ${apiKey}`,
-=======
 		...bearerHeaders(apiKey),
->>>>>>> v0.11.0
 		'Content-Type': 'application/json'
 	};
 	if (sessionId) headers['X-Session-Id'] = sessionId;
@@ -331,11 +293,7 @@ export const moveEntry = async (
 ): Promise<{ source: string; destination: string } | { error: string }> => {
 	const url = `${baseUrl.replace(/\/$/, '')}/files/move`;
 	const headers: Record<string, string> = {
-<<<<<<< HEAD
-		Authorization: `Bearer ${apiKey}`,
-=======
 		...bearerHeaders(apiKey),
->>>>>>> v0.11.0
 		'Content-Type': 'application/json'
 	};
 	if (sessionId) headers['X-Session-Id'] = sessionId;

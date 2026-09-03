@@ -845,8 +845,6 @@ body {
 	padding-bottom: 2rem; /* space for the bottom toolbar */
 }
 
-<<<<<<< HEAD
-=======
 /* High Contrast Mode: placeholders bottom out at 1.58:1 (WCAG 1.4.3 wants 4.5:1). */
 @layer utilities {
 	html.high-contrast:not(.dark) :is(input, textarea)::placeholder {
@@ -921,4 +919,3 @@ html.high-contrast:not(.dark) .shimmer {
 	color: var(--color-gray-700);
 	-webkit-text-fill-color: var(--color-gray-700);
 }
->>>>>>> v0.11.0

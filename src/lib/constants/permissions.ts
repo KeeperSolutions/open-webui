@@ -27,13 +27,9 @@ export const DEFAULT_PERMISSIONS = {
 		public_skills: false,
 		notes: false,
 		public_notes: false,
-<<<<<<< HEAD
-		public_chats: false,
-=======
 		folders: false,
 		public_chats: false,
 		open_chats: false,
->>>>>>> v0.11.0
 		public_calendars: false
 	},
 	access_grants: {
@@ -78,12 +74,8 @@ export const DEFAULT_PERMISSIONS = {
 		code_interpreter: true,
 		memories: true,
 		automations: false,
-<<<<<<< HEAD
-		calendar: true
-=======
 		calendar: true,
 		webhooks: false
->>>>>>> v0.11.0
 	},
 	settings: {
 		interface: true

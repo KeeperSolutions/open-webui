@@ -61,8 +61,6 @@ function detailsTokenizer(src: string) {
 
 function detailsStart(src: string) {
 	return src.match(/^<details[\s>]/) ? 0 : -1;
-<<<<<<< HEAD
-=======
 }
 
 function lheadingTokenizer(this: any, src: string): any {
@@ -78,7 +76,6 @@ function lheadingTokenizer(this: any, src: string): any {
 		text,
 		tokens: this.lexer.inline(text)
 	};
->>>>>>> v0.11.0
 }
 
 function detailsRenderer(token: any) {

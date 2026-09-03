@@ -128,7 +128,38 @@ export const unarchiveAllChats = async (token: string) => {
 	return res;
 };
 
-<<<<<<< HEAD
+export const unshareAllChats = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/share/all`, {
+		method: 'DELETE',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.then((json) => {
+			return json;
+		})
+		.catch((err) => {
+			error = err.detail;
+
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const importChat = async (
 	token: string,
 	chat: object,
@@ -155,34 +186,13 @@ export const importChat = async (
 			created_at: createdAt ?? null,
 			updated_at: updatedAt ?? null
 		})
-=======
-export const unshareAllChats = async (token: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/share/all`, {
-		method: 'DELETE',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		}
->>>>>>> v0.11.0
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
 		})
-<<<<<<< HEAD
 		.catch((err) => {
 			error = err;
-=======
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err.detail;
-
->>>>>>> v0.11.0
 			console.error(err);
 			return null;
 		});
@@ -1227,76 +1237,6 @@ export const deleteSharedChatById = async (token: string, id: string) => {
 };
 
 export const updateChatAccessGrants = async (token: string, id: string, accessGrants: object[]) => {
-<<<<<<< HEAD
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access/update`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		},
-		body: JSON.stringify({
-			access_grants: accessGrants
-		})
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err;
-
-			console.error(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const getChatAccessGrants = async (token: string, id: string) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		}
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.then((json) => {
-			return json;
-		})
-		.catch((err) => {
-			error = err;
-
-			console.error(err);
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-export const updateChatById = async (token: string, id: string, chat: object) => {
-=======
->>>>>>> v0.11.0
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/shared/${id}/access/update`, {

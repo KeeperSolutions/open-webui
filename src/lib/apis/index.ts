@@ -1582,9 +1582,6 @@ export const getVersionUpdates = async (token: string) => {
 	return res;
 };
 
-<<<<<<< HEAD
-export const getWebhookUrl = async (token: string) => {
-=======
 export type EventCatalogItem = {
 	event: string;
 	description: string;
@@ -1699,7 +1696,6 @@ export const updateEventWebhook = async (
 	id: string,
 	webhook: Partial<EventWebhook>
 ): Promise<EventWebhook> => {
->>>>>>> v0.11.0
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/events/webhooks/${id}`, {
@@ -1727,8 +1723,6 @@ export const updateEventWebhook = async (
 	return res;
 };
 
-<<<<<<< HEAD
-=======
 export const deleteEventWebhook = async (token: string, id: string) => {
 	let error = null;
 
@@ -1756,7 +1750,6 @@ export const deleteEventWebhook = async (token: string, id: string) => {
 	return res;
 };
 
->>>>>>> v0.11.0
 export interface ModelConfig {
 	id: string;
 	name: string;

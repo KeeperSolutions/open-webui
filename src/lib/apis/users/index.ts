@@ -702,8 +702,6 @@ export const getUserPreview = async (token: string, userId: string) => {
 
 	return res;
 };
-<<<<<<< HEAD
-=======
 
 export type UserUsageHeatmapEntry = {
 	date: string;
@@ -788,4 +786,3 @@ export const getUserUsage = async (
 
 	return res;
 };
->>>>>>> v0.11.0

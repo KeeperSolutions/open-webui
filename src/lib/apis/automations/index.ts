@@ -14,10 +14,7 @@ export type AutomationData = {
 
 export type AutomationForm = {
 	name: string;
-<<<<<<< HEAD
-=======
 	folder_id?: string | null;
->>>>>>> v0.11.0
 	data: AutomationData;
 	meta?: {
 		system_prompt?: string;
@@ -40,10 +37,7 @@ export type AutomationRunModel = {
 export type AutomationResponse = {
 	id: string;
 	user_id: string;
-<<<<<<< HEAD
-=======
 	folder_id: string | null;
->>>>>>> v0.11.0
 	name: string;
 	data: AutomationData;
 	meta: Record<string, any> | null;
@@ -61,12 +55,8 @@ export const getAutomationItems = async (
 	token: string,
 	query: string | null,
 	status: string | null,
-<<<<<<< HEAD
-	page: number
-=======
 	page: number,
 	folder_id?: string | null
->>>>>>> v0.11.0
 ): Promise<{ items: AutomationResponse[]; total: number }> => {
 	let error = null;
 
@@ -80,12 +70,9 @@ export const getAutomationItems = async (
 	if (page) {
 		searchParams.append('page', page.toString());
 	}
-<<<<<<< HEAD
-=======
 	if (folder_id !== undefined && folder_id !== null) {
 		searchParams.append('folder_id', folder_id);
 	}
->>>>>>> v0.11.0
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/automations/list?${searchParams.toString()}`, {
 		method: 'GET',

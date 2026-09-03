@@ -69,12 +69,7 @@ export const chatTitle = writable('');
 export const channels = writable([]);
 export const channelId = writable(null);
 
-<<<<<<< HEAD
-export const chats = writable(null);
-export const pinnedChats = writable([]);
-=======
 export { chats, pinnedChats } from './chatList';
->>>>>>> v0.11.0
 export const pinnedNotes = writable([]);
 export const tags = writable([]);
 export const folders = writable([]);
@@ -165,11 +160,6 @@ export type DesktopEvent = {
 	data?: any;
 };
 export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
-<<<<<<< HEAD
-export const scrollPaginationEnabled = writable(false);
-export const currentChatPage = writable(1);
-=======
->>>>>>> v0.11.0
 
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
@@ -283,16 +273,14 @@ type Settings = {
 	renderMarkdownInAssistantMessages?: boolean;
 	recentEmojis?: string[];
 	pinnedMenuItems?: string[];
-<<<<<<< HEAD
 
 	pipelines?: {
 		valves?: Record<string, Record<string, unknown>>;
 	};
-=======
+
 	pinnedNotesOrder?: string[];
 
 	defaultUploadContext?: 'full' | 'focused';
->>>>>>> v0.11.0
 
 	system?: string;
 	seed?: number;
