@@ -9,11 +9,7 @@ from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import throttle
 from open_webui.utils.validate import validate_profile_image_url
-<<<<<<< HEAD
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-=======
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
->>>>>>> v0.11.0
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -110,10 +106,7 @@ class UserModel(BaseModel):
     status_expires_at: int | None = None
 
     info: dict | None = None
-<<<<<<< HEAD
-=======
     variables: dict = Field(default_factory=dict, exclude=True)
->>>>>>> v0.11.0
     settings: UserSettings | None = None
 
     oauth: dict | None = None
@@ -305,14 +298,11 @@ class UsersTable:
         oauth: dict | None = None,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-<<<<<<< HEAD
-=======
         try:
             profile_image_url = validate_profile_image_url(profile_image_url)
         except ValueError:
             profile_image_url = '/user.png'
 
->>>>>>> v0.11.0
         async with get_async_db_context(db) as session:
             user = UserModel(
                 **{
@@ -331,10 +321,6 @@ class UsersTable:
             result = User(**user.model_dump())
             session.add(result)
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(result)
-=======
->>>>>>> v0.11.0
             return user if result else None
 
     # database read methods
@@ -424,7 +410,6 @@ class UsersTable:
         skip: int | None = None,
         limit: int | None = None,
         db: AsyncSession | None = None,
-<<<<<<< HEAD
         locate: str | None = None,
     ) -> dict:
         """Paginated user listing with optional filters for role, group, and channel.
@@ -438,19 +423,12 @@ class UsersTable:
         and a position measured under a different order is not a position, it is
         a wrong answer that looks right.
         """
-=======
-    ) -> dict:
-        """Paginated user listing with optional filters for role, group, and channel."""
->>>>>>> v0.11.0
         async with get_async_db_context(db) as session:
             # Deferred imports to avoid circular dependencies
             from open_webui.models.channels import ChannelMember
             from open_webui.models.groups import GroupMember
 
-<<<<<<< HEAD
 
-=======
->>>>>>> v0.11.0
             # Join GroupMember so we can order by group_id when requested
             stmt = select(User)
 
@@ -569,7 +547,6 @@ class UsersTable:
             # Count BEFORE pagination
             count_result = await session.execute(select(func.count()).select_from(stmt.subquery()))
             total = count_result.scalar()
-<<<<<<< HEAD
 
             # Also before pagination, and reading ids only: the position is an
             # index into the whole list, so it cannot be taken from the page.
@@ -579,8 +556,6 @@ class UsersTable:
                 ids = ids_result.scalars().all()
                 if locate in ids:
                     position = ids.index(locate)
-=======
->>>>>>> v0.11.0
 
             # correct pagination logic
             if skip is not None:
@@ -630,7 +605,6 @@ class UsersTable:
             stmt = select(User).order_by(User.created_at).limit(1)
             row = (await session.execute(stmt)).scalars().first()
             return UserModel.model_validate(row) if row else None
-<<<<<<< HEAD
 
     async def get_user_webhook_url_by_id(self, id: str, db: AsyncSession | None = None) -> str | None:
         async with get_async_db_context(db) as session:
@@ -638,8 +612,6 @@ class UsersTable:
             if user and user.settings:
                 return user.settings.get('ui', {}).get('notifications', {}).get('webhook_url', None)
             return None
-=======
->>>>>>> v0.11.0
 
     async def get_num_users_active_today(self, db: AsyncSession | None = None) -> int | None:
         async with get_async_db_context(db) as session:
@@ -657,10 +629,6 @@ class UsersTable:
                 return None
             user.role = role
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     async def update_user_status_by_id(
@@ -673,10 +641,6 @@ class UsersTable:
             for key, value in form_data.model_dump(exclude_none=True).items():
                 setattr(user, key, value)
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     async def update_user_profile_image_url_by_id(
@@ -685,24 +649,17 @@ class UsersTable:
         profile_image_url: str,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-<<<<<<< HEAD
-=======
         try:
             profile_image_url = validate_profile_image_url(profile_image_url)
         except ValueError:
             profile_image_url = '/user.png'
 
->>>>>>> v0.11.0
         async with get_async_db_context(db) as session:
             user = await session.get(User, id)
             if user is None:
                 return None
             user.profile_image_url = profile_image_url
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     @throttle(DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL)
@@ -723,10 +680,6 @@ class UsersTable:
             oauth[provider] = {'sub': sub}
             user.oauth = oauth
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     async def update_user_scim_by_id(
@@ -745,10 +698,6 @@ class UsersTable:
             scim[provider] = {'external_id': external_id}
             user.scim = scim
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     async def update_user_by_id(self, id: str, updated: dict, db: AsyncSession | None = None) -> UserModel | None:
@@ -759,10 +708,6 @@ class UsersTable:
             for key, value in updated.items():
                 setattr(user, key, value)
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     # settings update helper
@@ -777,10 +722,6 @@ class UsersTable:
             user_settings.update(updated)
             user.settings = user_settings
             await session.commit()
-<<<<<<< HEAD
-            await session.refresh(user)
-=======
->>>>>>> v0.11.0
             return UserModel.model_validate(user)
 
     async def delete_user_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
@@ -827,13 +768,8 @@ class UsersTable:
 
     async def get_valid_user_ids(self, user_ids: list[str], db: AsyncSession | None = None) -> list[str]:
         async with get_async_db_context(db) as session:
-<<<<<<< HEAD
-            result = await session.execute(select(User).where(User.id.in_(user_ids)))
-            return [u.id for u in result.scalars().all()]
-=======
             result = await session.execute(select(User.id).where(User.id.in_(user_ids)))
             return list(result.scalars().all())
->>>>>>> v0.11.0
 
     async def get_super_admin_user(self, db: AsyncSession | None = None) -> UserModel | None:
         async with get_async_db_context(db) as session:
@@ -859,13 +795,8 @@ class UsersTable:
 
     async def is_user_active(self, user_id: str, db: AsyncSession | None = None) -> bool:
         async with get_async_db_context(db) as session:
-<<<<<<< HEAD
-            user = await session.get(User, user_id)
-            if user and user.last_active_at:
-=======
             last_active_at = await session.scalar(select(User.last_active_at).where(User.id == user_id))
             if last_active_at:
->>>>>>> v0.11.0
                 # Consider user active if last_active_at within the last 3 minutes
                 three_minutes_ago = int(time.time()) - 180
                 return last_active_at >= three_minutes_ago
