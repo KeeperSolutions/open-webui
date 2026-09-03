@@ -1,17 +1,9 @@
-<<<<<<< HEAD
-import logging
-import os
-import shutil
-from typing import Optional
-
-=======
 import asyncio
 import logging
 import os
 from typing import Optional
 
 import aiofiles
->>>>>>> v0.11.0
 import aiohttp
 from fastapi import (
     APIRouter,
@@ -24,26 +16,18 @@ from fastapi import (
     UploadFile,
     status,
 )
-<<<<<<< HEAD
 from open_webui.config import CACHE_DIR, PII_MASKING_ENFORCED_PERMISSION
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
+    AIOHTTP_FILE_STREAM_CHUNK_SIZE,
     PII_FILTER_IDS,
 )
+from open_webui.events import EVENTS, publish_event
 from open_webui.routers.openai import get_all_models_responses
 from open_webui.utils.auth import get_admin_user
 from open_webui.utils.access_control import has_permission
-=======
-from open_webui.config import CACHE_DIR
-from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_FILE_STREAM_CHUNK_SIZE
-from open_webui.events import EVENTS, publish_event
-from open_webui.models.config import Config
-from open_webui.routers.openai import get_all_models_responses
-from open_webui.utils.auth import get_admin_user
->>>>>>> v0.11.0
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
@@ -213,9 +197,9 @@ def get_sorted_filters(model_id, models):
 
 
 async def get_openai_connection(url_idx: int) -> tuple[str, str]:
-    base_urls = await Config.get('openai.api_base_urls', [])
-    api_keys = await Config.get('openai.api_keys', [])
-    return base_urls[url_idx], api_keys[url_idx]
+    from open_webui.config import OPENAI_API_BASE_URLS, OPENAI_API_KEYS
+
+    return (OPENAI_API_BASE_URLS.value or [])[url_idx], (OPENAI_API_KEYS.value or [])[url_idx]
 
 
 async def process_pipeline_inlet_filter(request, payload, user, models):
@@ -460,7 +444,7 @@ async def get_pipelines_list(request: Request, user=Depends(get_admin_user)):
     log.debug(f'get_pipelines_list: get_openai_models_responses returned {responses}')
 
     urlIdxs = [idx for idx, response in enumerate(responses) if response is not None and 'pipelines' in response]
-    base_urls = await Config.get('openai.api_base_urls', [])
+    base_urls = request.app.state.config.OPENAI_API_BASE_URLS
 
     return {
         'data': [
