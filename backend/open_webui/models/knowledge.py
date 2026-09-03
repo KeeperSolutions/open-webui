@@ -4,10 +4,7 @@ import time
 import uuid
 from typing import Optional
 
-<<<<<<< HEAD
-=======
 from open_webui.config import RAG_FILE_CONTENT_SEARCH_MAX_CHARS
->>>>>>> v0.11.0
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
 from open_webui.models.files import (
@@ -35,10 +32,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-<<<<<<< HEAD
-=======
 from sqlalchemy.orm import defer
->>>>>>> v0.11.0
 
 log = logging.getLogger(__name__)
 
@@ -201,15 +195,9 @@ class KnowledgeTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> KnowledgeModel:
-<<<<<<< HEAD
-        knowledge_data = KnowledgeModel.model_validate(knowledge).model_dump(exclude={'access_grants'})
-        knowledge_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(knowledge_data['id'], db=db)
-=======
         knowledge_model = KnowledgeModel.model_validate(knowledge)
         knowledge_model.access_grants = (
             access_grants if access_grants is not None else await self._get_access_grants(knowledge_model.id, db=db)
->>>>>>> v0.11.0
         )
         return knowledge_model
 
@@ -304,8 +292,6 @@ class KnowledgeTable:
                     elif view_option == 'shared':
                         stmt = stmt.filter(Knowledge.user_id != user_id)
 
-<<<<<<< HEAD
-=======
                     source = filter.get('source')
                     if source == 'external':
                         stmt = stmt.filter(Knowledge.meta['source'].as_string() == 'external')
@@ -317,7 +303,6 @@ class KnowledgeTable:
                             )
                         )
 
->>>>>>> v0.11.0
                     stmt = AccessGrants.has_permission_filter(
                         db=db,
                         query=stmt,
@@ -327,10 +312,6 @@ class KnowledgeTable:
                         permission='read',
                     )
 
-<<<<<<< HEAD
-                stmt = stmt.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
-
-=======
                 order_by = (filter or {}).get('order_by')
                 direction = (filter or {}).get('direction')
 
@@ -343,7 +324,6 @@ class KnowledgeTable:
                 else:
                     stmt = stmt.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
 
->>>>>>> v0.11.0
                 count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
                 total = count_result.scalar()
                 if skip:
@@ -356,8 +336,6 @@ class KnowledgeTable:
 
                 knowledge_ids = [kb.id for kb, _ in items]
                 grants_map = await AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
-<<<<<<< HEAD
-=======
                 file_counts = {}
                 if knowledge_ids:
                     file_count_result = await db.execute(
@@ -366,7 +344,6 @@ class KnowledgeTable:
                         .group_by(KnowledgeFile.knowledge_id)
                     )
                     file_counts = dict(file_count_result.all())
->>>>>>> v0.11.0
 
                 knowledge_bases = []
                 for knowledge_base, user in items:
@@ -428,10 +405,7 @@ class KnowledgeTable:
                             # to avoid PostgreSQL "invalid memory alloc request
                             # size" on large extracted-content rows (#24670).
                             content_text = File.data['content'].as_string()
-<<<<<<< HEAD
-=======
                             content_text = func.substr(content_text, 1, RAG_FILE_CONTENT_SEARCH_MAX_CHARS)
->>>>>>> v0.11.0
                             search_filter = or_(
                                 File.filename.ilike(f'%{q}%'),
                                 content_text.ilike(f'%{q}%'),
@@ -468,10 +442,7 @@ class KnowledgeTable:
                 if limit:
                     stmt = stmt.limit(limit)
 
-<<<<<<< HEAD
-=======
                 stmt = stmt.options(defer(File.data))
->>>>>>> v0.11.0
                 result = await db.execute(stmt)
                 rows = result.all()
 
@@ -520,24 +491,6 @@ class KnowledgeTable:
         knowledge_bases = await self.get_knowledge_bases(db=db)
         user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
         user_group_ids = {group.id for group in user_groups}
-<<<<<<< HEAD
-
-        result = []
-        for knowledge_base in knowledge_bases:
-            if knowledge_base.user_id == user_id:
-                result.append(knowledge_base)
-            elif await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='knowledge',
-                resource_id=knowledge_base.id,
-                permission=permission,
-                user_group_ids=user_group_ids,
-                db=db,
-            ):
-                result.append(knowledge_base)
-        return result
-
-=======
 
         # One grants query for all non-owned knowledge bases instead of one each
         accessible_ids = await AccessGrants.get_accessible_resource_ids(
@@ -550,7 +503,6 @@ class KnowledgeTable:
         )
         return [kb for kb in knowledge_bases if kb.user_id == user_id or kb.id in accessible_ids]
 
->>>>>>> v0.11.0
     async def get_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
         try:
             async with get_async_db_context(db) as db:
@@ -642,10 +594,7 @@ class KnowledgeTable:
                             # to avoid PostgreSQL memory allocation failures on
                             # large content (#24670).
                             content_text = File.data['content'].as_string()
-<<<<<<< HEAD
-=======
                             content_text = func.substr(content_text, 1, RAG_FILE_CONTENT_SEARCH_MAX_CHARS)
->>>>>>> v0.11.0
                             stmt = stmt.filter(
                                 or_(
                                     File.filename.ilike(f'%{query_key}%'),
@@ -684,10 +633,7 @@ class KnowledgeTable:
                 if limit:
                     stmt = stmt.limit(limit)
 
-<<<<<<< HEAD
-=======
                 stmt = stmt.options(defer(File.data))
->>>>>>> v0.11.0
                 result = await db.execute(stmt)
                 items = result.all()
 
@@ -738,11 +684,6 @@ class KnowledgeTable:
     async def get_file_metadatas_by_id(
         self, knowledge_id: str, db: Optional[AsyncSession] = None
     ) -> list[FileMetadataResponse]:
-<<<<<<< HEAD
-        try:
-            files = await self.get_files_by_id(knowledge_id, db=db)
-            return [FileMetadataResponse(**file.model_dump()) for file in files]
-=======
         """Column-only listing: File.data holds each file's full extracted
         text, which metadata views must never load."""
         try:
@@ -762,7 +703,6 @@ class KnowledgeTable:
                     )
                     for row in result.all()
                 ]
->>>>>>> v0.11.0
         except Exception:
             return []
 
@@ -888,11 +828,6 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-<<<<<<< HEAD
-    async def delete_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
-        try:
-            async with get_async_db_context(db) as db:
-=======
     async def update_knowledge_meta_by_id(
         self, id: str, meta: dict, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
@@ -915,7 +850,6 @@ class KnowledgeTable:
     async def delete_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
             async with get_async_db_context(db) as db:
->>>>>>> v0.11.0
                 await AccessGrants.revoke_all_access('knowledge', id, db=db)
                 await db.execute(delete(Knowledge).filter_by(id=id))
                 await db.commit()

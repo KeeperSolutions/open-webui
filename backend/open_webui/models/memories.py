@@ -8,11 +8,7 @@ from typing import Literal
 
 from open_webui.internal.db import Base, get_async_db_context
 from pydantic import BaseModel, ConfigDict
-<<<<<<< HEAD
-from sqlalchemy import BigInteger, Column, String, Text, delete, select
-=======
 from sqlalchemy import JSON, BigInteger, Column, Index, String, Text, delete, select
->>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -24,14 +20,10 @@ class Memory(Base):  # user memory store
 
     id = Column(String, primary_key=True, unique=True)
     user_id = Column(String, index=True)
-<<<<<<< HEAD
-    content = Column(Text)  # free-form text learned from conversation
-=======
     type = Column(String, default='context', server_default='context', index=True)
     path = Column(Text, nullable=True)
     content = Column(Text)  # free-form text learned from conversation
     meta = Column(JSON, nullable=True)
->>>>>>> v0.11.0
     updated_at = Column(BigInteger)  # epoch seconds
     created_at = Column(BigInteger)  # epoch seconds
 
@@ -51,23 +43,17 @@ class MemoryModel(BaseModel):
 
 
 class MemoriesTable:
-<<<<<<< HEAD
-=======
     @staticmethod
     def normalize_memory_type(memory_type: str | None = None) -> str:
         return 'user' if memory_type == 'user' else 'context'
 
->>>>>>> v0.11.0
     async def insert_new_memory(
         self,
         user_id: str,
         content: str,
-<<<<<<< HEAD
-=======
         memory_type: str | None = None,
         path: str | None = None,
         meta: dict | None = None,
->>>>>>> v0.11.0
         db: AsyncSession | None = None,
     ) -> MemoryModel | None:
         """Persist a new memory entry and return the created model."""
@@ -76,38 +62,26 @@ class MemoriesTable:
             record = Memory(
                 id=str(uuid.uuid4()),
                 user_id=user_id,
-<<<<<<< HEAD
-                content=content,
-=======
                 type=self.normalize_memory_type(memory_type),
                 path=path,
                 content=content,
                 meta=meta,
->>>>>>> v0.11.0
                 created_at=now,
                 updated_at=now,
             )
             db.add(record)
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(record)
-=======
->>>>>>> v0.11.0
             return MemoryModel.model_validate(record) if record else None
 
     async def update_memory_by_id_and_user_id(
         self,
         id: str,
         user_id: str,
-<<<<<<< HEAD
-        content: str,
-=======
         content: str | None,
         memory_type: str | None = None,
         path: str | None = None,
         update_path: bool = False,
         meta: dict | None = None,
->>>>>>> v0.11.0
         db: AsyncSession | None = None,
     ) -> MemoryModel | None:
         async with get_async_db_context(db) as db:
@@ -127,10 +101,6 @@ class MemoriesTable:
                 memory.updated_at = int(time.time())
 
                 await db.commit()
-<<<<<<< HEAD
-                await db.refresh(memory)
-=======
->>>>>>> v0.11.0
                 return MemoryModel.model_validate(memory)
             except Exception:
                 return None
@@ -204,8 +174,6 @@ class MemoriesTable:
         now = int(time.time())
         results: list[dict] = []
 
-<<<<<<< HEAD
-=======
         async with get_async_db_context(db) as db:
             for operation in operations:
                 action = operation.get('action')
@@ -297,5 +265,4 @@ class MemoriesTable:
         return results
 
 
->>>>>>> v0.11.0
 Memories = MemoriesTable()  # user memory registry

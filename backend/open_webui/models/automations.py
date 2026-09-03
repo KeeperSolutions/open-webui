@@ -21,10 +21,7 @@ class Automation(Base):
 
     id = Column(Text, primary_key=True)
     user_id = Column(Text, nullable=False)
-<<<<<<< HEAD
-=======
     folder_id = Column(Text, nullable=True)
->>>>>>> v0.11.0
     name = Column(Text, nullable=False)
     data = Column(JSON, nullable=False)  # {prompt, model_id, rrule}
     meta = Column(JSON, nullable=True)
@@ -35,14 +32,10 @@ class Automation(Base):
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
-<<<<<<< HEAD
-    __table_args__ = (Index('ix_automation_next_run', 'next_run_at'),)
-=======
     __table_args__ = (
         Index('ix_automation_next_run', 'next_run_at'),
         Index('ix_automation_user_folder', 'user_id', 'folder_id'),
     )
->>>>>>> v0.11.0
 
 
 class AutomationRun(Base):
@@ -83,10 +76,7 @@ class AutomationModel(BaseModel):
 
     id: str
     user_id: str
-<<<<<<< HEAD
-=======
     folder_id: Optional[str] = None
->>>>>>> v0.11.0
     name: str
     data: dict
     meta: Optional[dict] = None
@@ -111,10 +101,7 @@ class AutomationRunModel(BaseModel):
 
 class AutomationForm(BaseModel):
     name: str
-<<<<<<< HEAD
-=======
     folder_id: Optional[str] = None
->>>>>>> v0.11.0
     data: AutomationData
     meta: Optional[dict] = None
     is_active: Optional[bool] = True
@@ -148,10 +135,7 @@ class AutomationTable:
             row = Automation(
                 id=str(uuid4()),
                 user_id=user_id,
-<<<<<<< HEAD
-=======
                 folder_id=form.folder_id,
->>>>>>> v0.11.0
                 name=form.name,
                 data=form.data.model_dump(),
                 meta=form.meta,
@@ -162,10 +146,6 @@ class AutomationTable:
             )
             db.add(row)
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(row)
-=======
->>>>>>> v0.11.0
             return AutomationModel.model_validate(row)
 
     async def count_by_user(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
@@ -191,10 +171,7 @@ class AutomationTable:
         user_id: str,
         query: Optional[str] = None,
         status: Optional[str] = None,
-<<<<<<< HEAD
-=======
         folder_id: Optional[str] = None,
->>>>>>> v0.11.0
         skip: int = 0,
         limit: int = 30,
         db: Optional[AsyncSession] = None,
@@ -202,12 +179,9 @@ class AutomationTable:
         async with get_async_db_context(db) as db:
             stmt = select(Automation).filter_by(user_id=user_id)
 
-<<<<<<< HEAD
-=======
             if folder_id is not None:
                 stmt = stmt.filter(Automation.folder_id == (folder_id or None))
 
->>>>>>> v0.11.0
             if query:
                 search = f'%{query}%'
                 # Search in name and prompt inside JSON data
@@ -253,10 +227,7 @@ class AutomationTable:
             if not row:
                 return None
             row.name = form.name
-<<<<<<< HEAD
-=======
             row.folder_id = form.folder_id
->>>>>>> v0.11.0
             row.data = form.data.model_dump()
             row.meta = form.meta
             if form.is_active is not None:
@@ -264,11 +235,6 @@ class AutomationTable:
             row.next_run_at = next_run_at
             row.updated_at = int(time.time_ns())
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(row)
-            return AutomationModel.model_validate(row)
-
-=======
             return AutomationModel.model_validate(row)
 
     async def clear_folder_ids(
@@ -288,7 +254,6 @@ class AutomationTable:
             await db.commit()
             return result.rowcount or 0
 
->>>>>>> v0.11.0
     async def toggle(
         self,
         id: str,
@@ -303,10 +268,6 @@ class AutomationTable:
             row.next_run_at = next_run_at if row.is_active else None
             row.updated_at = int(time.time_ns())
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(row)
-=======
->>>>>>> v0.11.0
             return AutomationModel.model_validate(row)
 
     async def delete(self, id: str, db: Optional[AsyncSession] = None) -> bool:
@@ -389,10 +350,6 @@ class AutomationRunTable:
             )
             db.add(row)
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(row)
-=======
->>>>>>> v0.11.0
             return AutomationRunModel.model_validate(row)
 
     async def get_latest(self, automation_id: str, db: Optional[AsyncSession] = None) -> Optional[AutomationRunModel]:
