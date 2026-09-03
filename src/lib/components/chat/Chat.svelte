@@ -1028,7 +1028,13 @@
 			}
 
 			// Upload file to server
-			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
+			const uploadedFile = await uploadFile(
+				localStorage.token,
+				file,
+				metadata,
+				null,
+				piiMaskingEnabled
+			);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
@@ -3148,6 +3154,7 @@
 										topPadding={true}
 										bottomPadding={files.length > 0}
 										{onSelect}
+										{piiMaskingEnabled}
 									/>
 								</div>
 							</div>

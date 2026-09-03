@@ -17,6 +17,8 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
+	import { getFileDataContentById } from '$lib/apis/files';
+	import { scopeCardDetections } from '$lib/utils/pii';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -28,6 +30,7 @@
 	export let chatId;
 	export let history;
 	export let messageId;
+	export let piiMaskingEnabled = true;
 
 	export let siblings;
 
@@ -66,9 +69,17 @@
 		}
 	}
 
+	type PiiCardDetection = {
+		type: string;
+		start: number;
+		end: number;
+		fileId?: string;
+		fileName?: string;
+		docIdx?: number;
+	};
 	// Keeper PII card: detections live on the child (assistant) message; read them
 	// from live history so the card sits on the user message it describes.
-	$: piiDetections = (() => {
+	$: piiDetections = ((): PiiCardDetection[] => {
 		// Iterate newest-first: childrenIds grow with regenerations / multi-model
 		// responses, so the latest child holds the freshest detections.
 		const children = history?.messages?.[messageId]?.childrenIds ?? [];
@@ -82,6 +93,139 @@
 		history?.messages?.[messageId]?.originalContent ??
 		history?.messages?.[messageId]?.content ??
 		'';
+
+	// Citation sources from the SAME child whose detections we use — needed to
+	// reconstruct file-sourced PII values locally (B2). File-sourced detections
+	// index into these chunks; message-sourced ones ignore this.
+	$: piiSources = (() => {
+		const children = history?.messages?.[messageId]?.childrenIds ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			const child = history?.messages?.[children[i]];
+			if ((child?.piiDetections ?? []).length > 0) return child?.sources ?? [];
+		}
+		return [];
+	})();
+
+	let fileItems: { key: string; type: string; value: string; source?: string }[] = [];
+	let _piiFetchKey = '';
+	let piiScanInProgress = false;
+	// File ids whose ingest scan owns the card display (status 'completed' = whole-file
+	// detections in fileItems, or 'running' = will populate shortly). For any OTHER
+	// attached file — scan skipped because masking was off at UPLOAD, then turned on
+	// before SEND — the card falls back to the chat-time B2 detections (exactly what
+	// was masked to the LLM), so files behave like ordinary messages. Starts optimistic
+	// (assume ingest covers everything) to avoid flashing B2 before the first poll.
+	let ingestCoveredFileIds = new Set<string>();
+	$: {
+		const files = history?.messages?.[messageId]?.files ?? [];
+		const ids = files
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id));
+		const key = ids.join(',');
+		// When masking is disabled, clear any stale card state and skip polling.
+		if (!piiMaskingEnabled) {
+			_piiFetchKey = key;
+			piiScanInProgress = false;
+			fileItems = [];
+			ingestCoveredFileIds = new Set();
+		} else if (key !== _piiFetchKey) {
+			_piiFetchKey = key;
+			piiScanInProgress = false;
+			ingestCoveredFileIds = new Set(ids); // optimistic until first poll narrows it
+			(async () => {
+				const capturedKey = key;
+				let out: typeof fileItems = [];
+				// Poll until all files report a terminal pii_scan_status.
+				// "running"  → scan still in progress, show indicator and retry in 3 s.
+				// "completed"/"failed" → done (stop polling).
+				// null → legacy file (uploaded before this feature); retry a few times
+				//        in case the scan just hasn't written yet, then give up.
+				for (let attempt = 0; attempt < 100; attempt++) {
+					if (_piiFetchKey !== capturedKey) return;
+					if (!piiMaskingEnabled) {
+						piiScanInProgress = false;
+						fileItems = [];
+						return;
+					}
+					type FetchedFile = {
+						id: string;
+						name: string | undefined;
+						content: string;
+						pii_detections: Array<{ type: string; start: number; end: number }>;
+						pii_scan_status: string | null;
+					};
+					const fetched: FetchedFile[] = [];
+					for (const f of files) {
+						const id = f?.id ?? f?.file?.id;
+						if (!id) continue;
+						const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
+						const { content, pii_detections, pii_scan_status } = await getFileDataContentById(
+							localStorage.token,
+							id
+						);
+						fetched.push({ id, name, content, pii_detections, pii_scan_status });
+					}
+					// Ingest owns the card for files whose scan completed or is still
+					// running; everything else (skipped/null/failed) falls back to B2.
+					if (_piiFetchKey === capturedKey) {
+						ingestCoveredFileIds = new Set(
+							fetched
+								.filter((f) => f.pii_scan_status === 'completed' || f.pii_scan_status === 'running')
+								.map((f) => f.id)
+						);
+					}
+					const anyRunning = fetched.some((f) => f.pii_scan_status === 'running');
+					out = fetched.flatMap((f) =>
+						(f.pii_detections ?? [])
+							.map((d) => {
+								const value = (f.content ?? '').slice(d.start, d.end);
+								return value
+									? {
+											key: JSON.stringify([d.type, value, f.name ?? null]),
+											type: d.type,
+											value,
+											source: f.name
+										}
+									: null;
+							})
+							.filter((x): x is NonNullable<typeof x> => x !== null)
+					);
+					if (anyRunning) {
+						if (_piiFetchKey === capturedKey) piiScanInProgress = true;
+						await new Promise((r) => setTimeout(r, 3000));
+						continue;
+					}
+					// All files are at a terminal status or legacy (null).
+					// For legacy files with no detections yet, retry briefly.
+					const hasLegacy = fetched.some((f) => f.pii_scan_status == null);
+					if (hasLegacy && out.length === 0 && attempt < 5) {
+						await new Promise((r) => setTimeout(r, 2500));
+						continue;
+					}
+					break;
+				}
+				if (_piiFetchKey === capturedKey) {
+					piiScanInProgress = false;
+					fileItems = out;
+				}
+			})();
+		}
+	}
+	// Ids of files attached to THIS user message — used to scope B2 file detections
+	// (which can cover any file resent in the turn) to the current message.
+	$: messageFileIds = new Set<string>(
+		(history?.messages?.[messageId]?.files ?? [])
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id))
+	);
+	// Card detections = message PII (no fileId) + B2 file PII ONLY for files the
+	// ingest scan didn't cover (otherwise fileItems is the authoritative whole-file
+	// source and B2 would double-count the retrieved chunks). See scopeCardDetections.
+	$: piiDetectionsScoped = scopeCardDetections(
+		piiDetections ?? [],
+		ingestCoveredFileIds,
+		messageFileIds
+	);
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -608,7 +752,13 @@
 						{/if}
 					{/if}
 
-					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
+					<PiiMaskedCard
+						detections={piiDetectionsScoped}
+						originalText={piiOriginalText}
+						sources={piiSources}
+						{fileItems}
+						scanning={piiScanInProgress}
+					/>
 
 					{#if $settings?.chatBubble ?? true}
 						{#if siblings.length > 1}

@@ -970,6 +970,7 @@
 	"Forwards system user OAuth access token to authenticate": "",
 	"Forwards system user session credentials to authenticate": "",
 	"Fr_day_of_week": "",
+	"from {{source}}": "iz {{source}}",
 	"Full Context Mode": "",
 	"Function": "",
 	"Function Calling": "",
