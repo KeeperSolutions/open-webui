@@ -20,10 +20,7 @@
 	export let onShare = () => {};
 	export let onDelete = () => {};
 	export let onCreateSubFolder = () => {};
-<<<<<<< HEAD
-=======
 	export let onMarkAllRead = () => {};
->>>>>>> v0.11.0
 
 	let show = false;
 </script>

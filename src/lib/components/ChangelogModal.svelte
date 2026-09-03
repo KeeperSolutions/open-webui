@@ -112,17 +112,6 @@
 				<XMark className={'size-4'} />
 			</button>
 		</div>
-<<<<<<< HEAD
-		<div class="flex items-center mt-1">
-			<div class="text-sm dark:text-gray-200">{$i18n.t('Release Notes')}</div>
-			<div class="flex self-center w-[1px] h-6 mx-2.5 bg-gray-50/50 dark:bg-gray-850/50"></div>
-			<div class="text-sm dark:text-gray-200">
-				v{WEBUI_VERSION}
-			</div>
-		</div>
-	</div>
-=======
->>>>>>> v0.11.0
 
 		<div
 			class="min-h-0 flex-1 overflow-y-auto px-4 py-2 text-gray-700 scrollbar-hidden dark:text-gray-100"

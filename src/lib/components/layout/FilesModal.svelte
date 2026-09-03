@@ -216,13 +216,8 @@
 				{/if}
 			</div>
 			<button
-<<<<<<< HEAD
-				class="self-center"
-				aria-label={$i18n.t('Close')}
-=======
 				aria-label={$i18n.t('Close')}
 				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
->>>>>>> v0.11.0
 				on:click={() => {
 					show = false;
 				}}
@@ -344,13 +339,7 @@
 
 							{#each files as file (file.id)}
 								<div
-<<<<<<< HEAD
-									role="button"
-									tabindex="0"
-									class="w-full flex justify-between items-center rounded-lg text-sm py-2 px-3 hover:bg-gray-50 dark:hover:bg-gray-850 cursor-pointer"
-=======
 									class="w-full flex justify-between items-center rounded-lg text-sm py-2 px-3 hover:bg-gray-50/70 dark:hover:bg-gray-850/50 cursor-pointer"
->>>>>>> v0.11.0
 									on:click={() => openFileViewer(file)}
 									on:keydown={(e) => {
 										if (e.key === 'Enter' || e.key === ' ') {

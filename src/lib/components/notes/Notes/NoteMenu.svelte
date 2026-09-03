@@ -11,10 +11,7 @@
 	import Link from '$lib/components/icons/Link.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
-<<<<<<< HEAD
-=======
 	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
->>>>>>> v0.11.0
 
 	const i18n = getContext('i18n');
 
@@ -25,10 +22,7 @@
 	export let onDelete = () => {};
 	export let onPin = null;
 	export let isPinned = false;
-<<<<<<< HEAD
-=======
 	export let onUploadFiles = null;
->>>>>>> v0.11.0
 
 	export let onCopyLink = null;
 	export let onCopyToClipboard = null;
@@ -136,28 +130,17 @@
 
 			{#if onPin}
 				<button
-<<<<<<< HEAD
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-=======
 					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
->>>>>>> v0.11.0
 					on:click={() => {
 						onPin();
 						show = false;
 					}}
 				>
 					{#if isPinned}
-<<<<<<< HEAD
-						<PinSlash />
-						<div class="flex items-center">{$i18n.t('Unpin')}</div>
-					{:else}
-						<Pin />
-=======
 						<PinSlash className="size-3.5" />
 						<div class="flex items-center">{$i18n.t('Unpin')}</div>
 					{:else}
 						<Pin className="size-3.5" />
->>>>>>> v0.11.0
 						<div class="flex items-center">{$i18n.t('Pin to Sidebar')}</div>
 					{/if}
 				</button>

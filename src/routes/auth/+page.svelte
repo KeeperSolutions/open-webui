@@ -24,8 +24,6 @@
 	let onboarding = false;
 	let form = null;
 
-<<<<<<< HEAD
-=======
 	let name = '';
 	let email = '';
 	let password = '';
@@ -35,7 +33,6 @@
 
 	let submitting = false;
 
->>>>>>> v0.11.0
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
 			toast.success($i18n.t(`You're now logged in.`));
@@ -61,9 +58,6 @@
 		}
 	};
 
-<<<<<<< HEAD
-	const oauthCallbackHandler = async (): Promise<boolean> => {
-=======
 	const signInHandler = async () => {
 		const sessionUser = await userSignIn(email, password).catch((error) => {
 			toast.error(`${error}`);
@@ -119,7 +113,6 @@
 	};
 
 	const oauthCallbackHandler = async () => {
->>>>>>> v0.11.0
 		// Get the value of the 'token' cookie
 		function getCookie(name) {
 			const match = document.cookie.match(
@@ -147,51 +140,12 @@
 		return true;
 	};
 
-<<<<<<< HEAD
-	async function setLogoImage() {
-		await tick();
-		const logo = document.getElementById('logo');
-
-		if (logo) {
-			const isDarkMode = document.documentElement.classList.contains('dark');
-
-			if (isDarkMode) {
-				const darkImage = new Image();
-				darkImage.src = `${WEBUI_BASE_URL}/static/favicon-dark.png`;
-
-				darkImage.onload = () => {
-					logo.src = `${WEBUI_BASE_URL}/static/favicon-dark.png`;
-					logo.style.filter = '';
-				};
-
-				darkImage.onerror = () => {
-					logo.style.filter = 'invert(1)';
-				};
-			}
-		}
-	}
-
-	const signInHandler = async () => {
-		const sessionUser = await userSignIn('', '').catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		await setSessionUser(sessionUser);
-	};
-
-	onMount(async () => {
-		const redirectPath = $page.url.searchParams.get('redirect');
-		if ($user !== undefined) {
-			goto(redirectPath || '/chat');
-			return;
-=======
 	let onboarding = false;
 
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
 		if ($user) {
 			goto(redirectPath || '/');
->>>>>>> v0.11.0
 		} else {
 			if (redirectPath) {
 				localStorage.setItem('redirectPath', redirectPath);
@@ -228,16 +182,9 @@
 				return;
 			}
 		}
-<<<<<<< HEAD
-
-		loaded = true;
-		setLogoImage();
-
-=======
 
 		loaded = true;
 
->>>>>>> v0.11.0
 		if (($config?.features?.auth_trusted_header ?? false) || $config?.features?.auth === false) {
 			await signInHandler();
 		} else {
@@ -257,22 +204,6 @@
 	}}
 />
 
-<<<<<<< HEAD
-{#if loaded}
-<div class="relative min-h-screen w-full flex items-center justify-center p-4 font-hg-body">
-	<img
-		src="/hubgate/hubgate-pixel-pattern.svg"
-		alt=""
-		aria-hidden="true"
-		class="pointer-events-none"
-		style="position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:0"
-	/>
-	<div class="relative w-full flex items-center justify-center p-4" style="z-index:1">
-		{#if ($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false}
-			<div class="flex items-center gap-3 text-hg-text-primary font-hg-body text-lg">
-				<span>{$i18n.t('Signing in to {{WEBUI_NAME}}', { WEBUI_NAME: $WEBUI_NAME })}</span>
-				<Spinner className="size-5" />
-=======
 <div class="w-full h-screen max-h-[100dvh] text-white relative" id="auth-page">
 	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-black"></div>
 
@@ -680,7 +611,6 @@
 						/>
 					</div>
 				</div>
->>>>>>> v0.11.0
 			</div>
 		{:else}
 			<HgAuthCard {form} on:success={(e) => setSessionUser(e.detail)} />

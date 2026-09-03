@@ -106,18 +106,11 @@
 	<!-- Mini Month Calendar -->
 	<div>
 		<div class="flex items-center justify-between px-1 mb-1.5 mt-1.5">
-<<<<<<< HEAD
-			<div class="text-[11px] font-medium">{miniMonthNames[miniMonth]} {miniYear}</div>
-			<div class="flex items-center gap-0.5">
-				<button
-					class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-=======
 			<div class="text-[11px] font-normal">{miniMonthNames[miniMonth]} {miniYear}</div>
 			<div class="flex items-center gap-0.5">
 				<button
 					class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 					aria-label={$i18n.t('Previous month')}
->>>>>>> v0.11.0
 					on:click={() => navigateMini(-1)}
 				>
 					<svg
@@ -136,10 +129,7 @@
 				</button>
 				<button
 					class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-<<<<<<< HEAD
-=======
 					aria-label={$i18n.t('Next month')}
->>>>>>> v0.11.0
 					on:click={() => navigateMini(1)}
 				>
 					<svg
@@ -170,11 +160,7 @@
 				<button
 					class="w-6 h-6 flex items-center justify-center rounded-full transition
 						{day.getMonth() !== miniMonth ? 'text-gray-300 dark:text-gray-600' : ''}
-<<<<<<< HEAD
-						{isToday(day) ? 'bg-hg-blue text-white' : ''}
-=======
 						{isToday(day) ? 'bg-blue-500 text-white' : ''}
->>>>>>> v0.11.0
 						{day.toDateString() === currentDate.toDateString() && !isToday(day)
 						? 'bg-gray-200 dark:bg-gray-700'
 						: ''}

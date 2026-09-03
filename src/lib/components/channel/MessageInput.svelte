@@ -853,7 +853,6 @@
 														aria-label={$i18n.t('Remove')}
 														class=" bg-white text-black border border-white rounded-full group-hover:visible invisible transition"
 														type="button"
-														aria-label={$i18n.t('Remove file')}
 														on:click={() => {
 															files.splice(fileIdx, 1);
 															files = files;
@@ -1071,11 +1070,7 @@
 												<Tooltip content={$i18n.t('Stop')}>
 													<button
 														aria-label={$i18n.t('Stop')}
-<<<<<<< HEAD
-														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
-=======
 														class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[5px]"
->>>>>>> v0.11.0
 														on:click={() => {
 															onStop();
 														}}

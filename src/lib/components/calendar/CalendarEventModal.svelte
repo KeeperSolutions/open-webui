@@ -4,10 +4,6 @@
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-<<<<<<< HEAD
-	import XMark from '$lib/components/icons/XMark.svelte';
-=======
->>>>>>> v0.11.0
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	import type { CalendarModel, CalendarEventModel, CalendarEventForm } from '$lib/apis/calendar';
@@ -36,15 +32,6 @@
 	let allDay = false;
 	let location = '';
 	let alertMinutes: number = 10;
-<<<<<<< HEAD
-	let loading = false;
-	let showDeleteConfirmDialog = false;
-
-	const NS = 1_000_000;
-
-	function nsToDateStr(ns: number): string {
-		return new Date(ns / NS).toISOString().slice(0, 10);
-=======
 	let repeatFrequency = '';
 	let loading = false;
 	let showDeleteConfirmDialog = false;
@@ -78,7 +65,6 @@
 		const month = String(d.getMonth() + 1).padStart(2, '0');
 		const day = String(d.getDate()).padStart(2, '0');
 		return `${year}-${month}-${day}`;
->>>>>>> v0.11.0
 	}
 
 	function nsToTimeStr(ns: number): string {
@@ -101,10 +87,7 @@
 			allDay = event.all_day;
 			location = event.location || '';
 			alertMinutes = event.meta?.alert_minutes ?? 10;
-<<<<<<< HEAD
-=======
 			repeatFrequency = parseRepeatFromRrule(event.rrule);
->>>>>>> v0.11.0
 		} else {
 			title = '';
 			description = '';
@@ -126,10 +109,7 @@
 			allDay = false;
 			location = '';
 			alertMinutes = 10;
-<<<<<<< HEAD
-=======
 			repeatFrequency = '';
->>>>>>> v0.11.0
 		}
 	}
 
@@ -150,20 +130,12 @@
 				const result = await updateCalendarEvent(localStorage.token, event.id, {
 					calendar_id: calendarId,
 					title: title.trim(),
-<<<<<<< HEAD
-					description: description.trim() || null,
-					start_at: startNs,
-					end_at: endNs,
-					all_day: allDay,
-					location: location.trim() || null,
-=======
 					description: description.trim() || undefined,
 					start_at: startNs,
 					end_at: endNs,
 					all_day: allDay,
 					rrule: getRepeatRrule(),
 					location: location.trim() || undefined,
->>>>>>> v0.11.0
 					meta: { alert_minutes: alertMinutes }
 				});
 				if (result) {
@@ -179,10 +151,7 @@
 					start_at: startNs,
 					end_at: endNs,
 					all_day: allDay,
-<<<<<<< HEAD
-=======
 					rrule: getRepeatRrule(),
->>>>>>> v0.11.0
 					location: location.trim() || undefined,
 					meta: { alert_minutes: alertMinutes }
 				};
@@ -218,37 +187,16 @@
 
 <Modal size="md" bind:show>
 	<div>
-<<<<<<< HEAD
-		<!-- Header -->
-		<div class="flex justify-between dark:text-gray-100 px-5 pt-4 pb-2">
-			<input
-				class="w-full text-lg bg-transparent outline-hidden font-primary placeholder:text-gray-300 dark:placeholder:text-gray-700"
-=======
 		<div class="dark:text-gray-100 px-4 pt-3 pb-1">
 			<input
 				class="w-full text-base bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700"
->>>>>>> v0.11.0
 				type="text"
 				bind:value={title}
 				placeholder={$i18n.t('Event title')}
 			/>
-<<<<<<< HEAD
-			<button
-				class="self-center shrink-0 ml-2"
-				aria-label={$i18n.t('Close')}
-				on:click={() => (show = false)}
-			>
-				<XMark className="size-5" />
-			</button>
-		</div>
-
-		<!-- Details -->
-		<div class="px-5 pb-2 flex flex-col gap-3">
-=======
 		</div>
 
 		<div class="px-4 pb-2 flex flex-col gap-2.5">
->>>>>>> v0.11.0
 			<!-- Calendar -->
 			<div>
 				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Calendar')}</div>
@@ -266,13 +214,6 @@
 			<div>
 				<div class="mb-1 text-xs text-gray-500">{$i18n.t('When')}</div>
 				<div class="flex items-center gap-2 text-sm flex-wrap">
-<<<<<<< HEAD
-					<input type="date" class="bg-transparent outline-hidden" bind:value={startDate} />
-					{#if !allDay}
-						<input type="time" class="bg-transparent outline-hidden" bind:value={startTime} />
-						<span class="text-gray-300 dark:text-gray-600">–</span>
-						<input type="time" class="bg-transparent outline-hidden" bind:value={endTime} />
-=======
 					<input
 						type="date"
 						class="bg-transparent outline-hidden dark:scheme-dark"
@@ -290,7 +231,6 @@
 							class="bg-transparent outline-hidden dark:scheme-dark"
 							bind:value={endTime}
 						/>
->>>>>>> v0.11.0
 					{/if}
 					<label class="flex items-center gap-1.5 cursor-pointer text-xs text-gray-400 ml-auto">
 						<input type="checkbox" class="accent-blue-500" bind:checked={allDay} />
@@ -326,8 +266,6 @@
 				</select>
 			</div>
 
-<<<<<<< HEAD
-=======
 			<!-- Repeat -->
 			<div>
 				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Repeat')}</div>
@@ -344,7 +282,6 @@
 				</select>
 			</div>
 
->>>>>>> v0.11.0
 			<!-- Description -->
 			<div>
 				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
@@ -357,12 +294,7 @@
 			</div>
 		</div>
 
-<<<<<<< HEAD
-		<!-- Bottom toolbar -->
-		<div class="flex items-center justify-between px-4 pb-3.5 pt-1 gap-2">
-=======
 		<div class="flex items-center justify-between px-4 pb-3 pt-1 gap-2">
->>>>>>> v0.11.0
 			<div class="flex items-center gap-0.5 flex-1 min-w-0">
 				{#if event && !event.meta?.automation_id}
 					<button

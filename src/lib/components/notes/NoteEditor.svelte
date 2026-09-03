@@ -1219,11 +1219,7 @@ ${content}
 									onDelete={() => {
 										showDeleteConfirm = true;
 									}}
-<<<<<<< HEAD
-									isPinned={note.is_pinned ?? false}
-=======
 									isPinned={$pinnedNotes.some((n) => n.id === note.id)}
->>>>>>> v0.11.0
 									onPin={async () => {
 										await toggleNotePinnedStatusById(localStorage.token, note.id);
 										note = await getNoteById(localStorage.token, note.id);

@@ -320,27 +320,16 @@
 
 <Modal size="sm" bind:show={showControls}>
 	<div class="text-gray-700 dark:text-gray-100">
-<<<<<<< HEAD
-		<div class="flex justify-between px-4.5 pt-4.5 pb-2">
-			<div class="text-lg font-medium self-center">{$i18n.t('Controls')}</div>
-			<button
-				class="self-center"
-=======
 		<div class="flex justify-between px-4 pt-3 pb-1">
 			<div class="text-sm font-medium self-center">{$i18n.t('Controls')}</div>
 			<button
 				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
->>>>>>> v0.11.0
 				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					showControls = false;
 				}}
 			>
-<<<<<<< HEAD
-				<XMark className="size-5" />
-=======
 				<XMark className="size-4" />
->>>>>>> v0.11.0
 			</button>
 		</div>
 		<div class="px-4.5 pb-5 overflow-y-auto max-h-[70vh]">
@@ -519,11 +508,7 @@
 							</div>
 
 							<button
-<<<<<<< HEAD
-								class="p-1.5 text-sm font-medium bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg {showControls
-=======
 								class="p-1.5 text-sm font-normal bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg {showControls
->>>>>>> v0.11.0
 									? 'text-black dark:text-white'
 									: 'text-gray-500 dark:text-gray-400'}"
 								aria-label={$i18n.t('Controls')}
@@ -532,11 +517,7 @@
 									showControls = !showControls;
 								}}
 							>
-<<<<<<< HEAD
-								<AdjustmentsHorizontal className="size-4" />
-=======
 								<AdjustmentsHorizontal className="size-3.5" />
->>>>>>> v0.11.0
 							</button>
 
 							<div class="flex gap-2 shrink-0">

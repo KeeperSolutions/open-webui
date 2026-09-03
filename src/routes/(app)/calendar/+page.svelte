@@ -15,10 +15,6 @@
 	import CalendarEventModal from '$lib/components/calendar/CalendarEventModal.svelte';
 	import CreateCalendarModal from '$lib/components/calendar/CreateCalendarModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-<<<<<<< HEAD
-	import Plus from '$lib/components/icons/Plus.svelte';
-=======
->>>>>>> v0.11.0
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import SidebarIcon from '$lib/components/icons/Sidebar.svelte';
 	import Select from '$lib/components/common/Select.svelte';
@@ -210,11 +206,7 @@
 </script>
 
 <svelte:head>
-<<<<<<< HEAD
-	<title>{$i18n.t('Calendar')} • {$WEBUI_NAME}</title>
-=======
 	<title>{$i18n.t('Calendar')} / {$WEBUI_NAME}</title>
->>>>>>> v0.11.0
 </svelte:head>
 
 <CalendarEventModal
@@ -237,11 +229,7 @@
 	{#if loaded}
 		<!-- Top Navbar — spans above sidebar and calendar -->
 		<nav class="px-3 pt-2 pb-2 backdrop-blur-xl drag-region select-none shrink-0">
-<<<<<<< HEAD
-			<div class="flex items-center gap-1">
-=======
 			<div class="flex items-center gap-0.5 md:gap-1">
->>>>>>> v0.11.0
 				{#if $mobile}
 					<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center">
 						<Tooltip
@@ -254,11 +242,7 @@
 								on:click={() => showSidebar.set(!$showSidebar)}
 							>
 								<div class="self-center p-1.5">
-<<<<<<< HEAD
-									<SidebarIcon />
-=======
 									<SidebarIcon className="size-4" />
->>>>>>> v0.11.0
 								</div>
 							</button>
 						</Tooltip>
@@ -324,13 +308,8 @@
 								{ value: 'month', label: $i18n.t('Month') }
 							]}
 							onChange={() => handleNavigate()}
-<<<<<<< HEAD
-							triggerClass="relative flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 dark:bg-gray-850 rounded-xl text-xs"
-							contentClass="rounded-2xl w-40 p-1 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-=======
 							triggerClass="relative flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:hover:bg-gray-850 dark:hover:text-white"
 							contentClass="rounded-xl w-28 p-1 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
->>>>>>> v0.11.0
 							align="end"
 						>
 							<svelte:fragment slot="trigger" let:selectedLabel>
@@ -351,31 +330,10 @@
 						</Select>
 
 						<button
-<<<<<<< HEAD
-							class="ml-1 px-2 py-1.5 text-xs gap-1 rounded-xl bg-black text-white dark:bg-white dark:text-black transition text-sm flex items-center"
-							on:click={handleNewEvent}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="2.5"
-								stroke="currentColor"
-								class="size-3"
-								><path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M12 4.5v15m7.5-7.5h-15"
-								/></svg
-							>
-
-							<span class="hidden sm:inline">{$i18n.t('New Event')}</span>
-=======
 							class="ml-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs text-gray-900 transition ring-1 ring-gray-200 hover:bg-gray-100 dark:bg-gray-850 dark:text-gray-100 dark:ring-gray-800 dark:hover:bg-gray-800"
 							on:click={handleNewEvent}
 						>
 							{$i18n.t('Create')}
->>>>>>> v0.11.0
 						</button>
 					</div>
 				</div>

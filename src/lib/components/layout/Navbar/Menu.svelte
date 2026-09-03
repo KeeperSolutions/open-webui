@@ -40,12 +40,8 @@
 
 	const i18n = getContext('i18n');
 
-<<<<<<< HEAD
-	export const shareEnabled: boolean = false;
-=======
 	export let shareEnabled: boolean = false;
 	export let readOnly: boolean = false;
->>>>>>> v0.11.0
 
 	export let shareHandler: Function;
 	export let moveChatHandler: Function;
@@ -327,11 +323,7 @@
 			{#if scrollToTop}
 				<button
 					draggable="false"
-<<<<<<< HEAD
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
-=======
 					class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] cursor-pointer select-none hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
->>>>>>> v0.11.0
 					on:click={() => {
 						scrollToTop();
 					}}
@@ -342,11 +334,7 @@
 						viewBox="0 0 24 24"
 						stroke-width="1.5"
 						stroke="currentColor"
-<<<<<<< HEAD
-						class="size-4"
-=======
 						class="size-3.5"
->>>>>>> v0.11.0
 					>
 						<path
 							stroke-linecap="round"
@@ -357,11 +345,7 @@
 					<div class="flex items-center">{$i18n.t('Scroll to Top')}</div>
 				</button>
 
-<<<<<<< HEAD
-				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
-=======
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
->>>>>>> v0.11.0
 			{/if}
 
 			{#if ($artifactContents ?? []).length > 0}
@@ -505,26 +489,14 @@
 
 				<button
 					draggable="false"
-<<<<<<< HEAD
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
-=======
 					class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] cursor-pointer select-none hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
->>>>>>> v0.11.0
 					on:click={() => {
 						deleteChatHandler();
 					}}
 				>
-<<<<<<< HEAD
-					<GarbageBin strokeWidth="1.5" />
-					<div class="flex items-center">{$i18n.t('Delete')}</div>
-				</button>
-
-				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
-=======
 					<GarbageBin className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Delete')}</div>
 				</button>
->>>>>>> v0.11.0
 
 				<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 

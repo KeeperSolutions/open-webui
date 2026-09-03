@@ -38,13 +38,8 @@
 		>
 			<div class="self-center shrink-0">
 				<img
-<<<<<<< HEAD
 					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
 					class=" size-5 rounded-full -translate-x-[0.5px]"
-=======
-					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&lang=${$i18n.language}`}
-					class=" size-4 rounded-full"
->>>>>>> v0.11.0
 					alt="logo"
 					on:error={(e) => {
 						e.currentTarget.src = '/favicon.png';

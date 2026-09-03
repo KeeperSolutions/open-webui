@@ -756,8 +756,6 @@
 					}
 					renameHandler();
 				}}
-				role="button"
-				tabindex="0"
 				on:click={async (e) => {
 					if (shouldIgnoreRowClick(e.target)) return;
 					if (clickTimer) {
@@ -860,29 +858,9 @@
 					{/if}
 				</div>
 
-<<<<<<< HEAD
-				<button
-					class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
-				>
-					<FolderMenu
-						onEdit={() => {
-							showFolderModal = true;
-						}}
-						onDelete={() => {
-							showDeleteConfirm = true;
-						}}
-						onExport={() => {
-							exportHandler();
-						}}
-						onCreateSubFolder={() => {
-							createSubFolderParentId = folderId;
-							showCreateSubFolderModal = true;
-						}}
-=======
 				{#if !folders[folderId]?.shared || folders[folderId]?.permission === 'write'}
 					<button
 						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
->>>>>>> v0.11.0
 					>
 						<FolderMenu
 							onEdit={() => {
@@ -959,13 +937,10 @@
 							createdAt={chat.created_at}
 							updatedAt={chat.updated_at}
 							lastReadAt={chat.last_read_at}
-<<<<<<< HEAD
-=======
 							active={chat.active ?? false}
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
 							readonly={chat.user_id !== $user?.id}
->>>>>>> v0.11.0
 							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {

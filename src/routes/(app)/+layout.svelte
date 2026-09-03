@@ -14,12 +14,9 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
-<<<<<<< HEAD
 	import { getBillingStatus, getMyUsage, type BillingStatus } from '$lib/apis/billing';
 	import { PLAN_TIER } from '$lib/billing/planTiers';
-=======
 	import { setTextScale } from '$lib/utils/text-scale';
->>>>>>> v0.11.0
 
 	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -57,13 +54,9 @@
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import TrustminderFeedback from '$lib/components/TrustminderFeedback.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-<<<<<<< HEAD
 	import { shouldShowTrustminderFeedback } from '$lib/utils/featureGates';
-	import { Shortcut, shortcuts } from '$lib/shortcuts';
-	import CreditsExhaustedModal from '$lib/components/billing/CreditsExhaustedModal.svelte';
-=======
 	import { loadKeybindings, matchKeybinding, Shortcut } from '$lib/shortcuts';
->>>>>>> v0.11.0
+	import CreditsExhaustedModal from '$lib/components/billing/CreditsExhaustedModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -71,11 +64,8 @@
 	let DB = null;
 	let localDBChats = [];
 
-<<<<<<< HEAD
-	let version = {
-		current: WEBUI_VERSION,
-		latest: WEBUI_VERSION
-	};
+	let version;
+	let handledSettingsUrl = '';
 	let billingStatus: BillingStatus | null = null;
 	let showPastDueBanner = false;
 	let showCreditsExhaustedModal = false;
@@ -101,10 +91,6 @@
 			// Billing unavailable — don't block the user
 		}
 	};
-=======
-	let version;
-	let handledSettingsUrl = '';
->>>>>>> v0.11.0
 
 	const clearChatInputStorage = () => {
 		const chatInputKeys = Object.keys(localStorage).filter((key) => key.startsWith('chat-input'));
@@ -291,11 +277,7 @@
 
 	onMount(async () => {
 		if ($user === undefined || $user === null) {
-<<<<<<< HEAD
-			await goto('/auth?redirect=' + encodeURIComponent($page.url.pathname + $page.url.search));
-=======
 			await gotoAuth();
->>>>>>> v0.11.0
 			return;
 		}
 		if (!['user', 'admin'].includes($user?.role)) {

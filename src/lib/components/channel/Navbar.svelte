@@ -192,38 +192,6 @@
 						</Tooltip>
 					{/if}
 				{/if}
-<<<<<<< HEAD
-
-				{#if $user !== undefined}
-					<div>
-						<UserMenu
-							className="w-[240px]"
-							role={$user?.role}
-							help={true}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
-						>
-							<button
-								class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								aria-label="User Menu"
-							>
-								<div class=" self-center">
-									<img
-										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class="size-6 object-cover rounded-full"
-										alt="User profile"
-										draggable="false"
-									/>
-								</div>
-							</button>
-						</UserMenu>
-					</div>
-				{/if}
-=======
->>>>>>> v0.11.0
 			</div>
 		</div>
 	</div>

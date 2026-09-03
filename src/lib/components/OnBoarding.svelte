@@ -38,21 +38,6 @@
 </script>
 
 {#if show}
-<<<<<<< HEAD
-	<div class="w-full h-screen max-h-[100dvh] text-white relative">
-		<div class="fixed m-10 z-50">
-			<div class="flex space-x-2">
-				<div class=" self-center">
-					<img
-						id="logo"
-						crossorigin="anonymous"
-						src="/static/favicon.png"
-						class=" w-6 rounded-full"
-						alt="logo"
-					/>
-				</div>
-			</div>
-=======
 	<div class="relative h-screen max-h-[100dvh] w-full overflow-hidden text-white">
 		<div class="fixed top-6 left-6 z-50 sm:top-10 sm:left-10">
 			<img
@@ -62,7 +47,6 @@
 				class="size-6 rounded-full"
 				alt="logo"
 			/>
->>>>>>> v0.11.0
 		</div>
 
 		<video

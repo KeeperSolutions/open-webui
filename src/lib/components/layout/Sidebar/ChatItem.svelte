@@ -3,8 +3,6 @@
 	const invisibleDragImage = new Image();
 	invisibleDragImage.src =
 		'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-<<<<<<< HEAD
-=======
 
 	/**
 	 * At most one chat hover preview may be open across all ChatItem instances.
@@ -14,21 +12,13 @@
 	 * therefore force-closes whichever one is still up.
 	 */
 	let closeActiveHoverPreview: (() => void) | null = null;
->>>>>>> v0.11.0
 </script>
 
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto, invalidate, invalidateAll } from '$app/navigation';
 	import { onMount, getContext, createEventDispatcher, tick } from 'svelte';
-<<<<<<< HEAD
-	const i18n = getContext('i18n');
-
-	const dispatch = createEventDispatcher();
-
-=======
 	import { LinkPreview } from 'bits-ui';
->>>>>>> v0.11.0
 	import {
 		archiveChatById,
 		cloneChatById,
@@ -66,14 +56,11 @@
 	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
 	import { createMessagesList } from '$lib/utils';
-<<<<<<< HEAD
-=======
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 
 	const i18n = getContext('i18n');
 
 	const dispatch = createEventDispatcher();
->>>>>>> v0.11.0
 
 	export let className = '';
 
@@ -82,10 +69,7 @@
 	export let createdAt: number | null = null;
 	export let updatedAt: number | null = null;
 	export let lastReadAt: number | null = null;
-<<<<<<< HEAD
-=======
 	export let active = false;
->>>>>>> v0.11.0
 
 	export let selected = false;
 	export let shiftKey = false;
@@ -148,22 +132,6 @@
 		!active &&
 		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
 	$: showInlineActions = id === $chatId || confirmEdit || mouseOver || selected;
-
-	// Local state: tracks the last updatedAt seen while the user was viewing
-	// this chat.  Survives prop refreshes from sidebar data re-fetches that
-	// would overwrite the `lastReadAt` prop with a stale server value.
-	let viewedAt: number | null = null;
-
-	$: if (id === $chatId) {
-		viewedAt = updatedAt ?? Date.now() / 1000;
-	}
-
-	$: effectiveReadAt = Math.max(lastReadAt ?? 0, viewedAt ?? 0) || null;
-
-	$: unread =
-		id !== $chatId &&
-		!$activeChatIds.has(id) &&
-		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
 
 	const loadChat = async () => {
 		if (!chat) {
@@ -246,7 +214,7 @@
 		if (res) {
 			tags.set(await getAllTags(localStorage.token));
 			if ($chatId === id) {
-				await goto('/chat');
+				await goto('/');
 
 				await chatId.set('');
 				await tick();
@@ -377,13 +345,10 @@
 			el.removeEventListener('dragstart', onDragStart);
 			el.removeEventListener('drag', onDrag);
 			el.removeEventListener('dragend', onDragEndHandler);
-<<<<<<< HEAD
-=======
 
 			if (closeActiveHoverPreview === closeHoverPreview) {
 				closeActiveHoverPreview = null;
 			}
->>>>>>> v0.11.0
 		};
 	});
 
@@ -422,33 +387,6 @@
 	const generateTitleHandler = async () => {
 		generating = true;
 		chat = await getChatById(localStorage.token, id);
-<<<<<<< HEAD
-
-		const chatContent = chat.chat;
-
-		// Build the active branch message list from the history tree.
-		// Fallback to the legacy flat messages array for older chats
-		// that haven't been migrated to the tree structure yet.
-		const history = chatContent?.history;
-		let messages = [];
-		if (history?.messages && history?.currentId) {
-			messages = createMessagesList(history, history.currentId).map((message) => ({
-				role: message.role,
-				content: message.content
-			}));
-		} else {
-			messages = (chatContent?.messages ?? []).map((message) => ({
-				role: message.role,
-				content: message.content
-			}));
-		}
-
-		// Resolve the model from the most recent assistant message in the
-		// active branch. This avoids using the stale top-level `models`
-		// array which may reference a model from an older edit.
-		let model = '';
-
-=======
 
 		const chatContent = chat.chat;
 
@@ -474,7 +412,6 @@
 		// array which may reference a model from an older edit.
 		let model = '';
 
->>>>>>> v0.11.0
 		// For the active chat, prefer the live dropdown selection.
 		if (id === $chatId) {
 			try {
@@ -603,53 +540,11 @@
 			/>
 		</div>
 	{:else}
-<<<<<<< HEAD
-		<a
-			id="sidebar-chat-item"
-			class=" w-full flex justify-between rounded-xl px-[11px] py-[6px] {id === $chatId ||
-			confirmEdit
-				? 'bg-gray-100 dark:bg-gray-900 selected'
-				: selected
-					? 'bg-gray-100 dark:bg-gray-950 selected'
-					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
-			href="/c/{id}"
-			on:click={() => {
-				dispatch('select');
-
-				if ($selectedFolder) {
-					selectedFolder.set(null);
-				}
-
-				if ($mobile) {
-					showSidebar.set(false);
-				}
-
-				// Optimistically mark as read in UI when clicked
-				unread = false;
-				lastReadAt = Date.now() / 1000;
-			}}
-			on:dblclick={async (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-
-				doubleClicked = true;
-				renameHandler();
-			}}
-			on:mouseenter={(e) => {
-				mouseOver = true;
-			}}
-			on:mouseleave={(e) => {
-				mouseOver = false;
-			}}
-			on:focus={(e) => {}}
-			draggable="false"
-=======
 		<LinkPreview.Root
 			openDelay={300}
 			closeDelay={0}
 			disabled={$mobile || confirmEdit || dragged}
 			bind:open={openPreview}
->>>>>>> v0.11.0
 		>
 			<LinkPreview.Trigger
 				id="sidebar-chat-item"
@@ -668,27 +563,9 @@
 					openPreview = false;
 					dispatch('select');
 
-<<<<<<< HEAD
-			<div class="flex self-center flex-1 w-full min-w-0">
-				{#if unread}
-					<div class="shrink-0 self-center pr-2.5 flex transition-opacity duration-300">
-						<div class="size-1.5 bg-sky-500 rounded-full" />
-					</div>
-				{/if}
-				<div
-					dir="auto"
-					class="text-left self-center overflow-hidden w-full h-[20px] truncate {unread
-						? 'font-medium text-gray-900 dark:text-gray-100'
-						: ''}"
-				>
-					{title}
-				</div>
-			</div>
-=======
 					if ($selectedFolder) {
 						selectedFolder.set(null);
 					}
->>>>>>> v0.11.0
 
 					if ($mobile) {
 						showSidebar.set(false);
@@ -820,93 +697,6 @@
 						cloneChatHandler={() => {
 							cloneChatHandler(id);
 						}}
-<<<<<<< HEAD
-					>
-						<Sparkles strokeWidth="2" />
-					</button>
-				</Tooltip>
-			</div>
-		{:else if shiftKey && mouseOver}
-			<div class=" flex items-center self-center space-x-1.5">
-				<Tooltip content={$i18n.t('Archive')} className="flex items-center">
-					<button
-						class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-						disabled={archiving}
-						on:click={() => {
-							archiveChatHandler(id);
-						}}
-						type="button"
-					>
-						<ArchiveBox className="size-4  translate-y-[0.5px]" strokeWidth="2" />
-					</button>
-				</Tooltip>
-
-				<Tooltip content={$i18n.t('Delete')}>
-					<button
-						class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-						disabled={deleting}
-						on:click={() => {
-							deleteChatHandler(id);
-						}}
-						type="button"
-					>
-						<GarbageBin strokeWidth="2" />
-					</button>
-				</Tooltip>
-			</div>
-		{:else}
-			<div class="flex self-center z-10 items-end">
-				<ChatMenu
-					chatId={id}
-					cloneChatHandler={() => {
-						cloneChatHandler(id);
-					}}
-					shareHandler={() => {
-						showShareChatModal = true;
-					}}
-					{moveChatHandler}
-					archiveChatHandler={() => {
-						archiveChatHandler(id);
-					}}
-					{renameHandler}
-					deleteHandler={() => {
-						showDeleteConfirm = true;
-					}}
-					onClose={() => {
-						dispatch('unselect');
-					}}
-					onPinChange={async () => {
-						dispatch('change');
-					}}
-				>
-					<button
-						aria-label="Chat Menu"
-						class=" self-center dark:hover:text-white transition m-0"
-						on:click={() => {
-							dispatch('select');
-						}}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 16 16"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path
-								d="M2 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM6.5 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM12.5 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-							/>
-						</svg>
-					</button>
-				</ChatMenu>
-
-				{#if id === $chatId}
-					<!-- Shortcut support using "delete-chat-button" id -->
-					<button
-						id="delete-chat-button"
-						class="hidden"
-						aria-label={$i18n.t('Delete Chat')}
-						on:click={() => {
-=======
 						shareHandler={() => {
 							showShareChatModal = true;
 						}}
@@ -916,7 +706,6 @@
 						}}
 						{renameHandler}
 						deleteHandler={() => {
->>>>>>> v0.11.0
 							showDeleteConfirm = true;
 						}}
 						{markUnreadHandler}

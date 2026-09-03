@@ -206,10 +206,7 @@
 				connection_type: connectionType,
 				auth_type,
 				headers: headers ? JSON.parse(headers) : undefined,
-<<<<<<< HEAD
-=======
 				passthrough_params: parsePassthroughParams(passthroughParams),
->>>>>>> v0.11.0
 				...(provider ? { provider } : {}),
 				...(!ollama && azure ? { azure: true } : {}),
 				...(azure ? { api_version: apiVersion } : {}),
@@ -451,114 +448,6 @@
 						</div>
 
 						{#if !ollama && !direct}
-<<<<<<< HEAD
-							<div class="flex gap-2 mt-2">
-								<div class="flex flex-col w-full">
-									<label
-										for="headers-input"
-										class={`mb-0.5 text-xs text-gray-500
-								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
-										>{$i18n.t('Headers')}</label
-									>
-
-									<div class="flex-1">
-										<Tooltip
-											content={$i18n.t(
-												'Enter additional headers in JSON format (e.g. {"X-Custom-Header": "value"}'
-											)}
-										>
-											<Textarea
-												className="w-full text-sm outline-hidden"
-												bind:value={headers}
-												placeholder={$i18n.t('Enter additional headers in JSON format')}
-												required={false}
-												minSize={30}
-											/>
-										</Tooltip>
-									</div>
-								</div>
-							</div>
-						{/if}
-
-						<div class="flex gap-2 mt-2">
-							<div class="flex flex-col w-full">
-								<label
-									for="prefix-id-input"
-									class={`mb-0.5 text-xs text-gray-500
-								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
-									>{$i18n.t('Prefix ID')}</label
-								>
-
-								<div class="flex-1">
-									<Tooltip
-										content={$i18n.t(
-											'Prefix ID is used to avoid conflicts with other connections by adding a prefix to the model IDs - leave empty to disable'
-										)}
-									>
-										<input
-											class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-											type="text"
-											id="prefix-id-input"
-											bind:value={prefixId}
-											placeholder={$i18n.t('Prefix ID')}
-											autocomplete="off"
-										/>
-									</Tooltip>
-								</div>
-							</div>
-						</div>
-
-						{#if !ollama && !direct}
-							<div class="flex flex-row justify-between items-center w-full mt-2">
-								<label
-									for="provider-select"
-									class={`mb-0.5 text-xs text-gray-500
-								${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
-									>{$i18n.t('Provider')}</label
-								>
-
-								<div>
-									<select
-										id="provider-select"
-										bind:value={provider}
-										class="text-xs text-gray-700 dark:text-gray-300 bg-transparent outline-hidden"
-									>
-										<option value="">{$i18n.t('Default')}</option>
-										<option value="azure">{$i18n.t('Azure OpenAI')}</option>
-										<option value="llama.cpp">{$i18n.t('llama.cpp')}</option>
-									</select>
-								</div>
-							</div>
-						{/if}
-
-						{#if azure}
-							<div class="flex gap-2 mt-2">
-								<div class="flex flex-col w-full">
-									<label
-										for="api-version-input"
-										class={`mb-0.5 text-xs text-gray-500
-										${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : ''}`}
-										>{$i18n.t('API Version')}</label
-									>
-
-									<div class="flex-1">
-										<input
-											id="api-version-input"
-											class={`w-full text-sm bg-transparent ${($settings?.highContrastMode ?? false) ? 'placeholder:text-gray-700 dark:placeholder:text-gray-100' : 'outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700'}`}
-											type="text"
-											bind:value={apiVersion}
-											placeholder={$i18n.t('API Version')}
-											autocomplete="off"
-											required
-										/>
-									</div>
-								</div>
-							</div>
-						{/if}
-
-						{#if !ollama && !direct}
-=======
->>>>>>> v0.11.0
 							<div class="flex flex-row justify-between items-center w-full mt-1">
 								<label
 									for="api-type-toggle"

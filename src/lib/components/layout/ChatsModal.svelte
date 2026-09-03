@@ -106,13 +106,8 @@
 				{/if}
 			</div>
 			<button
-<<<<<<< HEAD
-				class="self-center"
-				aria-label={$i18n.t('Close')}
-=======
 				aria-label={$i18n.t('Close')}
 				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
->>>>>>> v0.11.0
 				on:click={() => {
 					show = false;
 				}}
@@ -319,7 +314,6 @@
 														<button
 															aria-label={$i18n.t('Unarchive Chat')}
 															class="self-center w-fit px-1 text-sm rounded-xl"
-															aria-label={$i18n.t('Unarchive Chat')}
 															on:click={async (e) => {
 																e.stopImmediatePropagation();
 																e.stopPropagation();

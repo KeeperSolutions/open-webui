@@ -57,11 +57,8 @@
 	export let messagesCount: number | null = 8;
 	let messagesLoading = false;
 
-<<<<<<< HEAD
-=======
 	const getMessagesContainer = () => document.getElementById(messagesContainerId);
 
->>>>>>> v0.11.0
 	onDestroy(() => {
 		cancelAnimationFrame(pendingRebuild);
 	});
@@ -143,11 +140,7 @@
 	}
 
 	const scrollToBottom = () => {
-<<<<<<< HEAD
-		const element = document.getElementById('messages-container');
-=======
 		const element = getMessagesContainer();
->>>>>>> v0.11.0
 		if (element) {
 			element.scrollTop = element.scrollHeight;
 
@@ -181,11 +174,7 @@
 				messages: messages
 			});
 
-<<<<<<< HEAD
-			// Refresh local message content from backend (e.g. re-derived via serialize_output)
-=======
 			// Keep local plain-content edits aligned with the saved chat response.
->>>>>>> v0.11.0
 			if (res?.chat?.history?.messages) {
 				for (const [id, msg] of Object.entries(res.chat.history.messages)) {
 					if (history.messages[id] && (msg as any).content) {
@@ -195,12 +184,7 @@
 				history = history;
 			}
 
-<<<<<<< HEAD
-			currentChatPage.set(1);
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
-=======
 			await refreshChatList(localStorage.token);
->>>>>>> v0.11.0
 		}
 	};
 
@@ -413,13 +397,8 @@
 					parentId: parentId,
 					childrenIds: [],
 					files: undefined,
-<<<<<<< HEAD
-					content: content,
-					output: output ?? undefined,
-=======
 					content: output !== undefined ? '' : content,
 					...(output !== undefined ? { output } : {}),
->>>>>>> v0.11.0
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
@@ -437,12 +416,6 @@
 				await updateChat();
 			} else {
 				// Edit response message
-<<<<<<< HEAD
-				history.messages[messageId].originalContent = history.messages[messageId].content;
-				history.messages[messageId].content = content;
-				if (output !== undefined) {
-					history.messages[messageId].output = output;
-=======
 				if (content !== undefined) {
 					history.messages[messageId].originalContent = history.messages[messageId].content;
 					history.messages[messageId].content = content;
@@ -450,7 +423,6 @@
 				if (output !== undefined) {
 					history.messages[messageId].output = output;
 					history.messages[messageId].content = '';
->>>>>>> v0.11.0
 				}
 				await updateChat();
 			}
@@ -512,8 +484,6 @@
 		history.currentId = nextMessageId;
 		history = history;
 
-<<<<<<< HEAD
-=======
 		if (!$temporaryChatEnabled) {
 			const res = await deleteChatMessageById(localStorage.token, chatId, messageId);
 			if (res?.chat?.history) {
@@ -524,7 +494,6 @@
 		}
 	};
 
->>>>>>> v0.11.0
 	const triggerScroll = () => {
 		if (autoScroll) {
 			const element = getMessagesContainer();
