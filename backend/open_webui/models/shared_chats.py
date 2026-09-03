@@ -3,15 +3,9 @@ import time
 import uuid
 from typing import Optional
 
-<<<<<<< HEAD
 from open_webui.internal.db import Base, EncryptedJSONField, get_async_db_context
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, ForeignKey, Text, delete, select
-=======
-from open_webui.internal.db import Base, JSONField, get_async_db_context
-from pydantic import BaseModel, ConfigDict
-from sqlalchemy import JSON, BigInteger, Column, ForeignKey, Text, delete, select
->>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -29,11 +23,7 @@ class SharedChat(Base):
     user_id = Column(Text, nullable=False)  # Who created this share
 
     title = Column(Text)
-<<<<<<< HEAD
     chat = Column(EncryptedJSONField)  # Snapshot of chat JSON at share time
-=======
-    chat = Column(JSON)  # Snapshot of chat JSON at share time
->>>>>>> v0.11.0
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
@@ -211,8 +201,6 @@ class SharedChatsTable:
         except Exception:
             return False
 
-<<<<<<< HEAD
-=======
     async def delete_all_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Delete all shared chats created by a user."""
         try:
@@ -223,6 +211,5 @@ class SharedChatsTable:
         except Exception:
             return False
 
->>>>>>> v0.11.0
 
 SharedChats = SharedChatsTable()

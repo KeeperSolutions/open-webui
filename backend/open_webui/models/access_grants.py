@@ -360,10 +360,6 @@ class AccessGrantsTable:
             )
             db.add(grant)
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(grant)
-=======
->>>>>>> v0.11.0
             return AccessGrantModel.model_validate(grant)
 
     async def revoke_access(
@@ -541,8 +537,6 @@ class AccessGrantsTable:
                 result_dict[g.resource_id].append(AccessGrantModel.model_validate(g))
             return result_dict
 
-<<<<<<< HEAD
-=======
     async def has_anyone_access(
         self,
         resource_type: str,
@@ -565,7 +559,6 @@ class AccessGrantsTable:
             )
             return result.scalars().first() is not None
 
->>>>>>> v0.11.0
     async def has_access(
         self,
         user_id: str,

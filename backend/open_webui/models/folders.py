@@ -6,11 +6,7 @@ from typing import Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from pydantic import BaseModel, ConfigDict
-<<<<<<< HEAD
-from sqlalchemy import JSON, BigInteger, Boolean, Column, Text, delete, func, select
-=======
 from sqlalchemy import JSON, BigInteger, Boolean, Column, Text, delete, func, select, or_, and_
->>>>>>> v0.11.0
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -149,8 +145,6 @@ class FolderTable:
         except Exception:
             return None
 
-<<<<<<< HEAD
-=======
     async def get_folder_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[FolderModel]:
         """Fetch folder by ID only (no user_id filter). Used for shared access."""
         try:
@@ -197,7 +191,6 @@ class FolderTable:
                     folder_perms[g.resource_id] = g.permission
             return folder_perms
 
->>>>>>> v0.11.0
     async def get_children_folders_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[list[FolderModel]]:
@@ -256,8 +249,6 @@ class FolderTable:
             result = await db.execute(select(Folder).filter_by(parent_id=parent_id, user_id=user_id))
             return [FolderModel.model_validate(folder) for folder in result.scalars().all()]
 
-<<<<<<< HEAD
-=======
     async def get_folder_ids_by_id_and_user_id_in_subtree(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> list[str]:
@@ -277,7 +268,6 @@ class FolderTable:
 
             return folder_ids
 
->>>>>>> v0.11.0
     async def update_folder_parent_id_by_id_and_user_id(
         self,
         id: str,

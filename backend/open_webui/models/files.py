@@ -142,10 +142,6 @@ class FilesTable:
                 result = File(**file.model_dump())
                 db.add(result)
                 await db.commit()
-<<<<<<< HEAD
-                await db.refresh(result)
-=======
->>>>>>> v0.11.0
                 if result:
                     return FileModel.model_validate(result)
                 else:
@@ -204,8 +200,6 @@ class FilesTable:
             result = await db.execute(select(File))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
-<<<<<<< HEAD
-=======
     async def count_files_by_user_id(
         self,
         user_id: str | None = None,
@@ -218,7 +212,6 @@ class FilesTable:
             result = await db.execute(stmt)
             return result.scalar() or 0
 
->>>>>>> v0.11.0
     async def check_access_by_user_id(self, id, user_id, permission='write', db: AsyncSession | None = None) -> bool:
         file = await self.get_file_by_id(id, db=db)
         if not file:

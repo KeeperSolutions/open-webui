@@ -501,8 +501,6 @@ class MessageTable:
 
             return [Reactions(**reaction) for reaction in reactions.values()]
 
-<<<<<<< HEAD
-=======
     async def get_reactions_by_message_ids(
         self, ids: list[str], db: Optional[AsyncSession] = None
     ) -> dict[str, list[Reactions]]:
@@ -568,7 +566,6 @@ class MessageTable:
             )
             return {row[0]: (row[1], row[2]) for row in result.all()}
 
->>>>>>> v0.11.0
     async def remove_reaction_by_id_and_user_id_and_name(
         self, id: str, user_id: str, name: str, db: Optional[AsyncSession] = None
     ) -> bool:

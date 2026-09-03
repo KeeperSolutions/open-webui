@@ -266,15 +266,9 @@ class ChannelTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> ChannelModel:
-<<<<<<< HEAD
-        channel_data = ChannelModel.model_validate(channel).model_dump(exclude={'access_grants'})
-        channel_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(channel_data['id'], db=db)
-=======
         channel_model = ChannelModel.model_validate(channel)
         channel_model.access_grants = (
             access_grants if access_grants is not None else await self._get_access_grants(channel_model.id, db=db)
->>>>>>> v0.11.0
         )
         return channel_model
 
@@ -875,10 +869,6 @@ class ChannelTable:
                 result = ChannelFile(**channel_file.model_dump())
                 db.add(result)
                 await db.commit()
-<<<<<<< HEAD
-                await db.refresh(result)
-=======
->>>>>>> v0.11.0
                 if result:
                     return ChannelFileModel.model_validate(result)
                 else:

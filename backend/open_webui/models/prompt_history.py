@@ -70,10 +70,6 @@ class PromptHistoryTable:
             )
             db.add(history)
             await db.commit()
-<<<<<<< HEAD
-            await db.refresh(history)
-=======
->>>>>>> v0.11.0
             return PromptHistoryModel.model_validate(history)
 
     async def get_history_by_prompt_id(

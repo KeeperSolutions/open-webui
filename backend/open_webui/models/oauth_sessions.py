@@ -128,10 +128,6 @@ class OAuthSessionTable:
 
                 db.add(result)
                 await db.commit()
-<<<<<<< HEAD
-                await db.refresh(result)
-=======
->>>>>>> v0.11.0
 
                 if result:
                     # Make a copy of the model data before closing session

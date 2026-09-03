@@ -106,16 +106,10 @@ class NoteTable:
         db: Optional[AsyncSession] = None,
     ) -> NoteModel:
         # We exclude access_grants to inject them
-<<<<<<< HEAD
-        note_data = NoteModel.model_validate(note).model_dump(exclude={'access_grants'})
-        note_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(note_data['id'], db=db)
-=======
         note_model = NoteModel.model_validate(note)
         note_model.data = note_model.data or {}
         note_model.access_grants = (
             access_grants if access_grants is not None else await self._get_access_grants(note_model.id, db=db)
->>>>>>> v0.11.0
         )
         return note_model
 

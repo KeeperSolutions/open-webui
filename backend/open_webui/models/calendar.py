@@ -241,19 +241,11 @@ class CalendarTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> CalendarModel:
-<<<<<<< HEAD
-        cal_data = CalendarModel.model_validate(cal).model_dump(exclude={'access_grants'})
-        cal_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(cal_data['id'], db=db)
-        )
-        return CalendarModel.model_validate(cal_data)
-=======
         calendar_model = CalendarModel.model_validate(cal)
         calendar_model.access_grants = (
             access_grants if access_grants is not None else await self._get_access_grants(calendar_model.id, db=db)
         )
         return calendar_model
->>>>>>> v0.11.0
 
     async def get_or_create_defaults(self, user_id: str, db: Optional[AsyncSession] = None) -> list[CalendarModel]:
         """Return user's calendars, creating 'Personal' default if none exist."""
@@ -508,18 +500,12 @@ class CalendarEventTable:
                 # Filter to requested calendars only
                 accessible_cal_ids = [c for c in accessible_cal_ids if c in calendar_ids]
 
-<<<<<<< HEAD
-            # Also get event IDs where user is an attendee
-            attendee_event_ids_result = await db.execute(
-                select(CalendarEventAttendee.event_id).filter(CalendarEventAttendee.user_id == user_id)
-=======
             # Also get event IDs where the user is an attendee, excluding invites they declined
             attendee_event_ids_result = await db.execute(
                 select(CalendarEventAttendee.event_id).filter(
                     CalendarEventAttendee.user_id == user_id,
                     CalendarEventAttendee.status != 'declined',
                 )
->>>>>>> v0.11.0
             )
             attendee_event_ids = [r[0] for r in attendee_event_ids_result.all()]
 
@@ -781,13 +767,6 @@ class CalendarEventAttendeeTable:
     async def set_attendees(
         self, event_id: str, attendees: list[dict], db: Optional[AsyncSession] = None
     ) -> list[CalendarEventAttendeeModel]:
-<<<<<<< HEAD
-        """Replace all attendees for an event.
-
-        Each dict in attendees: {user_id: str, status?: str, meta?: dict}
-        """
-        async with get_async_db_context(db) as db:
-=======
         """Replace all attendees for an event ({user_id, meta?} per dict).
 
         RSVP status is the attendee's alone to set (via update_rsvp): an existing
@@ -802,27 +781,18 @@ class CalendarEventAttendeeTable:
                 ).scalars()
             }
 
->>>>>>> v0.11.0
             # Remove existing
             await db.execute(delete(CalendarEventAttendee).filter(CalendarEventAttendee.event_id == event_id))
 
             now = int(time.time_ns())
             models = []
             for att in attendees:
-<<<<<<< HEAD
-                row = CalendarEventAttendee(
-                    id=str(uuid4()),
-                    event_id=event_id,
-                    user_id=att['user_id'],
-                    status=att.get('status', 'pending'),
-=======
                 user_id = att['user_id']
                 row = CalendarEventAttendee(
                     id=str(uuid4()),
                     event_id=event_id,
                     user_id=user_id,
                     status=existing_status.get(user_id, 'pending'),
->>>>>>> v0.11.0
                     meta=att.get('meta'),
                     created_at=now,
                     updated_at=now,

@@ -103,15 +103,9 @@ class PromptsTable:
         access_grants: list[AccessGrantModel | None] = None,
         db: AsyncSession | None = None,
     ) -> PromptModel:
-<<<<<<< HEAD
-        prompt_data = PromptModel.model_validate(prompt).model_dump(exclude={'access_grants'})
-        prompt_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(prompt_data['id'], db=db)
-=======
         prompt_model = PromptModel.model_validate(prompt)
         prompt_model.access_grants = (
             access_grants if access_grants is not None else await self._get_access_grants(prompt_model.id, db=db)
->>>>>>> v0.11.0
         )
         return prompt_model
 
@@ -138,10 +132,6 @@ class PromptsTable:
                 )
                 session.add(record)
                 await session.commit()
-<<<<<<< HEAD
-                await session.refresh(record)  # populate generated defaults
-=======
->>>>>>> v0.11.0
 
                 await AccessGrants.set_access_grants(
                     'prompt',
@@ -178,10 +168,6 @@ class PromptsTable:
                 if history_entry:
                     record.version_id = history_entry.id
                     await session.commit()
-<<<<<<< HEAD
-                    await session.refresh(record)  # re-read version_id
-=======
->>>>>>> v0.11.0
 
                 return await self._to_prompt_model(record, db=session)
             except Exception as e:
@@ -649,10 +635,6 @@ class PromptsTable:
                     prompt.is_active = not prompt.is_active
                     prompt.updated_at = int(time.time())
                     await session.commit()
-<<<<<<< HEAD
-                    await session.refresh(prompt)
-=======
->>>>>>> v0.11.0
                     return await self._to_prompt_model(prompt, db=session)
                 return None
         except Exception:
