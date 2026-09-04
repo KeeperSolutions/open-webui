@@ -90,8 +90,7 @@ async def resolve_pii_masking_enforced(request, user) -> bool:
         # Do not swallow this quietly: a DB outage would otherwise surface as
         # every user's toggle mysteriously locking, with nothing in the log.
         log.warning(
-            f'[pii_policy] could not resolve masking policy for user_id={user_id}; '
-            f'failing closed (enforced=True): {e}'
+            f'[pii_policy] could not resolve masking policy for user_id={user_id}; failing closed (enforced=True): {e}'
         )
         enforced = True
 
@@ -122,8 +121,7 @@ class PiiMaskingUnavailableError(Exception):
     """
 
     DEFAULT_MESSAGE = (
-        "PII masking is currently unavailable, so your message was not sent. "
-        "Please try again in a moment."
+        'PII masking is currently unavailable, so your message was not sent. Please try again in a moment.'
     )
 
     def __init__(self, message: Optional[str] = None):
@@ -137,11 +135,11 @@ def resolve_request_pii_masking(payload) -> Optional[bool]:
     signal the inlet override (below) uses, so the fail-closed guard and the
     pipeline agree on whether masking was requested.
     """
-    features = payload.get("features")
+    features = payload.get('features')
     if not isinstance(features, dict):
-        metadata = payload.get("metadata")
-        features = metadata.get("features") if isinstance(metadata, dict) else None
-    value = features.get("pii_masking") if isinstance(features, dict) else None
+        metadata = payload.get('metadata')
+        features = metadata.get('features') if isinstance(metadata, dict) else None
+    value = features.get('pii_masking') if isinstance(features, dict) else None
     return value if isinstance(value, bool) else None
 
 
@@ -172,7 +170,7 @@ def assert_pii_masking_available(payload, model_id, models, policy_enforced=Fals
         return
     if not policy_enforced and resolve_request_pii_masking(payload) is not True:
         return
-    resolved_ids = {f.get("id") for f in get_sorted_filters(model_id, models)}
+    resolved_ids = {f.get('id') for f in get_sorted_filters(model_id, models)}
     if not (resolved_ids & PII_FILTER_IDS):
         raise PiiMaskingUnavailableError()
 
@@ -193,6 +191,33 @@ def get_sorted_filters(model_id, models):
     return sorted_filters
 
 
+async def _post_inlet_once(session, url, key, filter_id, request_data):
+    """One inlet POST. Extracted from `process_pipeline_inlet_filter` so the
+    chunked path (TRAU-543) can issue the same call many times. Behaviour is
+    unchanged: `ClientResponseError` is translated into an HTTPException that
+    preserves the pipeline's own `detail`, everything else propagates so the
+    caller's fail-closed branch decides."""
+    async with session.post(
+        f'{url}/{filter_id}/filter/inlet',
+        headers={'Authorization': f'Bearer {key}'},
+        json=request_data,
+        ssl=AIOHTTP_CLIENT_SESSION_SSL,
+    ) as response:
+        try:
+            response.raise_for_status()
+            return await response.json()
+        except aiohttp.ClientResponseError as e:
+            try:
+                res = await response.json() if 'application/json' in response.content_type else {}
+                if 'detail' in res:
+                    raise HTTPException(status_code=response.status, detail=res['detail'])
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+            raise HTTPException(status_code=response.status, detail=e.message)
+
+
 async def process_pipeline_inlet_filter(request, payload, user, models):
     # Extract user.settings as a plain dict. user.settings is a UserSettings
     # Pydantic instance (models/users.py:40-43) with extra="allow", so arbitrary
@@ -210,27 +235,27 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
     # The stored shape is:
     #   user.settings.ui.pipelines.valves.<filter_id>.<key>
     # (not user.settings.pipelines.* as the spec originally assumed).
-    ui_settings = user_settings_dict.get("ui", {})
+    ui_settings = user_settings_dict.get('ui', {})
     if not isinstance(ui_settings, dict):
         ui_settings = {}
 
-    pipelines_settings = ui_settings.get("pipelines", {})
+    pipelines_settings = ui_settings.get('pipelines', {})
     if not isinstance(pipelines_settings, dict):
         pipelines_settings = {}
 
-    all_filter_valves = pipelines_settings.get("valves", {})
+    all_filter_valves = pipelines_settings.get('valves', {})
     if not isinstance(all_filter_valves, dict):
         all_filter_valves = {}
 
     # user dict from openai.py is intentionally rebuilt here to inject
     # per-user, per-filter valves. See TASK-3.7a-SPEC.md §3.2.
     base_user_dict = {
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "role": user.role,
+        'id': user.id,
+        'email': user.email,
+        'name': user.name,
+        'role': user.role,
     }
-    model_id = payload["model"]
+    model_id = payload['model']
     sorted_filters = get_sorted_filters(model_id, models)
 
     # Team policy, resolved ONCE per inlet call and memoized per request, so the
@@ -277,7 +302,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
 
             # Per-filter valves injection (TASK-3.7a). Each filter gets its own
             # valves dict from user.settings["ui"]["pipelines"]["valves"][filter_id].
-            filter_id = filter.get("id")
+            filter_id = filter.get('id')
             per_filter_valves = all_filter_valves.get(filter_id, {})
             if not isinstance(per_filter_valves, dict):
                 per_filter_valves = {}
@@ -288,53 +313,27 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             # masking without a DB write. Top-level wins when both are present.
             request_pii = resolve_request_pii_masking(payload)
             if isinstance(request_pii, bool):
-                per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
+                per_filter_valves = {**per_filter_valves, 'pii_masking_enabled': request_pii}
 
             # Team policy wins over both the stored valve and the per-request
             # override, so it is applied LAST. Reversing these two blocks hands
             # the user's False the final word over the policy — the same lines of
             # code, the opposite outcome.
             if policy_enforced and filter_id in PII_FILTER_IDS:
-                per_filter_valves = {**per_filter_valves, "pii_masking_enabled": True}
+                per_filter_valves = {**per_filter_valves, 'pii_masking_enabled': True}
 
             log.debug(
-                f"[pii_toggle] filter_id={filter_id} "
-                f"pii_masking_enabled={per_filter_valves.get('pii_masking_enabled')}"
+                f'[pii_toggle] filter_id={filter_id} pii_masking_enabled={per_filter_valves.get("pii_masking_enabled")}'
             )
-            user_with_valves = {**base_user_dict, "valves": per_filter_valves}
+            user_with_valves = {**base_user_dict, 'valves': per_filter_valves}
 
-            headers = {"Authorization": f"Bearer {key}"}
             request_data = {
-                "user": user_with_valves,
-                "body": payload,
+                'user': user_with_valves,
+                'body': payload,
             }
 
             try:
-                async with session.post(
-                    f'{url}/{filter["id"]}/filter/inlet',
-                    headers=headers,
-                    json=request_data,
-                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
-                ) as response:
-                    response.raise_for_status()
-                    payload = await response.json()
-            except aiohttp.ClientResponseError as e:
-                try:
-                    res = await response.json() if 'application/json' in response.content_type else {}
-                    if 'detail' in res:
-                        raise HTTPException(
-                            status_code=response.status,
-                            detail=res['detail'],
-                        )
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass
-
-                raise HTTPException(
-                    status_code=response.status,
-                    detail=e.message,
-                )
+                payload = await _post_inlet_once(session, url, key, filter['id'], request_data)
             except HTTPException:
                 raise
             except Exception as e:
@@ -347,9 +346,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
                 # must never block chat). `pii_masking_enabled` defaults to True
                 # (the pipeline default) when neither the per-request override nor
                 # a stored valve set it.
-                if filter_id in PII_FILTER_IDS and per_filter_valves.get(
-                    "pii_masking_enabled", True
-                ):
+                if filter_id in PII_FILTER_IDS and per_filter_valves.get('pii_masking_enabled', True):
                     raise PiiMaskingUnavailableError() from e
 
     return payload
