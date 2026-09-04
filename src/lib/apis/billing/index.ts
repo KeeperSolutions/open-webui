@@ -33,6 +33,9 @@ export type BillingStatus = {
 
 	// All tiers
 	current_month_cost_eur: number;
+
+	// Sidebar usage poller cadence (seconds); falls back to 120 when absent
+	usage_poll_interval_seconds?: number;
 };
 
 const base = `${WEBUI_API_BASE_URL}/billing`;
