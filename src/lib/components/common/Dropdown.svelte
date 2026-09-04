@@ -67,6 +67,8 @@
 
 		contentEl.style.position = 'fixed';
 		contentEl.style.zIndex = '9999';
+		// Without this the menu is unclickable: bits-ui sets pointer-events:none on <body> (TRAU-541).
+		contentEl.style.pointerEvents = 'auto';
 
 		const contentHeight = contentEl.offsetHeight || 0;
 		const spaceBelow = window.innerHeight - rect.bottom - sideOffset;
