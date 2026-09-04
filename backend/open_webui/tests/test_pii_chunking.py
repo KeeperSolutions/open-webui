@@ -61,9 +61,12 @@ def test_an_entity_is_never_severed_by_a_break():
 
 
 def test_budgets_are_consistent_with_the_measured_throughput():
-    """Guards the numbers in Appendix A: at ~240 chars/s a chunk must finish
-    well inside the 60 s socket-read budget."""
-    from open_webui.utils.pii_chunking import PII_INLET_TOTAL_BUDGET_S
+    """Guards the numbers in Appendix A: at the measured rate a chunk must
+    finish well inside the 60 s socket-read budget."""
+    from open_webui.utils.pii_chunking import (
+        PII_INLET_CHARS_PER_SECOND,
+        PII_INLET_TOTAL_BUDGET_S,
+    )
 
-    assert PII_INLET_CHUNK_CHARS / 240 < 30, 'chunk cannot finish inside one POST budget'
+    assert PII_INLET_CHUNK_CHARS / PII_INLET_CHARS_PER_SECOND < 30
     assert PII_INLET_TOTAL_BUDGET_S >= 60

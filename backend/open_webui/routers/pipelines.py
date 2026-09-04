@@ -31,6 +31,7 @@ from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_RETRIES,
     PII_INLET_CONCURRENCY,
     PII_INLET_TOTAL_BUDGET_S,
+    estimated_masking_seconds,
     split_text_for_pii,
 )
 from pydantic import BaseModel
@@ -268,6 +269,17 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     FAIL-CLOSED: any chunk still failing after `PII_INLET_CHUNK_RETRIES`, and any
     overrun of `PII_INLET_TOTAL_BUDGET_S`, raises `PiiMaskingUnavailableError`.
 
+    Refuses outright, before issuing any POST, when `estimated_masking_seconds`
+    for this payload exceeds `PII_INLET_TOTAL_BUDGET_S`. The estimate is split
+    in two: the skeleton POST carries every non-oversized message at full
+    length and runs once, sequentially (charged at 1x, no speedup applies to
+    it), while only the oversized messages' chunk POSTs benefit from
+    concurrency (charged at the measured speedup). Summing everything and
+    applying the speedup to the whole payload would let a history-heavy chat
+    with only a modestly oversized paste slip past the guard and straight into
+    the `PII_INLET_TOTAL_BUDGET_S` timeout below — paying the wall-clock cost
+    first and refusing anyway. Refusing up front is the honest answer.
+
     Requires a stable chat_id (see `_payload_chat_id`). Every chunk POST
     inherits `payload['metadata']`, and the pipeline's own chat-id resolver
     mints a FRESH ephemeral thread per call whenever chat_id is missing —
@@ -279,18 +291,29 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     non-chunked path is unaffected — it is not exposed to this failure mode
     since a single call inherits the real chat_id like it always has.
     """
+    messages = payload.get('messages') or []
+    indices = _oversized_message_indices(payload)
+    oversized = set(indices)
+    chunked_chars = sum(
+        len(m['content']) for i, m in enumerate(messages) if i in oversized and isinstance(m.get('content'), str)
+    )
+    skeleton_chars = sum(
+        len(m['content']) for i, m in enumerate(messages) if i not in oversized and isinstance(m.get('content'), str)
+    )
+    if estimated_masking_seconds(skeleton_chars, chunked_chars) > PII_INLET_TOTAL_BUDGET_S:
+        raise PiiMaskingUnavailableError(
+            'This message is too long to mask safely. Shorten it, or attach the text as a file instead.'
+        )
+
     if _payload_chat_id(payload) is None:
         raise PiiMaskingUnavailableError(
             'PII masking is currently unavailable for a message this large without an active '
             'conversation. Please try again from an existing chat.'
         )
 
-    indices = _oversized_message_indices(payload)
-    messages = payload.get('messages') or []
-
     skeleton = {
         **payload,
-        'messages': [{**m, 'content': ''} if i in set(indices) else m for i, m in enumerate(messages)],
+        'messages': [{**m, 'content': ''} if i in oversized else m for i, m in enumerate(messages)],
     }
 
     jobs = []  # (message_index, piece_index, text)

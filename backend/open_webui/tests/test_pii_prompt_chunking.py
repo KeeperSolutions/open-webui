@@ -464,3 +464,67 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
     assert counts[0] == 1
     assert counts[-1] == 3
     assert events[-1]['data']['done'] is True
+
+
+def test_a_prompt_beyond_the_budget_is_refused_with_a_message_a_user_can_act_on():
+    """Past the budget the honest answer is a refusal, not a five-minute wait.
+    The text must say what to do — the old wording named an internal constant."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    payload = _payload('x' * (max_maskable_chars() + 1))
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        with pytest.raises(PiiMaskingUnavailableError) as excinfo:
+            _run(payload)
+    message = str(excinfo.value)
+    assert 'MAX_' not in message and 'CHARS' not in message
+    assert 'too long' in message.lower() or 'shorten' in message.lower()
+    assert seen == [], 'refused requests must not touch the pipeline at all'
+
+
+def test_a_history_heavy_chat_is_refused_even_though_its_grand_total_is_under_the_paste_cap():
+    """The skeleton POST carries every non-oversized message at full length,
+    ONCE, sequentially — no concurrency speedup applies to it. A chat with
+    enough ordinary history can bust the wall-clock budget on the skeleton
+    call alone even while its grand total stays under `max_maskable_chars()`,
+    because that cap only bounds a lone paste (skeleton_chars=0). Summing
+    everything and applying the speedup to the whole payload (the earlier,
+    wrong formula) would let this case slip past the guard and into the
+    120 s `PII_INLET_TOTAL_BUDGET_S` timeout instead — refused either way, but
+    only after paying the wait."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    # 20 ordinary turns, each under the 1800-char oversized threshold, so all
+    # 20 land in the skeleton POST: 20 * 1500 = 30 000 chars / 240 chars/s =
+    # 125 s on the skeleton call alone, already past the 120 s budget.
+    history = [{'role': 'user', 'content': 'a' * 1500} for _ in range(20)]
+    paste = {'role': 'user', 'content': 'b' * 2000}  # oversized -> chunked, not skeleton
+    payload = {
+        'model': 'gpt-4',
+        'messages': history + [paste],
+        'metadata': {'chat_id': 'c1'},
+        'features': {'pii_masking': True},
+    }
+    total_chars = sum(len(m['content']) for m in payload['messages'])
+    assert total_chars < max_maskable_chars(), (
+        'the case only matters if the naive total-based cap would have let it through'
+    )
+
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        with pytest.raises(PiiMaskingUnavailableError):
+            _run(payload)
+    assert seen == [], 'refused requests must not touch the pipeline at all'
+
+
+def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
+    """The other half of the boundary: a lone paste at exactly
+    `max_maskable_chars()` characters (no other history, so skeleton_chars=0)
+    must NOT be refused — it should proceed and issue POSTs."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    payload = _payload('x' * max_maskable_chars())
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        _run(payload)  # must not raise
+    assert seen, 'a within-budget paste must actually be masked, not refused'
