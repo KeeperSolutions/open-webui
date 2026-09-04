@@ -9,7 +9,6 @@
 	import PinnedModelItem from './PinnedModelItem.svelte';
 
 	export let selectedChatId = null;
-	export let shiftKey = false;
 
 	let pinnedModels = [];
 
@@ -88,7 +87,6 @@
 		{#if model}
 			<PinnedModelItem
 				{model}
-				{shiftKey}
 				onClick={() => {
 					selectedChatId = null;
 					chatId.set('');
