@@ -113,11 +113,25 @@
 				preload.setAttribute('fetchpriority', 'high');
 				document.head.appendChild(preload);
 
+				window.matchMedia('(prefers-color-scheme: dark)').addListener((e) => {
+					if (localStorage.theme === 'system') {
+						if (e.matches) {
+							document.documentElement.classList.add('dark');
+							document.documentElement.classList.remove('light');
+							metaThemeColorTag.setAttribute('content', '#171717');
+						} else {
+							document.documentElement.classList.add('light');
+							document.documentElement.classList.remove('dark');
+							metaThemeColorTag.setAttribute('content', '#ffffff');
+						}
+					}
+				});
 				const isDarkMode = document.documentElement.classList.contains('dark');
 
 				const logo = document.createElement('img');
 				logo.id = 'logo';
-				logo.style = 'width: auto; height: 6rem; display:block;';
+				logo.style =
+					'position: absolute; width: auto; height: 6rem; top: 44%; left: 50%; transform: translateX(-50%); display:block;';
 				logo.loading = 'eager';
 				logo.fetchPriority = 'high';
 				logo.src = isDarkMode ? '/static/splash-dark.png' : '/static/splash.png';

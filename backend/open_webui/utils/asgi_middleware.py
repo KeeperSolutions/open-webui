@@ -100,13 +100,19 @@ class CommitSessionMiddleware:
             # Downstream did not complete successfully. Roll back any
             # pending sync writes, release the connection, and let the
             # exception propagate.
-            try:
-                ScopedSession.rollback()
-            except Exception:
-                log.exception('CommitSessionMiddleware: rollback failed after downstream error')
-            finally:
-                ScopedSession.remove()
+            if ScopedSession.registry.has():
+                try:
+                    ScopedSession.rollback()
+                except Exception:
+                    log.exception('CommitSessionMiddleware: rollback failed after downstream error')
+                finally:
+                    ScopedSession.remove()
             raise
+
+        # Nothing in this request touched the sync session: committing would
+        # only instantiate one to run an empty transaction.
+        if not ScopedSession.registry.has():
+            return
 
         # Downstream completed. Commit pending sync work.
         try:
@@ -169,9 +175,9 @@ class AuthTokenMiddleware:
 
         async def send_with_timing(message: Message) -> None:
             if message['type'] == 'http.response.start':
-                process_time = int(time.monotonic() - start_time)
+                process_time = time.monotonic() - start_time
                 headers = MutableHeaders(scope=message)
-                headers['X-Process-Time'] = str(process_time)
+                headers['X-Process-Time'] = f'{process_time:.6f}'
             await send(message)
 
         await self.app(scope, receive, send_with_timing)
@@ -230,7 +236,15 @@ class RedirectMiddleware:
             return
 
         path = scope.get('path', '')
-        query_string = scope.get('query_string', b'').decode('latin-1', errors='replace')
+        raw_query = scope.get('query_string', b'')
+        # This middleware only acts on /watch?v= and ?shared= URLs; skip the
+        # decode + parse_qs work for every other GET. (A false positive on the
+        # substring check just falls through to the full parse below.)
+        if not (path.endswith('/watch') or b'shared' in raw_query):
+            await self.app(scope, receive, send)
+            return
+
+        query_string = raw_query.decode('latin-1', errors='replace')
         query_params = parse_qs(query_string)
 
         redirect_params: dict[str, str] = {}

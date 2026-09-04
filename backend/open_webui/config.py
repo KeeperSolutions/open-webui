@@ -43,6 +43,11 @@ from open_webui.internal.config import (
 )
 
 # ── Persistent configuration layer ──────────────────────────────────────────
+# Fork keeps its own blob-based ConfigVar/AppConfig layer. Upstream v0.11.0
+# replaced this with a per-key `open_webui.models.config.Config` async store
+# (`await Config.get('dotted.key')`); we deliberately do NOT adopt it here —
+# it would shadow this `Config` symbol and break all ~2k `app.state.config.X`
+# call sites. See md-docs/upgrade-0.9.6-to-0.11.0.md, Risk #1.
 from open_webui.internal.config import (  # noqa: F401
     ConfigTable as Config,
 )
@@ -364,10 +369,24 @@ OLLAMA_BASE_URLS = OLLAMA_BASE_URLS if OLLAMA_BASE_URLS != '' else OLLAMA_BASE_U
 OLLAMA_BASE_URLS = [url.strip() for url in OLLAMA_BASE_URLS.split(';')]
 OLLAMA_BASE_URLS = ConfigVar('OLLAMA_BASE_URLS', 'ollama.base_urls', OLLAMA_BASE_URLS)
 
+# v0.11.0 added env-var JSON parsing + validation for *_API_CONFIGS; folded
+# into the ConfigVar default so DB persistence still wraps it.
+_ollama_api_configs = {}
+_ollama_api_configs_raw = os.getenv('OLLAMA_API_CONFIGS', '')
+if _ollama_api_configs_raw:
+    try:
+        parsed = json.loads(_ollama_api_configs_raw)
+        if isinstance(parsed, dict):
+            _ollama_api_configs = parsed
+        else:
+            log.warning('OLLAMA_API_CONFIGS must be a JSON object, ignoring')
+    except (json.JSONDecodeError, TypeError):
+        log.warning('OLLAMA_API_CONFIGS is not valid JSON, ignoring')
+
 OLLAMA_API_CONFIGS = ConfigVar(
     'OLLAMA_API_CONFIGS',
     'ollama.api_configs',
-    {},
+    _ollama_api_configs,
 )
 
 ####################################
@@ -409,16 +428,28 @@ OPENAI_API_BASE_URLS = [
 ]
 OPENAI_API_BASE_URLS = ConfigVar('OPENAI_API_BASE_URLS', 'openai.api_base_urls', OPENAI_API_BASE_URLS)
 
+_openai_api_configs = {}
+_openai_api_configs_raw = os.getenv('OPENAI_API_CONFIGS', '')
+if _openai_api_configs_raw:
+    try:
+        parsed = json.loads(_openai_api_configs_raw)
+        if isinstance(parsed, dict):
+            _openai_api_configs = parsed
+        else:
+            log.warning('OPENAI_API_CONFIGS must be a JSON object, ignoring')
+    except (json.JSONDecodeError, TypeError):
+        log.warning('OPENAI_API_CONFIGS is not valid JSON, ignoring')
+
 OPENAI_API_CONFIGS = ConfigVar(
     'OPENAI_API_CONFIGS',
     'openai.api_configs',
-    {},
+    _openai_api_configs,
 )
 
 # Get the actual OpenAI API key based on the base URL
 OPENAI_API_KEY = ''
 try:
-    OPENAI_API_KEY = OPENAI_API_KEYS.value[OPENAI_API_BASE_URLS.value.index('https://api.openai.com/v1')]
+    OPENAI_API_KEY = OPENAI_API_KEYS[OPENAI_API_BASE_URLS.index('https://api.openai.com/v1')]
 except Exception:
     pass
 OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
@@ -452,6 +483,29 @@ TOOL_SERVER_CONNECTIONS = ConfigVar(
     tool_server_connections,
 )
 
+
+####################################
+# EXTERNAL_KNOWLEDGE (v0.11.0)
+# Dynamic list of external vector-DB knowledge connections, managed via the
+# /knowledge/external/connections endpoints. Upstream stored this through its
+# per-key Config store; the fork keeps it as a ConfigVar (Risk #1).
+####################################
+
+try:
+    external_knowledge_connections = json.loads(os.getenv('EXTERNAL_KNOWLEDGE_CONNECTIONS', '[]'))
+except Exception as e:
+    log.exception(f'Error loading EXTERNAL_KNOWLEDGE_CONNECTIONS: {e}')
+    external_knowledge_connections = []
+
+
+EXTERNAL_KNOWLEDGE_CONNECTIONS = ConfigVar(
+    'EXTERNAL_KNOWLEDGE_CONNECTIONS',
+    'external_knowledge.connections',
+    external_knowledge_connections,
+)
+
+# v0.11.0 introduced OAUTH_CLIENT_TIMEOUT here as a plain env read; the fork
+# already exposes it as a ConfigVar, kept below.
 OAUTH_CLIENT_TIMEOUT = ConfigVar(
     'OAUTH_CLIENT_TIMEOUT',
     'oauth.client.timeout',
@@ -739,6 +793,33 @@ USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS = (
     os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS', 'True').lower() == 'true'
 )
 
+# v0.11.0 additions
+USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS = (
+    os.getenv('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS', 'True').lower() == 'true'
+)
+
+USER_PERMISSIONS_FOLDERS_ALLOW_SHARING = (
+    os.getenv('USER_PERMISSIONS_FOLDERS_ALLOW_SHARING', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING = (
+    os.getenv('USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_CHAT_IMPORT = os.getenv('USER_PERMISSIONS_CHAT_IMPORT', 'True').lower() == 'true'
+
+USER_PERMISSIONS_FEATURES_USER_WEBHOOKS = (
+    os.getenv('USER_PERMISSIONS_FEATURES_USER_WEBHOOKS', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT = (
+    os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT', 'False').lower() == 'true'
+)
+
 
 USER_PERMISSIONS_CHAT_CONTROLS = os.getenv('USER_PERMISSIONS_CHAT_CONTROLS', 'True').lower() == 'true'
 
@@ -859,6 +940,8 @@ DEFAULT_USER_PERMISSIONS = {
         'prompts_export': USER_PERMISSIONS_WORKSPACE_PROMPTS_EXPORT,
         'tools_import': USER_PERMISSIONS_WORKSPACE_TOOLS_IMPORT,
         'tools_export': USER_PERMISSIONS_WORKSPACE_TOOLS_EXPORT,
+        'skills_import': USER_PERMISSIONS_WORKSPACE_SKILLS_IMPORT,
+        'skills_export': USER_PERMISSIONS_WORKSPACE_SKILLS_EXPORT,
     },
     'sharing': {
         'models': USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING,
@@ -873,11 +956,14 @@ DEFAULT_USER_PERMISSIONS = {
         'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
         'notes': USER_PERMISSIONS_NOTES_ALLOW_SHARING,
         'public_notes': USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING,
+        'folders': USER_PERMISSIONS_FOLDERS_ALLOW_SHARING,
         'public_chats': USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING,
+        'open_chats': USER_PERMISSIONS_CHAT_ALLOW_OPEN_SHARING,
         'public_calendars': USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING,
     },
     'access_grants': {
         'allow_users': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS,
+        'allow_groups': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_GROUPS,
     },
     'chat': {
         'controls': USER_PERMISSIONS_CHAT_CONTROLS,
@@ -894,6 +980,7 @@ DEFAULT_USER_PERMISSIONS = {
         'edit': USER_PERMISSIONS_CHAT_EDIT,
         'share': USER_PERMISSIONS_CHAT_SHARE,
         'export': USER_PERMISSIONS_CHAT_EXPORT,
+        'import': USER_PERMISSIONS_CHAT_IMPORT,
         'stt': USER_PERMISSIONS_CHAT_STT,
         'tts': USER_PERMISSIONS_CHAT_TTS,
         'call': USER_PERMISSIONS_CHAT_CALL,
@@ -909,6 +996,7 @@ DEFAULT_USER_PERMISSIONS = {
         'folders': USER_PERMISSIONS_FEATURES_FOLDERS,
         'channels': USER_PERMISSIONS_FEATURES_CHANNELS,
         'direct_tool_servers': USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS,
+        'webhooks': USER_PERMISSIONS_FEATURES_USER_WEBHOOKS,
         # Chat features
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
@@ -946,6 +1034,14 @@ ENABLE_CHANNELS = ConfigVar(
     os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true',
 )
 
+# v0.11.0 addition — admin-editable via routers/auths.py (validated against
+# {'thread', 'channel'}).
+CHANNEL_MODEL_RESPONSE_MODE = ConfigVar(
+    'CHANNEL_MODEL_RESPONSE_MODE',
+    'channels.model_response_mode',
+    os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread'),
+)
+
 ENABLE_CALENDAR = ConfigVar(
     'ENABLE_CALENDAR',
     'calendar.enable',
@@ -968,6 +1064,56 @@ AUTOMATION_MIN_INTERVAL = ConfigVar(
     'AUTOMATION_MIN_INTERVAL',
     'automations.min_interval',
     os.getenv('AUTOMATION_MIN_INTERVAL', ''),
+)
+
+# v0.11.0 addition — token-auth expiry for automation runs. Previously read
+# via a direct os.getenv in utils/automations.py (see 2026-08-25 runbook
+# entry); now a proper ConfigVar matching its AUTOMATION_* siblings.
+# FOLLOW-UP: update utils/automations.py to read
+# request.app.state.config.AUTOMATION_AUTH_TOKEN_EXPIRES_IN instead of
+# os.getenv('AUTOMATION_AUTH_TOKEN_EXPIRES_IN', '1h').
+AUTOMATION_AUTH_TOKEN_EXPIRES_IN = ConfigVar(
+    'AUTOMATION_AUTH_TOKEN_EXPIRES_IN',
+    'automations.auth_token_expires_in',
+    os.getenv('AUTOMATION_AUTH_TOKEN_EXPIRES_IN', '1h'),
+)
+
+# v0.11.0 — subagents feature. Admin-editable via routers/configs.py
+# (keys under subagents.*).
+ENABLE_SUBAGENTS = ConfigVar(
+    'ENABLE_SUBAGENTS',
+    'subagents.enable',
+    os.getenv('ENABLE_SUBAGENTS', 'False').lower() == 'true',
+)
+SUBAGENTS_BACKGROUND_ENABLED = ConfigVar(
+    'SUBAGENTS_BACKGROUND_ENABLED',
+    'subagents.background_enabled',
+    os.getenv('SUBAGENTS_BACKGROUND_ENABLED', 'False').lower() == 'true',
+)
+SUBAGENTS_MAX_CONCURRENT = ConfigVar(
+    'SUBAGENTS_MAX_CONCURRENT',
+    'subagents.max_concurrent',
+    int(os.getenv('SUBAGENTS_MAX_CONCURRENT', '20')),
+)
+SUBAGENTS_MAX_ASYNC = ConfigVar(
+    'SUBAGENTS_MAX_ASYNC',
+    'subagents.max_async',
+    int(os.getenv('SUBAGENTS_MAX_ASYNC', '20')),
+)
+SUBAGENTS_MAX_ITERATIONS = ConfigVar(
+    'SUBAGENTS_MAX_ITERATIONS',
+    'subagents.max_iterations',
+    int(os.getenv('SUBAGENTS_MAX_ITERATIONS', '30')),
+)
+SUBAGENTS_MAX_OUTPUT = ConfigVar(
+    'SUBAGENTS_MAX_OUTPUT',
+    'subagents.max_output',
+    int(os.getenv('SUBAGENTS_MAX_OUTPUT', '30000')),
+)
+SUBAGENTS_SYSTEM_PROMPT = ConfigVar(
+    'SUBAGENTS_SYSTEM_PROMPT',
+    'subagents.system_prompt',
+    os.getenv('SUBAGENTS_SYSTEM_PROMPT', ''),
 )
 
 ENABLE_NOTES = ConfigVar(
@@ -1004,6 +1150,15 @@ DEFAULT_ARENA_MODEL = {
 }
 
 WEBHOOK_URL = ConfigVar('WEBHOOK_URL', 'webhook_url', os.getenv('WEBHOOK_URL', ''))
+
+# v0.11.0 event-webhook system (open_webui/events.py). Upstream kept the list in
+# its per-key Config store; the fork keeps it as a ConfigVar (Risk #1).
+try:
+    _event_webhooks_default = json.loads(os.getenv('EVENT_WEBHOOKS', '[]'))
+except Exception as e:
+    log.exception(f'Error loading EVENT_WEBHOOKS: {e}')
+    _event_webhooks_default = []
+EVENT_WEBHOOKS = ConfigVar('EVENT_WEBHOOKS', 'events.webhooks', _event_webhooks_default)
 
 ENABLE_ADMIN_EXPORT = os.getenv('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
@@ -1139,6 +1294,48 @@ TASK_MODEL_EXTERNAL = ConfigVar(
     'TASK_MODEL_EXTERNAL',
     'task.model.external',
     os.getenv('TASK_MODEL_EXTERNAL', ''),
+)
+
+# v0.11.0 — context-compaction feature. Admin-editable via routers/chats.py
+# (keys under chat.context_compaction.*). The default prompt lives in
+# utils/context_compaction.py (DEFAULT_CONTEXT_COMPACTION_PROMPT), used when
+# the template is blank — so no DEFAULT_CONTEXT_COMPACTION_PROMPT_TEMPLATE
+# constant here, matching upstream.
+ENABLE_CONTEXT_COMPACTION = ConfigVar(
+    'ENABLE_CONTEXT_COMPACTION',
+    'chat.context_compaction.enable',
+    os.getenv('ENABLE_CONTEXT_COMPACTION', 'False').lower() == 'true',
+)
+
+CONTEXT_COMPACTION_MODEL = ConfigVar(
+    'CONTEXT_COMPACTION_MODEL',
+    'chat.context_compaction.model',
+    os.getenv('CONTEXT_COMPACTION_MODEL', ''),
+)
+
+CONTEXT_COMPACTION_TOKEN_THRESHOLD = ConfigVar(
+    'CONTEXT_COMPACTION_TOKEN_THRESHOLD',
+    'chat.context_compaction.token_threshold',
+    int(os.getenv('CONTEXT_COMPACTION_TOKEN_THRESHOLD', '80000')),
+)
+
+_context_compaction_token_cap = os.getenv('CONTEXT_COMPACTION_TOKEN_CAP')
+CONTEXT_COMPACTION_TOKEN_CAP = ConfigVar(
+    'CONTEXT_COMPACTION_TOKEN_CAP',
+    'chat.context_compaction.token_cap',
+    int(_context_compaction_token_cap) if _context_compaction_token_cap else None,
+)
+
+CONTEXT_COMPACTION_RETENTION_PERCENTAGE = ConfigVar(
+    'CONTEXT_COMPACTION_RETENTION_PERCENTAGE',
+    'chat.context_compaction.retention_percentage',
+    min(50, max(10, int(os.getenv('CONTEXT_COMPACTION_RETENTION_PERCENTAGE', '40')))),
+)
+
+CONTEXT_COMPACTION_PROMPT_TEMPLATE = ConfigVar(
+    'CONTEXT_COMPACTION_PROMPT_TEMPLATE',
+    'chat.context_compaction.prompt_template',
+    os.getenv('CONTEXT_COMPACTION_PROMPT_TEMPLATE', ''),
 )
 
 TITLE_GENERATION_PROMPT_TEMPLATE = ConfigVar(
@@ -1446,7 +1643,6 @@ Your task is to synthesize these responses into a single, high-quality response.
 
 Responses from models: {{responses}}"""
 
-
 ####################################
 # Code Interpreter
 ####################################
@@ -1505,6 +1701,22 @@ ENABLE_MEMORIES = ConfigVar(
     'memories.enable',
     os.getenv('ENABLE_MEMORIES', 'True').lower() == 'true',
 )
+
+# v0.11.0 memory-system additions. The fork's routers/auths.py ADMIN_CONFIG_KEYS
+# already expects ENABLE_MEMORY_SYSTEM_CONTEXT to be admin-configurable, so it
+# gets a ConfigVar. The background-review knobs below are upstream plumbing for
+# a feature the fork hasn't adopted yet — kept as plain env reads for now (same
+# treatment as AUTOMATION_AUTH_TOKEN_EXPIRES_IN); give them ConfigVars and wire
+# them into auths.py if/when the background-review feature is merged.
+ENABLE_MEMORY_SYSTEM_CONTEXT = ConfigVar(
+    'ENABLE_MEMORY_SYSTEM_CONTEXT',
+    'memories.system_context.enable',
+    os.getenv('ENABLE_MEMORY_SYSTEM_CONTEXT', 'True').lower() == 'true',
+)
+ENABLE_MEMORY_BACKGROUND_REVIEW = os.getenv('ENABLE_MEMORY_BACKGROUND_REVIEW', 'False').lower() == 'true'
+MEMORIES_REVIEW_INTERVAL_TURNS = int(os.getenv('MEMORIES_REVIEW_INTERVAL_TURNS', '10'))
+MEMORIES_USER_CHAR_LIMIT = int(os.getenv('MEMORIES_USER_CHAR_LIMIT', '2000'))
+MEMORIES_CONTEXT_CHAR_LIMIT = int(os.getenv('MEMORIES_CONTEXT_CHAR_LIMIT', '2000'))
 
 CODE_INTERPRETER_ENGINE = ConfigVar(
     'CODE_INTERPRETER_ENGINE',
@@ -1995,6 +2207,24 @@ CONTENT_EXTRACTION_ENGINE = ConfigVar(
     os.getenv('CONTENT_EXTRACTION_ENGINE', '').lower(),
 )
 
+# v0.11.0 addition — parsed list of MIME types the content-extraction engine
+# is allowed to handle for media. routers/retrieval.py already treats this as
+# admin-editable (ADMIN mapping + config assignment), so it gets a ConfigVar.
+_content_extraction_media_mime_types = os.getenv('CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES')
+CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES = ConfigVar(
+    'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES',
+    'rag.content_extraction.supported_media_mime_types',
+    (
+        [
+            mime_type.strip()
+            for mime_type in _content_extraction_media_mime_types.split(',')
+            if mime_type.strip()
+        ]
+        if _content_extraction_media_mime_types is not None
+        else None
+    ),
+)
+
 DATALAB_MARKER_API_KEY = ConfigVar(
     'DATALAB_MARKER_API_KEY',
     'rag.datalab_marker_api_key',
@@ -2115,6 +2345,23 @@ EXTERNAL_DOCUMENT_LOADER_API_KEY = ConfigVar(
     os.getenv('EXTERNAL_DOCUMENT_LOADER_API_KEY', ''),
 )
 
+# v0.11.0 addition — JSON dict of headers forwarded to the external document
+# loader. Consumed by retrieval/loaders/main.py + retrieval/utils.py and
+# admin-editable via routers/retrieval.py, so it gets a ConfigVar.
+_external_document_loader_headers = os.getenv('EXTERNAL_DOCUMENT_LOADER_HEADERS', '')
+try:
+    _external_document_loader_headers = json.loads(_external_document_loader_headers)
+except json.JSONDecodeError:
+    _external_document_loader_headers = {}
+if not isinstance(_external_document_loader_headers, dict):
+    _external_document_loader_headers = {}
+
+EXTERNAL_DOCUMENT_LOADER_HEADERS = ConfigVar(
+    'EXTERNAL_DOCUMENT_LOADER_HEADERS',
+    'rag.external_document_loader_headers',
+    _external_document_loader_headers,
+)
+
 TIKA_SERVER_URL = ConfigVar(
     'TIKA_SERVER_URL',
     'rag.tika_server_url',
@@ -2173,6 +2420,13 @@ MISTRAL_OCR_API_KEY = ConfigVar(
     'MISTRAL_OCR_API_KEY',
     'rag.mistral_ocr_api_key',
     os.getenv('MISTRAL_OCR_API_KEY', ''),
+)
+
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+MISTRAL_OCR_USE_BASE64 = ConfigVar(
+    'MISTRAL_OCR_USE_BASE64',
+    'rag.mistral_ocr_use_base64',
+    os.getenv('MISTRAL_OCR_USE_BASE64', 'False').lower() == 'true',
 )
 
 PADDLEOCR_VL_BASE_URL = ConfigVar(
@@ -2241,6 +2495,10 @@ RAG_FILE_MAX_SIZE = ConfigVar(
     (int(os.getenv('RAG_FILE_MAX_SIZE')) if os.getenv('RAG_FILE_MAX_SIZE') else None),
 )
 
+# v0.11.0 addition — imported as a plain int by models/knowledge.py for a
+# SQL func.substr() cap; a static tuning constant, not admin-editable.
+RAG_FILE_CONTENT_SEARCH_MAX_CHARS = int(os.getenv('RAG_FILE_CONTENT_SEARCH_MAX_CHARS', str(64 * 1024 * 1024)))
+
 FILE_IMAGE_COMPRESSION_WIDTH = ConfigVar(
     'FILE_IMAGE_COMPRESSION_WIDTH',
     'file.image_compression_width',
@@ -2284,6 +2542,13 @@ RAG_EMBEDDING_MODEL = ConfigVar(
     os.getenv('RAG_EMBEDDING_MODEL', 'sentence-transformers/all-MiniLM-L6-v2'),
 )
 log.info(f'Embedding model set: {RAG_EMBEDDING_MODEL.value}')
+
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+RAG_TOKENIZER_MODEL = ConfigVar(
+    'RAG_TOKENIZER_MODEL',
+    'rag.tokenizer_model',
+    os.getenv('RAG_TOKENIZER_MODEL', ''),
+)
 
 RAG_EMBEDDING_MODEL_AUTO_UPDATE = (
     not OFFLINE_MODE and os.getenv('RAG_EMBEDDING_MODEL_AUTO_UPDATE', 'True').lower() == 'true'
@@ -2468,7 +2733,15 @@ RAG_OLLAMA_API_KEY = ConfigVar(
 )
 
 
-ENABLE_RAG_LOCAL_WEB_FETCH = os.getenv('ENABLE_RAG_LOCAL_WEB_FETCH', 'False').lower() == 'true'
+ENABLE_LOCAL_WEB_FETCH = (
+    os.getenv(
+        'ENABLE_LOCAL_WEB_FETCH',
+        os.getenv('ENABLE_RAG_LOCAL_WEB_FETCH', 'False'),
+    ).lower()
+    == 'true'
+)
+# Deprecated compatibility alias; use ENABLE_LOCAL_WEB_FETCH for new deployments.
+ENABLE_RAG_LOCAL_WEB_FETCH = ENABLE_LOCAL_WEB_FETCH
 
 
 DEFAULT_WEB_FETCH_FILTER_LIST = [
@@ -2502,13 +2775,30 @@ YOUTUBE_LOADER_PROXY_URL = ConfigVar(
 
 
 ####################################
-# Web Search (RAG)
+# Web Search
 ####################################
 
 ENABLE_WEB_SEARCH = ConfigVar(
     'ENABLE_WEB_SEARCH',
     'rag.web.search.enable',
     os.getenv('ENABLE_WEB_SEARCH', 'False').lower() == 'true',
+)
+
+# v0.11.0 additions — web-search confirmation prompt. Admin-editable via
+# routers/retrieval.py (keys under web.search.confirmation.*).
+ENABLE_WEB_SEARCH_CONFIRMATION = ConfigVar(
+    'ENABLE_WEB_SEARCH_CONFIRMATION',
+    'web.search.confirmation.enable',
+    os.getenv('ENABLE_WEB_SEARCH_CONFIRMATION', 'False').lower() == 'true',
+)
+
+WEB_SEARCH_CONFIRMATION_CONTENT = ConfigVar(
+    'WEB_SEARCH_CONFIRMATION_CONTENT',
+    'web.search.confirmation.content',
+    os.getenv(
+        'WEB_SEARCH_CONFIRMATION_CONTENT',
+        'Your query will be sent to the configured web search provider.',
+    ),
 )
 
 WEB_SEARCH_ENGINE = ConfigVar(
@@ -2612,6 +2902,13 @@ SEARXNG_QUERY_URL = ConfigVar(
     os.getenv('SEARXNG_QUERY_URL', ''),
 )
 
+# v0.11.0 addition — admin-editable via routers/retrieval.py.
+OPENSERP_BASE_URL = ConfigVar(
+    'OPENSERP_BASE_URL',
+    'rag.web.search.openserp_base_url',
+    os.getenv('OPENSERP_BASE_URL', 'http://localhost:7000'),
+)
+
 SEARXNG_LANGUAGE = ConfigVar(
     'SEARXNG_LANGUAGE',
     'rag.web.search.searxng_language',
@@ -2700,6 +2997,19 @@ SERPLY_API_KEY = ConfigVar(
     'SERPLY_API_KEY',
     'rag.web.search.serply_api_key',
     os.getenv('SERPLY_API_KEY', ''),
+)
+
+# v0.11.0 additions — admin-editable via routers/retrieval.py.
+SERPHOUSE_API_KEY = ConfigVar(
+    'SERPHOUSE_API_KEY',
+    'rag.web.search.serphouse_api_key',
+    os.getenv('SERPHOUSE_API_KEY', ''),
+)
+
+SERPHOUSE_DOMAIN = ConfigVar(
+    'SERPHOUSE_DOMAIN',
+    'rag.web.search.serphouse_domain',
+    os.getenv('SERPHOUSE_DOMAIN', 'google.com'),
 )
 
 DDGS_BACKEND = ConfigVar(
@@ -2802,6 +3112,26 @@ PERPLEXITY_SEARCH_API_URL = ConfigVar(
     'PERPLEXITY_SEARCH_API_URL',
     'rag.web.search.perplexity_search_api_url',
     os.getenv('PERPLEXITY_SEARCH_API_URL', 'https://api.perplexity.ai/search'),
+)
+
+# v0.11.0 additions — Microsoft Web IQ search provider; admin-editable via
+# routers/retrieval.py.
+MICROSOFT_WEB_IQ_API_BASE_URL = ConfigVar(
+    'MICROSOFT_WEB_IQ_API_BASE_URL',
+    'rag.web.search.microsoft_web_iq_api_base_url',
+    os.getenv('MICROSOFT_WEB_IQ_API_BASE_URL', 'https://api.microsoft.ai/v3'),
+)
+
+MICROSOFT_WEB_IQ_API_KEY = ConfigVar(
+    'MICROSOFT_WEB_IQ_API_KEY',
+    'rag.web.search.microsoft_web_iq_api_key',
+    os.getenv('MICROSOFT_WEB_IQ_API_KEY', ''),
+)
+
+MICROSOFT_WEB_IQ_LANGUAGE = ConfigVar(
+    'MICROSOFT_WEB_IQ_LANGUAGE',
+    'rag.web.search.microsoft_web_iq_language',
+    os.getenv('MICROSOFT_WEB_IQ_LANGUAGE', 'en'),
 )
 
 SOUGOU_API_SID = ConfigVar(
@@ -3170,6 +3500,12 @@ IMAGES_GEMINI_ENDPOINT_METHOD = ConfigVar(
     os.getenv('IMAGES_GEMINI_ENDPOINT_METHOD', ''),
 )
 
+# v0.11.0 addition — imported as a plain bool by routers/images.py alongside
+# IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN etc.; not admin-editable.
+ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION = (
+    os.getenv('ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION', 'true').lower() == 'true'
+)
+
 ENABLE_IMAGE_EDIT = ConfigVar(
     'ENABLE_IMAGE_EDIT',
     'images.edit.enable',
@@ -3289,6 +3625,13 @@ AUDIO_STT_OPENAI_API_KEY = ConfigVar(
     'AUDIO_STT_OPENAI_API_KEY',
     'audio.stt.openai.api_key',
     os.getenv('AUDIO_STT_OPENAI_API_KEY', OPENAI_API_KEY),
+)
+
+# v0.11.0 addition — admin-editable via routers/audio.py.
+AUDIO_STT_OPENAI_API_REQUEST_FORMAT = ConfigVar(
+    'AUDIO_STT_OPENAI_API_REQUEST_FORMAT',
+    'audio.stt.openai.api_request_format',
+    os.getenv('AUDIO_STT_OPENAI_API_REQUEST_FORMAT', 'multipart'),
 )
 
 AUDIO_STT_ENGINE = ConfigVar(
@@ -3496,6 +3839,15 @@ if JWT_EXPIRES_IN.value == '-1':
 ####################################
 # OAuth config
 ####################################
+
+# v0.11.0 addition — master switch for OAuth/OIDC sign-in. Defaults enabled so
+# existing deployments with a provider configured keep working; admins can turn
+# it off without clearing provider settings. Admin-editable via routers/auths.py.
+ENABLE_OAUTH = ConfigVar(
+    'ENABLE_OAUTH',
+    'oauth.enable',
+    os.getenv('ENABLE_OAUTH', 'True').lower() == 'true',
+)
 
 ENABLE_OAUTH_SIGNUP = ConfigVar(
     'ENABLE_OAUTH_SIGNUP',
@@ -3852,6 +4204,30 @@ if _oauth_authorize_params:
         log.warning('OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
 
+# v0.11.0 added this helper to centralise scope + timeout + PKCE
+# (code_challenge_method) across all providers. Adapted to the fork's
+# ConfigVar layer — reads `.value` off OAUTH_TIMEOUT / OAUTH_CODE_CHALLENGE_METHOD.
+def oauth_client_kwargs(scope, **kwargs):
+    scope_value = scope.value if hasattr(scope, 'value') else scope
+    timeout = OAUTH_TIMEOUT.value
+    code_challenge_method = OAUTH_CODE_CHALLENGE_METHOD.value
+
+    client_kwargs = {
+        'scope': scope_value,
+        **kwargs,
+        **({'timeout': int(timeout)} if timeout else {}),
+    }
+
+    if code_challenge_method == 'S256':
+        client_kwargs['code_challenge_method'] = 'S256'
+    elif code_challenge_method:
+        raise Exception(
+            'Code challenge methods other than "%s" not supported. Given: "%s"' % ('S256', code_challenge_method)
+        )
+
+    return client_kwargs
+
+
 def load_oauth_providers():
     OAUTH_PROVIDERS.clear()
     if GOOGLE_CLIENT_ID.value and GOOGLE_CLIENT_SECRET.value:
@@ -3862,10 +4238,7 @@ def load_oauth_providers():
                 client_id=GOOGLE_CLIENT_ID.value,
                 client_secret=GOOGLE_CLIENT_SECRET.value,
                 server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-                client_kwargs={
-                    'scope': GOOGLE_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(GOOGLE_OAUTH_SCOPE.value),
                 redirect_uri=GOOGLE_REDIRECT_URI.value,
                 **({'authorize_params': GOOGLE_OAUTH_AUTHORIZE_PARAMS} if GOOGLE_OAUTH_AUTHORIZE_PARAMS else {}),
             )
@@ -3883,10 +4256,7 @@ def load_oauth_providers():
                 client_id=MICROSOFT_CLIENT_ID.value,
                 client_secret=MICROSOFT_CLIENT_SECRET.value,
                 server_metadata_url=f'{MICROSOFT_CLIENT_LOGIN_BASE_URL.value}/{MICROSOFT_CLIENT_TENANT_ID.value}/v2.0/.well-known/openid-configuration?appid={MICROSOFT_CLIENT_ID.value}',
-                client_kwargs={
-                    'scope': MICROSOFT_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(MICROSOFT_OAUTH_SCOPE.value),
                 redirect_uri=MICROSOFT_REDIRECT_URI.value,
             )
             return client
@@ -3907,10 +4277,7 @@ def load_oauth_providers():
                 authorize_url='https://github.com/login/oauth/authorize',
                 api_base_url='https://api.github.com',
                 userinfo_endpoint='https://api.github.com/user',
-                client_kwargs={
-                    'scope': GITHUB_CLIENT_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(GITHUB_CLIENT_SCOPE.value),
                 redirect_uri=GITHUB_CLIENT_REDIRECT_URI.value,
             )
             return client
@@ -3927,30 +4294,19 @@ def load_oauth_providers():
     ):
 
         def oidc_oauth_register(oauth: OAuth):
-            client_kwargs = {
-                'scope': OAUTH_SCOPES.value,
-                **(
-                    {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
-                    if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
-                    else {}
-                ),
-                **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-            }
-
-            if OAUTH_CODE_CHALLENGE_METHOD.value and OAUTH_CODE_CHALLENGE_METHOD.value == 'S256':
-                client_kwargs['code_challenge_method'] = 'S256'
-            elif OAUTH_CODE_CHALLENGE_METHOD.value:
-                raise Exception(
-                    'Code challenge methods other than "%s" not supported. Given: "%s"'
-                    % ('S256', OAUTH_CODE_CHALLENGE_METHOD.value)
-                )
-
             client = oauth.register(
                 name='oidc',
                 client_id=OAUTH_CLIENT_ID.value,
                 client_secret=OAUTH_CLIENT_SECRET.value,
                 server_metadata_url=OPENID_PROVIDER_URL.value,
-                client_kwargs=client_kwargs,
+                client_kwargs=oauth_client_kwargs(
+                    OAUTH_SCOPES.value,
+                    **(
+                        {'token_endpoint_auth_method': OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value}
+                        if OAUTH_TOKEN_ENDPOINT_AUTH_METHOD.value
+                        else {}
+                    ),
+                ),
                 redirect_uri=OPENID_REDIRECT_URI.value,
             )
             return client
@@ -3971,10 +4327,7 @@ def load_oauth_providers():
                 authorize_url='https://accounts.feishu.cn/open-apis/authen/v1/authorize',
                 api_base_url='https://open.feishu.cn/open-apis',
                 userinfo_endpoint='https://open.feishu.cn/open-apis/authen/v1/user_info',
-                client_kwargs={
-                    'scope': FEISHU_OAUTH_SCOPE.value,
-                    **({'timeout': int(OAUTH_TIMEOUT.value)} if OAUTH_TIMEOUT.value else {}),
-                },
+                client_kwargs=oauth_client_kwargs(FEISHU_OAUTH_SCOPE.value),
                 redirect_uri=FEISHU_REDIRECT_URI.value,
             )
             return client

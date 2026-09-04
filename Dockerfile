@@ -131,7 +131,7 @@ RUN chown -R $UID:$GID /app $HOME
 # Install common system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    git build-essential pandoc gcc netcat-openbsd curl jq \
+    git build-essential pandoc gcc netcat-openbsd curl jq ca-certificates \
     libmariadb-dev \
     python3-dev \
     ffmpeg libsm6 libxext6 zstd \
@@ -192,6 +192,17 @@ COPY --chown=$UID:$GID ./backend .
 
 # copy provider logos from static to backend static directory
 COPY --chown=$UID:$GID --from=build /app/static/providers /app/backend/open_webui/static/providers
+
+# The backend rewrites its bundled static assets (favicons, splash, manifest,
+# loader.js, ...) under open_webui/static at startup. Make that directory
+# writable by an arbitrary UID -- which under OpenShift's restricted SCC is
+# always a member of GID 0 -- so those writes don't fail with EACCES and crash
+# the boot log with "[Errno 13] Permission denied". `chmod -R g=u` mirrors the
+# owner bits onto the group (the Red Hat arbitrary-UID idiom). This is applied
+# unconditionally because it targets a directory the app writes on every start;
+# the broader, opt-in USE_PERMISSION_HARDENING below covers the rest of /app.
+RUN chgrp -R 0 /app/backend/open_webui/static && \
+    chmod -R g=u /app/backend/open_webui/static
 
 EXPOSE 8080
 

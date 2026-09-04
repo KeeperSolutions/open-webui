@@ -10,6 +10,7 @@ import time
 from typing import Optional
 from urllib.parse import quote, urlparse
 
+import aiofiles
 import aiohttp
 from aiocache import cached
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -24,11 +25,10 @@ from open_webui.config import (
     CACHE_DIR,
 )
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event, publish_model_provider_request_failed
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
-    AIOHTTP_CLIENT_TIMEOUT,
     AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST,
-    AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     BYPASS_MODEL_ACCESS_CONTROL,
     ENABLE_FORWARD_USER_INFO_HEADERS,
     ENABLE_OPENAI_API_PASSTHROUGH,
@@ -44,10 +44,12 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.routers.billing import check_billing_access
-from open_webui.utils.access_control import check_model_access, has_connection_access
+from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
 from open_webui.utils.anthropic import get_anthropic_models, is_anthropic_url
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
+from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.model_ids import strip_provider_model_prefix
 from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
     stream_chunks_handler,
@@ -58,6 +60,7 @@ from open_webui.utils.payload import (
 )
 from open_webui.utils.session_pool import (
     cleanup_response,
+    get_client_timeout,
     get_session,
     stream_wrapper,
 )
@@ -119,6 +122,8 @@ def _llm_retry_backoff_seconds(attempt: int) -> float:
 # clients to attempt decompression of an already-decoded payload, resulting
 # in ZlibError.  See https://github.com/aio-libs/aiohttp/issues/4462.
 _STRIP_PROXY_HEADERS = frozenset({'Content-Encoding', 'Content-Length', 'Transfer-Encoding'})
+_MODEL_LIST_TIMEOUT = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
+_UNSUPPORTED_OPENAI_MODEL_KEYWORDS = ('babbage', 'dall-e', 'davinci', 'embedding', 'tts', 'whisper')
 
 
 def _clean_proxy_headers(raw_headers) -> dict:
@@ -133,9 +138,8 @@ async def send_get_request(
     user: UserModel = None,
     config=None,
 ):
-    timeout = aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST)
     try:
-        async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
+        async with aiohttp.ClientSession(timeout=_MODEL_LIST_TIMEOUT, trust_env=True) as session:
             if request and config:
                 headers, cookies = await get_headers_and_cookies(request, url, key, config, user=user)
             else:
@@ -153,7 +157,7 @@ async def send_get_request(
                 cookies=cookies,
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as response:
-                return await response.json()
+                return await response.json(loads=JSONCodec.loads)
     except Exception as e:
         # Handle connection error here
         log.error(f'Connection error: {e}')
@@ -253,7 +257,7 @@ async def get_headers_and_cookies(
         headers['Authorization'] = f'Bearer {token}'
 
     if config.get('headers') and isinstance(config.get('headers'), dict):
-        custom_headers = get_custom_headers(config.get('headers'), user, metadata)
+        custom_headers = await get_custom_headers(config.get('headers'), user, metadata, request=request)
         headers.update(custom_headers)
 
     return headers, cookies
@@ -282,15 +286,176 @@ def get_microsoft_entra_id_access_token():
 
 router = APIRouter()
 
+LLAMACPP_LOADED_STATES = {'loaded', 'sleeping'}
+LLAMACPP_UNLOADED_STATES = {'loading', 'unloaded'}
+
+
+def get_llamacpp_model_loaded_state(model: dict, provider: str, manual_model_ids: bool = False) -> bool | None:
+    if provider != 'llama.cpp':
+        return None
+
+    status = model.get('status')
+    if isinstance(status, dict):
+        value = status.get('value')
+        if value in LLAMACPP_LOADED_STATES:
+            return True
+        if value in LLAMACPP_UNLOADED_STATES:
+            return False
+
+    if not manual_model_ids and 'status' not in model:
+        return True
+
+    return None
+
+
+# The fork keeps its ConfigVar/AppConfig backbone (Risk #1). Upstream's
+# versions of these helpers used `await Config.get_many()` / `Config.upsert()`;
+# they have no `request` to reach `app.state.config`, so — matching the
+# module-level-`ConfigVar`-import convention already used elsewhere in this
+# file — they read/write the live ConfigVars directly (`.value` reflects the
+# latest DB/env value; assignment + `commit()` persists).
+
+
+async def get_openai_config() -> dict:
+    from open_webui.config import (
+        ENABLE_OPENAI_API,
+        OPENAI_API_BASE_URLS,
+        OPENAI_API_CONFIGS,
+        OPENAI_API_KEYS,
+    )
+
+    return {
+        'ENABLE_OPENAI_API': ENABLE_OPENAI_API.value,
+        'OPENAI_API_BASE_URLS': OPENAI_API_BASE_URLS.value,
+        'OPENAI_API_KEYS': OPENAI_API_KEYS.value,
+        'OPENAI_API_CONFIGS': OPENAI_API_CONFIGS.value,
+    }
+
+
+async def get_openai_runtime_config() -> tuple[bool, list[str], list[str], dict]:
+    from open_webui.config import (
+        ENABLE_OPENAI_API,
+        OPENAI_API_BASE_URLS,
+        OPENAI_API_CONFIGS,
+        OPENAI_API_KEYS,
+    )
+
+    return (
+        ENABLE_OPENAI_API.value,
+        OPENAI_API_BASE_URLS.value or [],
+        OPENAI_API_KEYS.value or [],
+        OPENAI_API_CONFIGS.value or {},
+    )
+
+
+async def normalize_openai_api_keys(api_base_urls: list[str], api_keys: list[str]) -> list[str]:
+    if len(api_keys) > len(api_base_urls):
+        api_keys = api_keys[: len(api_base_urls)]
+    elif len(api_keys) < len(api_base_urls):
+        api_keys = [*api_keys, *([''] * (len(api_base_urls) - len(api_keys)))]
+
+    from open_webui.config import OPENAI_API_KEYS
+
+    OPENAI_API_KEYS.value = api_keys
+    OPENAI_API_KEYS.commit()
+    return api_keys
+
+
+async def get_openai_connection(idx: int) -> tuple[str, str, dict]:
+    _, api_base_urls, api_keys, api_configs = await get_openai_runtime_config()
+    url = api_base_urls[idx]
+    key = api_keys[idx]
+    api_config = api_configs.get(str(idx), api_configs.get(url, {}))
+    return url, key, api_config
+
+
+async def get_anthropic_token_count_target(request: Request, form_data: dict, user: UserModel):
+    """Resolve the upstream LiteLLM connection for an Anthropic token-count request."""
+    requested_model = form_data.get('model')
+    if not requested_model:
+        raise HTTPException(status_code=400, detail='model is required')
+
+    payload = {**form_data}
+    model_id = requested_model
+    model_info = await Models.get_model_by_id(model_id)
+    await check_model_access(user, model_info, BYPASS_MODEL_ACCESS_CONTROL)
+
+    if model_info and model_info.base_model_id:
+        model_id = model_info.base_model_id
+        payload['model'] = model_id
+
+    models = request.app.state.OPENAI_MODELS
+    if not models or model_id not in models:
+        await get_all_models(request, user=user)
+        models = request.app.state.OPENAI_MODELS
+
+    model = models.get(model_id)
+    if not model or 'urlIdx' not in model:
+        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.MODEL_NOT_FOUND())
+
+    url, key, api_config = await get_openai_connection(model['urlIdx'])
+    prefix_id = api_config.get('prefix_id')
+    payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
+
+    headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
+    return requested_model, payload, url, key, headers, cookies
+
+
+async def count_anthropic_tokens(request: Request, form_data: dict, user: UserModel) -> int:
+    """Forward an Anthropic token-count request through an OpenAI-compatible connection."""
+    requested_model, payload, url, key, headers, cookies = await get_anthropic_token_count_target(
+        request, form_data, user
+    )
+    request_url = f'{url.rstrip("/")}/messages/count_tokens'
+    response = None
+
+    try:
+        session = await get_session()
+        response = await session.request(
+            method='POST',
+            url=request_url,
+            data=json.dumps(payload),
+            headers=headers,
+            cookies=cookies,
+            ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            timeout=get_client_timeout(),
+        )
+
+        try:
+            response_data = await response.json(loads=JSONCodec.loads)
+        except Exception:
+            response_data = await response.text()
+
+        if response.status >= 400:
+            await publish_model_provider_request_failed(
+                request,
+                actor=user,
+                provider='openai-compatible',
+                base_url=url,
+                api_key=key,
+                status=response.status,
+                requested_model=requested_model,
+                upstream_error=response_data,
+            )
+            raise HTTPException(status_code=response.status, detail=response_data)
+
+        input_tokens = response_data.get('input_tokens') if isinstance(response_data, dict) else None
+        if isinstance(input_tokens, bool) or not isinstance(input_tokens, int) or input_tokens < 0:
+            raise HTTPException(status_code=502, detail='Invalid token-count response from upstream provider')
+
+        return input_tokens
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception('Failed to count Anthropic tokens for model %s', requested_model)
+        raise HTTPException(status_code=502, detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR)
+    finally:
+        await cleanup_response(response)
+
 
 @router.get('/config')
 async def get_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'ENABLE_OPENAI_API': request.app.state.config.ENABLE_OPENAI_API,
-        'OPENAI_API_BASE_URLS': request.app.state.config.OPENAI_API_BASE_URLS,
-        'OPENAI_API_KEYS': request.app.state.config.OPENAI_API_KEYS,
-        'OPENAI_API_CONFIGS': request.app.state.config.OPENAI_API_CONFIGS,
-    }
+    return await get_openai_config()
 
 
 class OpenAIConfigForm(BaseModel):
@@ -302,58 +467,76 @@ class OpenAIConfigForm(BaseModel):
 
 @router.post('/config/update')
 async def update_config(request: Request, form_data: OpenAIConfigForm, user=Depends(get_admin_user)):
-    request.app.state.config.ENABLE_OPENAI_API = form_data.ENABLE_OPENAI_API
-
     # Warn when a non-empty stored key is about to be replaced with a blank one.
-    # This helps diagnose intermittent connection loss.
+    # This helps diagnose intermittent connection loss. (fork diagnostic)
     existing_urls: list[str] = list(request.app.state.config.OPENAI_API_BASE_URLS)
     existing_keys: list[str] = list(request.app.state.config.OPENAI_API_KEYS)
     existing_key_by_url = dict(zip(existing_urls, existing_keys))
-    for idx, (url, new_key) in enumerate(
-        zip(form_data.OPENAI_API_BASE_URLS, form_data.OPENAI_API_KEYS)
-    ):
-        old_key = existing_key_by_url.get(url, "")
+    for idx, (url, new_key) in enumerate(zip(form_data.OPENAI_API_BASE_URLS, form_data.OPENAI_API_KEYS)):
+        old_key = existing_key_by_url.get(url, '')
         if old_key and not new_key:
             log.warning(
-                f"[openai] update_config: key for URL[{idx}] is being "
-                f"cleared (was non-empty). Caller: user={user.id}"
+                f'[openai] update_config: key for URL[{idx}] is being '
+                f'cleared (was non-empty). Caller: user={user.id}'
             )
 
+    api_keys = form_data.OPENAI_API_KEYS
+
+    if len(api_keys) > len(form_data.OPENAI_API_BASE_URLS):
+        api_keys = api_keys[: len(form_data.OPENAI_API_BASE_URLS)]
+    elif len(api_keys) < len(form_data.OPENAI_API_BASE_URLS):
+        api_keys = [*api_keys, *([''] * (len(form_data.OPENAI_API_BASE_URLS) - len(api_keys)))]
+
+    valid_keys = set(map(str, range(len(form_data.OPENAI_API_BASE_URLS))))
+    api_configs = {key: value for key, value in form_data.OPENAI_API_CONFIGS.items() if key in valid_keys}
+
+    request.app.state.config.ENABLE_OPENAI_API = form_data.ENABLE_OPENAI_API
     request.app.state.config.OPENAI_API_BASE_URLS = form_data.OPENAI_API_BASE_URLS
-    request.app.state.config.OPENAI_API_KEYS = form_data.OPENAI_API_KEYS
+    request.app.state.config.OPENAI_API_KEYS = api_keys
+    request.app.state.config.OPENAI_API_CONFIGS = api_configs
 
-    # Check if API KEYS length is same than API URLS length
-    if len(request.app.state.config.OPENAI_API_KEYS) != len(request.app.state.config.OPENAI_API_BASE_URLS):
-        if len(request.app.state.config.OPENAI_API_KEYS) > len(request.app.state.config.OPENAI_API_BASE_URLS):
-            request.app.state.config.OPENAI_API_KEYS = request.app.state.config.OPENAI_API_KEYS[
-                : len(request.app.state.config.OPENAI_API_BASE_URLS)
-            ]
-        else:
-            request.app.state.config.OPENAI_API_KEYS += [''] * (
-                len(request.app.state.config.OPENAI_API_BASE_URLS) - len(request.app.state.config.OPENAI_API_KEYS)
-            )
+    await get_all_models.cache.clear()
+    request.app.state.BASE_MODELS = []
+    request.app.state.OPENAI_MODELS = {}
+    models = getattr(request.app.state, 'MODELS', None)
+    if hasattr(models, 'clear'):
+        models.clear()
+    else:
+        request.app.state.MODELS = {}
 
-    request.app.state.config.OPENAI_API_CONFIGS = form_data.OPENAI_API_CONFIGS
-
-    # Remove the API configs that are not in the API URLS
-    keys = list(map(str, range(len(request.app.state.config.OPENAI_API_BASE_URLS))))
-    request.app.state.config.OPENAI_API_CONFIGS = {
-        key: value for key, value in request.app.state.config.OPENAI_API_CONFIGS.items() if key in keys
-    }
+    await publish_event(
+        request,
+        EVENTS.MODEL_PROVIDER_CONFIG_UPDATED,
+        actor=user,
+        subject_id='openai',
+        subject_type='model.provider_config',
+        data={
+            'provider': 'openai',
+            'enabled': form_data.ENABLE_OPENAI_API,
+            'base_url_count': len(form_data.OPENAI_API_BASE_URLS),
+        },
+    )
 
     return {
-        'ENABLE_OPENAI_API': request.app.state.config.ENABLE_OPENAI_API,
-        'OPENAI_API_BASE_URLS': request.app.state.config.OPENAI_API_BASE_URLS,
-        'OPENAI_API_KEYS': request.app.state.config.OPENAI_API_KEYS,
-        'OPENAI_API_CONFIGS': request.app.state.config.OPENAI_API_CONFIGS,
+        'ENABLE_OPENAI_API': form_data.ENABLE_OPENAI_API,
+        'OPENAI_API_BASE_URLS': form_data.OPENAI_API_BASE_URLS,
+        'OPENAI_API_KEYS': api_keys,
+        'OPENAI_API_CONFIGS': api_configs,
     }
 
 
 @router.post('/audio/speech')
 async def speech(request: Request, user=Depends(get_verified_user)):
+    if user.role != 'admin' and not await has_permission(user.id, 'chat.tts', request.app.state.config.USER_PERMISSIONS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     idx = None
     try:
-        idx = request.app.state.config.OPENAI_API_BASE_URLS.index('https://api.openai.com/v1')
+        _, api_base_urls, _, _ = await get_openai_runtime_config()
+        idx = api_base_urls.index('https://api.openai.com/v1')
 
         body = await request.body()
         name = hashlib.sha256(body).hexdigest()
@@ -367,12 +550,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         if file_path.is_file():
             return FileResponse(file_path)
 
-        url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-        key = request.app.state.config.OPENAI_API_KEYS[idx]
-        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-            str(idx),
-            request.app.state.config.OPENAI_API_CONFIGS.get(url, {}),  # Legacy support
-        )
+        url, key, api_config = await get_openai_connection(idx)
 
         headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
 
@@ -389,13 +567,12 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
             r.raise_for_status()
 
-            # Save the streaming content to a file
-            with open(file_path, 'wb') as f:
+            async with aiofiles.open(file_path, 'wb') as f:
                 async for chunk in r.content.iter_chunked(8192):
-                    f.write(chunk)
+                    await f.write(chunk)
 
-            with open(file_body_path, 'w') as f:
-                json.dump(json.loads(body.decode('utf-8')), f)
+            async with aiofiles.open(file_body_path, 'w') as f:
+                await f.write(json.dumps(json.loads(body.decode('utf-8'))))
 
             # Return the saved file
             return FileResponse(file_path)
@@ -406,7 +583,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             detail = None
             if r is not None:
                 try:
-                    res = await r.json()
+                    res = await r.json(loads=JSONCodec.loads)
                     if 'error' in res:
                         detail = f'External: {res["error"]}'
                 except Exception:
@@ -422,29 +599,15 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
 
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
-    if not request.app.state.config.ENABLE_OPENAI_API:
+    enable_openai_api, api_base_urls, api_keys, api_configs = await get_openai_runtime_config()
+    if not enable_openai_api:
         return []
 
-    # Cache config values locally to avoid repeated Redis lookups.
-    # Each access to request.app.state.config.<KEY> triggers a Redis GET;
-    # caching here avoids hundreds of redundant round-trips.
-    api_base_urls = request.app.state.config.OPENAI_API_BASE_URLS
-    api_keys = list(request.app.state.config.OPENAI_API_KEYS)
-    api_configs = request.app.state.config.OPENAI_API_CONFIGS
-
-    # Check if API KEYS length is same than API URLS length
     num_urls = len(api_base_urls)
     num_keys = len(api_keys)
 
     if num_keys != num_urls:
-        # if there are more keys than urls, remove the extra keys
-        if num_keys > num_urls:
-            api_keys = api_keys[:num_urls]
-            request.app.state.config.OPENAI_API_KEYS = api_keys
-        # if there are more urls than keys, add empty keys
-        else:
-            api_keys += [''] * (num_urls - num_keys)
-            request.app.state.config.OPENAI_API_KEYS = api_keys
+        api_keys = await normalize_openai_api_keys(api_base_urls, api_keys)
 
     request_tasks = []
     for idx, url in enumerate(api_base_urls):
@@ -549,17 +712,17 @@ async def get_filtered_models(models, user, db=None):
 
 @cached(
     ttl=MODELS_CACHE_TTL,
-    key=lambda _, user: f'openai_all_models_{user.id}' if user else 'openai_all_models',
+    # key_builder (not key) is the per-call hook in aiocache 0.12; `key=` is a
+    # static key, so a `key=lambda` collapsed every caller to one shared entry.
+    key_builder=lambda _func, request, user=None: f'openai_all_models_{user.id}' if user else 'openai_all_models',
 )
 async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
     log.info('get_all_models()')
 
-    if not request.app.state.config.ENABLE_OPENAI_API:
+    enable_openai_api, api_base_urls, _, api_configs = await get_openai_runtime_config()
+    if not enable_openai_api:
+        request.app.state.OPENAI_MODELS = {}
         return {'data': []}
-
-    # Cache config value locally to avoid repeated Redis lookups inside
-    # the nested loop in get_merged_models (one GET per model otherwise).
-    api_base_urls = request.app.state.config.OPENAI_API_BASE_URLS
 
     responses = await get_all_models_responses(request, user=user)
 
@@ -571,19 +734,7 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
         return None
 
     def is_supported_openai_models(model_id):
-        if any(
-            name in model_id
-            for name in [
-                'babbage',
-                'dall-e',
-                'davinci',
-                'embedding',
-                'tts',
-                'whisper',
-            ]
-        ):
-            return False
-        return True
+        return not any(name in model_id for name in _UNSUPPORTED_OPENAI_MODEL_KEYWORDS)
 
     def get_merged_models(model_lists):
         log.debug(f'merge_models_lists {model_lists}')
@@ -591,31 +742,36 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
 
         for idx, model_list in enumerate(model_lists):
             if model_list is not None and 'error' not in model_list:
+                base_url = api_base_urls[idx]
+                hostname = urlparse(base_url).hostname if base_url else None
+                api_config = api_configs.get(str(idx), api_configs.get(base_url, {}))
+
                 for model in model_list:
                     model_id = model.get('id') or model.get('name')
 
-                    base_url = api_base_urls[idx]
-                    hostname = urlparse(base_url).hostname if base_url else None
                     if hostname == 'api.openai.com' and not is_supported_openai_models(model_id):
                         # Skip unwanted OpenAI models
                         continue
 
                     if model_id and model_id not in models:
+                        provider = model.get('provider', '')
                         merged = {
                             **model,
                             'name': model.get('name', model_id),
                             'owned_by': 'openai',
                             'openai': model,
                             'connection_type': model.get('connection_type', 'external'),
-                            'provider': model.get('provider', ''),
+                            'provider': provider,
                             'urlIdx': idx,
                         }
 
-                        # llama.cpp router mode: derive loaded state from
-                        # the status object returned by GET /v1/models.
-                        status = model.get('status')
-                        if isinstance(status, dict) and 'value' in status:
-                            merged['loaded'] = status['value'] in ('loaded', 'sleeping')
+                        loaded = get_llamacpp_model_loaded_state(
+                            model,
+                            provider,
+                            manual_model_ids=bool(api_config.get('model_ids')),
+                        )
+                        if loaded is not None:
+                            merged['loaded'] = loaded
 
                         models[model_id] = merged
 
@@ -641,18 +797,12 @@ async def get_models(request: Request, url_idx: int | None = None, user=Depends(
     if url_idx is None:
         models = await get_all_models(request, user=user)
     else:
-        url = request.app.state.config.OPENAI_API_BASE_URLS[url_idx]
-        key = request.app.state.config.OPENAI_API_KEYS[url_idx]
-
-        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-            str(url_idx),
-            request.app.state.config.OPENAI_API_CONFIGS.get(url, {}),  # Legacy support
-        )
+        url, key, api_config = await get_openai_connection(url_idx)
 
         r = None
         async with aiohttp.ClientSession(
             trust_env=True,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST),
+            timeout=_MODEL_LIST_TIMEOUT,
         ) as session:
             try:
                 headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
@@ -676,30 +826,20 @@ async def get_models(request: Request, url_idx: int | None = None, user=Depends(
                         if r.status != 200:
                             error_detail = f'HTTP Error: {r.status}'
                             try:
-                                res = await r.json()
+                                res = await r.json(loads=JSONCodec.loads)
                                 if 'error' in res:
                                     error_detail = f'External Error: {res["error"]}'
                             except Exception:
                                 pass
                             raise Exception(error_detail)
 
-                        response_data = await r.json()
+                        response_data = await r.json(loads=JSONCodec.loads)
 
                         if 'api.openai.com' in url:
                             response_data['data'] = [
                                 model
                                 for model in response_data.get('data', [])
-                                if not any(
-                                    name in model['id']
-                                    for name in [
-                                        'babbage',
-                                        'dall-e',
-                                        'davinci',
-                                        'embedding',
-                                        'tts',
-                                        'whisper',
-                                    ]
-                                )
+                                if not any(name in model['id'] for name in _UNSUPPORTED_OPENAI_MODEL_KEYWORDS)
                             ]
 
                         models = response_data
@@ -738,7 +878,7 @@ async def verify_connection(
 
     async with aiohttp.ClientSession(
         trust_env=True,
-        timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST),
+        timeout=_MODEL_LIST_TIMEOUT,
     ) as session:
         try:
             headers, cookies = await get_headers_and_cookies(request, url, key, api_config, user=user)
@@ -766,7 +906,7 @@ async def verify_connection(
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 ) as r:
                     try:
-                        response_data = await r.json()
+                        response_data = await r.json(loads=JSONCodec.loads)
                     except Exception:
                         response_data = await r.text()
 
@@ -792,7 +932,7 @@ async def verify_connection(
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 ) as r:
                     try:
-                        response_data = await r.json()
+                        response_data = await r.json(loads=JSONCodec.loads)
                     except Exception:
                         response_data = await r.text()
 
@@ -1115,8 +1255,11 @@ def convert_responses_result(response: dict) -> dict:
 async def generate_chat_completion(
     request: Request,
     form_data: dict,
-    user=Depends(check_billing_access),
+    user=Depends(check_billing_access),  # Risk #7: billing gate — never revert to get_verified_user
 ):
+    if not request.app.state.config.ENABLE_OPENAI_API:
+        raise HTTPException(status_code=503, detail='OpenAI API is disabled')
+
     # NOTE: We intentionally do NOT use Depends(get_async_session) here.
     # Database operations (get_model_by_id, AccessGrants.has_access) manage their own short-lived sessions.
     # This prevents holding a connection during the entire LLM call (30-60+ seconds),
@@ -1176,17 +1319,10 @@ async def generate_chat_completion(
             detail=ERROR_MESSAGES.MODEL_NOT_FOUND(),
         )
 
-    # Get the API config for the model
-    api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-        str(idx),
-        request.app.state.config.OPENAI_API_CONFIGS.get(
-            request.app.state.config.OPENAI_API_BASE_URLS[idx], {}
-        ),  # Legacy support
-    )
+    url, key, api_config = await get_openai_connection(idx)
 
     prefix_id = api_config.get('prefix_id', None)
-    if prefix_id:
-        payload['model'] = payload['model'].replace(f'{prefix_id}.', '')
+    payload['model'] = strip_provider_model_prefix(payload['model'], prefix_id)
 
     # Add user info to the payload if the model is a pipeline
     if 'pipeline' in model and model.get('pipeline'):
@@ -1196,9 +1332,6 @@ async def generate_chat_completion(
             'email': user.email,
             'role': user.role,
         }
-
-    url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-    key = request.app.state.config.OPENAI_API_KEYS[idx]
 
     # Check if model is a reasoning model that needs special handling
     if is_openai_new_model(payload['model']):
@@ -1255,6 +1388,7 @@ async def generate_chat_completion(
             request_url = f'{url}/responses'
         else:
             request_url = f'{url}/chat/completions'
+    requested_model = payload.get('model')
     # For Chat Completions, strip image parts from multimodal tool messages
     # (Chat Completions doesn't support images in tool content).
     if not is_responses and 'messages' in payload:
@@ -1263,6 +1397,10 @@ async def generate_chat_completion(
                 message['content'] = ''.join(
                     part.get('text', '') for part in message['content'] if part.get('type') in ('input_text', 'text')
                 )
+
+    is_streaming_request = bool(payload.get('stream', False))
+    if not is_streaming_request:
+        payload.pop('stream_options', None)
 
     payload = json.dumps(payload)
 
@@ -1302,39 +1440,35 @@ async def generate_chat_completion(
     retry_deadline = time.monotonic() + LLM_RETRY_MAX_DURATION_SECONDS
 
     try:
+        # --- TRAU-520 retry loop wrapping the (v0.11.0-rewritten) single call ---
+        # The per-attempt body is upstream's v0.11.0 version (JSONCodec,
+        # publish_model_provider_request_failed telemetry, get_client_timeout);
+        # the for-loop / status-classification / manual per-attempt cleanup is
+        # the fork's retry skeleton (see the constant docs above and the
+        # 0.7.2→0.8.12 runbook's "openai.py retry-logic merge" entry).
         for attempt in range(max_attempts):
-            # Total wall-clock budget across all attempts (see the constant):
-            # stop starting new attempts once the budget is spent, even if
-            # attempts remain.
+            # Total wall-clock budget across all attempts: stop starting new
+            # attempts once the budget is spent, even if attempts remain.
             if attempt > 0 and time.monotonic() >= retry_deadline:
                 log.warning(
-                    "LLM retry budget (%ss) exhausted after %d attempt(s); "
-                    "propagating last error.",
+                    'LLM retry budget (%ss) exhausted after %d attempt(s); propagating last error.',
                     LLM_RETRY_MAX_DURATION_SECONDS,
                     attempt,
                 )
                 break
 
             try:
-                # A FRESH session (and connection) per attempt is intentional,
-                # not an oversight. Hoisting one session out of the loop would
-                # save at most a single TCP+TLS handshake on a retry, but (a) the
-                # retry path already sleeps a jittered backoff (>= 0.25s) that
-                # dwarfs a handshake, (b) cleanup_response closes the connection
-                # (not release-to-pool) so reuse would need deeper changes to help
-                # at all, and (c) a new connection lets a load balancer re-route
-                # away from the struggling upstream node that caused the retry.
-                # So each attempt fully owns and tears down its own session.
+                # A FRESH session (and connection) per attempt is intentional:
+                # cleanup_response closes (not release-to-pool), the backoff
+                # sleep dwarfs a handshake, and a new connection lets a load
+                # balancer re-route away from the struggling upstream node.
                 session = aiohttp.ClientSession(
                     trust_env=True,
-                    timeout=aiohttp.ClientTimeout(
-                        total=AIOHTTP_CLIENT_TIMEOUT,
-                        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
-                    ),
+                    timeout=get_client_timeout(stream=is_streaming_request),
                 )
 
                 r = await session.request(
-                    method="POST",
+                    method='POST',
                     url=request_url,
                     data=payload,
                     headers=headers,
@@ -1342,82 +1476,113 @@ async def generate_chat_completion(
                     ssl=AIOHTTP_CLIENT_SESSION_SSL,
                 )
 
-                # Check if response is SSE. Only a validated 200 + event-stream
-                # is a streaming success returned as-is (never retried; mid-stream
-                # failures are out of scope, see above). An event-stream that
-                # carries a retryable error status (e.g. 503 from a proxy) must
-                # NOT short-circuit here — it falls through to the status check
-                # below and is retried like any other transient error.
-                if r.status == 200 and "text/event-stream" in r.headers.get(
-                    "Content-Type", ""
-                ):
-                    streaming = True
-                    return StreamingResponse(
-                        stream_wrapper(r, session, stream_chunks_handler),
-                        status_code=r.status,
-                        headers=_clean_proxy_headers(r.headers),
-                    )
-
                 # Non-stream transient upstream status (429 / transient 5xx):
-                # retry while attempts AND budget remain. Every other status —
-                # success or a non-retryable 4xx — falls through and is returned
-                # below.
+                # retry while attempts AND budget remain. This runs BEFORE the
+                # SSE / body handling below so a retryable 503 with an
+                # event-stream content-type is still retried, not streamed.
                 if (
                     r.status in LLM_RETRY_RETRYABLE_STATUS
                     and attempt + 1 < max_attempts
                     and time.monotonic() < retry_deadline
                 ):
                     log.warning(
-                        "LLM call returned retryable status %s "
-                        "(attempt %d/%d); retrying.",
+                        'LLM call returned retryable status %s (attempt %d/%d); retrying.',
                         r.status,
                         attempt + 1,
                         max_attempts,
                     )
-                    # NOTE: close this attempt's response/session by hand
-                    # before backing off, or we leak the connection.
                     await cleanup_response(r, session)
                     r = None
                     session = None
                     await asyncio.sleep(_llm_retry_backoff_seconds(attempt))
                     continue
 
-                try:
-                    response = await r.json()
-                except Exception as e:
-                    log.error(e)
-                    response = await r.text()
+                # Check if response is SSE
+                if 'text/event-stream' in r.headers.get('Content-Type', ''):
+                    # An error status with an SSE content-type (and not retryable,
+                    # or out of attempts): read the body and return a proper
+                    # error response instead of streaming the error back.
+                    if r.status >= 400:
+                        error_body = await r.text()
+                        log.error(
+                            'Provider returned HTTP %d with SSE content-type: %s',
+                            r.status,
+                            error_body[:1000],
+                        )
+                        try:
+                            error_json = json.loads(error_body)
+                            await publish_model_provider_request_failed(
+                                request,
+                                actor=user,
+                                provider='openai-compatible',
+                                base_url=url,
+                                api_key=key,
+                                status=r.status,
+                                requested_model=requested_model,
+                                upstream_error=error_json,
+                            )
+                            return JSONResponse(status_code=r.status, content=error_json)
+                        except json.JSONDecodeError:
+                            await publish_model_provider_request_failed(
+                                request,
+                                actor=user,
+                                provider='openai-compatible',
+                                base_url=url,
+                                api_key=key,
+                                status=r.status,
+                                requested_model=requested_model,
+                                upstream_error=error_body,
+                            )
+                            return JSONResponse(
+                                status_code=r.status,
+                                content={'error': {'message': error_body, 'code': r.status}},
+                            )
 
-                if r.status >= 400:
-                    log.error(
-                        "Provider returned HTTP %d: %s",
-                        r.status,
-                        str(response)[:1000],
+                    streaming = True
+                    return StreamingResponse(
+                        stream_wrapper(r, session, stream_chunks_handler),
+                        status_code=r.status,
+                        headers=_clean_proxy_headers(r.headers),
                     )
-                    if isinstance(response, (dict, list)):
-                        return JSONResponse(status_code=r.status, content=response)
-                    else:
-                        return PlainTextResponse(status_code=r.status, content=response)
+                else:
+                    try:
+                        response = await r.json(loads=JSONCodec.loads)
+                    except Exception as e:
+                        log.error(e)
+                        response = await r.text()
 
-                # Convert Responses API result to simple format
-                if is_responses and isinstance(response, dict):
-                    response = convert_responses_result(response)
+                    if r.status >= 400:
+                        await publish_model_provider_request_failed(
+                            request,
+                            actor=user,
+                            provider='openai-compatible',
+                            base_url=url,
+                            api_key=key,
+                            status=r.status,
+                            requested_model=requested_model,
+                            upstream_error=response,
+                        )
+                        if isinstance(response, (dict, list)):
+                            return JSONResponse(status_code=r.status, content=response)
+                        else:
+                            return PlainTextResponse(status_code=r.status, content=response)
 
-                return response
+                    # Convert Responses API result to simple format
+                    if is_responses and isinstance(response, dict):
+                        response = convert_responses_result(response)
+
+                    return response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 # Transient network/timeout error (session build or request).
-                # Retry while attempts and budget remain; otherwise re-raise to
-                # the terminal handler below. ONLY network/timeout exceptions are
-                # caught here — any other exception (a real bug) propagates
-                # straight to the outer handler, unretried, so it is neither
-                # masked as a transient blip nor delayed by backoff.
+                # Retry while attempts and budget remain; otherwise re-raise.
+                # ONLY network/timeout exceptions are caught here — a real bug
+                # propagates straight to the outer handler, unretried.
                 log.warning(
-                    "LLM call raised %s (attempt %d/%d).",
+                    'LLM call raised %s (attempt %d/%d).',
                     type(e).__name__,
                     attempt + 1,
                     max_attempts,
                 )
-                # NOTE: manual per-attempt cleanup before retry/terminal.
                 await cleanup_response(r, session)
                 r = None
                 session = None
@@ -1427,11 +1592,10 @@ async def generate_chat_completion(
                 raise
 
         # Reached only when the loop broke out on the budget guard after a
-        # retryable-status backoff (no exception in flight). Surface a terminal
-        # connection error rather than falling through to a None return.
+        # retryable-status backoff (no exception in flight).
         raise HTTPException(
             status_code=503,
-            detail="Open WebUI: Server Connection Error",
+            detail='Open WebUI: Server Connection Error',
         )
     except HTTPException:
         # Already a terminal HTTP error (the budget-exhaustion raise above) —
@@ -1474,12 +1638,7 @@ async def embeddings(request: Request, form_data: dict, user):
     if model_id in models:
         idx = models[model_id]['urlIdx']
 
-    url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-    key = request.app.state.config.OPENAI_API_KEYS[idx]
-    api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-        str(idx),
-        request.app.state.config.OPENAI_API_CONFIGS.get(url, {}),  # Legacy support
-    )
+    url, key, api_config = await get_openai_connection(idx)
 
     r = None
     streaming = False
@@ -1505,6 +1664,7 @@ async def embeddings(request: Request, form_data: dict, user):
             headers['api-version'] = api_version
     else:
         embeddings_url = f'{url}/embeddings'
+    requested_model = form_data.get('model')
 
     try:
         session = await get_session()
@@ -1514,26 +1674,34 @@ async def embeddings(request: Request, form_data: dict, user):
             data=body,
             headers=headers,
             cookies=cookies,
-            timeout=aiohttp.ClientTimeout(
-                total=AIOHTTP_CLIENT_TIMEOUT, sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
-            ),
+            timeout=get_client_timeout(),
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
         )
 
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r),
+                stream_wrapper(r, passthrough=True),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
-                response_data = await r.json()
+                response_data = await r.json(loads=JSONCodec.loads)
             except Exception:
                 response_data = await r.text()
 
             if r.status >= 400:
+                await publish_model_provider_request_failed(
+                    request,
+                    actor=user,
+                    provider='openai-compatible',
+                    base_url=url,
+                    api_key=key,
+                    status=r.status,
+                    requested_model=requested_model,
+                    upstream_error=response_data,
+                )
                 if isinstance(response_data, (dict, list)):
                     return JSONResponse(status_code=r.status, content=response_data)
                 else:
@@ -1582,6 +1750,7 @@ async def responses(
     Routes to the correct upstream backend based on the model field.
     """
     payload = form_data.model_dump(exclude_none=True)
+    is_streaming_request = bool(payload.get('stream', False))
 
     idx = 0
     model_id = form_data.model
@@ -1599,12 +1768,7 @@ async def responses(
         if model_id in models:
             idx = models[model_id]['urlIdx']
 
-    url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-    key = request.app.state.config.OPENAI_API_KEYS[idx]
-    api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-        str(idx),
-        request.app.state.config.OPENAI_API_CONFIGS.get(url, {}),  # Legacy support
-    )
+    url, key, api_config = await get_openai_connection(idx)
 
     r = None
     streaming = False
@@ -1637,24 +1801,34 @@ async def responses(
             headers=headers,
             cookies=cookies,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+            timeout=get_client_timeout(stream=is_streaming_request),
         )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r),
+                stream_wrapper(r, passthrough=True),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
-                response_data = await r.json()
+                response_data = await r.json(loads=JSONCodec.loads)
             except Exception:
                 response_data = await r.text()
 
             if r.status >= 400:
+                await publish_model_provider_request_failed(
+                    request,
+                    actor=user,
+                    provider='openai-compatible',
+                    base_url=url,
+                    api_key=key,
+                    status=r.status,
+                    requested_model=payload.get('model'),
+                    upstream_error=response_data,
+                )
                 if isinstance(response_data, (dict, list)):
                     return JSONResponse(status_code=r.status, content=response_data)
                 else:
@@ -1697,6 +1871,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             payload = json.loads(body)
         except (json.JSONDecodeError, ValueError):
             payload = None
+    is_streaming_request = bool(payload.get('stream', False)) if isinstance(payload, dict) else False
 
     idx = 0
     model_id = payload.get('model') if isinstance(payload, dict) else None
@@ -1708,14 +1883,8 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
         if model_id in models:
             idx = models[model_id]['urlIdx']
 
-    url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-    key = request.app.state.config.OPENAI_API_KEYS[idx]
-    api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
-        str(idx),
-        request.app.state.config.OPENAI_API_CONFIGS.get(
-            request.app.state.config.OPENAI_API_BASE_URLS[idx], {}
-        ),  # Legacy support
-    )
+    url, key, api_config = await get_openai_connection(idx)
+    base_url = url
 
     r = None
     streaming = False
@@ -1754,26 +1923,34 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
             headers=headers,
             cookies=cookies,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(
-                total=AIOHTTP_CLIENT_TIMEOUT, sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ
-            ),
+            timeout=get_client_timeout(stream=is_streaming_request),
         )
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):
             streaming = True
             return StreamingResponse(
-                stream_wrapper(r),
+                stream_wrapper(r, passthrough=True),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
         else:
             try:
-                response_data = await r.json()
+                response_data = await r.json(loads=JSONCodec.loads)
             except Exception:
                 response_data = await r.text()
 
             if r.status >= 400:
+                await publish_model_provider_request_failed(
+                    request,
+                    actor=user,
+                    provider='openai-compatible',
+                    base_url=base_url,
+                    api_key=key,
+                    status=r.status,
+                    requested_model=model_id,
+                    upstream_error=response_data,
+                )
                 if isinstance(response_data, (dict, list)):
                     return JSONResponse(status_code=r.status, content=response_data)
                 else:

@@ -38,6 +38,46 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+TASK_CONFIG_KEYS = {
+    'TASK_MODEL': 'task.model.default',
+    'TASK_MODEL_EXTERNAL': 'task.model.external',
+    'TITLE_GENERATION_PROMPT_TEMPLATE': 'task.title.prompt_template',
+    'IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE': 'task.image.prompt_template',
+    'ENABLE_AUTOCOMPLETE_GENERATION': 'task.autocomplete.enable',
+    'AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH': 'task.autocomplete.input_max_length',
+    'AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE': 'task.autocomplete.prompt_template',
+    'TAGS_GENERATION_PROMPT_TEMPLATE': 'task.tags.prompt_template',
+    'FOLLOW_UP_GENERATION_PROMPT_TEMPLATE': 'task.follow_up.prompt_template',
+    'ENABLE_FOLLOW_UP_GENERATION': 'task.follow_up.enable',
+    'ENABLE_TAGS_GENERATION': 'task.tags.enable',
+    'ENABLE_TITLE_GENERATION': 'task.title.enable',
+    'ENABLE_SEARCH_QUERY_GENERATION': 'task.query.search.enable',
+    'ENABLE_RETRIEVAL_QUERY_GENERATION': 'task.query.retrieval.enable',
+    'QUERY_GENERATION_PROMPT_TEMPLATE': 'task.query.prompt_template',
+    'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE': 'task.tools.prompt_template',
+    'ENABLE_VOICE_MODE_PROMPT': 'task.voice.prompt.enable',
+    'VOICE_MODE_PROMPT_TEMPLATE': 'task.voice.prompt_template',
+}
+
+
+async def get_config_values(key_map: dict[str, str]) -> dict:
+    # Risk #1: the fork keeps its ConfigVar backbone; resolve FIELD → live ConfigVar.
+    from open_webui import config as _cfg
+
+    return {field: getattr(getattr(_cfg, field, None), 'value', None) for field in key_map}
+
+
+def config_updates(data: dict, key_map: dict[str, str]) -> dict:
+    from open_webui import config as _cfg
+
+    for field, value in data.items():
+        if field in key_map:
+            cv = getattr(_cfg, field, None)
+            if cv is not None:
+                cv.value = value
+                cv.commit()
+    return {}
+
 
 # Matches the placeholder shape minted by the PII pipeline ([PERSON_1], [HR_OIB_2],
 # ...). Used to decide whether a task completion actually needs an outlet restore.
@@ -188,19 +228,6 @@ def _apply_restored_content(response, restored_content):
 ##################################
 
 
-class ActiveChatsForm(BaseModel):
-    chat_ids: list[str]
-
-
-@router.post('/active/chats')
-async def check_active_chats(request: Request, form_data: ActiveChatsForm, user=Depends(get_verified_user)):
-    """Check which chat IDs have active tasks."""
-    from open_webui.tasks import get_active_chat_ids
-
-    active = await get_active_chat_ids(request.app.state.redis, form_data.chat_ids)
-    return {'active_chat_ids': active}
-
-
 @router.get('/config')
 async def get_task_config(request: Request, user=Depends(get_verified_user)):
     return {
@@ -232,6 +259,7 @@ class TaskConfigForm(BaseModel):
     IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE: str
     ENABLE_AUTOCOMPLETE_GENERATION: bool
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH: int
+    AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE: str
     TAGS_GENERATION_PROMPT_TEMPLATE: str
     FOLLOW_UP_GENERATION_PROMPT_TEMPLATE: str
     ENABLE_FOLLOW_UP_GENERATION: bool
@@ -332,8 +360,9 @@ async def generate_title(request: Request, form_data: dict, user=Depends(check_b
 
     log.debug(f'generating chat title using model {task_model_id} for user {user.email} ')
 
-    if request.app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE != '':
-        template = request.app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE
+    title_template = request.app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE
+    if title_template != '':
+        template = title_template
     else:
         template = DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE
 
@@ -417,8 +446,9 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ch
 
     log.debug(f'generating chat title using model {task_model_id} for user {user.email} ')
 
-    if request.app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE != '':
-        template = request.app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
+    follow_up_template = request.app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
+    if follow_up_template != '':
+        template = follow_up_template
     else:
         template = DEFAULT_FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
 
@@ -493,8 +523,9 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(che
 
     log.debug(f'generating chat tags using model {task_model_id} for user {user.email} ')
 
-    if request.app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE != '':
-        template = request.app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE
+    tags_template = request.app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE
+    if tags_template != '':
+        template = tags_template
     else:
         template = DEFAULT_TAGS_GENERATION_PROMPT_TEMPLATE
 
@@ -563,8 +594,9 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
 
     log.debug(f'generating image prompt using model {task_model_id} for user {user.email} ')
 
-    if request.app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE != '':
-        template = request.app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
+    image_prompt_template = request.app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
+    if image_prompt_template != '':
+        template = image_prompt_template
     else:
         template = DEFAULT_IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
 
@@ -648,8 +680,9 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(check
 
     log.debug(f'generating {type} queries using model {task_model_id} for user {user.email}')
 
-    if (request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE).strip() != '':
-        template = request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE
+    query_template = request.app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE
+    if query_template.strip() != '':
+        template = query_template
     else:
         template = DEFAULT_QUERY_GENERATION_PROMPT_TEMPLATE
 
@@ -700,8 +733,9 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
     prompt = form_data.get('prompt')
     messages = form_data.get('messages')
 
-    if request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH > 0:
-        if len(prompt) > request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH:
+    autocomplete_input_max_length = request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
+    if autocomplete_input_max_length > 0:
+        if len(prompt) > autocomplete_input_max_length:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.INPUT_TOO_LONG(request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH),
@@ -733,8 +767,9 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 
     log.debug(f'generating autocompletion using model {task_model_id} for user {user.email}')
 
-    if (request.app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE).strip() != '':
-        template = request.app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
+    autocomplete_template = request.app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
+    if autocomplete_template.strip() != '':
+        template = autocomplete_template
     else:
         template = DEFAULT_AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
 
