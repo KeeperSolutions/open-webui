@@ -2312,6 +2312,91 @@ async def connect_mcp_server(
     return client, tool_specs
 
 
+# Strong references to in-flight progress-event tasks. `asyncio.create_task`
+# only holds a WEAK reference to the task it schedules — with nothing else
+# referencing it, the task can be garbage-collected before it runs (ruff
+# RUF006). This set is that reference; `_pii_progress_task_done` below
+# removes each task once it finishes.
+_pii_progress_tasks: set = set()
+
+
+def _pii_progress_task_done(task):
+    _pii_progress_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    # A raised exception here must never surface as an unretrieved-task-
+    # exception warning — a progress event is diagnostics, not the masking
+    # path it reports on.
+    if exc is not None:
+        log.debug(f'[pii_chunking] progress event task failed: {exc}')
+
+
+def _should_emit_pii_progress(done, total):
+    """Whether a PII-masking progress update is worth persisting.
+
+    Each status event drives a non-atomic read-modify-write of the WHOLE chat
+    row (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
+    `update_chat_by_id`, no optimistic-concurrency check): fetch the chat,
+    append to `statusHistory`, write the entire document back. Emitting once
+    per chunk on a large paste (dozens to ~100 chunks, up to
+    `PII_INLET_CONCURRENCY` of those in flight concurrently) turns into that
+    many concurrent whole-row rewrites, which can clobber each other's
+    appended entries. Throttle to roughly ten events total instead: always
+    the first completion and the terminal one (so the bar always starts and
+    always reaches 100%), otherwise only every ~10% of the work.
+    """
+    if done <= 1 or done >= total:
+        return True
+    step = max(1, total // 10)
+    return done % step == 0
+
+
+def _pii_progress_emitter(event_emitter):
+    """Adapt the inlet's synchronous `on_progress(done, total)` callback to the
+    async status-event channel.
+
+    The callback fires from inside `asyncio.gather`, so it cannot await; the
+    event is scheduled instead. Best-effort by construction — a progress event
+    that fails to emit must never affect masking, which is a security path:
+    the producer calls `on_progress` from inside `_mask_piece`'s retry `try`,
+    so a synchronous exception escaping here would be caught as a transient
+    chunk failure and cause a spurious re-POST of an already-masked chunk.
+    """
+
+    def on_progress(done, total):
+        try:
+            # Inside the try on purpose: `done >= total` here and inside the
+            # throttle helper is a comparison on whatever the producer hands
+            # us. If a future change ever passes a non-comparable `total`
+            # (e.g. None), that must be swallowed too — not just the
+            # scheduling below it — or the propagating TypeError lands in
+            # `_mask_piece`'s retry `try` and triggers a spurious re-POST of
+            # an already-masked chunk.
+            if not _should_emit_pii_progress(done, total):
+                return
+            task = asyncio.create_task(
+                event_emitter(
+                    {
+                        'type': 'status',
+                        'data': {
+                            'action': 'pii_masking',
+                            'description': 'Masking sensitive data',
+                            'count': done,
+                            'total': total,
+                            'done': done >= total,
+                        },
+                    }
+                )
+            )
+            _pii_progress_tasks.add(task)
+            task.add_done_callback(_pii_progress_task_done)
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] could not emit progress: {e}')
+
+    return on_progress
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
     # Ensure chat_id is always a string — external API clients may omit it.
     if not isinstance(metadata.get('chat_id'), str):
@@ -2535,7 +2620,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # INSIDE process_pipeline_inlet_filter so it covers every inlet caller —
     # this main-chat path AND all task generators — from a single chokepoint.
     try:
-        form_data = await process_pipeline_inlet_filter(request, form_data, user, models)
+        form_data = await process_pipeline_inlet_filter(
+            request,
+            form_data,
+            user,
+            models,
+            on_progress=_pii_progress_emitter(event_emitter),
+        )
     except Exception as e:
         raise e
 

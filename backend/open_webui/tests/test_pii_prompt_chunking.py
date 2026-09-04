@@ -287,3 +287,180 @@ def test_oversized_message_without_chat_id_fails_closed_before_any_post():
         with pytest.raises(PiiMaskingUnavailableError):
             _run(payload)
     assert seen == []
+
+
+def test_chat_path_emits_a_pii_masking_status_event():
+    """The user waits ~65 s for a 50-page paste. Silence reads as a hang, so the
+    wait must be visible; the final event must mark itself done or the shimmer
+    never stops.
+
+    Driven inside a running loop on purpose: the emitter schedules with
+    `asyncio.create_task`, which has no loop to attach to outside one — the
+    production caller is always inside `asyncio.gather`."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 2)
+        on_progress(2, 2)
+        await asyncio.sleep(0)  # let the scheduled tasks run
+        await asyncio.sleep(0)
+
+    asyncio.run(drive())
+
+    assert [e['data']['action'] for e in events] == ['pii_masking', 'pii_masking']
+    assert events[0]['data']['done'] is False
+    assert events[-1]['data']['done'] is True
+    assert events[-1]['data']['count'] == events[-1]['data']['total'] == 2
+
+
+def test_progress_swallows_a_synchronously_raising_emitter():
+    """If `event_emitter(...)` itself raises before returning a coroutine (a
+    non-async callable, or one that blows up before yielding), `on_progress`
+    must swallow it. The producer calls `on_progress` from inside
+    `_mask_piece`'s retry `try` — a synchronous exception escaping here would
+    be caught there as a transient chunk failure and cause a spurious re-POST
+    of an already-masked chunk."""
+    import open_webui.utils.middleware as M
+
+    def emitter(event):
+        raise RuntimeError('boom')
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 1)  # must not raise
+
+    asyncio.run(drive())  # must not raise
+
+
+def test_progress_retrieves_a_raising_coroutines_exception_via_the_done_callback():
+    """The event is scheduled with `asyncio.create_task`, so `event_emitter`'s
+    own body runs later, off the `on_progress` call stack — meaning an
+    exception raised there does NOT propagate to the caller regardless of
+    whether anything retrieves it. A bare "on_progress must not raise"
+    assertion is therefore true even for the bare `asyncio.create_task(...)`
+    call with no stored reference and no done-callback: Python only surfaces
+    an un-retrieved task exception later, through the event loop's default
+    exception handler, when the task is garbage-collected. What the
+    strong-reference set + `_pii_progress_task_done` actually buy is that the
+    exception gets RETRIEVED (`task.exception()`) instead of leaking to that
+    default handler. Assert the handler is never invoked — that is the
+    property this mechanism exists for."""
+    import gc
+
+    import open_webui.utils.middleware as M
+
+    async def emitter(event):
+        raise RuntimeError('boom')
+
+    handler_calls = []
+
+    async def drive():
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda _loop, context: handler_calls.append(context))
+
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 1)  # must not raise
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        # The done-callback should already have discarded the task from the
+        # module-level set by now. Drop whatever reference is left and force
+        # a collection so an un-retrieved exception can't hide behind GC
+        # timing — if the callback didn't run, this is what would surface it.
+        M._pii_progress_tasks.clear()
+        gc.collect()
+
+    asyncio.run(drive())  # must not raise
+
+    assert handler_calls == [], (
+        "the coroutine's exception must be retrieved via the done-callback, "
+        f"not surfaced to asyncio's default exception handler: {handler_calls}"
+    )
+
+
+def test_progress_swallows_a_malformed_total_raised_by_the_throttle_guard_itself():
+    """`_should_emit_pii_progress` starts with `if done <= 1 or done >=
+    total`: with `done=1` the `or` short-circuits before `total` is ever
+    compared, so `done=1` can't exercise this. `done=2` forces the second
+    operand to actually evaluate `done >= total`, so a non-comparable
+    `total` (e.g. None) raises a `TypeError` from INSIDE the guard call
+    itself — the exact statement whose position (inside vs. outside the
+    `try`) matters: if a future producer change ever passed such a `total`,
+    that must be swallowed like a scheduling failure, not propagate out of
+    `on_progress` and into `_mask_piece`'s retry `try`, where it would look
+    like a transient chunk failure and trigger a spurious re-POST of an
+    already-masked chunk."""
+    import open_webui.utils.middleware as M
+
+    async def emitter(event):
+        pass
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(2, None)  # must not raise — done=2 skips the done<=1 short-circuit
+
+    asyncio.run(drive())  # must not raise
+
+
+def test_progress_throttles_to_about_ten_events_and_always_emits_the_terminal_one():
+    """Every status event triggers a non-atomic whole-chat-row rewrite
+    (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
+    `update_chat_by_id`, no optimistic-concurrency check). Emitting per-chunk
+    on a large paste means dozens of concurrent whole-row rewrites that can
+    clobber each other — so completions must be throttled to roughly ten
+    events, and the terminal one (which stops the shimmer) must never be
+    among the dropped ones."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        for done in range(1, 101):
+            on_progress(done, 100)
+        for _ in range(200):
+            await asyncio.sleep(0)
+
+    asyncio.run(drive())
+
+    counts = [e['data']['count'] for e in events]
+    assert counts[0] == 1, 'first completion must always be reported'
+    assert counts[-1] == 100, 'last event reported must be the terminal one'
+    assert events[-1]['data']['done'] is True, 'terminal event must be marked done'
+    assert 2 <= len(events) <= 11, f'expected roughly ten throttled events, got {len(events)}'
+
+
+def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():
+    """`total // 10` is 0 for any `total < 10`; the throttle must guard
+    against a modulo-by-zero there and still guarantee the first and terminal
+    events are reported."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 3)
+        on_progress(2, 3)
+        on_progress(3, 3)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(drive())  # must not raise (no ZeroDivisionError)
+
+    counts = [e['data']['count'] for e in events]
+    assert counts[0] == 1
+    assert counts[-1] == 3
+    assert events[-1]['data']['done'] is True
