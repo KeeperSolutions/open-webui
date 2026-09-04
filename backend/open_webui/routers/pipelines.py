@@ -27,9 +27,11 @@ from open_webui.routers.openai import get_all_models_responses
 from open_webui.utils.auth import get_admin_user
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.pii_chunking import (
+    PII_INLET_CHARS_PER_SECOND,
     PII_INLET_CHUNK_CHARS,
     PII_INLET_CHUNK_RETRIES,
     PII_INLET_CONCURRENCY,
+    PII_INLET_SKELETON_SAFETY_MARGIN,
     PII_INLET_TOTAL_BUDGET_S,
     estimated_masking_seconds,
     split_text_for_pii,
@@ -227,6 +229,34 @@ async def _post_inlet_once(session, url, key, filter_id, request_data):
             raise HTTPException(status_code=response.status, detail=e.message)
 
 
+# Background-task types (carried on `metadata.task`) for which the external
+# pipeline skips NER entirely and re-masks via the deterministic vault regex
+# alone — mirrors `_LLM_FACING_SKIP_NER_TASKS` in the pipeline's own
+# `pii_filter_pipeline.py`. That re-mask costs microseconds regardless of
+# payload size, so these three keep the ORIGINAL single whole-payload call:
+# both the chunked path and its size guard exist solely to survive NER's flat
+# ~240 chars/s ceiling, which these payloads never pay. Chunking them anyway
+# would refuse large title/tags/follow-up prompts that succeeded before this
+# branch, and would turn one cheap call into ~20 for smaller ones.
+#
+# `query_generation` and `image_prompt_generation` are deliberately NOT
+# exempt: their output goes to an EXTERNAL service (RAG search / image
+# backend), so the pipeline keeps full NER for them, and chunking genuinely
+# helps those large payloads survive it. Every other/unknown task type also
+# keeps chunking — this is an allowlist, not `metadata.task`-generic.
+# Strings are the OpenWebUI `TASKS` enum values (open_webui/constants.py).
+_CHUNKING_EXEMPT_TASKS = frozenset({'title_generation', 'tags_generation', 'follow_up_generation'})
+
+
+def _payload_task_type(payload):
+    """The background-task type from `metadata.task` (see `TASKS` in
+    open_webui.constants), or None for an ordinary chat turn. Defensive about
+    a non-dict `metadata` the same way `_payload_chat_id` is."""
+    metadata = payload.get('metadata')
+    task = metadata.get('task') if isinstance(metadata, dict) else None
+    return task if isinstance(task, str) else None
+
+
 def _oversized_message_indices(payload):
     """Indices of messages whose content alone would blow the per-call budget."""
     return [
@@ -250,6 +280,38 @@ def _payload_chat_id(payload):
         if isinstance(candidate, str) and candidate:
             return candidate
     return None
+
+
+def _shifted_pii_detections(response, offset):
+    """Defensively extract `metadata.pii_detections_public` (the PII-free
+    `[{type, start, end}]` mirror the pipeline attaches for the card — see
+    `pii_filter_pipeline.py`) from one inlet response, shifting every span by
+    `offset` characters. Used for both a chunk response (`offset` = that
+    piece's document offset, so spans index the ORIGINAL unsplit message) and
+    the skeleton response (`offset=0`).
+
+    Never raises: a detection entry that is not a dict, or whose `start`/
+    `end` are not plain ints, is skipped rather than crashing the request — a
+    security-facing card being wrong in one entry is bad, but a malformed
+    entry from an external service must never be able to fail-open the whole
+    masked request. `bool` is excluded explicitly because it is a subclass of
+    `int` in Python and is never a valid character offset.
+    """
+    metadata = response.get('metadata') if isinstance(response, dict) else None
+    detections = metadata.get('pii_detections_public') if isinstance(metadata, dict) else None
+    if not isinstance(detections, list):
+        return []
+    shifted = []
+    for d in detections:
+        if not isinstance(d, dict):
+            continue
+        start, end = d.get('start'), d.get('end')
+        if not isinstance(start, int) or isinstance(start, bool):
+            continue
+        if not isinstance(end, int) or isinstance(end, bool):
+            continue
+        shifted.append({'type': d.get('type'), 'start': start + offset, 'end': end + offset})
+    return shifted
 
 
 async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user_with_valves, on_progress):
@@ -280,6 +342,15 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     the `PII_INLET_TOTAL_BUDGET_S` timeout below — paying the wall-clock cost
     first and refusing anyway. Refusing up front is the honest answer.
 
+    A second, narrower guard refuses when the SKELETON ALONE cannot fit inside
+    one POST: the total-budget check above only bounds the sum of skeleton +
+    chunked cost against `PII_INLET_TOTAL_BUDGET_S` (120s), but the skeleton is
+    a single sequential call bound by `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (60s)
+    — a much tighter ceiling that a history-heavy skeleton can blow through
+    while the grand total still looks affordable. Without this, such a request
+    would pass the guard, run the skeleton POST, and die on ITS OWN socket
+    read after 60s — the wait-then-refuse this branch exists to remove.
+
     Requires a stable chat_id (see `_payload_chat_id`). Every chunk POST
     inherits `payload['metadata']`, and the pipeline's own chat-id resolver
     mints a FRESH ephemeral thread per call whenever chat_id is missing —
@@ -305,6 +376,15 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             'This message is too long to mask safely. Shorten it, or attach the text as a file instead.'
         )
 
+    if (
+        AIOHTTP_CLIENT_TIMEOUT_SOCK_READ is not None
+        and skeleton_chars / PII_INLET_CHARS_PER_SECOND
+        > AIOHTTP_CLIENT_TIMEOUT_SOCK_READ * PII_INLET_SKELETON_SAFETY_MARGIN
+    ):
+        raise PiiMaskingUnavailableError(
+            'This message is too long to mask safely. Shorten it, or attach the text as a file instead.'
+        )
+
     if _payload_chat_id(payload) is None:
         raise PiiMaskingUnavailableError(
             'PII masking is currently unavailable for a message this large without an active '
@@ -316,17 +396,21 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         'messages': [{**m, 'content': ''} if i in oversized else m for i, m in enumerate(messages)],
     }
 
-    jobs = []  # (message_index, piece_index, text)
+    jobs = []  # (message_index, piece_index, piece_offset, text)
     for i in indices:
-        for piece_index, (_offset, piece) in enumerate(split_text_for_pii(messages[i]['content'])):
-            jobs.append((i, piece_index, piece))
+        for piece_index, (piece_offset, piece) in enumerate(split_text_for_pii(messages[i]['content'])):
+            jobs.append((i, piece_index, piece_offset, piece))
 
     total = len(jobs)
     done = 0
     semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
     results: dict[tuple[int, int], str] = {}
+    # Each chunk's `metadata.pii_detections_public` (finding #5), keyed the
+    # same way as `results`, already shifted to index the ORIGINAL (unsplit)
+    # message rather than the piece — see `_shifted_pii_detections`.
+    piece_detections: dict[tuple[int, int], list] = {}
 
-    async def _mask_piece(msg_index, piece_index, piece):
+    async def _mask_piece(msg_index, piece_index, piece_offset, piece):
         nonlocal done
         body = {
             **payload,
@@ -344,16 +428,27 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
                         {'user': user_with_valves, 'body': body},
                     )
                 results[(msg_index, piece_index)] = out['messages'][0]['content']
-                done += 1
-                if on_progress is not None:
-                    on_progress(done, total)
-                return
+                piece_detections[(msg_index, piece_index)] = _shifted_pii_detections(out, piece_offset)
             except HTTPException:
                 raise  # the pipeline said no on purpose; do not retry
             except Exception as e:
                 last_exc = e
                 if attempt + 1 < PII_INLET_CHUNK_RETRIES:
                     await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            else:
+                # Finding #9: progress reporting lives OUTSIDE the retry
+                # try/except, after the result is already recorded. A
+                # callback that raises must never be mistaken for a transient
+                # chunk failure here — that would trigger a spurious re-POST
+                # of a chunk that already succeeded, pushing `done` past
+                # `total`. The production callback swallows everything
+                # (`_pii_progress_emitter`), so this is a latent-bug guard,
+                # not a live symptom.
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+                return
         raise PiiMaskingUnavailableError() from last_exc
 
     async def _run_all():
@@ -396,7 +491,42 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         # handler turns into `PiiMaskingUnavailableError` for PII filters.
         pieces = [results[(i, p)] for p in range(sum(1 for j in jobs if j[0] == i))]
         out_messages[i] = {**out_messages[i], 'content': ''.join(pieces)}
-    return {**out, 'messages': out_messages}
+
+    # Finding #5: the skeleton response's own `pii_detections_public` is
+    # correct ONLY for whichever message the skeleton call itself treated as
+    # the last user message — right when that message was not oversized (it
+    # then survived the skeleton at full length, unchanged). When the ACTUAL
+    # last message of the conversation is itself oversized, the skeleton sent
+    # it blanked (''), so the skeleton alone always reports zero detections
+    # for it — exactly the false negative this fixes. Merge in the reassembled
+    # chunks' detections ONLY when the last message is oversized: that mirrors
+    # the pipeline's own single-call rule that `pii_detections_public` only
+    # ever covers the conversation's last user message, so an earlier
+    # (non-last) oversized message's detections are correctly never surfaced.
+    merged_detections = []
+    seen_keys = set()
+
+    def _merge(detections):
+        for d in detections:
+            key = (d.get('type'), d['start'], d['end'])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            merged_detections.append(d)
+
+    _merge(_shifted_pii_detections(out, 0))
+    last_index = len(messages) - 1
+    if last_index in oversized:
+        piece_count = sum(1 for j in jobs if j[0] == last_index)
+        for p in range(piece_count):
+            _merge(piece_detections.get((last_index, p), []))
+
+    out_metadata = out.get('metadata')
+    final_metadata = {
+        **(out_metadata if isinstance(out_metadata, dict) else {}),
+        'pii_detections_public': merged_detections,
+    }
+    return {**out, 'messages': out_messages, 'metadata': final_metadata}
 
 
 async def process_pipeline_inlet_filter(request, payload, user, models, *, on_progress=None):
@@ -517,6 +647,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                 if (
                     filter_id in PII_FILTER_IDS
                     and per_filter_valves.get('pii_masking_enabled', True)
+                    and _payload_task_type(payload) not in _CHUNKING_EXEMPT_TASKS
                     and _oversized_message_indices(payload)
                 ):
                     # TRAU-543: one call cannot carry this much text. The inlet

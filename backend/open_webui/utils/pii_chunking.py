@@ -15,17 +15,19 @@ you send it. Do not tune these by intuition — re-measure.
 # already measures ~25 s against a 30 s budget. 1800 chars is ~8 s.
 PII_INLET_CHUNK_CHARS = 1800
 
-# Sub-chunk POSTs in flight at once. In THEORY the wall-clock floor for a
-# request is total_chars / rate / concurrency, so this looks like the lever
-# that shortens a large paste. In PRACTICE, measured 2026-09-04 against the
-# staging pipeline, concurrent requests queue behind one saturated CPU instead
-# of landing on separate instances — see `PII_INLET_EFFECTIVE_SPEEDUP`, the
-# ~1.3x that models what this constant actually buys today, not the ~10x this
-# comment used to (wrongly) imply. Kept at 10 anyway: it costs nothing while
-# the service doesn't scale out, and pays off immediately the day it does
-# (Cloud Run instance limits, CPU allocation, GPU — infrastructure work outside
-# this repo) without any code change here.
-PII_INLET_CONCURRENCY = 10
+# Sub-chunk POSTs in flight at once. Set to 4 because that is the EXACT
+# concurrency the `PII_INLET_EFFECTIVE_SPEEDUP` measurement was taken at
+# (2026-09-04 against the staging pipeline): four concurrent requests measured
+# 8.6 / 13.6 / 18.3 / 25.2 s each — the FIFO signature of queueing behind one
+# saturated CPU, not four requests actually running in parallel. Raising this
+# constant is NOT "more throughput"; it is a timeout cliff. Each additional
+# in-flight request adds roughly one more 8 s serial slot to the tail
+# request's queueing delay, so at 10 the tail would wait ≈58 s against the
+# 60 s `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` — and a chunk that times out on the
+# tail gets retried by `_mask_piece`, adding MORE load to the very bottleneck
+# that caused the timeout. Do not raise this without re-measuring the
+# speedup at the new concurrency first.
+PII_INLET_CONCURRENCY = 4
 
 # Wall-clock ceiling for masking ONE request, across all its chunks. Without it
 # nothing bounds total time once the work is parallel — the per-request socket
@@ -40,6 +42,15 @@ PII_INLET_CHUNK_RETRIES = 3
 # Measured inlet throughput, characters per second (Appendix A). Everything
 # below is arithmetic on this number; re-measure before changing it.
 PII_INLET_CHARS_PER_SECOND = 240
+
+# Safety margin applied when checking whether the SKELETON POST alone (every
+# non-oversized message, sent as ONE sequential call with no chunking to fall
+# back on) fits inside `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`. Comparing against
+# the raw timeout would admit a skeleton estimated at, say, 59.9s of a 60s
+# budget — indistinguishable from a timeout given request/response overhead
+# the flat characters/second rate does not model. 0.8 leaves real headroom;
+# see the skeleton-fit guard in `routers/pipelines.py`.
+PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 
 # How much wall-clock concurrency ACTUALLY buys us, measured 2026-09-04 against
 # the staging pipeline: one request alone 8.13 s, four concurrent 25.22 s total

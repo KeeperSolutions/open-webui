@@ -528,3 +528,221 @@ def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
         _run(payload)  # must not raise
     assert seen, 'a within-budget paste must actually be masked, not refused'
+
+
+def test_skeleton_alone_too_slow_for_one_post_is_refused_even_under_the_total_budget():
+    """(finding #3) The general budget check bounds skeleton + chunked cost
+    TOGETHER against the 120s wall-clock ceiling. But the skeleton is a
+    SINGLE sequential POST, bound by the much tighter 60s
+    `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`. Ordinary history alone can blow that
+    ceiling while the grand total still looks affordable, and without this
+    guard the request would sail past the general check only to die on the
+    skeleton POST's own socket read 60s later — the wait-then-refuse this
+    branch exists to remove."""
+    from open_webui.utils.pii_chunking import PII_INLET_TOTAL_BUDGET_S, estimated_masking_seconds
+
+    # 9 ordinary turns, each under the 1800-char oversized threshold, so all
+    # 9 land in the skeleton POST: 9 * 1500 = 13 500 chars / 240 chars/s =
+    # 56.25s on the skeleton call alone -- past 60 * 0.8 = 48s margin, but
+    # nowhere near the 120s total budget once the paste's chunked share is
+    # added at the concurrency-priced speedup.
+    history = [{'role': 'user', 'content': 'a' * 1500} for _ in range(9)]
+    paste = {'role': 'user', 'content': 'b' * 2000}  # oversized -> chunked, not skeleton
+    payload = {
+        'model': 'gpt-4',
+        'messages': history + [paste],
+        'metadata': {'chat_id': 'c1'},
+        'features': {'pii_masking': True},
+    }
+    skeleton_chars = sum(len(m['content']) for m in history)
+    chunked_chars = len(paste['content'])
+    assert estimated_masking_seconds(skeleton_chars, chunked_chars) <= PII_INLET_TOTAL_BUDGET_S, (
+        'the case only matters if the general budget check would have let it through'
+    )
+
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        with pytest.raises(PiiMaskingUnavailableError):
+            _run(payload)
+    assert seen == [], 'refused requests must not touch the pipeline at all'
+
+
+def test_title_generation_task_is_exempt_from_chunking_even_when_oversized():
+    """(finding #1) The pipeline skips NER entirely for title/tags/follow-up
+    generation and re-masks via the deterministic vault regex alone --
+    microseconds regardless of payload size -- so these must keep the single
+    whole-payload call the pipeline expects. Chunking them (and applying the
+    chunked path's size guard) would refuse exactly the large chats this
+    ticket targets."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    payload = _payload('x' * (max_maskable_chars() + 1))
+    payload['metadata']['task'] = 'title_generation'
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        _run(payload)  # must not raise
+    assert len(seen) == 1, 'an exempt task type must take exactly one POST, not be chunked'
+
+
+def test_query_generation_task_still_chunks_when_oversized():
+    """(finding #1) query_generation is deliberately NOT exempt: its output
+    goes to an external service (RAG search), so the pipeline keeps full NER
+    for it and chunking genuinely helps it survive that cost."""
+    payload = _payload(BIG)
+    payload['metadata']['task'] = 'query_generation'
+    seen = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
+        _run(payload)
+    chunks = [t for t in seen if t]
+    assert len(chunks) > 1, 'query_generation must still be chunked, not exempted'
+
+
+def _detection_session(seen, detections_for):
+    """Mock inlet like `_session`, but attaches
+    `metadata.pii_detections_public` to each non-blank response, computed by
+    `detections_for(piece_text)` -> list[dict] | None."""
+
+    def _post(url, *, headers, json, ssl):
+        body = json['body']
+        text = body['messages'][0]['content']
+        seen.append(text)
+        out_metadata = {}
+        detections = detections_for(text) if text else None
+        if detections is not None:
+            out_metadata['pii_detections_public'] = detections
+        out = {**body, 'messages': [{'role': 'user', 'content': text.upper()}], 'metadata': out_metadata}
+        resp = MagicMock()
+        resp.json = AsyncMock(return_value=out)
+        resp.raise_for_status = MagicMock()
+        resp.content_type = 'application/json'
+
+        async def _enter(_self=None):
+            return resp
+
+        cm = MagicMock()
+        cm.__aenter__ = _enter
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    s = MagicMock()
+    s.post = _post
+    scm = MagicMock()
+    scm.__aenter__ = AsyncMock(return_value=s)
+    scm.__aexit__ = AsyncMock(return_value=False)
+    return scm
+
+
+def test_chunked_detections_merge_with_document_relative_offsets():
+    """(finding #5) Each chunk's own `pii_detections_public` must be shifted
+    by that piece's offset into the message and merged into the returned
+    metadata -- otherwise the card shows nothing for a message where the
+    entities were actually found."""
+    marker = 'OIB 12345678903'
+
+    def _detections_for(text):
+        idx = text.find(marker)
+        return [{'type': 'HR_OIB', 'start': idx, 'end': idx + len(marker)}] if idx != -1 else []
+
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_detection_session(seen, _detections_for),
+    ):
+        out = _run(_payload(BIG))
+
+    real_chunks = [t for t in seen if t]
+    assert len(real_chunks) > 1, 'fixture must actually produce more than one chunk'
+
+    detections = out['metadata']['pii_detections_public']
+    assert len(detections) > 1, 'detections from more than one chunk must be merged'
+    for d in detections:
+        assert BIG[d['start'] : d['end']] == marker, (
+            'a merged detection must index the ORIGINAL message, not the piece it was found in'
+        )
+
+
+def test_malformed_chunk_detections_are_dropped_without_failing_the_request():
+    """(finding #5) A detection entry that is not a dict, or whose start/end
+    are not plain ints (bool included -- a subclass of int but never a valid
+    offset), must be skipped rather than crash an otherwise-successful
+    request -- a malformed entry from an external service must not fail-open
+    the whole masked request."""
+
+    def _detections_for(_text):
+        return [
+            'not-a-dict',
+            {'type': 'HR_OIB', 'start': True, 'end': 5},  # bool start
+            {'type': 'HR_OIB', 'start': 0, 'end': 'nope'},  # non-int end
+            {'type': 'HR_OIB', 'start': 0, 'end': 4},  # well-formed
+        ]
+
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_detection_session(seen, _detections_for),
+    ):
+        out = _run(_payload(BIG))  # must not raise
+
+    detections = out['metadata']['pii_detections_public']
+    assert detections, 'the one well-formed detection per chunk must still survive'
+    for d in detections:
+        assert set(d) == {'type', 'start', 'end'}
+        assert isinstance(d['start'], int) and not isinstance(d['start'], bool)
+        assert isinstance(d['end'], int) and not isinstance(d['end'], bool)
+
+
+def test_one_bad_chunk_fails_the_whole_request_while_other_chunks_still_complete():
+    """(finding #7) The property that actually matters is not "all chunks
+    fail" (already covered by
+    `test_a_chunk_that_never_succeeds_fails_the_whole_request_closed`, whose
+    `fail_on` substring appears in every chunk of `BIG`) but "ONE bad chunk
+    kills the whole request rather than yielding partially-masked text". A
+    `return_exceptions=True` regression would still raise for the all-fail
+    case but silently succeed here, so only THIS test can catch it."""
+    sentinel = 'SENTINEL_ONLY_IN_ONE_CHUNK_7f3'
+    # Prepended so it sits well inside the very first ~1800-char chunk, far
+    # from any split boundary, and appears in the fixture exactly once.
+    content = sentinel + ' ' + BIG
+    assert content.count(sentinel) == 1
+
+    completed = []
+    seen = []
+
+    def _post(url, *, headers, json, ssl):
+        body = json['body']
+        text = body['messages'][0]['content']
+        seen.append(text)
+        if text and sentinel not in text:
+            completed.append(text)
+        if sentinel in text:
+            raise aiohttp.ClientConnectionError('boom')
+        out = {**body, 'messages': [{'role': 'user', 'content': text.upper()}]}
+        resp = MagicMock()
+        resp.json = AsyncMock(return_value=out)
+        resp.raise_for_status = MagicMock()
+        resp.content_type = 'application/json'
+
+        async def _enter(_self=None):
+            return resp
+
+        cm = MagicMock()
+        cm.__aenter__ = _enter
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    s = MagicMock()
+    s.post = _post
+    scm = MagicMock()
+    scm.__aenter__ = AsyncMock(return_value=s)
+    scm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=scm):
+        with pytest.raises(PiiMaskingUnavailableError):
+            _run(_payload(content))
+
+    real_chunks = [t for t in seen if t]
+    assert len(real_chunks) > 1, 'fixture must actually produce more than one chunk'
+    assert completed, 'other chunks must have completed before the bad one failed the whole request'
+    assert len(completed) < len({t for t in real_chunks}), (
+        'the sentinel chunk must be among those attempted, or this does not exercise the partial-failure case'
+    )

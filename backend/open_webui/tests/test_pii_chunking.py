@@ -1,7 +1,5 @@
 """Unit tests for the shared PII chunk splitter (TRAU-543)."""
 
-import pytest
-
 from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_CHARS,
     split_text_for_pii,
