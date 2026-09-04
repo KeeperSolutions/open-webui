@@ -1204,7 +1204,7 @@
 				<div class={settingRowClass}>
 					<label id="floating-action-buttons-label" class={settingLabelClass}>
 						{$i18n.t('Floating Quick Actions')}
-					</span>
+					</label>
 
 					<div class={settingControlClass}>
 						{#if showFloatingActionButtons}

@@ -15,7 +15,7 @@
 
 	import { formatDate, resolveTheme } from '$lib/utils';
 
-	import { settings, user, shortCodesToEmojis, theme } from '$lib/stores';
+	import { settings, user, theme, shortCodesToEmojis } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { getMessageData } from '$lib/apis/channels';
 
@@ -137,67 +137,6 @@
 		swipeLocked = false;
 	};
 
-	// Swipe-to-reply state
-	let swipeStartX = 0;
-	let swipeStartY = 0;
-	let swipeOffsetX = 0;
-	let isSwiping = false;
-	let swipeLocked = false; // locked to horizontal once determined
-	let swipeMessageEl: HTMLElement | null = null;
-
-	const SWIPE_THRESHOLD = 60;
-	const SWIPE_MAX = 100;
-	const SWIPE_DEAD_ZONE = 10;
-
-	const handleTouchStart = (e: TouchEvent) => {
-		if (disabled || edit || !onReply) return;
-		const touch = e.touches[0];
-		swipeStartX = touch.clientX;
-		swipeStartY = touch.clientY;
-		swipeOffsetX = 0;
-		isSwiping = false;
-		swipeLocked = false;
-	};
-
-	const handleTouchMove = (e: TouchEvent) => {
-		if (disabled || edit || !onReply) return;
-		const touch = e.touches[0];
-		const deltaX = touch.clientX - swipeStartX;
-		const deltaY = touch.clientY - swipeStartY;
-
-		// Determine swipe direction from dead zone
-		if (!swipeLocked && (Math.abs(deltaX) > SWIPE_DEAD_ZONE || Math.abs(deltaY) > SWIPE_DEAD_ZONE)) {
-			if (Math.abs(deltaY) > Math.abs(deltaX)) {
-				// Vertical scroll — abort swipe tracking
-				isSwiping = false;
-				swipeLocked = true;
-				return;
-			}
-			// Horizontal swipe — lock in
-			swipeLocked = true;
-			isSwiping = true;
-		}
-
-		if (!isSwiping) return;
-
-		// Only allow right swipe
-		const clampedX = Math.max(0, deltaX);
-		// Dampen the motion beyond threshold for a rubber-band feel
-		swipeOffsetX = clampedX <= SWIPE_THRESHOLD
-			? clampedX
-			: SWIPE_THRESHOLD + (clampedX - SWIPE_THRESHOLD) * 0.3;
-		swipeOffsetX = Math.min(swipeOffsetX, SWIPE_MAX);
-	};
-
-	const handleTouchEnd = () => {
-		if (isSwiping && swipeOffsetX >= SWIPE_THRESHOLD && onReply) {
-			onReply(message);
-		}
-		swipeOffsetX = 0;
-		isSwiping = false;
-		swipeLocked = false;
-	};
-
 	const loadMessageData = async () => {
 		if (message && message?.data === true) {
 			const res = await getMessageData(localStorage.token, channel?.id, message.id);
@@ -249,75 +188,6 @@
 			</div>
 		{/if}
 
-		{#if message?.is_pinned}
-			<div class="flex {showUserProfile ? 'mb-0.5' : 'mt-0.5'}">
-				<div class="ml-8.5 flex items-center gap-1 px-1 rounded-full text-xs">
-					<Pin className="size-3 text-yellow-500 dark:text-yellow-300" />
-					<span class="text-gray-500">{$i18n.t('Pinned')}</span>
-				</div>
-			</div>
-		{/if}
-
-		{#if message?.reply_to_message?.user}
-			<div class="relative text-xs mb-1">
-				<div
-					class="absolute h-3 w-7 left-[18px] top-2 rounded-tl-lg border-t-[1.5px] border-l-[1.5px] border-gray-200 dark:border-gray-700 z-0"
-				></div>
-
-				<button
-					class="ml-12 flex items-center space-x-2 relative z-0"
-					on:click={() => {
-						const messageElement = document.getElementById(
-							`message-${message.reply_to_message.id}`
-						);
-						if (messageElement) {
-							messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-							messageElement.classList.add('highlight');
-							setTimeout(() => {
-								messageElement.classList.remove('highlight');
-							}, 2000);
-							return;
-						}
-					}}
-				>
-					{#if message?.reply_to_message?.meta?.model_id}
-						<img
-							src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${message.reply_to_message.meta.model_id}&theme=${resolveTheme($theme)}`}
-							alt={message.reply_to_message.meta.model_name ??
-								message.reply_to_message.meta.model_id}
-							class="size-4 ml-0.5 rounded-full object-cover"
-							on:error={(e) => {
-								e.currentTarget.src = '/favicon.png';
-							}}
-						/>
-					{:else}
-						<img
-							src={message.reply_to_message.user?.role === 'webhook'
-								? `${WEBUI_API_BASE_URL}/channels/webhooks/${message.reply_to_message.user?.id}/profile/image`
-								: `${WEBUI_API_BASE_URL}/users/${message.reply_to_message.user?.id}/profile/image`}
-							alt={message.reply_to_message.user?.name ?? $i18n.t('Unknown User')}
-							class="size-4 ml-0.5 rounded-full object-cover"
-							loading="lazy"
-						/>
-					{/if}
-
-					<div class="shrink-0">
-						{message?.reply_to_message.meta?.model_name ??
-							message?.reply_to_message.user?.name ??
-							$i18n.t('Unknown User')}
-					</div>
-
-					<div class="italic text-sm text-gray-500 dark:text-gray-400 line-clamp-1 w-full flex-1">
-						<Markdown
-							id={`${message.id}-reply-to`}
-							content={message?.reply_to_message?.content}
-							allowEmbeds={false}
-						/>
-					</div>
-				</button>
-			</div>
-		{/if}
-
 		<div
 			id="message-{renderedMessageId}"
 			class="flex flex-col justify-between w-full max-w-full mx-auto group hover:bg-gray-300/5 dark:hover:bg-gray-700/5 relative {className
@@ -338,24 +208,188 @@
 				? ''
 				: 'transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);'}"
 		>
-			<div class={`shrink-0 mr-1 w-9`}>
-				{#if showUserProfile}
-					{#if message?.meta?.model_id}
-						<img
-							src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${message.meta.model_id}&theme=${resolveTheme($theme)}`}
-							alt={message.meta.model_name ?? message.meta.model_id}
-							class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
-							on:error={(e) => {
-								e.currentTarget.src = '/favicon.png';
-							}}
-						/>
-					{:else if message.user?.role === 'webhook'}
-						<ProfileImage
-							src={`${WEBUI_API_BASE_URL}/channels/webhooks/${message.user?.id}/profile/image`}
-							className={'size-8 ml-0.5'}
-						/>
-					{:else}
-						<ProfilePreview user={message.user}>
+			{#if !edit && !disabled}
+				<div
+					class=" absolute {showButtons ? '' : 'invisible group-hover:visible'} right-1 -top-2 z-10"
+				>
+					<div
+						class="flex gap-1 rounded-lg bg-white dark:bg-gray-850 shadow-md p-0.5 border border-gray-100/30 dark:border-gray-850/30"
+					>
+						{#if onReaction}
+							<EmojiPicker
+								onClose={() => (showButtons = false)}
+								onSubmit={(name) => {
+									showButtons = false;
+									onReaction(name);
+								}}
+							>
+								<Tooltip content={$i18n.t('Add Reaction')}>
+									<button
+										class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-1"
+										on:click={() => {
+											showButtons = true;
+										}}
+									>
+										<FaceSmile />
+									</button>
+								</Tooltip>
+							</EmojiPicker>
+						{/if}
+
+						{#if onReply}
+							<Tooltip content={$i18n.t('Reply')}>
+								<button
+									class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-0.5"
+									on:click={() => {
+										onReply(message);
+									}}
+								>
+									<ArrowUpLeftAlt className="size-5" />
+								</button>
+							</Tooltip>
+						{/if}
+
+						<Tooltip content={message?.is_pinned ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+							<button
+								class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-1"
+								on:click={() => {
+									onPin(message);
+								}}
+							>
+								{#if message?.is_pinned}
+									<PinSlash className="size-4" />
+								{:else}
+									<Pin className="size-4" />
+								{/if}
+							</button>
+						</Tooltip>
+
+						{#if !thread && onThread}
+							<Tooltip content={$i18n.t('Reply in Thread')}>
+								<button
+									class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-1"
+									on:click={() => {
+										onThread(message.id);
+									}}
+								>
+									<ChatBubbleOvalEllipsis />
+								</button>
+							</Tooltip>
+						{/if}
+
+						{#if message.user_id === $user?.id || $user?.role === 'admin'}
+							{#if onEdit}
+								<Tooltip content={$i18n.t('Edit')}>
+									<button
+										class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-1"
+										on:click={() => {
+											edit = true;
+											editedContent = message.content;
+										}}
+									>
+										<Pencil />
+									</button>
+								</Tooltip>
+							{/if}
+
+							{#if onDelete}
+								<Tooltip content={$i18n.t('Delete')}>
+									<button
+										class="hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-lg p-1"
+										on:click={() => (showDeleteConfirmDialog = true)}
+									>
+										<GarbageBin />
+									</button>
+								</Tooltip>
+							{/if}
+						{/if}
+					</div>
+				</div>
+			{/if}
+
+			{#if message?.is_pinned}
+				<div class="flex {showUserProfile ? 'mb-0.5' : 'mt-0.5'}">
+					<div class="ml-8.5 flex items-center gap-1 px-1 rounded-full text-xs">
+						<Pin className="size-3 text-yellow-500 dark:text-yellow-300" />
+						<span class="text-gray-500">{$i18n.t('Pinned')}</span>
+					</div>
+				</div>
+			{/if}
+
+			{#if message?.reply_to_message?.user}
+				<div class="relative text-xs mb-1">
+					<div
+						class="absolute h-3 w-7 left-[18px] top-2 rounded-tl-lg border-t-[1.5px] border-l-[1.5px] border-gray-200 dark:border-gray-700 z-0"
+					></div>
+
+					<button
+						class="ml-12 flex items-center space-x-2 relative z-0"
+						on:click={() => {
+							const messageElement = document.getElementById(`message-${replyToMessageId}`);
+							if (messageElement) {
+								messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+								messageElement.classList.add('highlight');
+								setTimeout(() => {
+									messageElement.classList.remove('highlight');
+								}, 2000);
+								return;
+							}
+						}}
+					>
+						{#if message?.reply_to_message?.meta?.model_id}
+							<img
+								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${message.reply_to_message.meta.model_id}&theme=${resolveTheme($theme)}`}
+								alt={message.reply_to_message.meta.model_name ??
+									message.reply_to_message.meta.model_id}
+								class="size-4 ml-0.5 rounded-full object-cover"
+								on:error={(e) => {
+									e.currentTarget.src = '/favicon.png';
+								}}
+							/>
+						{:else}
+							<img
+								src={message.reply_to_message.user?.role === 'webhook'
+									? `${WEBUI_API_BASE_URL}/channels/webhooks/${message.reply_to_message.user?.id}/profile/image`
+									: `${WEBUI_API_BASE_URL}/users/${message.reply_to_message.user?.id}/profile/image`}
+								alt={message.reply_to_message.user?.name ?? $i18n.t('Unknown User')}
+								class="size-4 ml-0.5 rounded-full object-cover"
+							/>
+						{/if}
+
+						<div class="shrink-0">
+							{message?.reply_to_message.meta?.model_name ??
+								message?.reply_to_message.user?.name ??
+								$i18n.t('Unknown User')}
+						</div>
+
+						<div class="italic text-sm text-gray-500 dark:text-gray-400 line-clamp-1 w-full flex-1">
+							<Markdown
+								id={`${renderedMessageId}-reply-to`}
+								content={message?.reply_to_message?.content}
+								allowEmbeds={false}
+							/>
+						</div>
+					</button>
+				</div>
+			{/if}
+
+			<div
+				class=" flex w-full message-{message.id} "
+				id="message-{renderedMessageId}"
+				dir={$settings.chatDirection}
+			>
+				<div class={`shrink-0 mr-1 w-9`}>
+					{#if showUserProfile}
+						{#if message?.meta?.model_id}
+							<img
+								src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${message.meta.model_id}&theme=${resolveTheme($theme)}`}
+								alt={message.meta.model_name ?? message.meta.model_id}
+								class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
+								on:error={(e) => {
+									e.currentTarget.src = '/favicon.png';
+								}}
+							/>
+						{:else if message.user?.role === 'webhook'}
 							<ProfileImage
 								src={`${WEBUI_API_BASE_URL}/channels/webhooks/${message.user?.id}/profile/image`}
 								className={'size-8 ml-0.5'}
@@ -625,7 +659,6 @@
 					{/if}
 				</div>
 			</div>
-		</div>
 		</div>
 	</div>
 {/if}

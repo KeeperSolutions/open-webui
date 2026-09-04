@@ -241,8 +241,7 @@
 			: $config?.audio?.tts?.voice);
 
 	const speak = async () => {
-		const content = visibleResponseContent;
-		if (!content.trim().length) {
+		if (!visibleResponseContent.trim().length) {
 			toast.info($i18n.t('No content to speak'));
 			return;
 		}

@@ -190,10 +190,9 @@ COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
 # copy backend files
 COPY --chown=$UID:$GID ./backend .
 
-<<<<<<< HEAD
 # copy provider logos from static to backend static directory
 COPY --chown=$UID:$GID --from=build /app/static/providers /app/backend/open_webui/static/providers
-=======
+
 # The backend rewrites its bundled static assets (favicons, splash, manifest,
 # loader.js, ...) under open_webui/static at startup. Make that directory
 # writable by an arbitrary UID -- which under OpenShift's restricted SCC is
@@ -204,7 +203,6 @@ COPY --chown=$UID:$GID --from=build /app/static/providers /app/backend/open_webu
 # the broader, opt-in USE_PERMISSION_HARDENING below covers the rest of /app.
 RUN chgrp -R 0 /app/backend/open_webui/static && \
     chmod -R g=u /app/backend/open_webui/static
->>>>>>> v0.11.0
 
 EXPOSE 8080
 

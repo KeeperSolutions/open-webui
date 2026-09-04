@@ -5,8 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<<<<<<< HEAD
-=======
 ## [0.11.0] - 2026-07-27
 
 ### Added
@@ -558,7 +556,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔧 **You.com search key renamed.** You.com web search now prefers the "YDC_API_KEY" environment variable, with the previous "YOUCOM_API_KEY" still accepted as a fallback. [Commit](https://github.com/open-webui/open-webui/commit/df634bb64f5043b0292e43c69bd1d31676c89328), [#26316](https://github.com/open-webui/open-webui/pull/26316)
 - 🧪 **Client-side Python now runs sandboxed.** Client-side Python (Pyodide) now runs in a sandboxed, opaque-origin iframe by default, isolating executed code from your session, cookies, local storage, and the app's own endpoints, while full Python, JavaScript, and external network access keep working. Code that relied on reaching same-origin Open WebUI endpoints from Pyodide will no longer be able to, and Pyodide is now marked legacy in the admin Code Execution settings. [Commit](https://github.com/open-webui/open-webui/commit/516051304e1b1f250c34438746ade673a79bd40c), [Commit](https://github.com/open-webui/open-webui/commit/c7be66626fd10c75ec35f662a709129ba1b020ec), [Commit](https://github.com/open-webui/open-webui/commit/62ae2069183109d878d72b9444a0e7c4f6c66caa), [Commit](https://github.com/open-webui/open-webui/commit/518702caae5a6484e71aa79e8ab908ec398290a7), [Commit](https://github.com/open-webui/open-webui/commit/03a8363583b7e0e04760d49f1e8d28dbbfefee4d)
 
->>>>>>> v0.11.0
 ## [0.9.6] - 2026-06-01
 
 ### Added

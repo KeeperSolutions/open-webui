@@ -280,7 +280,7 @@
 							}}
 						>
 							{item?.name ?? 'File'}
-						</button>
+						</a>
 					</div>
 				</div>
 
@@ -512,7 +512,7 @@
 							class="w-full border-0 rounded-lg mb-2"
 							controls
 							playsinline
-						></audio>
+						/>
 					{:else if isPDF}
 						<PDFViewer
 							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}

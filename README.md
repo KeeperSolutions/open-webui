@@ -43,21 +43,17 @@ For more information, be sure to check out our [Open WebUI Documentation](https:
 
 - 🧠 **Persistent Memory**: The AI remembers facts about you across conversations, carrying context from one chat to the next.
 
-<<<<<<< HEAD
 - 🎨 **Automatic Provider Logo Assignment**: Models automatically display provider logos (OpenAI, Anthropic, Google, Meta, Ollama) based on configurable ID patterns. Admins can customize providers, add new ones, and override logos manually. Full support for light/dark theme variants.
 
 - 🐍 **Native Python Function Calling Tool**: Enhance your LLMs with built-in code editor support in the tools workspace. Bring Your Own Function (BYOF) by simply adding your pure Python functions, enabling seamless integration with LLMs.
-=======
+
 - ✅ **Live Workflow & Message Flow**: Watch the AI build and work through checklists in real time. Queue messages while the AI is still responding; they send automatically when it's ready.
->>>>>>> v0.11.0
 
 - 📅 **Calendar & AI Scheduling**: Built-in personal and shared calendars with month/week/day views, recurring events, color coding, attendees, and reminders. Models manage your schedule conversationally through native function calling.
 
-<<<<<<< HEAD
 - 📚 **Local RAG Integration**: Dive into the future of chat interactions with groundbreaking Retrieval Augmented Generation (RAG) support using your choice of 9 vector databases and multiple content extraction engines (Tika, Docling, Document Intelligence, Mistral OCR, PaddleOCR-vl, External loaders). Load documents directly into chat or add files to your document library, effortlessly accessing them using the `#` command before a query.
-=======
+
 - ⏱️ **Automations**: Schedule prompts to run on recurring schedules, with runs surfaced on your calendar and each completed run linking back to the chat it produced.
->>>>>>> v0.11.0
 
 - 📱 **Responsive Design & PWA**: Seamless experience across desktop, laptop, and mobile, with a Progressive Web App for native app-like feel and offline access on localhost.
 
