@@ -13,6 +13,7 @@ mocking the group table away would leave exactly that unverified.
 import sys
 import time
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -129,11 +130,23 @@ def _form(enforced, reason=None):
     )
 
 
+def _make_request():
+    """Minimal request stub for the group routes — they read
+    request.app.state.config.USER_PERMISSIONS (policy resolution) and
+    request.app.state.instance_id (event publishing)."""
+    request = MagicMock()
+    request.app.state.config.USER_PERMISSIONS = {}
+    request.app.state.instance_id = "test-instance"
+    request.state = SimpleNamespace()
+    return request
+
+
 async def _call_route(group_id, form, db_session, audits, groups_bound):
     from open_webui.routers import groups as groups_router
 
     with patch.object(groups_router, "Groups", groups_bound), patch.object(groups_router, "PiiPolicyAudits", audits):
         return await groups_router.update_group_by_id(
+            request=_make_request(),
             id=group_id,
             form_data=form,
             user=MagicMock(id="admin-1", email="admin@example.com"),
@@ -398,6 +411,7 @@ async def _call_membership(action, group_id, user_ids, db_session, audits, group
         patch.object(groups_router.Users, "get_valid_user_ids", _get_valid_user_ids),
     ):
         return await handler(
+            request=_make_request(),
             id=group_id,
             form_data=GroupMembershipForm(user_ids=user_ids, reason=reason),
             user=MagicMock(id="admin-1", email="admin@example.com"),

@@ -93,7 +93,7 @@ async def proxy_terminal(
     user=Depends(get_verified_user),
 ):
     """Proxy a request to the admin terminal server identified by *server_id*."""
-    connections = ws.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
+    connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
     connection = next((c for c in connections if c.get('id') == server_id), None)
 
     if connection is None:
@@ -243,7 +243,7 @@ async def _resolve_authenticated_connection(ws: WebSocket, server_id: str):
         return None
 
     # Resolve terminal server
-    connections = request.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
+    connections = ws.app.state.config.TERMINAL_SERVER_CONNECTIONS or []
     connection = next((c for c in connections if c.get('id') == server_id), None)
 
     if connection is None:

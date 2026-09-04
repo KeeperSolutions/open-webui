@@ -196,10 +196,15 @@ def get_sorted_filters(model_id, models):
     return sorted_filters
 
 
-async def get_openai_connection(url_idx: int) -> tuple[str, str]:
-    from open_webui.config import OPENAI_API_BASE_URLS, OPENAI_API_KEYS
-
-    return (OPENAI_API_BASE_URLS.value or [])[url_idx], (OPENAI_API_KEYS.value or [])[url_idx]
+async def get_openai_connection(request, url_idx: int) -> tuple[str, str]:
+    # Read from the per-request AppConfig (request.app.state.config), not the
+    # module-level ConfigVar — this fork keeps the AppConfig backbone and every
+    # other pipelines.py connection lookup resolves it this way (and tests
+    # override it there). Upstream's version took no request and read the
+    # per-key Config store; adapted here to Risk #1.
+    base_urls = request.app.state.config.OPENAI_API_BASE_URLS or []
+    api_keys = request.app.state.config.OPENAI_API_KEYS or []
+    return base_urls[url_idx], api_keys[url_idx]
 
 
 async def process_pipeline_inlet_filter(request, payload, user, models):
@@ -278,7 +283,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             except Exception:
                 continue
 
-            url, key = await get_openai_connection(urlIdx)
+            url, key = await get_openai_connection(request, urlIdx)
 
             if not key:
                 continue
@@ -384,7 +389,7 @@ async def process_pipeline_outlet_filter(request, payload, user, models):
             except Exception:
                 continue
 
-            url, key = await get_openai_connection(urlIdx)
+            url, key = await get_openai_connection(request, urlIdx)
 
             if not key:
                 continue
@@ -484,7 +489,7 @@ async def upload_pipeline(
             while chunk := await file.read(AIOHTTP_FILE_STREAM_CHUNK_SIZE):
                 await buffer.write(chunk)
 
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         headers = {'Authorization': f'Bearer {key}'}
 
@@ -556,7 +561,7 @@ async def add_pipeline(request: Request, form_data: AddPipelineForm, user=Depend
     try:
         urlIdx = form_data.urlIdx
 
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.post(
@@ -606,7 +611,7 @@ async def delete_pipeline(request: Request, form_data: DeletePipelineForm, user=
     try:
         urlIdx = form_data.urlIdx
 
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.delete(
@@ -649,7 +654,7 @@ async def delete_pipeline(request: Request, form_data: DeletePipelineForm, user=
 async def get_pipelines(request: Request, urlIdx: Optional[int] = None, user=Depends(get_admin_user)):
     response = None
     try:
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(
@@ -689,7 +694,7 @@ async def get_pipeline_valves(
 ):
     response = None
     try:
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(
@@ -736,7 +741,7 @@ async def get_pipeline_valves_spec(
 ):
     response = None
     try:
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(
@@ -777,7 +782,7 @@ async def update_pipeline_valves(
 ):
     response = None
     try:
-        url, key = await get_openai_connection(urlIdx)
+        url, key = await get_openai_connection(request, urlIdx)
 
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.post(

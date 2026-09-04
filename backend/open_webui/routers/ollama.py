@@ -554,7 +554,7 @@ async def get_ollama_versions(
 
     # Fan-out to every enabled backend
     tasks = []
-    for idx, url in enumeraterequest.app.state.config.OLLAMA_BASE_URLS:
+    for idx, url in enumerate(request.app.state.config.OLLAMA_BASE_URLS):
         api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
             str(idx),
             request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),

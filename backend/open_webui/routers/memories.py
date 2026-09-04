@@ -332,6 +332,7 @@ async def query_memory(
 
 @router.post('/search', response_model=list[MemoryModel])
 async def search_memories(
+    request: Request,
     form_data: SearchMemoriesForm,
     user=Depends(get_verified_user),
 ):
@@ -350,6 +351,7 @@ async def search_memories(
 
 @router.post('/paths')
 async def list_memory_paths(
+    request: Request,
     form_data: ListMemoryPathsForm,
     user=Depends(get_verified_user),
 ):
@@ -366,6 +368,7 @@ async def list_memory_paths(
 
 @router.post('/path')
 async def read_memory_path(
+    request: Request,
     form_data: ReadMemoryPathForm,
     user=Depends(get_verified_user),
 ):

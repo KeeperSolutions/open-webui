@@ -1011,6 +1011,11 @@ def build_event(
     parts = event_name_value.split('.')
     resource = '.'.join(parts[:-1])
     instance_id = getattr(getattr(app, 'state', None), 'instance_id', None)
+    # app.state.instance_id is None until lifespan sets it, and test doubles
+    # can hand back a non-string sentinel here — coerce to the declared type so
+    # a spurious ValidationError never masks the event this call is reporting.
+    if not isinstance(instance_id, str):
+        instance_id = None
     subject = (
         {'type': subject_type or resource, 'id': subject_id}
         if subject_id is not None or subject_type is not None

@@ -286,11 +286,37 @@ async def generate_chat_completion(
         if model.get('owned_by') == 'ollama':
             # Using /ollama/api/chat endpoint
             form_data = convert_payload_openai_to_ollama(form_data)
-            response = await generate_ollama_chat_completion(
-                request=request,
-                form_data=form_data,
-                user=user,
-            )
+            try:
+                response = await generate_ollama_chat_completion(
+                    request=request,
+                    form_data=form_data,
+                    user=user,
+                )
+            except HTTPException as e:
+                # Ollama rejects any `tools` payload for models that lack tool
+                # support ("<model> does not support tools", HTTP 400). Builtin
+                # tools (time, knowledge, memories, …) are injected by default,
+                # so a small local model like gemma3:1b would otherwise be
+                # unusable. Retry once without tools rather than failing the
+                # whole message.
+                detail = str(getattr(e, 'detail', '') or '')
+                if (
+                    e.status_code == 400
+                    and 'does not support tools' in detail
+                    and form_data.get('tools')
+                ):
+                    log.info(
+                        'Ollama model %s rejected tools; retrying without them.',
+                        form_data.get('model'),
+                    )
+                    form_data.pop('tools', None)
+                    response = await generate_ollama_chat_completion(
+                        request=request,
+                        form_data=form_data,
+                        user=user,
+                    )
+                else:
+                    raise
             if form_data.get('stream'):
                 response.headers['content-type'] = 'text/event-stream'
                 return StreamingResponse(

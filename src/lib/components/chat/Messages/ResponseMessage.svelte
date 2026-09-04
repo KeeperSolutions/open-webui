@@ -892,6 +892,13 @@
 
 							{#if message?.error}
 								<Error content={message?.error?.content ?? message.content} />
+								{#if isLastMessage && !readOnly}
+									<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+										{$i18n.t(
+											'Regenerate this response or delete it to continue the conversation.'
+										)}
+									</div>
+								{/if}
 							{/if}
 
 							{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}

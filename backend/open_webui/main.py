@@ -1003,7 +1003,7 @@ app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
 
 app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
 app.state.config.WEBHOOK_URL = WEBHOOK_URL
-app.state.config.BANNERS = WEBUI_BANNERS
+app.state.config.WEBUI_BANNERS = WEBUI_BANNERS
 
 
 app.state.config.ENABLE_FOLDERS = ENABLE_FOLDERS
@@ -1314,13 +1314,13 @@ app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = IMAGES_EDIT_COMFYUI_WORKFL
 #
 ########################################
 
-app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
-app.state.config.STT_MODEL = AUDIO_STT_MODEL
-app.state.config.STT_SUPPORTED_CONTENT_TYPES = AUDIO_STT_SUPPORTED_CONTENT_TYPES
-app.state.config.STT_ALLOWED_EXTENSIONS = AUDIO_STT_ALLOWED_EXTENSIONS
+app.state.config.AUDIO_STT_ENGINE = AUDIO_STT_ENGINE
+app.state.config.AUDIO_STT_MODEL = AUDIO_STT_MODEL
+app.state.config.AUDIO_STT_SUPPORTED_CONTENT_TYPES = AUDIO_STT_SUPPORTED_CONTENT_TYPES
+app.state.config.AUDIO_STT_ALLOWED_EXTENSIONS = AUDIO_STT_ALLOWED_EXTENSIONS
 
-app.state.config.STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
-app.state.config.STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
+app.state.config.AUDIO_STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
+app.state.config.AUDIO_STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
 
 app.state.config.WHISPER_MODEL = WHISPER_MODEL
 app.state.config.DEEPGRAM_API_KEY = DEEPGRAM_API_KEY
@@ -1335,25 +1335,25 @@ app.state.config.AUDIO_STT_MISTRAL_API_KEY = AUDIO_STT_MISTRAL_API_KEY
 app.state.config.AUDIO_STT_MISTRAL_API_BASE_URL = AUDIO_STT_MISTRAL_API_BASE_URL
 app.state.config.AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS = AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS
 
-app.state.config.TTS_ENGINE = AUDIO_TTS_ENGINE
+app.state.config.AUDIO_TTS_ENGINE = AUDIO_TTS_ENGINE
 
-app.state.config.TTS_MODEL = AUDIO_TTS_MODEL
-app.state.config.TTS_VOICE = AUDIO_TTS_VOICE
+app.state.config.AUDIO_TTS_MODEL = AUDIO_TTS_MODEL
+app.state.config.AUDIO_TTS_VOICE = AUDIO_TTS_VOICE
 
-app.state.config.TTS_OPENAI_API_BASE_URL = AUDIO_TTS_OPENAI_API_BASE_URL
-app.state.config.TTS_OPENAI_API_KEY = AUDIO_TTS_OPENAI_API_KEY
-app.state.config.TTS_OPENAI_PARAMS = AUDIO_TTS_OPENAI_PARAMS
+app.state.config.AUDIO_TTS_OPENAI_API_BASE_URL = AUDIO_TTS_OPENAI_API_BASE_URL
+app.state.config.AUDIO_TTS_OPENAI_API_KEY = AUDIO_TTS_OPENAI_API_KEY
+app.state.config.AUDIO_TTS_OPENAI_PARAMS = AUDIO_TTS_OPENAI_PARAMS
 
-app.state.config.TTS_API_KEY = AUDIO_TTS_API_KEY
-app.state.config.TTS_SPLIT_ON = AUDIO_TTS_SPLIT_ON
+app.state.config.AUDIO_TTS_API_KEY = AUDIO_TTS_API_KEY
+app.state.config.AUDIO_TTS_SPLIT_ON = AUDIO_TTS_SPLIT_ON
 
 
-app.state.config.TTS_AZURE_SPEECH_REGION = AUDIO_TTS_AZURE_SPEECH_REGION
-app.state.config.TTS_AZURE_SPEECH_BASE_URL = AUDIO_TTS_AZURE_SPEECH_BASE_URL
-app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT = AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT
+app.state.config.AUDIO_TTS_AZURE_SPEECH_REGION = AUDIO_TTS_AZURE_SPEECH_REGION
+app.state.config.AUDIO_TTS_AZURE_SPEECH_BASE_URL = AUDIO_TTS_AZURE_SPEECH_BASE_URL
+app.state.config.AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT
 
-app.state.config.TTS_MISTRAL_API_KEY = AUDIO_TTS_MISTRAL_API_KEY
-app.state.config.TTS_MISTRAL_API_BASE_URL = AUDIO_TTS_MISTRAL_API_BASE_URL
+app.state.config.AUDIO_TTS_MISTRAL_API_KEY = AUDIO_TTS_MISTRAL_API_KEY
+app.state.config.AUDIO_TTS_MISTRAL_API_BASE_URL = AUDIO_TTS_MISTRAL_API_BASE_URL
 
 
 app.state.faster_whisper_model = None
@@ -1391,6 +1391,24 @@ app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = AUTOCOMPLETE_GENERATI
 app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
 app.state.config.VOICE_MODE_PROMPT_TEMPLATE = VOICE_MODE_PROMPT_TEMPLATE
 app.state.config.ENABLE_VOICE_MODE_PROMPT = ENABLE_VOICE_MODE_PROMPT
+
+
+# Safety net (Risk #1): the manual registrations above bind many ConfigVars
+# under this fork's historical short aliases (e.g. `TTS_ENGINE` for
+# `AUDIO_TTS_ENGINE`, `TOP_K` for `RAG_TOP_K`). Router code merged from
+# upstream reads them by their canonical config.py name via
+# `request.app.state.config.<NAME>`. Register every ConfigVar under its
+# canonical name too, so both spellings resolve to the same underlying
+# ConfigVar. Names already registered above (aliases included) are left
+# untouched.
+from open_webui import config as _owui_config
+from open_webui.internal.config import ConfigVar as _ConfigVar
+
+for _name in dir(_owui_config):
+    _cv = getattr(_owui_config, _name, None)
+    if isinstance(_cv, _ConfigVar) and _name not in app.state.config._entries:
+        setattr(app.state.config, _name, _cv)
+del _owui_config, _ConfigVar, _name, _cv
 
 
 async def initialize_runtime_config(app: FastAPI):
@@ -2956,12 +2974,12 @@ async def get_app_config(request: Request):
                 },
                 'audio': {
                     'tts': {
-                        'engine': app.state.config.TTS_ENGINE,
-                        'voice': app.state.config.TTS_VOICE,
-                        'split_on': app.state.config.TTS_SPLIT_ON,
+                        'engine': app.state.config.AUDIO_TTS_ENGINE,
+                        'voice': app.state.config.AUDIO_TTS_VOICE,
+                        'split_on': app.state.config.AUDIO_TTS_SPLIT_ON,
                     },
                     'stt': {
-                        'engine': app.state.config.STT_ENGINE,
+                        'engine': app.state.config.AUDIO_STT_ENGINE,
                     },
                 },
                 'file': {

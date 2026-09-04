@@ -4,8 +4,6 @@ from typing import Any
 from open_webui.retrieval.vector.main import SearchResult
 from open_webui.utils.misc import sanitize_text_for_db
 
-from open_webui.utils.misc import sanitize_text_for_db
-
 KEYS_TO_EXCLUDE = ['content', 'pages', 'tables', 'paragraphs', 'sections', 'figures']
 
 

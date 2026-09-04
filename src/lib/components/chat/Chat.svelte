@@ -1043,6 +1043,11 @@
 					}, 100);
 				} else if (type === 'chat:message:error') {
 					message.error = data.error;
+					// Mark the turn finished so the composer re-enables — otherwise
+					// `isActive` (MessageInput) stays true on `done != true` and the
+					// conversation is stuck after any backend-emitted error.
+					message.done = true;
+					taskIds = null;
 				} else if (type === 'chat:message:follow_ups') {
 					message.followUps = data.follow_ups;
 

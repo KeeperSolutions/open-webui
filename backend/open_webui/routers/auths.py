@@ -1250,8 +1250,10 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         'AUTOMATION_MIN_INTERVAL': request.app.state.config.AUTOMATION_MIN_INTERVAL,
         'ENABLE_AUTOMATIONS': request.app.state.config.ENABLE_AUTOMATIONS,
         'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
+        'CHANNEL_MODEL_RESPONSE_MODE': request.app.state.config.CHANNEL_MODEL_RESPONSE_MODE,
         'ENABLE_CALENDAR': request.app.state.config.ENABLE_CALENDAR,
         'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
+        'ENABLE_MEMORY_SYSTEM_CONTEXT': request.app.state.config.ENABLE_MEMORY_SYSTEM_CONTEXT,
         'ENABLE_NOTES': request.app.state.config.ENABLE_NOTES,
         'ENABLE_USER_WEBHOOKS': request.app.state.config.ENABLE_USER_WEBHOOKS,
         'ENABLE_USER_STATUS': request.app.state.config.ENABLE_USER_STATUS,
@@ -1294,9 +1296,62 @@ class AdminConfig(BaseModel):
 
 @router.post('/admin/config')
 async def update_admin_config(request: Request, form_data: AdminConfig, user=Depends(get_admin_user)):
-    enable_group_management: bool = False
-    enable_group_creation: bool = False
-    attribute_for_groups: str = 'memberOf'
+    # Risk #1: this fork keeps the AppConfig backbone, so admin settings are
+    # written field-by-field onto request.app.state.config (which proxies the
+    # module ConfigVars + persists via .commit()), NOT through upstream's
+    # per-key Config.upsert(). WEBUI_URL is deliberately NOT written here — it
+    # is controlled exclusively by the WEBUI_URL environment variable
+    # (WEBUI_URL_ENV_CONTROLLED), guarded by test_webui_url_config.py.
+    config = request.app.state.config
+
+    config.SHOW_ADMIN_DETAILS = form_data.SHOW_ADMIN_DETAILS
+    config.ADMIN_EMAIL = form_data.ADMIN_EMAIL
+    config.ENABLE_SIGNUP = form_data.ENABLE_SIGNUP
+
+    config.ENABLE_API_KEYS = form_data.ENABLE_API_KEYS
+    config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = form_data.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
+    config.API_KEYS_ALLOWED_ENDPOINTS = form_data.API_KEYS_ALLOWED_ENDPOINTS
+
+    config.ENABLE_FOLDERS = form_data.ENABLE_FOLDERS
+    config.FOLDER_MAX_FILE_COUNT = (
+        int(form_data.FOLDER_MAX_FILE_COUNT) if form_data.FOLDER_MAX_FILE_COUNT else ''
+    )
+    config.AUTOMATION_MAX_COUNT = (
+        int(form_data.AUTOMATION_MAX_COUNT) if form_data.AUTOMATION_MAX_COUNT else ''
+    )
+    config.AUTOMATION_MIN_INTERVAL = (
+        int(form_data.AUTOMATION_MIN_INTERVAL) if form_data.AUTOMATION_MIN_INTERVAL else ''
+    )
+    config.ENABLE_AUTOMATIONS = form_data.ENABLE_AUTOMATIONS
+    config.ENABLE_CHANNELS = form_data.ENABLE_CHANNELS
+    if form_data.CHANNEL_MODEL_RESPONSE_MODE in ['thread', 'channel']:
+        config.CHANNEL_MODEL_RESPONSE_MODE = form_data.CHANNEL_MODEL_RESPONSE_MODE
+    config.ENABLE_CALENDAR = form_data.ENABLE_CALENDAR
+    config.ENABLE_MEMORIES = form_data.ENABLE_MEMORIES
+    config.ENABLE_MEMORY_SYSTEM_CONTEXT = form_data.ENABLE_MEMORY_SYSTEM_CONTEXT
+    config.ENABLE_NOTES = form_data.ENABLE_NOTES
+
+    if form_data.DEFAULT_USER_ROLE in ['pending', 'user', 'admin']:
+        config.DEFAULT_USER_ROLE = form_data.DEFAULT_USER_ROLE
+
+    config.DEFAULT_GROUP_ID = form_data.DEFAULT_GROUP_ID
+
+    pattern = r'^(-1|0|(-?\d+(\.\d+)?)(ms|s|m|h|d|w))$'
+    if re.match(pattern, form_data.JWT_EXPIRES_IN):
+        config.JWT_EXPIRES_IN = form_data.JWT_EXPIRES_IN
+
+    config.ENABLE_COMMUNITY_SHARING = form_data.ENABLE_COMMUNITY_SHARING
+    config.ENABLE_MESSAGE_RATING = form_data.ENABLE_MESSAGE_RATING
+
+    config.ENABLE_USER_WEBHOOKS = form_data.ENABLE_USER_WEBHOOKS
+    config.ENABLE_USER_STATUS = form_data.ENABLE_USER_STATUS
+
+    config.PENDING_USER_OVERLAY_TITLE = form_data.PENDING_USER_OVERLAY_TITLE
+    config.PENDING_USER_OVERLAY_CONTENT = form_data.PENDING_USER_OVERLAY_CONTENT
+
+    config.RESPONSE_WATERMARK = form_data.RESPONSE_WATERMARK
+
+    return await get_config_values(ADMIN_CONFIG_KEYS)
 
 
 class LdapServerConfig(BaseModel):
