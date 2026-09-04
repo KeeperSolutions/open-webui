@@ -53,11 +53,7 @@
 
 	import { executeToolServer, getBackendConfig, getModels, getVersion } from '$lib/apis';
 	import { getSessionUser, updateUserTimezone, userSignOut } from '$lib/apis/auths';
-<<<<<<< HEAD
-	import { getAllTags, getChatList } from '$lib/apis/chats';
-=======
 	import { getAllTags } from '$lib/apis/chats';
->>>>>>> v0.11.0
 	import { chatCompletion } from '$lib/apis/openai';
 	import { isTemporaryChatId } from '$lib/utils/chatId';
 	import {
@@ -68,17 +64,15 @@
 	} from '$lib/utils/connections';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
-<<<<<<< HEAD
-	import { bestMatchingLanguage, isDev, isStaging, displayFileHandler, getUserTimezone } from '$lib/utils';
-=======
 	import {
 		bestMatchingLanguage,
 		cleanText,
 		displayFileHandler,
 		getUserTimezone,
+		isDev,
+		isStaging,
 		removeAllDetails
 	} from '$lib/utils';
->>>>>>> v0.11.0
 	import { setTextScale } from '$lib/utils/text-scale';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
@@ -128,11 +122,6 @@
 	let heartbeatInterval = null;
 	let disconnectToastTimer = null;
 	let disconnectWarningShown = false;
-<<<<<<< HEAD
-
-	const BREAKPOINT = 768;
-	const DISCONNECT_TOAST_DELAY_MS = 2000;
-=======
 	let pageIsVisible = true;
 	let pageWasHidden = false;
 	let lastVisibleAt = Date.now();
@@ -175,7 +164,6 @@
 			toast.warning($i18n.t('Connection lost. Reconnecting...'));
 		}, resumeDelay + DISCONNECT_TOAST_DELAY_MS);
 	};
->>>>>>> v0.11.0
 
 	const setupSocket = async (enableWebsocket) => {
 		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
@@ -199,30 +187,17 @@
 			console.log('connected', _socket.id);
 
 			// Cancel any pending disconnect toast if we reconnected quickly
-<<<<<<< HEAD
-			if (disconnectToastTimer) {
-				clearTimeout(disconnectToastTimer);
-				disconnectToastTimer = null;
-			}
-=======
 			clearDisconnectToastTimer();
->>>>>>> v0.11.0
 
 			if (hasConnectedOnce) {
 				socketConnected.set(true);
 				// Only show "Reconnected" if the user actually saw the disconnect warning
 				if (disconnectWarningShown) {
 					toast.success($i18n.t('Reconnected'));
-<<<<<<< HEAD
-					disconnectWarningShown = false;
-				}
-			}
-=======
 				}
 			}
 			disconnectWarningShown = false;
 			disconnectReason = null;
->>>>>>> v0.11.0
 			hasConnectedOnce = true;
 
 			const res = await getVersion(localStorage.token);
@@ -276,20 +251,6 @@
 		_socket.on('disconnect', (reason, details) => {
 			console.log(`Socket ${_socket.id} disconnected due to ${reason}`);
 			socketConnected.set(false);
-<<<<<<< HEAD
-
-			// Delay showing the disconnect toast so brief interruptions
-			// (e.g. mobile tab backgrounding) don't flash a nuisance warning
-			if (disconnectToastTimer) {
-				clearTimeout(disconnectToastTimer);
-			}
-			disconnectWarningShown = false;
-			disconnectToastTimer = setTimeout(() => {
-				disconnectToastTimer = null;
-				disconnectWarningShown = true;
-				toast.warning($i18n.t('Connection lost. Reconnecting...'));
-			}, DISCONNECT_TOAST_DELAY_MS);
-=======
 			disconnectReason = reason;
 			disconnectWarningShown = false;
 
@@ -299,7 +260,6 @@
 			} else {
 				scheduleDisconnectToast();
 			}
->>>>>>> v0.11.0
 
 			if (heartbeatInterval) {
 				clearInterval(heartbeatInterval);
@@ -309,15 +269,6 @@
 			if (details) {
 				console.log('Additional details:', details);
 			}
-		});
-
-		_socket.on('user-list', (data) => {
-			activeUserIds.set(data.user_ids);
-		});
-
-		_socket.on('usage', (data) => {
-			console.log('usage', data);
-			USAGE_POOL.set(data['models']);
 		});
 	};
 
@@ -566,11 +517,7 @@
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
 
-<<<<<<< HEAD
-		// Calendar alerts are not chat-scoped — handle before chat_id checks
-=======
 		// Calendar alerts are not chat-scoped, handle before chat_id checks
->>>>>>> v0.11.0
 		if (type === 'calendar:alert' && data) {
 			const timeStr =
 				data.minutes_until <= 0
@@ -593,11 +540,7 @@
 
 			if ($isLastActiveTab) {
 				if ($settings?.notificationEnabled ?? false) {
-<<<<<<< HEAD
-					new Notification(`${data.title} • Open WebUI`, {
-=======
 					new Notification(`${data.title} / Open WebUI`, {
->>>>>>> v0.11.0
 						body: timeStr,
 						icon: `${WEBUI_BASE_URL}/static/favicon.png`
 					});
@@ -707,12 +650,6 @@
 			}
 		}
 
-<<<<<<< HEAD
-		if ((event.chat_id !== $chatId && !$temporaryChatEnabled) || isInBackground) {
-			if (type === 'chat:completion') {
-				const { done, content, title } = data;
-				const displayTitle = title || $i18n.t('New Chat');
-=======
 		if (
 			!event?.internal &&
 			((event.chat_id !== $chatId && !$temporaryChatEnabled) || isInBackground)
@@ -721,7 +658,6 @@
 				const { done, content, output, title } = data;
 				const displayTitle = title || $i18n.t('New Chat');
 				const contentPreview = cleanText(removeAllDetails(getOutputText(output) || content || ''));
->>>>>>> v0.11.0
 
 				if (done) {
 					if (
@@ -739,13 +675,8 @@
 
 					if ($isLastActiveTab) {
 						if ($settings?.notificationEnabled ?? false) {
-<<<<<<< HEAD
-							new Notification(`${displayTitle} • Open WebUI`, {
-								body: content,
-=======
 							new Notification(`${displayTitle} / Open WebUI`, {
 								body: contentPreview,
->>>>>>> v0.11.0
 								icon: `${WEBUI_BASE_URL}/static/favicon.png`
 							});
 						}
@@ -756,11 +687,7 @@
 							onClick: () => {
 								goto(`/c/${event.chat_id}`);
 							},
-<<<<<<< HEAD
-							content: content,
-=======
 							content: contentPreview,
->>>>>>> v0.11.0
 							title: displayTitle
 						},
 						duration: 15000,
@@ -768,12 +695,7 @@
 					});
 				}
 			} else if (type === 'chat:title') {
-<<<<<<< HEAD
-				currentChatPage.set(1);
-				await chats.set(await getChatList(localStorage.token, $currentChatPage));
-=======
 				await refreshChatList(localStorage.token);
->>>>>>> v0.11.0
 			} else if (type === 'chat:tags') {
 				tags.set(await getAllTags(localStorage.token));
 			}
@@ -960,15 +882,7 @@
 		}
 
 		if (now >= exp - TOKEN_EXPIRY_BUFFER) {
-<<<<<<< HEAD
-			const res = await userSignOut();
-			user.set(null);
-			localStorage.removeItem('token');
-
-			location.href = res?.redirect_url ?? '/';
-=======
 			clearExpiredSession();
->>>>>>> v0.11.0
 		}
 	};
 
@@ -1224,60 +1138,6 @@
 				$socket?.on('events', chatEventHandler);
 				$socket?.on('events:channel', channelEventHandler);
 
-<<<<<<< HEAD
-				const userSettings = await getUserSettings(localStorage.token);
-				if (userSettings) {
-					settings.set(userSettings.ui);
-				} else {
-					try {
-						settings.set(JSON.parse(localStorage.getItem('settings') ?? '{}'));
-					} catch {
-						settings.set({});
-					}
-				}
-
-				const savedTheme = $settings?.theme ?? localStorage.theme ?? 'system';
-				localStorage.theme = savedTheme;
-				theme.set(savedTheme);
-				if (window.applyTheme) {
-					window.applyTheme();
-				} else {
-					const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-					const isDark =
-						savedTheme === 'dark' ||
-						savedTheme === 'oled-dark' ||
-						(savedTheme === 'system' && prefersDark);
-					const html = document.documentElement;
-					if (savedTheme === 'oled-dark') {
-						html.style.setProperty('--color-gray-800', '#101010');
-						html.style.setProperty('--color-gray-850', '#050505');
-						html.style.setProperty('--color-gray-900', '#000000');
-						html.style.setProperty('--color-gray-950', '#000000');
-					} else {
-						html.style.removeProperty('--color-gray-800');
-						html.style.removeProperty('--color-gray-850');
-						html.style.removeProperty('--color-gray-900');
-						html.style.removeProperty('--color-gray-950');
-					}
-					html.classList.remove('light', 'dark', 'her');
-					html.classList.add(isDark ? 'dark' : savedTheme === 'her' ? 'her' : 'light');
-					const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-					if (metaThemeColor) {
-						const color =
-							savedTheme === 'oled-dark'
-								? '#000000'
-								: savedTheme === 'her'
-									? '#983724'
-									: isDark
-										? '#171717'
-										: '#ffffff';
-						metaThemeColor.setAttribute('content', color);
-					}
-				}
-				setTextScale($settings?.textScale ?? 1);
-
-=======
->>>>>>> v0.11.0
 				// Set up the token expiry check
 				if (tokenTimer) {
 					clearInterval(tokenTimer);
@@ -1356,9 +1216,9 @@
 								.catch(() => {});
 						}
 					} else {
-<<<<<<< HEAD
 						// Redirect Invalid Session User to landing page
 						localStorage.removeItem('token');
+						await user.set(null);
 						await goto('/');
 					}
 				} else {
@@ -1367,10 +1227,6 @@
 					const publicPaths = ['/', '/auth', '/landing', '/pricing', '/terms', '/privacy', '/trust-centre'];
 					if (!publicPaths.includes($page.url.pathname)) {
 						await goto('/');
-=======
-						localStorage.removeItem('token');
-						await user.set(null);
->>>>>>> v0.11.0
 					}
 				}
 			}

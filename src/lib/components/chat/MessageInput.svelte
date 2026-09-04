@@ -63,11 +63,6 @@
 	import { getFolderById } from '$lib/apis/folders';
 	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
-<<<<<<< HEAD
-	import { getTools } from '$lib/apis/tools';
-	import { getSkills } from '$lib/apis/skills';
-=======
->>>>>>> v0.11.0
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
@@ -93,11 +88,8 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
-<<<<<<< HEAD
 	import Keyframes from '../icons/Keyframes.svelte';
-=======
 	import Cube from '../icons/Cube.svelte';
->>>>>>> v0.11.0
 	import Sparkles from '../icons/Sparkles.svelte';
 	import Mic from '../icons/Mic.svelte';
 
@@ -164,10 +156,7 @@
 		(taskIds && taskIds.length > 0) ||
 		(history.currentId && history.messages[history.currentId]?.done != true) ||
 		generating;
-<<<<<<< HEAD
-=======
 	$: canCompact = !!history?.currentId;
->>>>>>> v0.11.0
 
 	export let prompt = '';
 	export let files = [];
@@ -575,7 +564,6 @@
 	let suggestions = null;
 
 	let showTools = false;
-<<<<<<< HEAD
 	export let piiMaskingEnabled = true;
 	let showSkills = false;
 
@@ -593,9 +581,6 @@
 	// What the control shows. Under policy this is ON regardless of the user's
 	// own value, which stays untouched underneath.
 	$: piiMaskingDisplayed = piiMaskingLocked || piiMaskingEnabled;
-=======
-	let showSkills = false;
->>>>>>> v0.11.0
 
 	let loaded = false;
 	let recording = false;
@@ -701,11 +686,6 @@
 		modelCapabilitiesById
 	);
 
-	let terminalCapableModels = [];
-	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
-	);
-
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
 		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
@@ -742,11 +722,7 @@
 	}
 
 	// Clear selected terminal when model doesn't support terminal
-<<<<<<< HEAD
-	$: if ($selectedTerminalId && terminalCapableModels.length === 0) {
-=======
 	$: if ($selectedTerminalId && selectedModelIds.length > 0 && terminalCapableModels.length === 0) {
->>>>>>> v0.11.0
 		selectedTerminalId.set(null);
 	}
 
@@ -1368,12 +1344,6 @@
 				dropzoneElement.addEventListener('drop', onDrop, true);
 				dropzoneElement.addEventListener('dragleave', onDragLeave);
 			}
-<<<<<<< HEAD
-
-			tools.set(await getTools(localStorage.token));
-			skills.set(await getSkills(localStorage.token));
-=======
->>>>>>> v0.11.0
 		};
 		initialize();
 
@@ -1447,7 +1417,6 @@
 							<button
 								aria-label={$i18n.t('Scroll to bottom')}
 								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
-								aria-label={$i18n.t('Scroll to bottom')}
 								on:click={() => {
 									autoScroll = true;
 									scrollToBottom();
@@ -1533,16 +1502,8 @@
 							id="generate-message-pair-button"
 							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
-							aria-label="Generate message pair"
 							on:click={() => createMessagePair(prompt)}
 						></button>
-
-						<!-- Task list display -->
-						{#if isActive && chatTasks.length > 0}
-							<div class="mx-1">
-								<TaskList tasks={chatTasks} />
-							</div>
-						{/if}
 
 						<!-- Task list display -->
 						{#if isActive && chatTasks.length > 0}
@@ -1649,15 +1610,9 @@
 
 						<div
 							id="message-input-container"
-<<<<<<< HEAD
 							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface dark:bg-gray-850 shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] dark:shadow-none text-hg-text-primary dark:text-gray-100 transition px-1 {$temporaryChatEnabled
 								? 'border-dashed border-hg-border dark:border-gray-700'
 								: 'border-hg-border dark:border-transparent'}"
-=======
-							class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
-								? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
-								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-0.5 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
->>>>>>> v0.11.0
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
@@ -2035,96 +1990,15 @@
 										<button
 											type="button"
 											id="input-menu-button"
-<<<<<<< HEAD
-											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
 											aria-label={$i18n.t('More')}
 										>
 											<HgIconPlus class="w-5 h-5 text-hg-text-tertiary dark:text-gray-400" />
-=======
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
-											aria-label={$i18n.t('More')}
-										>
-											<PlusAlt className="size-5" />
->>>>>>> v0.11.0
 										</button>
 									</InputMenu>
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
-<<<<<<< HEAD
-											class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"
-										></div>
-									{/if}
-
-									<Tooltip content={$i18n.t('Settings')} placement="top">
-										<button
-											type="button"
-											id="settings-button"
-											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-											on:click={() => showControls.update((v) => !v)}
-										>
-											<HgIconSettings class="w-5 h-5" />
-										</button>
-									</Tooltip>
-
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
-										<IntegrationsMenu
-											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-											{toggleFilters}
-											{showWebSearchButton}
-											{showImageGenerationButton}
-											{showCodeInterpreterButton}
-											bind:selectedToolIds
-											bind:selectedSkillIds
-											bind:selectedFilterIds
-											bind:webSearchEnabled
-											bind:imageGenerationEnabled
-											bind:codeInterpreterEnabled
-											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-											onShowValves={(e) => {
-												const { type, id } = e;
-												selectedValvesType = type;
-												selectedValvesItemId = id;
-												showValvesModal = true;
-												integrationsMenuCloseOnOutsideClick = false;
-											}}
-											onClose={async () => {
-												await tick();
-
-												const chatInput = document.getElementById('chat-input');
-												chatInput?.focus();
-											}}
-										>
-											<button
-												type="button"
-												id="integration-menu-button"
-												class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												aria-label={$i18n.t('Integrations')}
-											>
-												<Component className="size-4.5" strokeWidth="1.5" />
-											</button>
-										</IntegrationsMenu>
-									{/if}
-
-									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
-										<div class="ml-1 flex gap-1.5">
-											<Tooltip content={$i18n.t('Valves')} placement="top">
-												<button
-													type="button"
-													id="model-valves-button"
-													class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-													on:click={() => {
-														selectedValvesType = 'function';
-														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
-														showValvesModal = true;
-													}}
-												>
-													<Knobs className="size-4" strokeWidth="1.5" />
-												</button>
-											</Tooltip>
-										</div>
-									{/if}
-=======
 											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
 										/>
 									{/if}
@@ -2154,18 +2028,12 @@
 												}}
 												onClose={async () => {
 													await tick();
->>>>>>> v0.11.0
 
 													const chatInput = document.getElementById('chat-input');
 													chatInput?.focus();
 												}}
 											>
 												<button
-<<<<<<< HEAD
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-hg-text-secondary hover:text-hg-text-primary rounded-lg self-center transition"
-													aria-label="Available Tools"
-=======
->>>>>>> v0.11.0
 													type="button"
 													id="integration-menu-button"
 													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
@@ -2176,57 +2044,6 @@
 											</IntegrationsMenu>
 										{/if}
 
-<<<<<<< HEAD
-										{#if (selectedSkillIds ?? []).length > 0}
-											<Tooltip
-												content={$i18n.t('{{COUNT}} Available Skills', {
-													COUNT: (selectedSkillIds ?? []).length
-												})}
-											>
-												<button
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-													aria-label="Available Skills"
-													type="button"
-													on:click={() => {
-														showSkills = !showSkills;
-													}}
-												>
-													<Keyframes className="size-4" strokeWidth="1.75" />
-
-													<span class="text-sm">
-														{(selectedSkillIds ?? []).length}
-													</span>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#each selectedFilterIds as filterId (filterId)}
-											{@const filter = toggleFilters.find((f) => f.id === filterId)}
-											{#if filter}
-												<Tooltip content={filter?.name} placement="top">
-													<button
-														on:click|preventDefault={() => {
-															if (
-																filter?.has_user_valves &&
-																($_user?.role === 'admin' ||
-																	($_user?.permissions?.chat?.valves ?? true))
-															) {
-																selectedValvesType = 'function';
-																selectedValvesItemId = filterId;
-																showValvesModal = true;
-															} else {
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
-															}
-														}}
-														type="button"
-														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-															filterId
-														)
-															? 'text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-															: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} capitalize"
-=======
 										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
 											<div class="ml-1 flex gap-1.5 shrink-0">
 												<Tooltip content={$i18n.t('Valves')} placement="top">
@@ -2239,7 +2056,6 @@
 															selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
 															showValvesModal = true;
 														}}
->>>>>>> v0.11.0
 													>
 														<Knobs className="size-4" strokeWidth="1.5" />
 													</button>
@@ -2349,23 +2165,6 @@
 															>
 																<XMark className="size-4" strokeWidth="1.75" />
 															</div>
-<<<<<<< HEAD
-														{:else}
-															<Sparkles className="size-4" strokeWidth="1.75" />
-														{/if}
-														<!-- svelte-ignore a11y-click-events-have-key-events -->
-														<!-- svelte-ignore a11y-no-static-element-interactions -->
-														<div
-															class="hidden group-hover:block"
-															on:click={(e) => {
-																e.stopPropagation();
-																e.preventDefault();
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
-															}}
-														>
-=======
 														</button>
 													</Tooltip>
 												{/if}
@@ -2383,69 +2182,12 @@
 													>
 														<GlobeAlt className="size-4" strokeWidth="1.75" />
 														<div class="hidden group-hover:block">
->>>>>>> v0.11.0
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>
 													</button>
 												</Tooltip>
 											{/if}
 
-<<<<<<< HEAD
-										{#if webSearchEnabled}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-													($settings?.webSearch ?? false) === 'always'
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
-												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if imageGenerationEnabled}
-											<Tooltip content={$i18n.t('Image')} placement="top">
-												<button
-													on:click|preventDefault={() =>
-														(imageGenerationEnabled = !imageGenerationEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
-												>
-													<Photo className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if codeInterpreterEnabled}
-											<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-												<button
-													aria-label={codeInterpreterEnabled
-														? $i18n.t('Disable Code Interpreter')
-														: $i18n.t('Enable Code Interpreter')}
-													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() =>
-														(codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
-													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} {($settings?.highContrastMode ??
-													false)
-														? 'm-1'
-														: 'focus:outline-hidden rounded-full'}"
-												>
-													<Terminal className="size-3.5" strokeWidth="2" />
-=======
 											{#if imageGenerationEnabled}
 												<Tooltip content={$i18n.t('Image')} placement="top">
 													<button
@@ -2489,7 +2231,6 @@
 													</button>
 												</Tooltip>
 											{/if}
->>>>>>> v0.11.0
 
 											{#each pendingOAuthTools as pendingTool (pendingTool.id)}
 												<Tooltip content={$i18n.t('Click to connect')} placement="top">
@@ -2520,23 +2261,6 @@
 									</div>
 								</div>
 
-<<<<<<< HEAD
-								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
-									{#if isActive && prompt === '' && files.length === 0}
-										<Tooltip content={$i18n.t('Stop')}>
-											<button
-												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
-												aria-label={$i18n.t('Stop')}
-												on:click={() => {
-													stopResponse();
-												}}
-											>
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													viewBox="0 0 24 24"
-													fill="currentColor"
-													class="size-5"
-=======
 								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.5px]">
 									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
 										<ModelSelector
@@ -2573,18 +2297,23 @@
 													on:click={() => {
 														stopResponse();
 													}}
->>>>>>> v0.11.0
 												>
-													<path
-														fill-rule="evenodd"
-														d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
-														clip-rule="evenodd"
-													/>
-												</svg>
-											</button>
-										</Tooltip>
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														viewBox="0 0 24 24"
+														fill="currentColor"
+														class="size-5"
+													>
+														<path
+															fill-rule="evenodd"
+															d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
+															clip-rule="evenodd"
+														/>
+													</svg>
+												</button>
+											</Tooltip>
+										</div>
 									{:else}
-<<<<<<< HEAD
 										<!-- PII Masking toggle (stub) -->
 										<Tooltip
 											content={piiMaskingLocked
@@ -2663,22 +2392,12 @@
 										{/if}
 
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
-											<!-- Terminal Server Selector -->
-											{@const hasDirectToolServerAccess =
-												$_user?.role === 'admin' ||
-												($_user?.permissions?.features?.direct_tool_servers ?? true)}
-											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
-												<TerminalMenu bind:show={showTerminalMenu} />
-											{/if}
-
-=======
-										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
->>>>>>> v0.11.0
 											{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
+												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
 														id="voice-input-button"
-														class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+														class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center mr-0.5"
 														type="button"
 														on:click={async () => {
 															try {
@@ -2708,11 +2427,7 @@
 														}}
 														aria-label="Voice Input"
 													>
-<<<<<<< HEAD
 														<HgIconMic class="w-5 h-5" />
-=======
-														<Mic className="size-[18px]" />
->>>>>>> v0.11.0
 													</button>
 												</Tooltip>
 											{/if}
@@ -2723,11 +2438,7 @@
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-<<<<<<< HEAD
 														class="bg-hg-blue dark:bg-gray-700 text-white dark:text-gray-100 hover:bg-blue-700 dark:hover:bg-gray-600 transition rounded-full p-1.5 self-center"
-=======
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-[5px] self-center"
->>>>>>> v0.11.0
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {
@@ -2795,14 +2506,8 @@
 													<button
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0) || uploadPending
-<<<<<<< HEAD
 															? 'bg-hg-blue text-white hover:bg-blue-700'
 															: 'bg-hg-bg-muted text-hg-text-tertiary disabled'} transition rounded-full p-1.5 self-center"
-														aria-label={$i18n.t('Send message')}
-=======
-															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-[5px] self-center"
->>>>>>> v0.11.0
 														type="submit"
 														disabled={(prompt === '' && files.length === 0) || uploadPending}
 													>
