@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import shutil
@@ -25,6 +26,13 @@ from open_webui.env import (
 from open_webui.routers.openai import get_all_models_responses
 from open_webui.utils.auth import get_admin_user
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.pii_chunking import (
+    PII_INLET_CHUNK_CHARS,
+    PII_INLET_CHUNK_RETRIES,
+    PII_INLET_CONCURRENCY,
+    PII_INLET_TOTAL_BUDGET_S,
+    split_text_for_pii,
+)
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
@@ -218,7 +226,157 @@ async def _post_inlet_once(session, url, key, filter_id, request_data):
             raise HTTPException(status_code=response.status, detail=e.message)
 
 
-async def process_pipeline_inlet_filter(request, payload, user, models):
+def _oversized_message_indices(payload):
+    """Indices of messages whose content alone would blow the per-call budget."""
+    return [
+        i
+        for i, m in enumerate(payload.get('messages') or [])
+        if isinstance(m.get('content'), str) and len(m['content']) > PII_INLET_CHUNK_CHARS
+    ]
+
+
+def _payload_chat_id(payload):
+    """The payload's chat/conversation id, checked at both places it can
+    appear: a top-level `chat_id`, and the far more common `metadata.chat_id`
+    (see `routers/tasks.py`'s outlet-restore helper for the latter). Returns
+    None unless one of them is a non-empty string.
+    """
+    metadata = payload.get('metadata')
+    for candidate in (
+        payload.get('chat_id'),
+        metadata.get('chat_id') if isinstance(metadata, dict) else None,
+    ):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return None
+
+
+async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user_with_valves, on_progress):
+    """Mask a payload whose message(s) exceed the per-call budget.
+
+    One skeleton call carries the conversation with the oversized contents
+    BLANKED (not removed — see Key Decision 5: deleting a message shifts the
+    pipeline's last-user / last-assistant indices and silently changes which
+    history entries get NER). Every oversized content is then masked as
+    independent sub-chunks, concurrently, and spliced back in document order.
+
+    Concurrency is safe: `ThreadVault.get_placeholder` is atomic get-or-mint and
+    idempotent under concurrency, so racing chunks that contain the same value
+    receive the same placeholder. Only the assigned number may differ from
+    sequential order, which nothing depends on.
+
+    FAIL-CLOSED: any chunk still failing after `PII_INLET_CHUNK_RETRIES`, and any
+    overrun of `PII_INLET_TOTAL_BUDGET_S`, raises `PiiMaskingUnavailableError`.
+
+    Requires a stable chat_id (see `_payload_chat_id`). Every chunk POST
+    inherits `payload['metadata']`, and the pipeline's own chat-id resolver
+    mints a FRESH ephemeral thread per call whenever chat_id is missing —
+    each chunk would then land in its own PII vault, placeholder numbering
+    would restart per chunk, distinct people would collapse onto a shared
+    `[PERSON_1]` across the reassembled prompt, and the outlet could never
+    resolve them back. Refuse rather than mint a shared synthetic id: that
+    would write vault rows no chat deletion could ever reclaim. The
+    non-chunked path is unaffected — it is not exposed to this failure mode
+    since a single call inherits the real chat_id like it always has.
+    """
+    if _payload_chat_id(payload) is None:
+        raise PiiMaskingUnavailableError(
+            'PII masking is currently unavailable for a message this large without an active '
+            'conversation. Please try again from an existing chat.'
+        )
+
+    indices = _oversized_message_indices(payload)
+    messages = payload.get('messages') or []
+
+    skeleton = {
+        **payload,
+        'messages': [{**m, 'content': ''} if i in set(indices) else m for i, m in enumerate(messages)],
+    }
+
+    jobs = []  # (message_index, piece_index, text)
+    for i in indices:
+        for piece_index, (_offset, piece) in enumerate(split_text_for_pii(messages[i]['content'])):
+            jobs.append((i, piece_index, piece))
+
+    total = len(jobs)
+    done = 0
+    semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
+    results: dict[tuple[int, int], str] = {}
+
+    async def _mask_piece(msg_index, piece_index, piece):
+        nonlocal done
+        body = {
+            **payload,
+            'messages': [{**messages[msg_index], 'content': piece}],
+        }
+        last_exc = None
+        for attempt in range(PII_INLET_CHUNK_RETRIES):
+            try:
+                async with semaphore:
+                    out = await _post_inlet_once(
+                        session,
+                        url,
+                        key,
+                        filter_id,
+                        {'user': user_with_valves, 'body': body},
+                    )
+                results[(msg_index, piece_index)] = out['messages'][0]['content']
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+                return
+            except HTTPException:
+                raise  # the pipeline said no on purpose; do not retry
+            except Exception as e:
+                last_exc = e
+                if attempt + 1 < PII_INLET_CHUNK_RETRIES:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        raise PiiMaskingUnavailableError() from last_exc
+
+    async def _run_all():
+        skeleton_out = await _post_inlet_once(
+            session,
+            url,
+            key,
+            filter_id,
+            {'user': user_with_valves, 'body': skeleton},
+        )
+        await asyncio.gather(*(_mask_piece(*job) for job in jobs))
+        return skeleton_out
+
+    try:
+        out = await asyncio.wait_for(_run_all(), timeout=PII_INLET_TOTAL_BUDGET_S)
+    except asyncio.TimeoutError as e:
+        log.warning(
+            '[pii_chunking] masking exceeded %ss for %d chunks; refusing the request',
+            PII_INLET_TOTAL_BUDGET_S,
+            total,
+        )
+        raise PiiMaskingUnavailableError() from e
+
+    # FAIL-CLOSED (finding #1): a missing/empty `messages` in the skeleton
+    # response must never fall back to the caller's ORIGINAL, unmasked
+    # content, and a different-length response would either misalign a
+    # masked chunk onto the wrong history entry (via `out_messages[i]`) or
+    # raise a confusing IndexError. Refuse instead of guessing.
+    out_messages = out.get('messages')
+    if not out_messages or len(out_messages) != len(messages):
+        raise PiiMaskingUnavailableError()
+    out_messages = list(out_messages)
+    for i in indices:
+        # Finding #2: the expected piece count comes from the known `jobs`,
+        # not from however many keys happen to be in `results` — deriving it
+        # from `results` would silently TRUNCATE the message to its first k
+        # pieces if a future change tolerates partial `gather` failures
+        # (e.g. `return_exceptions=True`). `results[(i, p)]` raises KeyError
+        # for a missing piece, which the call site's generic exception
+        # handler turns into `PiiMaskingUnavailableError` for PII filters.
+        pieces = [results[(i, p)] for p in range(sum(1 for j in jobs if j[0] == i))]
+        out_messages[i] = {**out_messages[i], 'content': ''.join(pieces)}
+    return {**out, 'messages': out_messages}
+
+
+async def process_pipeline_inlet_filter(request, payload, user, models, *, on_progress=None):
     # Extract user.settings as a plain dict. user.settings is a UserSettings
     # Pydantic instance (models/users.py:40-43) with extra="allow", so arbitrary
     # keys like "pipelines" survive model_dump(). The isinstance(dict) branch is
@@ -333,7 +491,28 @@ async def process_pipeline_inlet_filter(request, payload, user, models):
             }
 
             try:
-                payload = await _post_inlet_once(session, url, key, filter['id'], request_data)
+                if (
+                    filter_id in PII_FILTER_IDS
+                    and per_filter_valves.get('pii_masking_enabled', True)
+                    and _oversized_message_indices(payload)
+                ):
+                    # TRAU-543: one call cannot carry this much text. The inlet
+                    # runs at a flat ~240 chars/s, so a 150k paste is ~625 s
+                    # serially and would blow the 60 s socket read long before
+                    # that. Split it and run the pieces concurrently.
+                    payload = await _mask_oversized_via_chunks(
+                        session,
+                        url,
+                        key,
+                        filter_id,
+                        payload,
+                        user_with_valves,
+                        on_progress,
+                    )
+                else:
+                    payload = await _post_inlet_once(session, url, key, filter['id'], request_data)
+            except PiiMaskingUnavailableError:
+                raise
             except HTTPException:
                 raise
             except Exception as e:
