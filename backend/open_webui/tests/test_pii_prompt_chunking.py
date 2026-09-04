@@ -408,14 +408,17 @@ def test_progress_swallows_a_malformed_total_raised_by_the_throttle_guard_itself
     asyncio.run(drive())  # must not raise
 
 
-def test_progress_throttles_to_about_ten_events_and_always_emits_the_terminal_one():
+def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal_one():
     """Every status event triggers a non-atomic whole-chat-row rewrite
     (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
     `update_chat_by_id`, no optimistic-concurrency check). Emitting per-chunk
     on a large paste means dozens of concurrent whole-row rewrites that can
-    clobber each other — so completions must be throttled to roughly ten
-    events, and the terminal one (which stops the shimmer) must never be
-    among the dropped ones."""
+    clobber each other — so completions must be throttled, and the terminal
+    one (which stops the shimmer) must never be among the dropped ones.
+
+    Twenty, not ten: with a 600s budget the largest admissible paste is ~104
+    chunks, and ten events would leave ~80s of an eight-minute wait with a
+    frozen number."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -436,7 +439,7 @@ def test_progress_throttles_to_about_ten_events_and_always_emits_the_terminal_on
     assert counts[0] == 1, 'first completion must always be reported'
     assert counts[-1] == 100, 'last event reported must be the terminal one'
     assert events[-1]['data']['done'] is True, 'terminal event must be marked done'
-    assert 2 <= len(events) <= 11, f'expected roughly ten throttled events, got {len(events)}'
+    assert 2 <= len(events) <= 21, f'expected roughly twenty throttled events, got {len(events)}'
 
 
 def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():

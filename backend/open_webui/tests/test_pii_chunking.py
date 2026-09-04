@@ -1,5 +1,7 @@
 """Unit tests for the shared PII chunk splitter (TRAU-543)."""
 
+import pytest
+
 from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_CHARS,
     split_text_for_pii,
@@ -68,3 +70,28 @@ def test_budgets_are_consistent_with_the_measured_throughput():
 
     assert PII_INLET_CHUNK_CHARS / PII_INLET_CHARS_PER_SECOND < 30
     assert PII_INLET_TOTAL_BUDGET_S >= 60
+
+
+@pytest.mark.parametrize(
+    'raw, expected',
+    [
+        (None, 600),  # unset
+        ('', 600),  # set but empty
+        ('not-a-number', 600),
+        ('0', 600),  # would make max_maskable_chars() 0 and refuse everything
+        ('-30', 600),
+        ('900', 900),
+    ],
+)
+def test_the_budget_env_override_falls_back_to_the_default_for_anything_unusable(monkeypatch, raw, expected):
+    """`PII_INLET_TOTAL_BUDGET_S` is env-tunable because the honest value
+    depends on the deployment's own request timeout. A typo must not silently
+    refuse every prompt: zero or negative would make `max_maskable_chars()`
+    return 0, which is fail-closed but indistinguishable from an outage."""
+    from open_webui.utils.pii_chunking import _positive_int_env
+
+    if raw is None:
+        monkeypatch.delenv('PII_INLET_TOTAL_BUDGET_S', raising=False)
+    else:
+        monkeypatch.setenv('PII_INLET_TOTAL_BUDGET_S', raw)
+    assert _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 600) == expected

@@ -2342,13 +2342,21 @@ def _should_emit_pii_progress(done, total):
     per chunk on a large paste (dozens to ~100 chunks, up to
     `PII_INLET_CONCURRENCY` of those in flight concurrently) turns into that
     many concurrent whole-row rewrites, which can clobber each other's
-    appended entries. Throttle to roughly ten events total instead: always
+    appended entries. Throttle to roughly twenty events total instead: always
     the first completion and the terminal one (so the bar always starts and
-    always reaches 100%), otherwise only every ~10% of the work.
+    always reaches 100%), otherwise only every ~5% of the work.
+
+    Twenty rather than ten because raising `PII_INLET_TOTAL_BUDGET_S`
+    multiplied the largest admissible chunk count by about five. At ten events
+    a ~190 000-character paste would update once every ~80s of an eight-minute
+    wait — indistinguishable from a hung request. Not raised further because
+    the cost here is concurrent whole-row rewrites, not websocket traffic, and
+    the shimmer in `StatusItem.svelte` already carries liveness between
+    updates; the number does not have to.
     """
     if done <= 1 or done >= total:
         return True
-    step = max(1, total // 10)
+    step = max(1, total // 20)
     return done % step == 0
 
 

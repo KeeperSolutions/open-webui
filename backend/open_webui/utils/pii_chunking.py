@@ -10,6 +10,27 @@ inlet processes text at a flat ~240 characters/second, independent of how much
 you send it. Do not tune these by intuition — re-measure.
 """
 
+import os
+
+
+def _positive_int_env(name, default):
+    """Read `name` from the environment as a positive int, falling back to
+    `default` for anything unusable — unset, empty, non-numeric, zero or
+    negative. A zero or negative budget would make `max_maskable_chars()`
+    return 0 and refuse every prompt: fail-closed, so not dangerous, but
+    indistinguishable from an outage and impossible to diagnose from the
+    error message. Falling back to a working default is the kinder failure.
+    """
+    raw = os.getenv(name, '')
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 # Characters per masking call. NOT a throughput knob: bigger chunks do not go
 # faster (the rate is flat), they only eat the per-request margin — 6000 chars
 # already measures ~25 s against a 30 s budget. 1800 chars is ~8 s.
@@ -27,13 +48,49 @@ PII_INLET_CHUNK_CHARS = 1800
 # tail gets retried by `_mask_piece`, adding MORE load to the very bottleneck
 # that caused the timeout. Do not raise this without re-measuring the
 # speedup at the new concurrency first.
+#
+# That re-measurement has now been done, and the answer is: DO NOT BOTHER.
+# 60 080 characters / 34 chunks against the live staging pipeline:
+#
+#     concurrency  4 -> 132.8s -> 452 chars/s
+#     concurrency  8 -> 117.2s -> 513 chars/s
+#     concurrency 12 -> 125.1s -> 480 chars/s
+#     concurrency 16 -> 122.1s -> 492 chars/s
+#
+# Flat from 4 upward; the spread between 480, 492 and 513 is inside the noise of
+# a single sample each. One pipeline instance saturates at ~490 chars/s and no
+# amount of extra in-flight requests moves it — the ~2x over a lone request's
+# 240 chars/s is network/vault/parse work overlapping NER, and that overlap is
+# already fully exploited at 4. Raising this constant therefore buys nothing
+# measurable while adding tail-latency risk against the 60s socket read,
+# especially under contention from a second user masking at the same time.
+# The ceiling is the pipeline's single NER thread on a single instance; it moves
+# only when that service is allowed to scale out.
 PII_INLET_CONCURRENCY = 4
 
 # Wall-clock ceiling for masking ONE request, across all its chunks. Without it
 # nothing bounds total time once the work is parallel — the per-request socket
 # timeout only bounds a single POST. On expiry the request is refused
 # (fail-closed), never forwarded.
-PII_INLET_TOTAL_BUDGET_S = 120
+#
+# It is also the ONLY thing setting the maximum promptable size:
+# `max_maskable_chars()` is arithmetic on this number, so raising it raises the
+# cap and changes nothing else.
+#
+# 600s (10 min) admits ~187 000 characters at the currently measured rate. That
+# is a deliberately uncomfortable number. It is this large only because the
+# staging pipeline is pinned to ONE instance
+# (`autoscaling.knative.dev/maxScale: 1` on the revision), so it masks at
+# ~310 chars/s however many chunks we send it. Letting that service scale out is
+# the real fix, after which this should come back down — at 8 instances the same
+# 187 000 characters take ~100s.
+#
+# WARNING: this budget is only real if the transport survives it. The chat
+# request stays open for the entire masking run, so a platform request timeout
+# shorter than this turns a clean, actionable refusal into a dropped connection
+# — strictly worse than the behaviour this ticket replaced. Cloud Run's default
+# is 300s. Set the env var per environment instead of assuming the default fits.
+PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 600)
 
 # Per-chunk retries for transient failures (cold start, 5xx, dropped
 # connection). Retrying one ~8 s chunk is far cheaper than failing a whole turn.
@@ -61,6 +118,18 @@ PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 # and be refused anyway. When the pipeline is allowed to scale out (Cloud Run
 # instance limits, CPU allocation, GPU — infrastructure work outside this repo),
 # this is the one number to raise.
+#
+# A second, larger measurement exists and 1.3 is KEPT anyway. The live
+# end-to-end check at 160 980 characters / 90 chunks
+# (`test_pii_prompt_chunking_live.py`) masked in 339.6 s = 474 chars/s, i.e. a
+# sustained 1.98x — better than the 1.29x burst probe because over 90 chunks one
+# request's network/vault/parse work overlaps another's NER, which a four-request
+# burst barely shows. Both numbers are real; they differ in duration, not in
+# correctness. 1.3 stays because BOTH were taken against an otherwise idle
+# pipeline. It is a single instance serialized on one NER thread, so any other
+# user masking at the same time takes throughput straight off this number, and
+# an optimistic value here restores exactly the wait-then-refuse this ticket
+# removed. The conservative value costs only cap headroom.
 PII_INLET_EFFECTIVE_SPEEDUP = 1.3
 
 
