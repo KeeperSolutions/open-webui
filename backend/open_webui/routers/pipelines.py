@@ -257,12 +257,72 @@ def _payload_task_type(payload):
     return task if isinstance(task, str) else None
 
 
-def _oversized_message_indices(payload):
-    """Indices of messages whose content alone would blow the per-call budget."""
+def _last_index_by_role(messages, role):
+    """Index of the last message with `role`, or -1 when there is none —
+    mirroring `_find_last_user_index` / `_find_last_assistant_index` in
+    `pii_filter_pipeline.py`, whose answers decide what that service charges
+    us for."""
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if isinstance(m, dict) and m.get('role') == role:
+            return i
+    return -1
+
+
+def _ner_priced_indices(messages):
+    """The indices `pii_filter_pipeline.py` will run full NER on: the last
+    user and the last assistant message (its `ner_indices`). These are the
+    only messages whose length costs `PII_INLET_CHARS_PER_SECOND` — every
+    other history entry stops at the deterministic vault re-mask, a regex
+    costing microseconds regardless of length."""
+    return sorted(
+        i
+        for i in {
+            _last_index_by_role(messages, 'user'),
+            _last_index_by_role(messages, 'assistant'),
+        }
+        if i >= 0
+    )
+
+
+def _chunkable_message_indices(payload):
+    """The messages this request must split into sub-chunks: the two the
+    pipeline actually runs NER on (`_ner_priced_indices`), and only those of
+    them whose own content exceeds the per-call budget.
+
+    Deliberately NOT "every oversized message in the payload", which is what
+    this returned first and which was wrong in a way that compounded:
+
+      * The payload carries the conversation's ORIGINAL text (masking is
+        undone on the way out), so an oversized paste comes back in full on
+        every subsequent turn. Chunking all of them re-split and re-masked
+        the entire history each turn — the progress counter climbed
+        15 -> 17 -> 19 across three turns, the third of which was a
+        two-sentence prompt whose growth came from the ASSISTANT's oversized
+        reply. Work grew quadratically in turn count.
+      * Worse, `_mask_oversized_via_chunks` charges every chunked character
+        against `PII_INLET_TOTAL_BUDGET_S`. Around turn 4 the accumulated
+        history alone crossed the budget and the chat refused ITSELF —
+        permanently, for any message, including a one-word one.
+
+    Scoping to `_ner_priced_indices` fixes both: the set is at most two
+    messages, so per-turn cost is bounded by THIS turn's text and cannot
+    accumulate across turns. Older oversized messages are sent whole in the
+    skeleton, where the pipeline re-masks them from the vault by regex — see
+    its `ner_indices` / `remask_pattern` seam.
+
+    Both NER'd messages are included, not just the user's: an oversized
+    assistant reply left in the skeleton would pay full NER inside the single
+    sequential skeleton POST and could blow its socket read — bricking the
+    chat exactly as before, only triggered by the model rather than the user.
+    """
+    messages = payload.get('messages') or []
     return [
         i
-        for i, m in enumerate(payload.get('messages') or [])
-        if isinstance(m.get('content'), str) and len(m['content']) > PII_INLET_CHUNK_CHARS
+        for i in _ner_priced_indices(messages)
+        if isinstance(messages[i], dict)
+        and isinstance(messages[i].get('content'), str)
+        and len(messages[i]['content']) > PII_INLET_CHUNK_CHARS
     ]
 
 
@@ -310,18 +370,29 @@ def _shifted_pii_detections(response, offset):
             continue
         if not isinstance(end, int) or isinstance(end, bool):
             continue
-        shifted.append({'type': d.get('type'), 'start': start + offset, 'end': end + offset})
+        # `type` is validated for the same reason, plus one of its own: the
+        # de-duplication key in `_mask_oversized_via_chunks` is
+        # `(type, start, end)` and goes into a set, so a non-hashable `type`
+        # (a list, a dict) from the external service would raise TypeError
+        # AFTER masking had already succeeded — turning a good response into
+        # a spurious "masking unavailable" refusal.
+        if not isinstance(d.get('type'), str):
+            continue
+        shifted.append({'type': d['type'], 'start': start + offset, 'end': end + offset})
     return shifted
 
 
 async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user_with_valves, on_progress):
     """Mask a payload whose message(s) exceed the per-call budget.
 
-    One skeleton call carries the conversation with the oversized contents
+    One skeleton call carries the conversation with the oversized content
     BLANKED (not removed — see Key Decision 5: deleting a message shifts the
     pipeline's last-user / last-assistant indices and silently changes which
-    history entries get NER). Every oversized content is then masked as
-    independent sub-chunks, concurrently, and spliced back in document order.
+    history entries get NER). That content is then masked as independent
+    sub-chunks, concurrently, and spliced back in document order. Only the
+    message being sent this turn is ever chunked — see
+    `_chunkable_message_indices` for why chunking history compounded into a
+    chat that permanently refused itself.
 
     Concurrency is safe: `ThreadVault.get_placeholder` is atomic get-or-mint and
     idempotent under concurrency, so racing chunks that contain the same value
@@ -332,24 +403,40 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     overrun of `PII_INLET_TOTAL_BUDGET_S`, raises `PiiMaskingUnavailableError`.
 
     Refuses outright, before issuing any POST, when `estimated_masking_seconds`
-    for this payload exceeds `PII_INLET_TOTAL_BUDGET_S`. The estimate is split
-    in two: the skeleton POST carries every non-oversized message at full
-    length and runs once, sequentially (charged at 1x, no speedup applies to
-    it), while only the oversized messages' chunk POSTs benefit from
-    concurrency (charged at the measured speedup). Summing everything and
-    applying the speedup to the whole payload would let a history-heavy chat
-    with only a modestly oversized paste slip past the guard and straight into
-    the `PII_INLET_TOTAL_BUDGET_S` timeout below — paying the wall-clock cost
+    exceeds `PII_INLET_TOTAL_BUDGET_S`. The estimate is split in two: the
+    skeleton POST runs once, sequentially (charged at 1x — no speedup applies
+    to it), while the chunk POSTs benefit from concurrency (charged at the
+    measured speedup). Applying the speedup to the whole payload would let a
+    borderline request slip past the guard and straight into the
+    `PII_INLET_TOTAL_BUDGET_S` timeout below — paying the wall-clock cost
     first and refusing anyway. Refusing up front is the honest answer.
 
-    A second, narrower guard refuses when the SKELETON ALONE cannot fit inside
-    one POST: the total-budget check above only bounds the sum of skeleton +
-    chunked cost against `PII_INLET_TOTAL_BUDGET_S` (120s), but the skeleton is
-    a single sequential call bound by `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (60s)
-    — a much tighter ceiling that a history-heavy skeleton can blow through
-    while the grand total still looks affordable. Without this, such a request
-    would pass the guard, run the skeleton POST, and die on ITS OWN socket
-    read after 60s — the wait-then-refuse this branch exists to remove.
+    The skeleton's share is NOT its total character count. Measured cost
+    (~`PII_INLET_CHARS_PER_SECOND`) is the cost of NER, and
+    `pii_filter_pipeline.py` runs NER on exactly two messages: the last user
+    and the last assistant one (`ner_indices`, mirrored here by
+    `_ner_priced_indices`). Every other history entry stops at the
+    deterministic vault re-mask — a regex, microseconds, independent of
+    length. Charging the whole history at the NER rate is what refused an
+    established chat with a modest paste (~12k of history plus 5k pasted)
+    that in reality completes in about 21s.
+
+    A second, narrower guard refuses when the skeleton's own NER share cannot
+    fit inside one POST: the total-budget check bounds skeleton + chunked cost
+    against `PII_INLET_TOTAL_BUDGET_S` (120s), but the skeleton is a single
+    sequential call bound by `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (60s) — a much
+    tighter ceiling. Without it such a request would pass the guard, run the
+    skeleton POST, and die on ITS OWN socket read after 60s — the
+    wait-then-refuse this branch exists to remove.
+
+    ACCEPTED residual: the `ner_indices` narrowing is gated in the pipeline on
+    `remask_pattern is not None`, i.e. on a non-empty vault for this thread.
+    A chat whose vault is empty (PII masking switched on mid-conversation) has
+    its whole history NER'd, and this estimate under-predicts. That case is
+    not made worse by chunking — a payload with no oversized message never
+    reaches this branch and hits the identical 60s socket read on its single
+    POST — and it still fails CLOSED. Modelling it here instead would restore
+    the over-charging above and refuse the common case to protect the rare one.
 
     Requires a stable chat_id (see `_payload_chat_id`). Every chunk POST
     inherits `payload['metadata']`, and the pipeline's own chat-id resolver
@@ -363,14 +450,27 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     since a single call inherits the real chat_id like it always has.
     """
     messages = payload.get('messages') or []
-    indices = _oversized_message_indices(payload)
+    indices = _chunkable_message_indices(payload)
     oversized = set(indices)
     chunked_chars = sum(
         len(m['content']) for i, m in enumerate(messages) if i in oversized and isinstance(m.get('content'), str)
     )
+    # The skeleton's NER-priced share: whichever of the two NER'd messages is
+    # small enough to have been left in it. See the docstring — everything
+    # else in the skeleton is vault-re-masked by regex, not detected. With
+    # today's constants it cannot exceed 2 * `PII_INLET_CHUNK_CHARS` (3 600
+    # chars, ~15s — anything larger is chunked instead), so the socket-read
+    # guard below cannot currently fire. It stays because it is the correct
+    # invariant, not because it is live today: raising
+    # `PII_INLET_CHUNK_CHARS` past `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ *
+    # PII_INLET_SKELETON_SAFETY_MARGIN * PII_INLET_CHARS_PER_SECOND` makes it
+    # load-bearing again, and silently losing it there is a 60s hang.
     skeleton_chars = sum(
-        len(m['content']) for i, m in enumerate(messages) if i not in oversized and isinstance(m.get('content'), str)
+        len(messages[i]['content'])
+        for i in _ner_priced_indices(messages)
+        if i not in oversized and isinstance(messages[i], dict) and isinstance(messages[i].get('content'), str)
     )
+
     if estimated_masking_seconds(skeleton_chars, chunked_chars) > PII_INLET_TOTAL_BUDGET_S:
         raise PiiMaskingUnavailableError(
             'This message is too long to mask safely. Shorten it, or attach the text as a file instead.'
@@ -648,7 +748,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                     filter_id in PII_FILTER_IDS
                     and per_filter_valves.get('pii_masking_enabled', True)
                     and _payload_task_type(payload) not in _CHUNKING_EXEMPT_TASKS
-                    and _oversized_message_indices(payload)
+                    and _chunkable_message_indices(payload)
                 ):
                     # TRAU-543: one call cannot carry this much text. The inlet
                     # runs at a flat ~240 chars/s, so a 150k paste is ~625 s

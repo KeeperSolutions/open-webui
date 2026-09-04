@@ -482,41 +482,6 @@ def test_a_prompt_beyond_the_budget_is_refused_with_a_message_a_user_can_act_on(
     assert seen == [], 'refused requests must not touch the pipeline at all'
 
 
-def test_a_history_heavy_chat_is_refused_even_though_its_grand_total_is_under_the_paste_cap():
-    """The skeleton POST carries every non-oversized message at full length,
-    ONCE, sequentially — no concurrency speedup applies to it. A chat with
-    enough ordinary history can bust the wall-clock budget on the skeleton
-    call alone even while its grand total stays under `max_maskable_chars()`,
-    because that cap only bounds a lone paste (skeleton_chars=0). Summing
-    everything and applying the speedup to the whole payload (the earlier,
-    wrong formula) would let this case slip past the guard and into the
-    120 s `PII_INLET_TOTAL_BUDGET_S` timeout instead — refused either way, but
-    only after paying the wait."""
-    from open_webui.utils.pii_chunking import max_maskable_chars
-
-    # 20 ordinary turns, each under the 1800-char oversized threshold, so all
-    # 20 land in the skeleton POST: 20 * 1500 = 30 000 chars / 240 chars/s =
-    # 125 s on the skeleton call alone, already past the 120 s budget.
-    history = [{'role': 'user', 'content': 'a' * 1500} for _ in range(20)]
-    paste = {'role': 'user', 'content': 'b' * 2000}  # oversized -> chunked, not skeleton
-    payload = {
-        'model': 'gpt-4',
-        'messages': history + [paste],
-        'metadata': {'chat_id': 'c1'},
-        'features': {'pii_masking': True},
-    }
-    total_chars = sum(len(m['content']) for m in payload['messages'])
-    assert total_chars < max_maskable_chars(), (
-        'the case only matters if the naive total-based cap would have let it through'
-    )
-
-    seen = []
-    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
-        with pytest.raises(PiiMaskingUnavailableError):
-            _run(payload)
-    assert seen == [], 'refused requests must not touch the pipeline at all'
-
-
 def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
     """The other half of the boundary: a lone paste at exactly
     `max_maskable_chars()` characters (no other history, so skeleton_chars=0)
@@ -528,43 +493,6 @@ def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
         _run(payload)  # must not raise
     assert seen, 'a within-budget paste must actually be masked, not refused'
-
-
-def test_skeleton_alone_too_slow_for_one_post_is_refused_even_under_the_total_budget():
-    """(finding #3) The general budget check bounds skeleton + chunked cost
-    TOGETHER against the 120s wall-clock ceiling. But the skeleton is a
-    SINGLE sequential POST, bound by the much tighter 60s
-    `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ`. Ordinary history alone can blow that
-    ceiling while the grand total still looks affordable, and without this
-    guard the request would sail past the general check only to die on the
-    skeleton POST's own socket read 60s later — the wait-then-refuse this
-    branch exists to remove."""
-    from open_webui.utils.pii_chunking import PII_INLET_TOTAL_BUDGET_S, estimated_masking_seconds
-
-    # 9 ordinary turns, each under the 1800-char oversized threshold, so all
-    # 9 land in the skeleton POST: 9 * 1500 = 13 500 chars / 240 chars/s =
-    # 56.25s on the skeleton call alone -- past 60 * 0.8 = 48s margin, but
-    # nowhere near the 120s total budget once the paste's chunked share is
-    # added at the concurrency-priced speedup.
-    history = [{'role': 'user', 'content': 'a' * 1500} for _ in range(9)]
-    paste = {'role': 'user', 'content': 'b' * 2000}  # oversized -> chunked, not skeleton
-    payload = {
-        'model': 'gpt-4',
-        'messages': history + [paste],
-        'metadata': {'chat_id': 'c1'},
-        'features': {'pii_masking': True},
-    }
-    skeleton_chars = sum(len(m['content']) for m in history)
-    chunked_chars = len(paste['content'])
-    assert estimated_masking_seconds(skeleton_chars, chunked_chars) <= PII_INLET_TOTAL_BUDGET_S, (
-        'the case only matters if the general budget check would have let it through'
-    )
-
-    seen = []
-    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
-        with pytest.raises(PiiMaskingUnavailableError):
-            _run(payload)
-    assert seen == [], 'refused requests must not touch the pipeline at all'
 
 
 def test_title_generation_task_is_exempt_from_chunking_even_when_oversized():
@@ -746,3 +674,203 @@ def test_one_bad_chunk_fails_the_whole_request_while_other_chunks_still_complete
     assert len(completed) < len({t for t in real_chunks}), (
         'the sentinel chunk must be among those attempted, or this does not exercise the partial-failure case'
     )
+
+
+def _history_session(calls):
+    """Mock inlet for MULTI-message payloads: echoes back every message
+    uppercased, the way the real pipeline returns the whole conversation, and
+    records each POST's message contents.
+
+    `_session` collapses its response to a single message, which is fine for
+    the one-message payloads above but makes a multi-message skeleton trip the
+    `len(out_messages) != len(messages)` fail-closed check before the assertion
+    under test is ever reached.
+    """
+
+    def _post(url, *, headers, json, ssl):
+        body = json['body']
+        calls.append([m.get('content') for m in body['messages']])
+        out = {
+            **body,
+            'messages': [{**m, 'content': (m.get('content') or '').upper()} for m in body['messages']],
+        }
+        resp = MagicMock()
+        resp.json = AsyncMock(return_value=out)
+        resp.raise_for_status = MagicMock()
+        resp.content_type = 'application/json'
+
+        async def _enter(_self=None):
+            return resp
+
+        cm = MagicMock()
+        cm.__aenter__ = _enter
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    s = MagicMock()
+    s.post = _post
+    scm = MagicMock()
+    scm.__aenter__ = AsyncMock(return_value=s)
+    scm.__aexit__ = AsyncMock(return_value=False)
+    return scm
+
+
+def _chunk_calls(calls):
+    """The chunk POSTs among recorded calls: a chunk carries exactly one
+    non-blank message. The skeleton is either the full conversation (more
+    than one message) or, for a single-message payload, that one message
+    BLANKED -- falsy either way."""
+    return [c for c in calls if len(c) == 1 and c[0]]
+
+
+def _turn(*messages):
+    return {
+        'model': 'gpt-4',
+        'messages': [{'role': r, 'content': c} for r, c in messages],
+        'metadata': {'chat_id': 'c1'},
+        'features': {'pii_masking': True},
+    }
+
+
+def test_only_the_message_being_sent_is_chunked_not_the_whole_history():
+    """THE regression this follow-up exists for. Chunking every oversized
+    message in the payload re-splits and re-masks the entire history on every
+    single turn: the observed counter climbed 15 -> 17 -> 19 across three
+    turns (the third being a two-sentence prompt, whose growth came from the
+    ASSISTANT's oversized reply), the work grew quadratically in turn count,
+    and around turn 4 the accumulated estimate crossed
+    `PII_INLET_TOTAL_BUDGET_S` and the chat refused itself PERMANENTLY -- even
+    for a one-word message.
+
+    Only the message being sent this turn can contain PII that has never been
+    through the pipeline; older ones were NER'd and vaulted on the turn they
+    were typed, and `pii_filter_pipeline.py` re-masks them from the vault by
+    regex (microseconds) rather than re-running NER. Chunk count must
+    therefore depend on the CURRENT message alone, not on conversation
+    length."""
+    calls = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('user', BIG)))
+    first_turn_chunks = len(_chunk_calls(calls))
+    assert first_turn_chunks > 1, 'fixture must actually be chunked'
+
+    calls.clear()
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('user', BIG), ('assistant', 'Short reply.'), ('user', 'Two short sentences. That is all.')))
+    assert len(calls) == 1, (
+        'a short message must take exactly one POST no matter how much oversized history sits behind it'
+    )
+
+    calls.clear()
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(
+            _turn(
+                ('user', BIG),
+                ('assistant', 'Short reply.'),
+                ('user', 'Two short sentences. That is all.'),
+                ('assistant', 'Another short reply.'),
+                ('user', BIG),
+            )
+        )
+    assert len(_chunk_calls(calls)) == first_turn_chunks, (
+        'the same paste must cost the same number of chunks on turn 3 as on turn 1'
+    )
+
+
+def test_oversized_history_is_left_whole_for_the_pipelines_own_vault_remask():
+    """The companion property: an oversized message that is NOT the one being
+    sent must reach the pipeline at FULL length in the skeleton, not blanked
+    and reassembled from chunks. Blanking it would hide from the pipeline the
+    history it re-masks from the vault."""
+    calls = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('user', BIG), ('assistant', 'Short reply.'), ('user', 'And a short follow-up.')))
+    assert len(calls) == 1
+    assert calls[0][0] == BIG, 'oversized history must be sent whole, not blanked'
+
+
+def test_a_long_conversation_with_an_oversized_paste_is_not_refused_by_history_length():
+    """Ordinary history must not consume the masking budget. The pipeline runs
+    full NER only on the last user and last assistant message
+    (`ner_indices` in `pii_filter_pipeline.py`); every other history entry
+    stops at the deterministic vault re-mask, which is regex and costs
+    microseconds regardless of length. Charging history at the NER rate
+    refused exactly the established chats this ticket set out to unblock."""
+    history = []
+    for _ in range(10):
+        history.append(('user', 'a' * 1500))
+        history.append(('assistant', 'b' * 1500))
+    payload = _turn(*history, ('user', BIG))
+
+    calls = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(payload)  # must not raise
+    assert _chunk_calls(calls), 'the paste must actually be masked, not refused'
+
+
+def test_an_oversized_assistant_reply_is_chunked_rather_than_left_to_blow_the_skeleton_post():
+    """The last ASSISTANT message is NER'd by the pipeline too, so leaving an
+    oversized one whole in the skeleton would pay its full NER cost inside the
+    single sequential skeleton POST and blow that call's 60s socket read --
+    bricking the chat the same way, only triggered by the model instead of the
+    user. It is chunked alongside the message being sent. The set stays
+    bounded at two messages, so this cannot accumulate across turns."""
+    calls = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('user', 'hi'), ('assistant', BIG)))
+    assistant_only = len(_chunk_calls(calls))
+    assert assistant_only > 1, 'an oversized assistant reply must be chunked'
+
+    calls.clear()
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('assistant', BIG), ('user', BIG)))
+    assert len(_chunk_calls(calls)) == 2 * assistant_only, 'both NER-priced messages are chunked, and only those two'
+
+    # An EARLIER oversized assistant reply is not NER'd by the pipeline and
+    # must stay out of the chunked set.
+    calls.clear()
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        _run(_turn(('assistant', BIG), ('user', 'ok'), ('assistant', 'Short reply.'), ('user', BIG)))
+    assert len(_chunk_calls(calls)) == assistant_only, 'only the LAST assistant reply is chunked'
+
+
+def test_the_two_ner_priced_messages_together_can_still_exceed_the_total_budget():
+    """The budget guard survives the narrowing: a long assistant reply and a
+    long paste are both chunked, both charged, and their sum is still checked
+    against `PII_INLET_TOTAL_BUDGET_S` before any POST goes out."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    half = max_maskable_chars() // 2 + 1
+    payload = _turn(('assistant', 'r' * half), ('user', 'b' * half))
+
+    calls = []
+    with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
+        with pytest.raises(PiiMaskingUnavailableError):
+            _run(payload)
+    assert calls == [], 'refused requests must not touch the pipeline at all'
+
+
+def test_a_detection_with_an_unhashable_type_is_dropped_rather_than_crashing_the_merge():
+    """`_shifted_pii_detections` validated start/end but passed `type`
+    through untouched, and the de-duplication key `(type, start, end)` goes
+    into a set. A non-hashable `type` from the external pipeline therefore
+    raised TypeError AFTER masking had already succeeded, turning a good
+    response into a spurious "masking unavailable" refusal."""
+
+    def _detections_for(_text):
+        return [
+            {'type': ['HR_OIB'], 'start': 0, 'end': 4},  # unhashable -> must be dropped
+            {'type': 'HR_OIB', 'start': 0, 'end': 4},  # well-formed
+        ]
+
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_detection_session(seen, _detections_for),
+    ):
+        out = _run(_payload(BIG))  # must not raise
+
+    detections = out['metadata']['pii_detections_public']
+    assert detections, 'the well-formed detection must survive'
+    for d in detections:
+        assert isinstance(d['type'], str)
