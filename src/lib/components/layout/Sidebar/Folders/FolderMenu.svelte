@@ -22,7 +22,7 @@
 	export let onCreateSubFolder = () => {};
 	export let onMarkAllRead = () => {};
 
-	let show = false;
+	export let show = false;
 </script>
 
 <Dropdown

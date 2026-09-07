@@ -4,7 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { theme } from '$lib/stores';
+	import { mobile, theme } from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -22,10 +22,10 @@
 	<div
 		class=" flex justify-center text-gray-800 dark:text-gray-200 cursor-grab relative group"
 		data-id={model?.id}
-		on:mouseenter={(e) => {
+		on:mouseenter={() => {
 			mouseOver = true;
 		}}
-		on:mouseleave={(e) => {
+		on:mouseleave={() => {
 			mouseOver = false;
 		}}
 	>
@@ -53,21 +53,20 @@
 			</div>
 		</a>
 
-		{#if mouseOver && onUnpin}
-			<div class="absolute right-5 top-2.5">
-				<div class=" flex items-center self-center space-x-1.5">
-					<Tooltip content={$i18n.t('Unpin')} className="flex items-center">
-						<button
-							class=" self-center dark:hover:text-white transition"
-							on:click={() => {
-								onUnpin();
-							}}
-							type="button"
-						>
-							<PinSlash className="size-3.5" strokeWidth="1.5" />
-						</button>
-					</Tooltip>
-				</div>
+		<!-- Touch devices have no hover, so the unpin button stays out on mobile. -->
+		{#if ($mobile || mouseOver) && onUnpin}
+			<div class="absolute right-1 inset-y-0 mr-1.5 flex items-center">
+				<Tooltip content={$i18n.t('Unpin')} className="flex items-center">
+					<button
+						class="flex size-5 items-center justify-center self-center hover:text-black dark:hover:text-white transition m-0"
+						on:click={() => {
+							onUnpin();
+						}}
+						type="button"
+					>
+						<PinSlash className="size-3.5" strokeWidth="1.5" />
+					</button>
+				</Tooltip>
 			</div>
 		{/if}
 	</div>

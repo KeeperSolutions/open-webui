@@ -102,7 +102,6 @@
 	let scrollTop = 0;
 
 	let navElement;
-	let shiftKey = false;
 
 	let selectedChatId = null;
 
@@ -615,22 +614,9 @@
 		checkDirection();
 	};
 
-	const onKeyDown = (e) => {
-		if (e.key === 'Shift') {
-			shiftKey = true;
-		}
-	};
-
-	const onKeyUp = (e) => {
-		if (e.key === 'Shift') {
-			shiftKey = false;
-		}
-	};
-
 	const onFocus = () => {};
 
 	const onBlur = () => {
-		shiftKey = false;
 		selectedChatId = null;
 	};
 
@@ -738,9 +724,6 @@
 			})
 		];
 
-		window.addEventListener('keydown', onKeyDown);
-		window.addEventListener('keyup', onKeyUp);
-
 		window.addEventListener('touchstart', onTouchStart);
 		window.addEventListener('touchend', onTouchEnd);
 
@@ -775,9 +758,6 @@
 
 		return () => {
 			unsubscribers.forEach((unsubscriber) => unsubscriber());
-
-			window.removeEventListener('keydown', onKeyDown);
-			window.removeEventListener('keyup', onKeyUp);
 
 			window.removeEventListener('touchstart', onTouchStart);
 			window.removeEventListener('touchend', onTouchEnd);
@@ -1414,7 +1394,6 @@
 						<Folders
 							bind:folderRegistry
 							{folders}
-							{shiftKey}
 							onFolderUnreadCounts={applyFolderUnreadCounts}
 							onDelete={(folderId) => {
 								selectedFolder.set(null);
@@ -1602,7 +1581,6 @@
 												updatedAt={chat.updated_at}
 												lastReadAt={chat.last_read_at}
 												active={chat.active ?? false}
-												{shiftKey}
 												selected={selectedChatId === chat.id}
 												on:select={() => {
 													selectedChatId = chat.id;
@@ -1667,7 +1645,6 @@
 										updatedAt={chat.updated_at}
 										lastReadAt={chat.last_read_at}
 										active={chat.active ?? false}
-										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
 											selectedChatId = chat.id;

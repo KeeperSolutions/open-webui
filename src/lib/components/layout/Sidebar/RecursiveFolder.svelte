@@ -41,6 +41,7 @@
 
 	import ChatItem from './ChatItem.svelte';
 	import FolderMenu from './Folders/FolderMenu.svelte';
+	import { longPress } from '$lib/utils/longPress';
 	import FolderShareModal from './Folders/FolderShareModal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import FolderModal from './Folders/FolderModal.svelte';
@@ -51,7 +52,6 @@
 
 	export let folders;
 	export let folderId;
-	export let shiftKey = false;
 
 	export let className = '';
 
@@ -68,6 +68,11 @@
 	let showFolderModal = false;
 	let showShareModal = false;
 	let edit = false;
+
+	// Touch devices have no hover, so press-and-hold opens the folder menu instead.
+	let menuOpen = false;
+
+	$: canOpenFolderMenu = !folders[folderId]?.shared || folders[folderId]?.permission === 'write';
 
 	let showCreateSubFolderModal = false;
 	let createSubFolderParentId = null;
@@ -733,7 +738,16 @@
 			dispatch('open', state);
 		}}
 	>
-		<div class="w-full group">
+		<div
+			class="w-full group"
+			use:longPress={{
+				enabled: $mobile && !edit && canOpenFolderMenu,
+				suppressNativeMenu: $mobile && !edit,
+				onLongPress: () => {
+					menuOpen = true;
+				}
+			}}
+		>
 			<div
 				id="folder-{folderId}-button"
 				class="relative w-full py-1 px-1.5 rounded-xl flex items-center gap-1.5 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition {$selectedFolder?.id ===
@@ -858,11 +872,14 @@
 					{/if}
 				</div>
 
-				{#if !folders[folderId]?.shared || folders[folderId]?.permission === 'write'}
+				{#if canOpenFolderMenu}
 					<button
-						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+						class="absolute z-10 right-2 {$mobile
+							? 'invisible'
+							: 'invisible group-hover:visible'} self-center flex items-center dark:text-gray-300"
 					>
 						<FolderMenu
+							bind:show={menuOpen}
 							onEdit={() => {
 								showFolderModal = true;
 							}}
@@ -912,7 +929,6 @@
 								bind:folderRegistry
 								{folders}
 								folderId={childFolder.id}
-								{shiftKey}
 								parentDragged={dragged}
 								{onItemMove}
 								{onDelete}
@@ -941,7 +957,6 @@
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
 							readonly={chat.user_id !== $user?.id}
-							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {
 								dispatch('change', e.detail);
