@@ -67,6 +67,7 @@
 		isYoutubeUrl,
 		displayFileHandler
 	} from '$lib/utils';
+	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
 
 	import {
@@ -513,7 +514,7 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		if (event.chat_id === $chatId) {
+		if (isEventForLoadedChat(event, $chatId, history?.messages)) {
 			await tick();
 			let message = history.messages[event.message_id];
 
