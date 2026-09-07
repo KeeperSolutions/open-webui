@@ -1323,7 +1323,7 @@
 						name={$i18n.t('Models')}
 						dragAndDrop={false}
 					>
-						<PinnedModelList bind:selectedChatId {shiftKey} />
+						<PinnedModelList bind:selectedChatId />
 					</SidebarSection>
 				{/if}
 

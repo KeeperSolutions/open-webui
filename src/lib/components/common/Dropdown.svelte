@@ -115,6 +115,8 @@
 
 		contentEl.style.position = 'fixed';
 		contentEl.style.zIndex = '9999';
+		// Without this the menu is unclickable: bits-ui sets pointer-events:none on <body>.
+		contentEl.style.pointerEvents = 'auto';
 
 		const contentHeight = naturalContentHeight();
 		const spaceBelow = window.innerHeight - rect.bottom - sideOffset;
