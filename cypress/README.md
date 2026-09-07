@@ -23,6 +23,10 @@ and every backend unit test stay green.
 description of each spec (what it asserts + what it guards against).
 Add a section there whenever you add an `NN-*.cy.ts` file.
 
+🔭 **`md-docs/e2e-future-coverage.md`** — current coverage vs. the
+upgrade Key Risk Areas, and what to add next (billing exhaustion, PII
+masking, content-search). Read it before extending the suite.
+
 ## `01-core-flow.cy.ts`
 
 Walks the core flows in one sequence:
