@@ -119,18 +119,30 @@ PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 # instance limits, CPU allocation, GPU — infrastructure work outside this repo),
 # this is the one number to raise.
 #
-# A second, larger measurement exists and 1.3 is KEPT anyway. The live
-# end-to-end check at 160 980 characters / 90 chunks
-# (`test_pii_prompt_chunking_live.py`) masked in 339.6 s = 474 chars/s, i.e. a
-# sustained 1.98x — better than the 1.29x burst probe because over 90 chunks one
-# request's network/vault/parse work overlaps another's NER, which a four-request
-# burst barely shows. Both numbers are real; they differ in duration, not in
-# correctness. 1.3 stays because BOTH were taken against an otherwise idle
-# pipeline. It is a single instance serialized on one NER thread, so any other
-# user masking at the same time takes throughput straight off this number, and
-# an optimistic value here restores exactly the wait-then-refuse this ticket
-# removed. The conservative value costs only cap headroom.
-PII_INLET_EFFECTIVE_SPEEDUP = 1.3
+# 1.29x was the BURST figure and it undercounts. Three later measurements, all
+# sustained over enough chunks for the overlap to develop, agree closely:
+#
+#   live E2E, 160 980 chars / 90 chunks   -> 339.6 s -> 474 chars/s (1.98x)
+#   user, 20 pages of Word (~64 000)      -> 120 s   -> 533 chars/s (2.22x)
+#   user, 50 pages of Word (~160 000)     -> 300 s   -> 533 chars/s (2.22x)
+#
+# The burst probe only had four requests in flight, too few for one request's
+# network/vault/parse work to overlap another's NER; small payloads show the same
+# effect (a 4 096-char probe manages only 360 chars/s). All the numbers are real,
+# they differ in how long the pipeline was kept busy.
+#
+# 1.8, not the measured ~2.0-2.2: every measurement was taken against an
+# otherwise IDLE pipeline. It is a single instance serialized on one NER thread
+# (`autoscaling.knative.dev/maxScale: 1`), so a second user masking at the same
+# time comes straight off this number. The margin is deliberate — an optimistic
+# value here admits a prompt that then dies on `PII_INLET_TOTAL_BUDGET_S`, which
+# is the wait-then-refuse this ticket exists to remove. Being wrong low only
+# costs cap headroom; being wrong high costs the user ten minutes and a refusal.
+#
+# Sizing at 1.8: cap ~259 000 characters (~80 pages of Word), which the pipeline
+# really masks in ~486 s at 533 chars/s — comfortably inside the 600 s budget, so
+# the guard and the deadline agree instead of contradicting each other.
+PII_INLET_EFFECTIVE_SPEEDUP = 1.8
 
 
 def estimated_masking_seconds(skeleton_chars, chunked_chars):
