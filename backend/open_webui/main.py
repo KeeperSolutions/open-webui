@@ -2136,7 +2136,13 @@ async def chat_completion(
                         )
 
                 except Exception:
-                    pass
+                    # These two events are the ONLY thing that tells the client
+                    # the turn is over: `chat:message:error` renders the error,
+                    # `chat:tasks:cancel` stops the spinner. Swallowing a
+                    # failure here silently leaves the user watching a spinner
+                    # forever, with the error visible only after a page reload
+                    # (the DB upsert above having succeeded). Never hide that.
+                    log.exception('Failed to deliver the chat error to the client')
             else:
                 # No chat_id/message_id → legacy/direct API path with no
                 # WebSocket error channel.  We must surface the error as
