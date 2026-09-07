@@ -1,7 +1,31 @@
 # E2E tests — post-upgrade regression gate
 
-`cypress/e2e/core-flow.cy.ts` drives a real browser against a **real
-backend + real local Ollama** and walks the core flows in one sequence:
+Two specs, run against a **real backend + real local Ollama** on a
+fresh scratch DB. `npm run e2e` runs both.
+
+**⚠️ Run order matters — the specs are numbered.** Cypress runs specs
+alphabetically, so `01-` before `02-`. Spec 01 does the signup **and
+creates + approves the regular user and shares the model with them**;
+spec 02 logs in **as that regular user**. Running `02` alone against a
+backend where `01` never ran fails loudly with a run-order hint.
+
+| Spec | Role | Covers |
+|---|---|---|
+| `01-core-flow.cy.ts` | admin, then regular user | first signup → admin, model select, chat round-trip, **creates + approves the regular user + shares the model**, permission boundary (Playground), logout, regular-user login + chat |
+| `02-chat-depth.cy.ts` | regular (non-admin) user | chat persistence across a full reload (save + re-decrypt), sidebar history, New Chat clears the transcript/URL, reopening a chat, **regenerate** produces a branched + completed version |
+
+Spec 02 is regular-user on purpose: persistence, reload, history and
+regenerate are things *every* user does, and a merge can break them (or
+a per-role chat permission) for non-admins only while the admin path
+and every backend unit test stay green.
+
+📋 **`SCENARIOS.md`** in this folder is the step-by-step, plain-language
+description of each spec (what it asserts + what it guards against).
+Add a section there whenever you add an `NN-*.cy.ts` file.
+
+## `01-core-flow.cy.ts`
+
+Walks the core flows in one sequence:
 
 1. First signup → backend auto-promotes to **admin**.
 2. Admin: select the configured model, send a message, wait for the
@@ -58,8 +82,35 @@ Ctrl-C.
 
 ```bash
 # with Ollama running + the model pulled:
-CYPRESS_E2E_MODEL=gemma3:1b npm run e2e
-CYPRESS_E2E_MODEL=gemma3:1b npm run e2e -- --spec cypress/e2e/core-flow.cy.ts
+CYPRESS_E2E_MODEL=gemma3:1b npm run e2e                    # both specs, in order
+CYPRESS_E2E_MODEL=gemma3:1b npm run e2e -- --spec cypress/e2e/01-core-flow.cy.ts
+
+```
+or, for instance, if you have quen model:
+
+```bash
+CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e
+```
+
+**Before doing anything else** the script checks `:5173` and `:8080`
+are free (a leftover `npm run dev`, or a previous run that didn't clean
+up, is the usual culprit) and **aborts with a hint** if not. Re-run
+with `E2E_FORCE_PORTS=1` to kill the holders instead. On exit it also
+kills anything still bound to those ports, as a backstop.
+
+### Flake check
+
+`npm run e2e:flake` (`scripts/e2e-flake.sh`) runs the full suite N times
+(default 5), each on a **fresh backend + fresh scratch DB**, and prints
+a pass/fail table. Use it after adding or changing a spec to confirm
+it's not flaky. A heartbeat line ticks every ~15s so you can see it's
+alive (full log saved + path printed; `E2E_FLAKE_VERBOSE=1` to stream
+everything). Forwards extra args to `npm run e2e`:
+
+```bash
+CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake            # 5 runs, both specs
+CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake 10         # 10 runs
+CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake 10 -- --spec cypress/e2e/02-chat-depth.cy.ts
 ```
 
 Env for `npm run e2e`:
@@ -68,6 +119,7 @@ Env for `npm run e2e`:
 - `E2E_BACKEND_PORT` — backend port (default `8080`; the dev frontend
   hardcodes the API base to `:8080`, so don't change this without a
   matching frontend change).
+- `E2E_FORCE_PORTS=1` — kill whatever holds the ports instead of aborting.
 - `E2E_KEEP_DB=1` — keep the scratch dir after the run (debugging).
 - extra args after `--` are forwarded to `cypress run`.
 
@@ -117,6 +169,9 @@ fragile spots:
 | Response complete | `[aria-label="Edit"]` visible | Action row is `{#if message.done}`-gated; doesn't render while streaming. |
 | User menu | `button[aria-label="User menu"]` | Desktop viewport pinned in `cypress.config.ts` to avoid the mobile-variant duplicate. |
 | Sign Out | `cy.contains('button', 'Sign Out')` | No id; no confirm dialog. |
+| Sidebar (expanded) | `a#sidebar-new-chat-button`, `a[href^="/c/"]` | Only render when the sidebar is expanded. `primeAppState` (support file) sets `localStorage.sidebar='true'` on every visit so it starts open. The `#sidebar-new-chat-button` id is on **two** elements — an always-present hidden `<button class="hidden">` and the expanded-sidebar `<a href="/">` — so match the anchor (`a#...`), not the bare id. |
+| Regenerate | `[aria-label="Regenerate"]` → then `cy.contains('button','Try Again')` | The button opens a dropdown (`$settings.regenerateMenu` on by default); "Try Again" is the plain regenerate. |
+| Version pager | `[aria-label="Previous message"]` | Only renders once a response has ≥2 sibling versions (i.e. after a regenerate). |
 
 ## Why `testIsolation: false`
 

@@ -3,9 +3,15 @@
 import { TEST_PASSWORD } from '../support/e2e';
 
 // ---------------------------------------------------------------------------
+// SPEC 01 of 2 — RUN ORDER MATTERS (files are numbered; Cypress runs specs
+// alphabetically). This spec does the one-and-only signup and, crucially,
+// CREATES + APPROVES the regular user and SHARES the model with them.
+// Spec 02 (02-chat-depth.cy.ts) then logs in AS that regular user — it
+// depends on this spec having run first against the same backend.
+//
 // Core flows — one sequence, top to bottom:
 //   first signup -> admin -> admin runs their flow -> admin creates the
-//   regular user -> regular user runs their flow.
+//   regular user + shares the model -> regular user runs their flow.
 //
 // Each `it()` depends on the state left by the previous one (Cypress runs
 // them in order within a file). This is deliberate — it mirrors how a

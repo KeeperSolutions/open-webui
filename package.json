@@ -20,6 +20,7 @@
 		"cy:open": "cypress open",
 		"cy:run": "cypress run",
 		"e2e": "./scripts/e2e.sh",
+		"e2e:flake": "./scripts/e2e-flake.sh",
 		"test:frontend": "vitest run --passWithNoTests --reporter=verbose",
 		"pyodide:fetch": "node scripts/prepare-pyodide.js",
 		"test": "npm run test:frontend"

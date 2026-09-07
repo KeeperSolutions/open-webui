@@ -49,9 +49,17 @@ declare namespace Cypress {
 		logout(): Chainable<void>;
 
 		/**
-		 * Log in via the sign-in form (wrapped in `cy.session`). Used for the
-		 * regular user after the admin has created their account.
+		 * Log in via the sign-in form. Used for the regular user after the
+		 * admin has created their account.
 		 */
 		loginViaForm(email: string, password: string): Chainable<void>;
+
+		/**
+		 * Log in as the E2E_USER_EMAIL regular (non-admin) account. That
+		 * account + its model access are set up by spec 01
+		 * (01-core-flow.cy.ts) — this asserts it exists (with a run-order
+		 * hint if not) before doing the form login.
+		 */
+		loginAsRegularUser(): Chainable<void>;
 	}
 }

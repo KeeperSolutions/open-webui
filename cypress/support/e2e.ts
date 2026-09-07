@@ -50,53 +50,78 @@ before(() => {
 		);
 	}
 
-	// Run-scoped, synthetic-looking identities. No collision when the suite
-	// is re-run against a DB that already has them, and obviously not real
-	// accounts if they ever leak into a shared DB. Explicit
-	// CYPRESS_E2E_*_EMAIL overrides still win.
-	const stamp = Date.now();
+	// Synthetic-looking identities. STABLE (not timestamped) so that every
+	// spec file in a run shares the same admin/user — `registerAdmin` signs
+	// up the first time and form-logs-in every time after (signup is
+	// disabled once the first admin exists). Explicit CYPRESS_E2E_*_EMAIL
+	// overrides still win. The scratch DB is fresh per `npm run e2e`
+	// invocation, so a fixed address never collides across real runs.
 	if (!Cypress.env('E2E_ADMIN_EMAIL')) {
-		Cypress.env('E2E_ADMIN_EMAIL', `e2e-admin+${stamp}@test.local`);
+		Cypress.env('E2E_ADMIN_EMAIL', 'e2e-admin@test.local');
 	}
 	if (!Cypress.env('E2E_USER_EMAIL')) {
-		Cypress.env('E2E_USER_EMAIL', `e2e-user+${stamp}@test.local`);
+		Cypress.env('E2E_USER_EMAIL', 'e2e-user@test.local');
 	}
 });
 
-// Cypress clears localStorage between tests by default, so a one-time
-// top-level `localStorage.setItem('locale', ...)` won't stick. Set it right
-// before each `cy.visit` — text-based selectors (`Sign Out`, `User menu`,
-// `Okay, Let's Go!`) depend on the en-US locale being active. (The spec
-// runs testIsolation:false so state persists, but visits still re-init the
-// app, so keep setting it per-visit.)
-const forceEnLocale = () => {
+// Run in `onBeforeLoad` of every `cy.visit`:
+//   - locale=en-US so text selectors (`Sign Out`, `User menu`,
+//     `Okay, Let's Go!`) match regardless of browser/OS locale.
+//   - sidebar='true' so the sidebar starts EXPANDED. Sidebar.svelte
+//     mounts it from `localStorage.sidebar === 'true'` (default:
+//     collapsed to a 42px icon rail), and in the collapsed state the
+//     `#sidebar-new-chat-button` is `.hidden` and no `a[href^="/c/"]`
+//     history rows render — spec 02 needs both.
+// Cypress clears localStorage between tests by default; `testIsolation:
+// false` keeps it, but visits still re-init the app, so set per-visit.
+const primeAppState = () => {
 	localStorage.setItem('locale', 'en-US');
+	localStorage.setItem('sidebar', 'true');
 };
 
 // --- registerAdmin ---------------------------------------------------------
-// First signup -> backend auto-promotes to admin (auths.py signup_handler)
-// and disables further signup. HgAuthCard only starts in 'signup' mode when
-// the page is reached via `?form=signup`.
+// Establish an authenticated ADMIN session on /chat.
+//   - First call against a fresh DB: signs up (the backend auto-promotes
+//     the first user to admin, auths.py signup_handler, then disables
+//     signup).
+//   - Every call after that: signup is gone, so this form-logs-in with the
+//     same credentials instead. Lets each spec file start independently
+//     without caring whether it's the first to run against this backend.
+// HgAuthCard only starts in 'signup' mode via `?form=signup`.
 Cypress.Commands.add('registerAdmin', () => {
-	cy.visit('/auth?form=signup', { onBeforeLoad: forceEnLocale });
+	const email = Cypress.env('E2E_ADMIN_EMAIL');
 
-	cy.get('input#name').type('E2E Admin');
-	cy.get('input#email').type(Cypress.env('E2E_ADMIN_EMAIL'));
-	cy.get('input#password').type(TEST_PASSWORD);
+	// Is signup still available? (config.features.enable_signup)
+	cy.request({
+		url: `${BACKEND_URL}/api/config`,
+		failOnStatusCode: false
+	}).then((res) => {
+		const signupOpen = res.body?.features?.enable_signup === true;
 
-	// Confirm-password field only renders when
-	// enable_signup_password_confirmation is on — fill it only if present.
-	cy.get('body').then(($body) => {
-		if ($body.find('input#confirm-password').length) {
-			cy.get('input#confirm-password').type(TEST_PASSWORD);
+		if (signupOpen) {
+			cy.visit('/auth?form=signup', { onBeforeLoad: primeAppState });
+			cy.get('input#name').type('E2E Admin');
+			cy.get('input#email').type(email);
+			cy.get('input#password').type(TEST_PASSWORD);
+			// Confirm-password field only renders when
+			// enable_signup_password_confirmation is on — fill if present.
+			cy.get('body').then(($body) => {
+				if ($body.find('input#confirm-password').length) {
+					cy.get('input#confirm-password').type(TEST_PASSWORD);
+				}
+			});
+			cy.get('form button[type="submit"]').click();
+		} else {
+			cy.visit('/auth', { onBeforeLoad: primeAppState });
+			cy.get('input#email').type(email);
+			cy.get('input#password').type(TEST_PASSWORD);
+			cy.get('form button[type="submit"]').click();
 		}
+
+		// setSessionUser -> goto('/chat')
+		cy.url({ timeout: 20_000 }).should('include', '/chat');
+		cy.dismissChangelog();
 	});
-
-	cy.get('form button[type="submit"]').click();
-
-	// setSessionUser -> goto('/chat')
-	cy.url({ timeout: 20_000 }).should('include', '/chat');
-	cy.dismissChangelog();
 });
 
 // --- dismissChangelog ----------------------------------------------------
@@ -234,10 +259,33 @@ Cypress.Commands.add('logout', () => {
 // testIsolation:false (one continuous walkthrough), and this is only
 // called once, so a plain form submit is enough — no cy.session needed.
 Cypress.Commands.add('loginViaForm', (email: string, password: string) => {
-	cy.visit('/auth', { onBeforeLoad: forceEnLocale });
+	cy.visit('/auth', { onBeforeLoad: primeAppState });
 	cy.get('input#email').type(email);
 	cy.get('input#password').type(password);
 	cy.get('form button[type="submit"]').click();
 	cy.url({ timeout: 20_000 }).should('include', '/chat');
 	cy.dismissChangelog();
+});
+
+// --- loginAsRegularUser ---------------------------------------------
+// Log in as the E2E_USER_EMAIL account. That account and its model
+// access are set up by spec 01 (01-core-flow.cy.ts) — this fails loudly
+// with a run-order hint if it's missing, rather than a cryptic form
+// error, so a `--spec 02-...` run in isolation gives a clear message.
+Cypress.Commands.add('loginAsRegularUser', () => {
+	const email = Cypress.env('E2E_USER_EMAIL');
+	cy.request({
+		method: 'POST',
+		url: `${BACKEND_URL}/api/v1/auths/signin`,
+		failOnStatusCode: false,
+		body: { email, password: TEST_PASSWORD }
+	}).then((res) => {
+		expect(
+			res.status,
+			`regular user "${email}" must exist before spec 02 — run spec 01 ` +
+				`first (npm run e2e runs both in order; a bare ` +
+				`--spec 02-chat-depth needs 01 to have populated this backend)`
+		).to.eq(200);
+	});
+	cy.loginViaForm(email, TEST_PASSWORD);
 });

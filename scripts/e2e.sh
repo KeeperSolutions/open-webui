@@ -21,9 +21,19 @@
 #   - deps installed (`npm install`, backend venv)
 #
 # Usage:
-#   CYPRESS_E2E_MODEL=gemma3:1b ./scripts/e2e.sh
-#   CYPRESS_E2E_MODEL=gemma3:1b ./scripts/e2e.sh --spec cypress/e2e/core-flow.cy.ts
+#   CYPRESS_E2E_MODEL=gemma3:1b ./scripts/e2e.sh          # all specs
+#   CYPRESS_E2E_MODEL=gemma3:1b ./scripts/e2e.sh --spec cypress/e2e/01-core-flow.cy.ts
 #   E2E_FRONTEND_PORT=5199 CYPRESS_E2E_MODEL=gemma3:1b ./scripts/e2e.sh
+#
+# Specs run ALPHABETICALLY against one fresh scratch DB, and ORDER MATTERS
+# (that's why they're numbered):
+#   01-core-flow.cy.ts  — signup -> admin -> chat -> creates + approves the
+#                         regular user AND shares the model with them ->
+#                         regular-user login/permission-boundary/logout
+#   02-chat-depth.cy.ts — logs in as THAT regular user; persistence across
+#                         reload, sidebar history, New Chat, regenerate
+# Running just 02 (`--spec`) against a backend where 01 never ran fails
+# loudly with a run-order hint.
 #
 # Env:
 #   CYPRESS_E2E_MODEL    required — model id/tag you have pulled in Ollama
@@ -31,8 +41,14 @@
 #                        build hardcodes the API base to :8080, so changing
 #                        this also needs a matching frontend change; leave it)
 #   E2E_FRONTEND_PORT    Vite dev server port (default 5173)
+#   E2E_FORCE_PORTS      set to 1 to kill whatever already holds the ports
+#                        instead of aborting (default: abort with a hint)
 #   E2E_KEEP_DB          set to 1 to skip deleting the scratch dir (debugging)
 #   any extra args       forwarded to `cypress run`
+#
+# FIRST thing this does: check :5173 and :8080 are free (a leftover
+# `npm run dev` or a previous run is the usual culprit). Aborts if not,
+# unless E2E_FORCE_PORTS=1.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -50,6 +66,40 @@ FRONTEND_PORT="${E2E_FRONTEND_PORT:-5173}"
 BACKEND_URL="http://localhost:${BACKEND_PORT}"
 FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
 
+# --- ports must be free BEFORE anything starts -------------------------
+# We start the frontend with --strictPort and the backend on a fixed
+# port, so a straggler (a leftover `npm run dev`, a previous run that
+# didn't clean up) makes this run fail confusingly partway through.
+# Refuse up front, and offer to reclaim them with E2E_FORCE_PORTS=1.
+if command -v lsof >/dev/null 2>&1; then
+	port_holders="$(lsof -ti "tcp:${FRONTEND_PORT}" -i "tcp:${BACKEND_PORT}" 2>/dev/null || true)"
+	if [[ -n "$port_holders" ]]; then
+		if [[ "${E2E_FORCE_PORTS:-}" == "1" ]]; then
+			echo "==> E2E_FORCE_PORTS=1 — killing existing holders of :${FRONTEND_PORT}/:${BACKEND_PORT}: $port_holders" >&2
+			# shellcheck disable=SC2086
+			kill -9 $port_holders 2>/dev/null || true
+			# give the OS a moment to release the sockets (lsof exits non-zero
+			# when only one of the two ports has no listener, so check output,
+			# not exit code)
+			for _ in 1 2 3 4 5; do
+				sleep 1
+				[[ -z "$(lsof -ti "tcp:${FRONTEND_PORT}" -i "tcp:${BACKEND_PORT}" 2>/dev/null || true)" ]] && break
+			done
+			if [[ -n "$(lsof -ti "tcp:${FRONTEND_PORT}" -i "tcp:${BACKEND_PORT}" 2>/dev/null || true)" ]]; then
+				echo "error: ports still busy after force-kill." >&2
+				exit 1
+			fi
+		else
+			echo "error: port ${FRONTEND_PORT} and/or ${BACKEND_PORT} already in use (pids: $port_holders)." >&2
+			echo "       Something is already running there — likely a leftover 'npm run dev'" >&2
+			echo "       or a previous e2e run. Free them, or re-run with E2E_FORCE_PORTS=1:" >&2
+			echo "         E2E_FORCE_PORTS=1 CYPRESS_E2E_MODEL=${CYPRESS_E2E_MODEL} npm run e2e" >&2
+			echo "       (manual: lsof -ti tcp:${FRONTEND_PORT} tcp:${BACKEND_PORT} | xargs kill -9)" >&2
+			exit 1
+		fi
+	fi
+fi
+
 # Isolated scratch data dir — its own e2e-webui.db, uploads, vector store, etc.
 SCRATCH_DIR="$(mktemp -d "${TMPDIR:-/tmp}/owui-e2e.XXXXXX")"
 BACKEND_PID=""
@@ -65,6 +115,18 @@ cleanup() {
 			wait "$pid" 2>/dev/null || true
 		fi
 	done
+	# Belt-and-suspenders: whatever still holds our ports, kill it. Guards
+	# against a wrapper process not propagating the signal to its child
+	# (e.g. `npm run` -> node) and leaving an orphan bound to the port.
+	if command -v lsof >/dev/null 2>&1; then
+		local stragglers
+		stragglers="$(lsof -ti "tcp:${FRONTEND_PORT}" -i "tcp:${BACKEND_PORT}" 2>/dev/null || true)"
+		if [[ -n "$stragglers" ]]; then
+			echo "==> killing port stragglers: $stragglers"
+			# shellcheck disable=SC2086
+			kill -9 $stragglers 2>/dev/null || true
+		fi
+	fi
 	if [[ "${E2E_KEEP_DB:-}" == "1" ]]; then
 		echo "==> E2E_KEEP_DB=1 — leaving scratch dir: $SCRATCH_DIR"
 	else
@@ -120,9 +182,17 @@ echo "==> model under test:  $CYPRESS_E2E_MODEL"
 BACKEND_PID=$!
 
 # --- frontend (Vite dev server) ----------------------------------------
+# `npm run dev` is `pyodide:fetch && vite dev`. We run the fetch here
+# (synchronously, once — it's cached after the first time) and then exec
+# `vite` DIRECTLY in the background, NOT via `npm run`: the npm wrapper
+# does not forward SIGTERM to the node/vite child it spawns, so killing
+# it on cleanup would orphan vite still bound to :5173.
+echo "==> prefetching pyodide (cached after first run)"
+node scripts/prepare-pyodide.js
+
 (
 	set -m
-	exec npm run dev -- --port "$FRONTEND_PORT" --strictPort
+	exec node_modules/.bin/vite dev --host --port "$FRONTEND_PORT" --strictPort
 ) &
 FRONTEND_PID=$!
 
