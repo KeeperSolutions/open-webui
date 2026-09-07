@@ -86,7 +86,7 @@ CYPRESS_E2E_MODEL=gemma3:1b npm run e2e                    # both specs, in orde
 CYPRESS_E2E_MODEL=gemma3:1b npm run e2e -- --spec cypress/e2e/01-core-flow.cy.ts
 
 ```
-or, for instance, if you have quen model:
+or, for instance, if you have a Qwen model:
 
 ```bash
 CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e
@@ -148,9 +148,12 @@ Start it with `DATABASE_URL="sqlite:///$(mktemp -d)/e2e-webui.db"`
   model like `gemma3:1b` exercises the Ollama "retry-without-tools"
   fallback — the response should still complete.
 
-Email overrides: `CYPRESS_E2E_ADMIN_EMAIL` / `CYPRESS_E2E_USER_EMAIL`
-(default to run-scoped `e2e-admin+<ts>@test.local` /
-`e2e-user+<ts>@test.local`).
+**Accounts the suite creates** (in whatever DB the backend under test
+points at — always a scratch DB): `e2e-admin@test.local` (first signup
+→ admin) and `e2e-user@test.local` (added by the admin), both with
+password `Test1234!`. Fixed, not timestamped, so spec 01 and spec 02
+share the same accounts. Override with `CYPRESS_E2E_ADMIN_EMAIL` /
+`CYPRESS_E2E_USER_EMAIL`.
 
 ## Adjusting selectors after an upgrade
 
@@ -166,7 +169,7 @@ fragile spots:
 | Model selector | `#model-selector-model-button` → `#model-search-input` → `[role="option"][data-value="<id>"]` | Virtualized + body-portalled; filter first so the row is rendered. |
 | Chat input | `#chat-input` | ProseMirror contenteditable — no `.value`, use `.invoke('text')`. |
 | Send button | `#send-message-button` | Disabled until there's text. |
-| Response complete | `[aria-label="Edit"]` visible | Action row is `{#if message.done}`-gated; doesn't render while streaming. |
+| Response complete **and OK** | `cy.assertAssistantResponded()` | `[aria-label="Edit"]` alone is NOT enough — the `chat:message:error` path also sets `message.done`, so a failed generation shows Edit too. The command also asserts the "Regenerate this response…" error hint is absent and `#response-content-container` has non-empty text. |
 | User menu | `button[aria-label="User menu"]` | Desktop viewport pinned in `cypress.config.ts` to avoid the mobile-variant duplicate. |
 | Sign Out | `cy.contains('button', 'Sign Out')` | No id; no confirm dialog. |
 | Sidebar (expanded) | `a#sidebar-new-chat-button`, `a[href^="/c/"]` | Only render when the sidebar is expanded. `primeAppState` (support file) sets `localStorage.sidebar='true'` on every visit so it starts open. The `#sidebar-new-chat-button` id is on **two** elements — an always-present hidden `<button class="hidden">` and the expanded-sidebar `<a href="/">` — so match the anchor (`a#...`), not the bare id. |

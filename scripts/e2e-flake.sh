@@ -9,11 +9,13 @@
 # Usage:
 #   CYPRESS_E2E_MODEL=qwen2.5:7b ./scripts/e2e-flake.sh          # 5 runs
 #   CYPRESS_E2E_MODEL=qwen2.5:7b ./scripts/e2e-flake.sh 10       # 10 runs
-#   CYPRESS_E2E_MODEL=qwen2.5:7b ./scripts/e2e-flake.sh 10 --spec cypress/e2e/02-chat-depth.cy.ts
+#   CYPRESS_E2E_MODEL=qwen2.5:7b ./scripts/e2e-flake.sh 10 -- --spec cypress/e2e/02-chat-depth.cy.ts
 #
-# Extra args after the count are forwarded to `npm run e2e` (so to
-# scripts/e2e.sh -> cypress run). Stops nothing on failure — runs all N
-# so you see the flake rate, not just the first red.
+# First arg = run count if it's a positive integer (0 / non-numeric is
+# rejected so a mistyped count can't report an un-run check as green).
+# Everything after it is forwarded to `npm run e2e` (-> scripts/e2e.sh ->
+# cypress run). Stops nothing on failure — runs all N so you see the
+# flake rate, not just the first red.
 #
 # By default each run is quiet: a heartbeat line ("… 45s — ✓ ...") ticks
 # every 15s so you know it's alive and which step it's on, the full log
@@ -25,16 +27,22 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# First arg, if it's a positive integer, is the run count; anything else
+# is left in "$@" to forward to `npm run e2e`. Reject 0 / non-numeric
+# explicitly so a mistyped count never reports an un-run check as green.
+RUNS=5
+if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
+	RUNS=$((10#$1)) # strip leading zeros, base-10
+	shift
+	if [[ "$RUNS" -lt 1 ]]; then
+		echo "error: run count must be >= 1 (got '$RUNS')." >&2
+		exit 1
+	fi
+fi
+
 if [[ -z "${CYPRESS_E2E_MODEL:-}" ]]; then
 	echo "error: CYPRESS_E2E_MODEL is required." >&2
 	exit 1
-fi
-
-RUNS="${1:-5}"
-if [[ "$RUNS" =~ ^[0-9]+$ ]]; then
-	shift || true
-else
-	RUNS=5
 fi
 
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/owui-e2e-flake.XXXXXX")"

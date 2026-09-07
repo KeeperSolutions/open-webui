@@ -189,6 +189,43 @@ Cypress.Commands.add('sendMessage', (text: string) => {
 	cy.get('#send-message-button').click();
 });
 
+// --- assertAssistantResponded ---------------------------------------
+// Wait for the last assistant turn to FINISH SUCCESSFULLY.
+//
+// Why not just `[aria-label="Edit"]`: that button renders whenever
+// `message.done === true`, and the `chat:message:error` handler ALSO
+// sets `message.done = true` (that's this session's stuck-after-error
+// fix). So a failed generation would still show Edit and a naive smoke
+// test would pass green on a backend/LLM error. Assert real output +
+// the absence of the error UI.
+//
+//   - `#response-content-container` (one per ResponseMessage) only
+//     renders `<ContentRenderer>` when `hasResponseContent &&
+//     message.error !== true` — so non-empty text there == the model
+//     actually produced output.
+//   - the error hint ("Regenerate this response or delete it to
+//     continue the conversation.") renders inside `{#if message?.error}`
+//     for the last message — its absence == no error.
+Cypress.Commands.add('assertAssistantResponded', (timeout = 120_000) => {
+	// done-gated action row appeared (streaming finished, one way or another)
+	cy.get('[aria-label="Edit"]', { timeout }).should('be.visible');
+
+	// no error surfaced on the turn
+	cy.contains(
+		'Regenerate this response or delete it to continue the conversation.'
+	).should('not.exist');
+
+	// the last assistant turn has actual, non-whitespace content
+	cy.get('#response-content-container')
+		.last()
+		.invoke('text')
+		.then((t) => {
+			expect(t.trim(), 'assistant response text').to.have.length.greaterThan(
+				0
+			);
+		});
+});
+
 // --- createRegularUser -------------------------------------------------
 // Admin-only. A plain 2nd signup is impossible (ENABLE_SIGNUP is flipped
 // off + persisted on first admin) and would land as 'pending' anyway.

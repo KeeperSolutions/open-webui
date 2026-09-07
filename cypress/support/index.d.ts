@@ -30,6 +30,16 @@ declare namespace Cypress {
 		sendMessage(text: string): Chainable<void>;
 
 		/**
+		 * Wait for the last assistant turn to finish SUCCESSFULLY: the
+		 * done-gated action row appears, the "Regenerate this response…"
+		 * error hint does NOT, and `#response-content-container` has
+		 * non-empty text. Catches backend/LLM errors that a bare
+		 * `[aria-label="Edit"]` check would pass green (the error path also
+		 * sets `message.done`). `timeout` defaults to 120s (real LLM gen).
+		 */
+		assertAssistantResponded(timeout?: number): Chainable<void>;
+
+		/**
 		 * Create an APPROVED regular (`role: 'user'`) account via the
 		 * admin-only `POST /api/v1/auths/add`. Requires an authenticated
 		 * admin session (reads `localStorage.token`).

@@ -48,10 +48,9 @@ describe('Chat depth — regular user (post-upgrade)', () => {
 		cy.sendMessage(PROMPT);
 
 		cy.contains(PROMPT).should('exist');
-		// message.done-gated action row === generation finished.
-		cy.get('[aria-label="Edit"]', { timeout: GEN_TIMEOUT }).should(
-			'be.visible'
-		);
+		// Generation finished AND succeeded (real output, no error UI) —
+		// not just message.done, which the error path also sets.
+		cy.assertAssistantResponded(GEN_TIMEOUT);
 
 		// A conversation id is now in the URL — the chat was saved.
 		cy.url().should('match', /\/c\/[0-9a-f-]{36}/i);
@@ -60,11 +59,24 @@ describe('Chat depth — regular user (post-upgrade)', () => {
 	it('the chat survives a full page reload (save + re-decrypt)', () => {
 		cy.url().then((chatUrl) => {
 			cy.reload();
-			// Same conversation, and BOTH turns rendered from the persisted
-			// (and, on staging/prod, encrypted) `chat` blob — not a fresh page.
+			// Same conversation, and BOTH turns rehydrated from the
+			// persisted (and, on staging/prod, encrypted) `chat` blob —
+			// not a fresh page.
 			cy.url().should('eq', chatUrl);
-			cy.contains(PROMPT, { timeout: 20_000 }).should('exist');
-			cy.get('[aria-label="Edit"]').should('exist');
+			cy.contains(PROMPT, { timeout: 20_000 }).should('exist'); // user turn
+			cy.get('[aria-label="Edit"]').should('exist'); // assistant turn
+			// The assistant's actual text came back non-empty — the round
+			// trip through save + EncryptedJSONField decrypt worked, not
+			// just an empty message shell.
+			cy.get('#response-content-container')
+				.last()
+				.invoke('text')
+				.then((t) =>
+					expect(
+						t.trim(),
+						'reloaded assistant text'
+					).to.have.length.greaterThan(0)
+				);
 		});
 	});
 
@@ -110,8 +122,9 @@ describe('Chat depth — regular user (post-upgrade)', () => {
 		cy.get('[aria-label="Previous message"]', {
 			timeout: GEN_TIMEOUT
 		}).should('be.visible');
-		// And the regenerated turn completed.
-		cy.get('[aria-label="Edit"]').should('be.visible');
+		// And the regenerated turn completed successfully (real output,
+		// no error UI).
+		cy.assertAssistantResponded(GEN_TIMEOUT);
 	});
 
 	it('the regenerated chat still survives a reload', () => {

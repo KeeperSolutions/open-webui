@@ -61,15 +61,10 @@ describe('Core flows (post-upgrade smoke)', () => {
 		// User message is echoed into the transcript.
 		cy.contains(prompt).should('exist');
 
-		// The action-button row (Edit/Regenerate/Copy) is gated `{#if
-		// message.done}` and does NOT render while streaming — its
-		// appearance is the "generation finished" signal. Also a regression
-		// guard for this session's chat:message:error -> message.done fix:
-		// a never-completing generation is exactly what an unset `done`
-		// looks like from here.
-		cy.get('[aria-label="Edit"]', { timeout: 120_000 }).should(
-			'be.visible'
-		);
+		// Generation finished AND succeeded — real output, no error UI.
+		// (A bare [aria-label="Edit"] check passes green on a failed
+		// generation too: chat:message:error also sets message.done.)
+		cy.assertAssistantResponded();
 	});
 
 	it('admin creates an approved regular user', () => {
@@ -111,9 +106,7 @@ describe('Core flows (post-upgrade smoke)', () => {
 		const prompt = 'Reply with exactly the single word: pong';
 		cy.sendMessage(prompt);
 		cy.contains(prompt).should('exist');
-		cy.get('[aria-label="Edit"]', { timeout: 120_000 }).should(
-			'be.visible'
-		);
+		cy.assertAssistantResponded();
 	});
 
 	it('regular user logs out and lands on /auth', () => {
