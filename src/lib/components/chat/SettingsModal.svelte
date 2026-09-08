@@ -24,10 +24,12 @@
 	import Search from '../icons/Search.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import Integrations from './Settings/Integrations.svelte';
+	import Connectors from './Settings/Connectors.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
 	import LockClosed from '../icons/LockClosed.svelte';
 	import SettingsAlt from '../icons/SettingsAlt.svelte';
 	import Link from '../icons/Link.svelte';
+	import Grid from '../icons/Grid.svelte';
 	import UserCircle from '../icons/UserCircle.svelte';
 	import SoundHigh from '../icons/SoundHigh.svelte';
 	import InfoCircle from '../icons/InfoCircle.svelte';
@@ -109,6 +111,7 @@
 		shortcuts: 'Basics',
 		connections: 'Services',
 		tools: 'Services',
+		connectors: 'Services',
 		personalization: 'Preferences',
 		audio: 'Preferences',
 		data_controls: 'Data',
@@ -368,6 +371,11 @@
 				'terminal',
 				'settings'
 			]
+		},
+		{
+			id: 'connectors',
+			title: 'Connectors',
+			keywords: ['google drive', 'drive', 'connectors', 'connect', 'settings']
 		},
 
 		{
@@ -1043,6 +1051,19 @@
 								<span>{$i18n.t('Integrations')}</span>
 							</button>
 						{/if}
+					{:else if tabId === 'connectors'}
+						<button
+							role="tab"
+							aria-controls="tab-connectors"
+							aria-selected={selectedTab === 'connectors'}
+							class={tabButtonClass(selectedTab === 'connectors')}
+							on:click={() => {
+								selectedTab = 'connectors';
+							}}
+						>
+							<Grid className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Connectors')}</span>
+						</button>
 					{:else if tabId === 'personalization'}
 						<button
 							role="tab"
@@ -1214,6 +1235,8 @@
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}
 				/>
+			{:else if selectedTab === 'connectors'}
+				<Connectors />
 			{:else if selectedTab === 'personalization'}
 				<Personalization
 					{saveSettings}

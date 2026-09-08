@@ -129,7 +129,7 @@ async def google_drive_callback(code: str, state: str, user=Depends(get_verified
         scopes=token_data.get('scope'),
     )
 
-    return RedirectResponse(f'{WEBUI_URL.value}/?connector=google_drive&status=connected')
+    return RedirectResponse(f'{WEBUI_URL.value}/?settings=connectors')
 
 
 @router.post('/google-drive/disconnect', response_model=ConnectorStatusResponse)
