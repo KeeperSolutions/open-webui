@@ -1573,6 +1573,29 @@ scan_file_content_for_pii = None
 # Mirror of the frontend PII_FILTER_IDS constant (pii.ts).
 _PII_FILTER_IDS = ('pii_filter', 'pii_filter_pipeline')
 
+# Whether to scan an uploaded file for PII at INGEST, to populate the card
+# before the user sends anything. OFF by default.
+#
+# It is a preview, not a security boundary — the fail-closed pass is
+# `mask_sources_for_llm` at send time, and that one covers everything actually
+# reaching the LLM. The preview cost a second full trip through a pipeline that
+# serializes NER (46.5s for the first 50 000 chars of a 167 460-char document,
+# measured on staging) and, because it only ever saw that capped prefix, it
+# reported a number the card then had to correct in front of the user: 26
+# detections after upload, 59 once the send-time pass finished. A wrong number,
+# for twice the load.
+#
+# The path itself is deliberately left intact rather than deleted. Masking AT
+# upload — keeping the masked text instead of discarding it, and mapping a
+# per-file vault into the chat vault — is the fix for the FIRST message still
+# paying full price, and it builds on exactly this machinery.
+ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', '').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+
 
 def _user_pii_masking_enabled(user) -> bool:
     """Read the user's persisted pii_masking_enabled valve setting (default True).
@@ -1605,6 +1628,8 @@ async def _store_ingest_pii_detections(request, file_id, text_content, user, pii
     pii_masking_enabled: per-request override (from the chat-input toggle, sent at
     upload time). Takes priority over the user's persisted valve settings. None
     means "not specified by caller" -> fall back to the user's persisted setting."""
+    if not ENABLE_INGEST_PII_SCAN:
+        return
     effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(user)
     if not effective:
         return
@@ -1626,8 +1651,16 @@ async def _store_ingest_pii_detections(request, file_id, text_content, user, pii
         global scan_file_content_for_pii
         if scan_file_content_for_pii is None:
             from open_webui.utils.middleware import scan_file_content_for_pii
+        from open_webui.utils.middleware import ingest_scan_is_truncated
+
         detections = await scan_file_content_for_pii(request, text_content, file_id=file_id, user=user)
-        update: dict = {'pii_scan_status': 'completed'}
+        # Written on EVERY completed scan, not only when true: a file re-scanned
+        # after shrinking would otherwise keep a stale True and have its card
+        # permanently supplemented from the send-time path.
+        update: dict = {
+            'pii_scan_status': 'completed',
+            'pii_scan_truncated': ingest_scan_is_truncated(text_content),
+        }
         if detections:
             update['pii_detections'] = detections
         await Files.update_file_data_by_id(file_id, update)

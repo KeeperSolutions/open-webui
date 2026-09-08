@@ -592,6 +592,10 @@ async def get_file_data_content_by_id(
             'content': file.data.get('content', ''),
             'pii_detections': file.data.get('pii_detections', []),
             'pii_scan_status': file.data.get('pii_scan_status', None),
+            # True when the scan covered only a prefix of the file, so the card
+            # knows its list is partial and must be supplemented from the
+            # send-time (whole-document) masking pass.
+            'pii_scan_truncated': file.data.get('pii_scan_truncated', False),
         }
     else:
         raise HTTPException(

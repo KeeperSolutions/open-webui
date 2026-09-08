@@ -14,6 +14,21 @@ from open_webui.utils.middleware import (
     _resolve_pii_scan_model_id,
     PII_MASK_CHUNK_CHARS,
 )
+import open_webui.routers.retrieval as _retrieval_at_import
+
+# Read BEFORE the autouse fixture below switches the scan on, so the shipped
+# default is still observable.
+INGEST_SCAN_DEFAULT = _retrieval_at_import.ENABLE_INGEST_PII_SCAN
+
+
+@pytest.fixture(autouse=True)
+def _enable_ingest_scan(monkeypatch):
+    """The upload-time scan is OPT-IN (see `ENABLE_INGEST_PII_SCAN`). Everything
+    in this module tests the scan machinery itself, so it is switched on here;
+    `test_the_ingest_scan_is_off_by_default` covers the shipped default."""
+    import open_webui.routers.retrieval as R
+
+    monkeypatch.setattr(R, 'ENABLE_INGEST_PII_SCAN', True)
 
 
 def _models(filter_id='pii_filter', url_idx=0, with_filter=True):
@@ -420,3 +435,93 @@ def test_every_process_file_call_in_upload_forwards_the_masking_toggle():
     assert missing == [], (
         f'ProcessFileForm built without pii_masking_enabled at process_uploaded_file-relative lines {missing}'
     )
+
+
+def test_a_truncated_scan_is_recorded_as_truncated(monkeypatch):
+    """The scan looks at only the first PII_SCAN_MAX_CHARS of a file. Measured
+    on staging: a 167 460-char document was scanned to 50 000 and the card
+    showed 28 detections where the full document holds 163 — and the frontend
+    treats a `completed` ingest scan as AUTHORITATIVE, suppressing the
+    send-time detections that would have filled the gap. Silently wrong is the
+    problem; the flag is what lets the card know it is looking at a prefix."""
+    import open_webui.routers.retrieval as R
+    from open_webui.utils.middleware import PII_SCAN_MAX_CHARS
+
+    saved = {}
+
+    async def fake_update(file_id, data, db=None):
+        saved.setdefault(file_id, {}).update(data)
+        return SimpleNamespace(id=file_id)
+
+    async def fake_scan(request, content, *, file_id, user, models=None, features=None):
+        return []
+
+    monkeypatch.setattr(R.Files, 'update_file_data_by_id', staticmethod(fake_update))
+    monkeypatch.setattr(R, 'scan_file_content_for_pii', fake_scan)
+
+    asyncio.run(
+        R._store_ingest_pii_detections(MagicMock(), 'big', 'x' * (PII_SCAN_MAX_CHARS + 1), _user())
+    )
+    assert saved['big']['pii_scan_truncated'] is True
+
+    asyncio.run(
+        R._store_ingest_pii_detections(MagicMock(), 'small', 'x' * 10, _user())
+    )
+    assert saved['small']['pii_scan_truncated'] is False, (
+        'the flag must be written on every completed scan, not only when true — '
+        'otherwise a file re-scanned after shrinking keeps a stale True'
+    )
+
+
+def test_content_endpoint_exposes_the_truncation_flag(monkeypatch):
+    """The card cannot know the scan was partial unless the endpoint says so."""
+    import open_webui.routers.files as F
+
+    async def fake_get(file_id, db=None):
+        return SimpleNamespace(
+            id=file_id,
+            user_id='u1',
+            data={'content': 'x', 'pii_scan_status': 'completed', 'pii_scan_truncated': True},
+        )
+
+    monkeypatch.setattr(F.Files, 'get_file_by_id', staticmethod(fake_get))
+    out = asyncio.run(
+        F.get_file_data_content_by_id('f1', user=SimpleNamespace(id='u1', role='user'), db=None)
+    )
+    assert out['pii_scan_truncated'] is True
+
+
+def test_the_ingest_scan_is_off_by_default(monkeypatch):
+    """The upload preview is off unless an operator asks for it.
+
+    It cost a full extra pass over the file through a pipeline that serializes
+    NER (46.5s for the first 50 000 chars, measured on staging) and produced a
+    number the card then had to correct: 26 detections after upload, 59 once the
+    send-time pass over the whole document finished. The send-time pass is the
+    fail-closed one and covers everything actually sent to the LLM, so the
+    preview bought a wrong number in exchange for doubling the load.
+
+    The machinery stays in place: masking AT upload (keeping the masked text
+    rather than discarding it) is the fix for the first message still paying
+    full price, and it builds on exactly this path.
+    """
+    import open_webui.routers.retrieval as R
+
+    assert INGEST_SCAN_DEFAULT is False, 'the upload scan must be opt-in'
+
+    monkeypatch.setattr(R, 'ENABLE_INGEST_PII_SCAN', False)
+    ran = []
+
+    async def must_not_run(*a, **k):
+        ran.append(1)
+        return []
+
+    async def must_not_write(*a, **k):
+        ran.append(1)
+
+    monkeypatch.setattr(R, 'scan_file_content_for_pii', must_not_run)
+    monkeypatch.setattr(R.Files, 'update_file_data_by_id', staticmethod(must_not_write))
+    monkeypatch.setattr(R.Files, 'get_file_by_id', staticmethod(must_not_write))
+
+    asyncio.run(R._store_ingest_pii_detections(MagicMock(), 'f1', 'OIB 11111111111', _user()))
+    assert ran == [], 'the disabled scan must not scan, read or write anything'

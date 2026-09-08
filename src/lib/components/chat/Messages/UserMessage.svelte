@@ -18,7 +18,11 @@
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
 	import { getFileDataContentById } from '$lib/apis/files';
-	import { scopeCardDetections } from '$lib/utils/pii';
+	import {
+		scopeCardDetections,
+		ingestCoveredFileIds as computeIngestCoveredFileIds,
+		piiIngestScanEnabled
+	} from '$lib/utils/pii';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
@@ -153,26 +157,30 @@
 						content: string;
 						pii_detections: Array<{ type: string; start: number; end: number }>;
 						pii_scan_status: string | null;
+						pii_scan_truncated?: boolean;
 					};
 					const fetched: FetchedFile[] = [];
 					for (const f of files) {
 						const id = f?.id ?? f?.file?.id;
 						if (!id) continue;
 						const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
-						const { content, pii_detections, pii_scan_status } = await getFileDataContentById(
-							localStorage.token,
-							id
-						);
-						fetched.push({ id, name, content, pii_detections, pii_scan_status });
+						const { content, pii_detections, pii_scan_status, pii_scan_truncated } =
+							await getFileDataContentById(localStorage.token, id);
+						fetched.push({
+							id,
+							name,
+							content,
+							pii_detections,
+							pii_scan_status,
+							pii_scan_truncated
+						});
 					}
-					// Ingest owns the card for files whose scan completed or is still
-					// running; everything else (skipped/null/failed) falls back to B2.
+					// Ingest owns the card for files whose scan completed (in full) or is
+					// still running; everything else — skipped, failed, or TRUNCATED —
+					// falls back to B2 so the send-time pass can fill in what the
+					// capped scan never looked at.
 					if (_piiFetchKey === capturedKey) {
-						ingestCoveredFileIds = new Set(
-							fetched
-								.filter((f) => f.pii_scan_status === 'completed' || f.pii_scan_status === 'running')
-								.map((f) => f.id)
-						);
+						ingestCoveredFileIds = computeIngestCoveredFileIds(fetched);
 					}
 					const anyRunning = fetched.some((f) => f.pii_scan_status === 'running');
 					out = fetched.flatMap((f) =>
@@ -195,10 +203,13 @@
 						await new Promise((r) => setTimeout(r, 3000));
 						continue;
 					}
-					// All files are at a terminal status or legacy (null).
-					// For legacy files with no detections yet, retry briefly.
-					const hasLegacy = fetched.some((f) => f.pii_scan_status == null);
-					if (hasLegacy && out.length === 0 && attempt < 5) {
+					// All files are at a terminal status or legacy (null). A null status
+					// means no scan has written yet — worth a brief retry when a scan is
+					// actually coming, and pure waste when the upload scan is off, since
+					// each attempt re-fetches the file's ENTIRE content.
+					const awaitingScan =
+						piiIngestScanEnabled() && fetched.some((f) => f.pii_scan_status == null);
+					if (awaitingScan && out.length === 0 && attempt < 5) {
 						await new Promise((r) => setTimeout(r, 2500));
 						continue;
 					}

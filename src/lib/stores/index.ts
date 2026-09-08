@@ -324,6 +324,7 @@ type Config = {
 		folder_max_file_count?: number;
 		/** Backend's PII_FILTER_IDS; absent on older backends, hence optional. */
 		pii_filter_ids?: string[];
+		pii_ingest_scan?: boolean;
 	};
 	oauth: {
 		providers: {

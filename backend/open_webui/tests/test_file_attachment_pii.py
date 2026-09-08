@@ -21,6 +21,7 @@ import asyncio
 import copy
 import json
 import sys
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,11 +37,14 @@ from open_webui.utils.middleware import (
     apply_source_context_to_messages,
     _mask_text_via_pii_pipeline,  # noqa: F401 (imported to assert it exists / is reusable)
     _mask_long_text_via_pii_pipeline,  # noqa: F401
-    _split_text_for_pii,
     PII_MASK_CHUNK_CHARS,
     PII_MASK_POST_RETRIES,
     PiiMaskingBlockedError,
 )
+
+# The splitter now has ONE implementation, shared with the prompt path
+# (TRAU-543); middleware's private copy was byte-identical and is gone.
+from open_webui.utils.pii_chunking import split_text_for_pii as _split_text_for_pii
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +120,9 @@ def _patch_policy(enforced):
     )
 
 
-def _patch_mw_session(captured: list, *, behavior="echo", masked_text=None, detections=None):
+def _patch_mw_session(
+    captured: list, *, behavior="echo", masked_text=None, detections=None, delay=None, inflight=None
+):
     """Patch middleware.aiohttp.ClientSession.
 
     behavior:
@@ -127,7 +133,12 @@ def _patch_mw_session(captured: list, *, behavior="echo", masked_text=None, dete
     detections: when set, the response body's metadata.pii_detections_public is
       populated with this list (chunk-relative {type,start,end}) so the hook's
       B2 detection-collection path can be exercised.
+
+    delay / inflight: when set, each POST sleeps `delay` inside __aenter__ and
+      records how many are in flight, so a test can assert that sub-chunks are
+      masked concurrently AND that the fan-out stays bounded.
     """
+    inflight = inflight if inflight is not None else {"now": 0, "peak": 0}
 
     def _make_response_cm(request_data):
         body = request_data["body"]
@@ -150,7 +161,21 @@ def _patch_mw_session(captured: list, *, behavior="echo", masked_text=None, dete
         captured.append(json)
         if behavior == "refuse":
             raise aiohttp.ClientConnectionError("connection refused")
-        return _make_response_cm(json)
+        cm = _make_response_cm(json)
+        if delay:
+            resp = cm.__aenter__.return_value
+
+            async def _enter(_self=None):
+                # _self: unittest.mock wraps a plain function assigned to a
+                # dunder as func(self, ...), so the mock passes `cm` itself.
+                inflight["now"] += 1
+                inflight["peak"] = max(inflight["peak"], inflight["now"])
+                await asyncio.sleep(delay)  # the await must live inside __aenter__
+                inflight["now"] -= 1
+                return resp
+
+            cm.__aenter__ = _enter
+        return cm
 
     session = MagicMock()
     session.post = _fake_post
@@ -271,33 +296,6 @@ def test_u4_unchanged_response_counts_as_pass():
         )
     assert len(captured) == 1  # one successful POST -> not blocked
     assert any("clean text no pii" in json.dumps(m) for m in result)
-
-
-# ---------------------------------------------------------------------------
-# U5  Char cap
-# ---------------------------------------------------------------------------
-
-
-def test_u5_char_cap_blocks_before_post():
-    """Accumulated source text > 50000 -> BLOCK before any masking POST."""
-    captured = []
-    big = "x" * 50001
-    with _patch_mw_session(captured, behavior="echo"):
-        with pytest.raises(PiiMaskingBlockedError):
-            _run(
-                apply_source_context_to_messages(
-                    _make_request(),
-                    [{"role": "user", "content": "q"}],
-                    _file_sources(big),
-                    "q",
-                    chat_id="chat-1",
-                    user=_make_user(),
-                    model_id="gpt-4",
-                    models=_make_models(),
-                    features={"pii_masking": True},
-                )
-            )
-    assert captured == []  # cap raises before the first POST
 
 
 # ---------------------------------------------------------------------------
@@ -913,3 +911,299 @@ def test_u20_without_a_mandated_policy_the_user_opt_out_still_holds():
 
     assert captured == [], "nothing should be routed to Presidio when the user opted out"
     assert "John Smith" in json.dumps(result)
+
+
+# ---------------------------------------------------------------------------
+# U21-U24  Parity with the prompt path: concurrency, and a budget not a wall
+# ---------------------------------------------------------------------------
+
+
+def test_u21_document_chunks_are_masked_concurrently_and_boundedly():
+    """The chat-time file path masked every sub-chunk one after another, so a
+    document cost chunks x ~7.5s inside the chat request while the prompt path
+    did the same work concurrently. Comparing the two measured two
+    implementations, not two code paths.
+
+    Both halves are asserted: the work really overlaps (wall clock far below the
+    sequential sum) and it stays bounded by PII_INLET_CONCURRENCY, so a large
+    document cannot open an unbounded fan-out against a pipeline that serializes
+    NER on one thread anyway.
+    """
+    from open_webui.utils.pii_chunking import PII_INLET_CHUNK_CHARS, PII_INLET_CONCURRENCY
+
+    delay = 0.05
+    chunks = 12
+    doc = ("a" * (PII_INLET_CHUNK_CHARS - 1) + "\n") * chunks
+    captured = []
+    inflight = {"now": 0, "peak": 0}
+
+    started = time.monotonic()
+    with _patch_mw_session(captured, behavior="echo", delay=delay, inflight=inflight):
+        _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources(doc),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+            )
+        )
+    elapsed = time.monotonic() - started
+
+    assert len(captured) >= chunks, "fixture must actually split into many chunks"
+    assert inflight["peak"] > 1, "chunks are still masked one at a time"
+    assert inflight["peak"] <= PII_INLET_CONCURRENCY, (
+        f"fan-out exceeded PII_INLET_CONCURRENCY: {inflight['peak']}"
+    )
+    assert elapsed < len(captured) * delay * 0.75, (
+        f"no real overlap: {elapsed:.2f}s against a {len(captured) * delay:.2f}s sequential sum"
+    )
+
+
+def test_u22_source_text_past_the_masking_budget_is_refused_before_any_post():
+    """The cap is now the same wall-clock budget the prompt path uses, not a
+    fixed character wall. Past it the honest answer is an immediate refusal
+    rather than a request that runs for minutes and fails anyway."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    captured = []
+    with _patch_mw_session(captured, behavior="echo"):
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    _file_sources("x" * (max_maskable_chars() + 1)),
+                    "q",
+                    chat_id="chat-1",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+    assert captured == [], "a refused request must not touch the pipeline at all"
+
+
+def test_u23_a_document_the_old_fixed_cap_refused_is_now_masked():
+    """The regression this parity work exists for: 50 000 characters (~15 pages)
+    were blocked outright by MAX_SOURCE_TEXT_CHARS while the prompt path took
+    five times as much. Same text, same pipeline, opposite answer depending only
+    on how the user supplied it."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    doc = "x" * 60000
+    assert len(doc) > 50000, "must exceed the old fixed cap"
+    assert len(doc) <= max_maskable_chars(), "the budget must admit what the wall refused"
+
+    captured = []
+    with _patch_mw_session(captured, behavior="echo"):
+        _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources(doc),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+            )
+        )
+    assert captured, "the document must actually be masked, not refused"
+
+
+def test_u24_the_budget_is_summed_across_all_sources_not_per_source():
+    """Wall clock is a property of the request, not of one attachment. Two
+    documents that each fit but together do not must be refused: a per-source
+    check let N attachments multiply the real cost N times over."""
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    half = max_maskable_chars() // 2 + 1000
+    sources = _file_sources("x" * half, name="a.pdf", file_id="f1") + _file_sources(
+        "y" * half, name="b.pdf", file_id="f2"
+    )
+
+    captured = []
+    with _patch_mw_session(captured, behavior="echo"):
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    sources,
+                    "q",
+                    chat_id="chat-1",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+    assert captured == []
+
+
+# ---------------------------------------------------------------------------
+# U25-U30  Per-chat masked-source cache (TRAU-513 follow-up)
+#
+# Measured on staging: a 167 460-char attachment costs 106.4s of masking, and
+# that cost was paid AGAIN on every later turn of the same chat — the sources
+# are rebuilt per request and `metadata['masked_sources']` never outlives it.
+# The document text is byte-identical each turn (the file carries
+# `context: 'full'`, so retrieval hands back the whole thing rather than a
+# query-dependent TOP_K slice), so the second masking run is provably pure
+# waste: same input, same vault, same output.
+#
+# The cache must not become a leak surface, hence the negative tests: a
+# different chat has a different vault (different placeholders), edited text is
+# a different document, an opted-out turn never masked anything worth keeping,
+# and a failed run must not be remembered as a success.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_pii_source_cache():
+    """The cache is process-global, so leaking it across tests would make them
+    order-dependent (a later test would silently serve an earlier test's text)."""
+    from open_webui.utils.middleware import reset_masked_source_cache
+
+    reset_masked_source_cache()
+    yield
+    reset_masked_source_cache()
+
+
+def _mask_call(sources, *, chat_id="chat-1", features=None, captured=None, policy=False):
+    captured = [] if captured is None else captured
+    with _patch_mw_session(captured, behavior="mask", masked_text="[PERSON_1]"), _patch_policy(
+        policy
+    ):
+        result = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                sources,
+                "q",
+                chat_id=chat_id,
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features=features if features is not None else {"pii_masking": True},
+            )
+        )
+    return result, captured
+
+
+def test_u25_the_same_document_in_the_same_chat_is_masked_once():
+    """The whole point: turn 2 must cost zero POSTs and return byte-identical
+    text. Anything less and 'hvala' still waits two minutes."""
+    sources = _file_sources("John Smith")
+
+    first, first_posts = _mask_call(sources)
+    second, second_posts = _mask_call(sources)
+
+    assert first_posts, "the first turn must actually mask"
+    assert second_posts == [], "the second turn re-masked identical text"
+    assert json.dumps(first[0]) == json.dumps(second[0])
+    assert first[1] == second[1], "detections must survive the cache unchanged"
+
+
+def test_u26_a_different_chat_never_reuses_another_chats_masked_text():
+    """Placeholders are minted from a vault keyed by chat_id. Serving chat A's
+    masked text inside chat B would hand the LLM placeholders that chat B's
+    vault cannot restore on the outlet — a broken conversation, and a cache
+    that silently crosses a tenancy boundary."""
+    sources = _file_sources("John Smith")
+
+    _mask_call(sources, chat_id="chat-1")
+    _, posts = _mask_call(sources, chat_id="chat-2")
+
+    assert posts, "chat-2 must mask against its own vault"
+
+
+def test_u27_edited_document_text_is_masked_again():
+    """The cache is keyed by content, not by file id: re-uploading a file under
+    the same id with new text must not serve the old masked body."""
+    _mask_call(_file_sources("John Smith"))
+    _, posts = _mask_call(_file_sources("Jane Doe"))
+
+    assert posts, "changed document text was served from the cache"
+
+
+def test_u28_an_opted_out_turn_is_never_cached():
+    """The dangerous case. With masking off the pipeline is not called and the
+    text passes through UNMASKED. Caching that and serving it to a later turn
+    where masking is ON would send raw PII to the LLM — the exact leak this
+    whole path exists to prevent."""
+    sources = _file_sources("John Smith")
+
+    off, off_posts = _mask_call(sources, features={"pii_masking": False})
+    assert off_posts == [], "nothing should be posted when the user opted out"
+    assert "John Smith" in json.dumps(off[0])
+
+    on, on_posts = _mask_call(sources, features={"pii_masking": True})
+    assert on_posts, "the opted-out pass-through was cached and reused while masking was ON"
+    assert "John Smith" not in json.dumps(on[0])
+
+
+def test_u29_a_failed_masking_run_is_not_remembered():
+    """Fail-closed must stay fail-closed across turns: a run that raised has no
+    result worth keeping, and must not leave a partial entry behind."""
+    sources = _file_sources("John Smith")
+
+    with _patch_mw_session([], behavior="refuse"), _patch_policy(False):
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    sources,
+                    "q",
+                    chat_id="chat-1",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+
+    _, posts = _mask_call(sources)
+    assert posts, "a failed run poisoned the cache"
+
+
+def test_u30_cached_detections_are_still_tagged_with_their_file():
+    """The card needs fileId/fileName/docIdx on every detection. Those are
+    applied around the cached value, so a cache hit must not drop them."""
+    sources = _file_sources("John Smith", name="doc.pdf", file_id="file-1")
+    dets = [{"type": "PERSON", "start": 0, "end": 10}]
+
+    captured = []
+    with _patch_mw_session(
+        captured, behavior="mask", masked_text="[PERSON_1]", detections=dets
+    ), _patch_policy(False):
+        args = (
+            _make_request(),
+            [{"role": "user", "content": "q"}],
+            sources,
+            "q",
+        )
+        kwargs = dict(
+            chat_id="chat-1",
+            user=_make_user(),
+            model_id="gpt-4",
+            models=_make_models(),
+            features={"pii_masking": True},
+        )
+        _, first_dets, _ = _run(apply_source_context_to_messages(*args, **kwargs))
+        posts_after_first = len(captured)
+        _, second_dets, _ = _run(apply_source_context_to_messages(*args, **kwargs))
+
+    assert len(captured) == posts_after_first, "the second call must not post"
+    assert first_dets == second_dets
+    assert first_dets and first_dets[0]["fileId"] == "file-1"
+    assert first_dets[0]["fileName"] == "doc.pdf"
+    assert first_dets[0]["docIdx"] == 0

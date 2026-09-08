@@ -2,6 +2,7 @@ import ast
 import asyncio
 import base64
 import copy
+import hashlib
 import html
 import inspect
 import json
@@ -12,6 +13,7 @@ import re
 import sys
 import textwrap
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 from uuid import uuid4
@@ -57,6 +59,13 @@ from open_webui.routers.images import (
     image_generations,
 )
 from open_webui.routers.memories import QueryMemoryForm, query_memory
+from open_webui.utils.pii_chunking import (
+    PII_INLET_CHUNK_CHARS,
+    PII_INLET_CONCURRENCY,
+    PII_INLET_TOTAL_BUDGET_S,
+    estimated_masking_seconds,
+    split_text_for_pii,
+)
 from open_webui.routers.pipelines import (
     get_sorted_filters,
     process_pipeline_inlet_filter,
@@ -951,7 +960,13 @@ class PiiMaskingBlockedError(Exception):
 
 # DoS guard: max accumulated source text (sum of chunk lengths) per source that
 # we will route through the Presidio inlet. Over this -> fail-closed (block).
-MAX_SOURCE_TEXT_CHARS = 50000
+# Superseded by the shared wall-clock budget (`PII_INLET_TOTAL_BUDGET_S` /
+# `max_maskable_chars`). A fixed character wall was the wrong shape for the
+# problem: 50 000 characters is ~15 pages, so the identical document was
+# refused as an attachment and accepted as a prompt, where the budget allowed
+# five times as much. Kept as a name only because a stale import elsewhere
+# should fail loudly rather than silently re-introduce the wall.
+MAX_SOURCE_TEXT_CHARS = None
 
 # TRAU-513: a single external-pipeline masking call silently truncates its input
 # at the pipeline's tokenizer cap (~512 tokens). A source document longer than
@@ -962,7 +977,10 @@ MAX_SOURCE_TEXT_CHARS = 50000
 # Kept comfortably below the observed ~2973-char (≈512-token) cutoff; the e2e
 # fixture's largest paragraph is ~530 chars, so this only ever breaks on
 # blank-line/newline boundaries and never cuts a multi-token entity.
-PII_MASK_CHUNK_CHARS = 1800
+# Sub-chunk size for source text. Kept as an alias of the shared prompt-path
+# constant (TRAU-543) rather than a second copy: two independently tunable
+# 1800s that must stay equal is a bug waiting for someone to change one.
+PII_MASK_CHUNK_CHARS = PII_INLET_CHUNK_CHARS
 
 # Ingest scan ONLY: how many sub-chunk masking POSTs to run concurrently against
 # the external pipeline. The scan discards masked text and uses only detection
@@ -1049,6 +1067,117 @@ PII_MASKING_BLOCK_MESSAGE = (
 )
 
 
+# Masked source documents, remembered per chat so an attachment is masked ONCE
+# instead of on every turn. Measured on staging: a 167 460-char attachment cost
+# 106.4s of masking, and `apply_source_context_to_messages` rebuilt and re-masked
+# it for every later message in the same chat — a bare "thanks" waited two
+# minutes. `metadata['masked_sources']` only ever lived for one request, so
+# nothing carried the result forward.
+#
+# Reuse is sound because the input is genuinely identical turn to turn: an
+# attachment carrying `context: 'full'` (retrieval/utils.py) hands back the whole
+# stored document rather than a query-dependent TOP_K slice, and re-masking it
+# calls `ThreadVault.get_placeholder`, an idempotent get-or-mint against the same
+# thread vault — so the second run provably reproduces the first run's output.
+# The cache returns that output without the round-trips.
+#
+# Keyed by chat_id because placeholders are minted per THREAD VAULT: chat A's
+# `[PERSON_1]` is not chat B's, and serving one inside the other would hand the
+# LLM placeholders the outlet cannot restore. Keyed by a hash of the document
+# text (not by file id) so an edited or re-uploaded file misses instead of
+# serving a stale body. Entries are only written when masking actually ran —
+# see `mask_sources_for_llm`.
+#
+# Process-local and lost on restart. That is deliberate: a miss costs latency,
+# never correctness, so there is no cache-invalidation surface to get wrong.
+PII_SOURCE_CACHE_MAX_ENTRIES = 256
+
+# Total masked text held across all entries. 20 MB is ~120 documents the size of
+# the one measured above; past it the least-recently-used entries are dropped.
+# A bound on entry COUNT alone would not do — one entry can be a megabyte.
+PII_SOURCE_CACHE_MAX_CHARS = 20_000_000
+
+_masked_source_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+_masked_source_cache_chars = 0
+
+
+def reset_masked_source_cache():
+    """Drop every entry. For tests, which would otherwise be order-dependent."""
+    global _masked_source_cache_chars
+    _masked_source_cache.clear()
+    _masked_source_cache_chars = 0
+
+
+def _masked_source_cache_key(chat_id, file_id, doc):
+    """Identify a document by its CONTENT, within one chat.
+
+    `model_id` is deliberately absent. The masked text depends on the thread
+    vault (chat_id) and the text itself; two models normally share the same PII
+    filter, and if they did not, serving text masked under the other model's
+    filter is over-masking — fail-safe, never a leak — whereas including it
+    would throw the cache away every time a user switches model mid-chat, which
+    is exactly when the saving matters.
+    """
+    return (
+        chat_id,
+        file_id,
+        hashlib.sha256(doc.encode("utf-8", "surrogatepass")).hexdigest(),
+    )
+
+
+def _masked_source_cache_get(key):
+    """Return `(masked_doc, detections)` or None, refreshing LRU position.
+
+    The stored detections are copied out: callers tag them in place with
+    fileId/fileName/docIdx, which would otherwise mutate the cached entry and
+    accumulate on every hit.
+    """
+    hit = _masked_source_cache.get(key)
+    if hit is None:
+        return None
+    _masked_source_cache.move_to_end(key)
+    masked_doc, dets = hit
+    return masked_doc, [dict(d) for d in dets]
+
+
+def _masked_source_cache_put(key, masked_doc, detections):
+    global _masked_source_cache_chars
+    if not isinstance(masked_doc, str):
+        return
+    if key in _masked_source_cache:
+        _masked_source_cache_chars -= len(_masked_source_cache[key][0])
+        del _masked_source_cache[key]
+    _masked_source_cache[key] = (masked_doc, [dict(d) for d in detections])
+    _masked_source_cache_chars += len(masked_doc)
+    while _masked_source_cache and (
+        len(_masked_source_cache) > PII_SOURCE_CACHE_MAX_ENTRIES
+        or _masked_source_cache_chars > PII_SOURCE_CACHE_MAX_CHARS
+    ):
+        _, (evicted, _dets) = _masked_source_cache.popitem(last=False)
+        _masked_source_cache_chars -= len(evicted)
+
+
+async def _resolve_pii_masking_decision(request, user, features):
+    """Return `(policy_enforced, pii_expected)` for this request.
+
+    Decision 2 — empty-filter semantics. Masking is "expected" unless explicitly
+    disabled via `features.pii_masking=False` (default-on)... EXCEPT when team
+    policy mandates masking, which beats the per-request flag exactly as it
+    already does on the prompt path (`routers/pipelines.py`: `if policy_enforced
+    and filter_id in PII_FILTER_IDS`). Without that, a user under a mandated
+    policy could switch the toggle off and send an attachment's contents to the
+    LLM unmasked while their prompt stayed masked — defeating the enforcement
+    layer through the file path alone.
+
+    `resolve_pii_masking_enforced` is memoized per request (on `request.state`,
+    keyed by user id) and fails closed, so this costs ONE permission lookup per
+    request even though every source chunk asks.
+    """
+    request_pii = features.get("pii_masking") if isinstance(features, dict) else None
+    policy_enforced = await resolve_pii_masking_enforced(request, user)
+    return policy_enforced, policy_enforced or request_pii is not False
+
+
 async def _mask_text_via_pii_pipeline(
     request,
     text,
@@ -1083,23 +1212,14 @@ async def _mask_text_via_pii_pipeline(
     if models is None:
         models = request.app.state.MODELS
 
-    # Decision 2 — empty-filter semantics. Masking is "expected" unless explicitly
-    # disabled via features.pii_masking=False (default-on)...
+    # See `_resolve_pii_masking_decision` for the empty-filter / policy-override
+    # semantics; `mask_sources_for_llm` asks the same question to decide whether
+    # a masking result is safe to cache.
     features = features if isinstance(features, dict) else {}
     request_pii = features.get("pii_masking")
-
-    # ...EXCEPT when team policy mandates masking, which beats the per-request
-    # flag exactly as it already does on the prompt path (`routers/pipelines.py`:
-    # `if policy_enforced and filter_id in PII_FILTER_IDS`). Without this, a user
-    # under a mandated policy could switch the toggle off and send an
-    # attachment's contents to the LLM unmasked while their prompt stayed
-    # masked — defeating the enforcement layer through the file path alone.
-    #
-    # `resolve_pii_masking_enforced` is memoized per request (on `request.state`,
-    # keyed by user id) and fails closed, so this costs ONE permission lookup per
-    # request even though every source chunk passes through here.
-    policy_enforced = await resolve_pii_masking_enforced(request, user)
-    pii_expected = policy_enforced or request_pii is not False
+    policy_enforced, pii_expected = await _resolve_pii_masking_decision(
+        request, user, features
+    )
 
     if model_id not in models:
         # Cannot resolve the filter machinery for an unknown model -> leak risk.
@@ -1265,84 +1385,83 @@ async def _mask_text_via_pii_pipeline(
     return masked, detections
 
 
-def _split_text_for_pii(text, max_chars=PII_MASK_CHUNK_CHARS):
-    """Partition ``text`` into pieces no longer than ``max_chars`` whose
-    concatenation is EXACTLY ``text`` (lossless — no dropped or duplicated
-    chars). Breaks are taken at paragraph / line / space boundaries, in that
-    order of preference, so a multi-token PII span (credit card, IBAN, phone
-    number) is never cut across a piece boundary. Only when a single run of
-    non-whitespace exceeds ``max_chars`` is a hard mid-run split used.
-
-    Returns a list of ``(start_offset, piece)`` tuples where ``start_offset`` is
-    the piece's character offset within ``text`` — used to translate
-    piece-relative detection offsets back to document-relative ones.
-    """
-    if not isinstance(text, str) or len(text) <= max_chars:
-        return [(0, text)]
-
-    pieces = []
-    i, n = 0, len(text)
-    while i < n:
-        if n - i <= max_chars:
-            pieces.append((i, text[i:]))
-            break
-        window_end = i + max_chars
-        split_at = -1
-        for sep in ("\n\n", "\n", " "):
-            idx = text.rfind(sep, i, window_end)
-            if idx > i:
-                split_at = idx + len(sep)  # keep the separator with the piece
-                break
-        if split_at <= i:
-            split_at = window_end  # no boundary in window -> hard split
-        pieces.append((i, text[i:split_at]))
-        i = split_at
-    return pieces
-
-
-async def _mask_long_text_via_pii_pipeline(request, text, **kwargs):
+async def _mask_long_text_via_pii_pipeline(request, text, *, semaphore=None, **kwargs):
     """Mask one source ``document`` that may exceed the external pipeline's
-    per-call token cap (TRAU-513). Splits the document into sub-chunks under the
-    cap (newline-bounded — never cutting an entity), masks each via
-    ``_mask_text_via_pii_pipeline`` reusing the caller's ``session``, then:
+    per-call budget (TRAU-513). Splits the document into sub-chunks under the
+    cap (boundary-aware — never cutting an entity), masks them CONCURRENTLY via
+    ``_mask_text_via_pii_pipeline``, then:
 
-      * reassembles the masked sub-chunks into the full masked document, and
+      * reassembles the masked sub-chunks in document order, and
       * merges detections with DOCUMENT-relative offsets (so the frontend keeps
         slicing values out of the original chunk it already holds), de-duped per
         document by ``(type, start, end)``.
 
+    Concurrency mirrors the prompt path (TRAU-543): the pipeline serializes NER
+    on one thread per instance, so the win here is overlapping one chunk's
+    network / vault / parse work with another's detection, not extra CPU.
+    Sequential masking cost a document ``chunks x ~7.5s`` inside the chat
+    request while the identical text pasted into the prompt was masked
+    concurrently — the same work, minutes apart, decided only by how the user
+    supplied it.
+
+    ``semaphore`` is supplied by the caller so ONE bound covers every document
+    in the request; creating it per document would let N attachments multiply
+    the fan-out N times over. Concurrency is safe: ``ThreadVault.get_placeholder``
+    is an atomic get-or-mint, so racing chunks carrying the same value receive
+    the same placeholder.
+
+    FAIL-CLOSED is unchanged: ``asyncio.gather`` without ``return_exceptions``
+    propagates the first ``PiiMaskingBlockedError`` and abandons the rest, so a
+    partially-masked document can never be assembled.
+
     For a document already under the cap this is exactly one masking call with
-    identical behaviour to the pre-fix code path (no extra POST, same offsets).
+    identical behaviour to the pre-fix path (no extra POST, same offsets).
     """
     if not isinstance(text, str) or text == "":
         return text, []
 
-    pieces = _split_text_for_pii(text)
+    pieces = split_text_for_pii(text)
     if len(pieces) == 1:
         # Fast path: short doc -> unchanged single-call behaviour.
         return await _mask_text_via_pii_pipeline(request, text, **kwargs)
 
-    masked_parts = []
-    detections = []
-    seen = set()
-    for piece_start, piece in pieces:
-        masked_piece, piece_dets = await _mask_text_via_pii_pipeline(
-            request, piece, **kwargs
-        )
-        masked_parts.append(masked_piece)
-        for d in piece_dets:
-            doc_det = {
+    sem = semaphore if semaphore is not None else asyncio.Semaphore(PII_INLET_CONCURRENCY)
+    masked_pieces: dict[int, str] = {}
+    piece_detections: dict[int, list] = {}
+
+    async def _mask_piece(index, piece_start, piece):
+        async with sem:
+            masked_piece, piece_dets = await _mask_text_via_pii_pipeline(
+                request, piece, **kwargs
+            )
+        masked_pieces[index] = masked_piece
+        piece_detections[index] = [
+            {
                 "type": d["type"],
                 "start": d["start"] + piece_start,
                 "end": d["end"] + piece_start,
             }
+            for d in piece_dets
+        ]
+
+    await asyncio.gather(
+        *(_mask_piece(i, start, piece) for i, (start, piece) in enumerate(pieces))
+    )
+
+    # Reassembly indexes `pieces`, not whatever landed in `masked_pieces`:
+    # deriving the range from the results would silently TRUNCATE the document
+    # to its first k sub-chunks if this ever tolerated partial failures.
+    detections = []
+    seen = set()
+    for i in range(len(pieces)):
+        for doc_det in piece_detections[i]:
             key = (doc_det["type"], doc_det["start"], doc_det["end"])
             if key in seen:
                 continue
             seen.add(key)
             detections.append(doc_det)
 
-    return "".join(masked_parts), detections
+    return "".join(masked_pieces[i] for i in range(len(pieces))), detections
 
 
 def _resolve_pii_scan_model_id(models):
@@ -1357,6 +1476,21 @@ def _resolve_pii_scan_model_id(models):
         if get_sorted_filters(model_id, models):
             return model_id
     return None
+
+
+def ingest_scan_is_truncated(content) -> bool:
+    """Whether the ingest scan will look at only a PREFIX of ``content``.
+
+    One rule, two callers: the cap applied below, and
+    ``_store_ingest_pii_detections``, which records the answer on the file so
+    the card can tell that it is showing a partial picture. Measured on
+    staging, a 167 460-char document scanned to 50 000 produced 28 card
+    detections where the full text holds 163 — and because the frontend treats
+    a `completed` scan as authoritative it also SUPPRESSED the send-time
+    detections that would have filled the gap. Keeping the two callers on the
+    same predicate is what stops that discrepancy from going silent again.
+    """
+    return isinstance(content, str) and len(content) > PII_SCAN_MAX_CHARS
 
 
 async def scan_file_content_for_pii(
@@ -1381,7 +1515,7 @@ async def scan_file_content_for_pii(
     source_marker = {"type": "file", "file_id": file_id}
     # Hard cap the scanned volume so a huge file can't become thousands of remote
     # calls. The card slices the FULL stored content, so prefix offsets stay valid.
-    if len(content) > PII_SCAN_MAX_CHARS:
+    if ingest_scan_is_truncated(content):
         log.info(
             "ingest PII scan: capping file %s content %d -> %d chars",
             file_id,
@@ -1394,7 +1528,7 @@ async def scan_file_content_for_pii(
     # the detection spans, so the pieces are independent -> we run them CONCURRENTLY
     # (bounded by PII_SCAN_CONCURRENCY). For a large document this turns ~100 serial
     # round-trips into a handful of parallel batches (minutes -> tens of seconds).
-    pieces = _split_text_for_pii(content)
+    pieces = split_text_for_pii(content)
     # total scales with the (bounded-concurrency) number of sub-chunk POSTs.
     timeout = aiohttp.ClientTimeout(
         sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=120
@@ -1533,9 +1667,49 @@ async def mask_sources_for_llm(
     """
     masked_sources = []
     detections: list[dict] = []
+    _t0 = time.time()
     _dbg_docs = 0
     _dbg_orig_chars = 0
     _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
+
+    # Budget guard, before any POST. Charged across EVERY source, not per
+    # source: wall clock is a property of the request, and a per-source cap let
+    # N attachments multiply the real cost N times over. Past the budget the
+    # honest answer is an immediate refusal — the alternative is a request that
+    # masks for minutes and is refused anyway, which is precisely the
+    # wait-then-refuse the prompt path removed.
+    #
+    # `estimated_masking_seconds(0, chars)` prices everything as chunked work
+    # (there is no skeleton call on this path), so the admissible total is
+    # exactly `max_maskable_chars()` — the same number the prompt path allows,
+    # so the same document costs the same whether pasted or attached.
+    total_source_chars = sum(
+        len(d)
+        for source in sources
+        for d in (source.get('document') or [])
+        if isinstance(d, str)
+    )
+    if estimated_masking_seconds(0, total_source_chars) > PII_INLET_TOTAL_BUDGET_S:
+        raise PiiMaskingBlockedError(
+            'These attachments are too large to mask safely. Remove one, or shorten them.'
+        )
+
+    # ONE bound for the whole request. Created here rather than per document so
+    # five attachments cannot open five times the fan-out at a pipeline that
+    # serializes NER on a single thread anyway.
+    semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
+
+    # Whether a result from this request is safe to remember. Gated on masking
+    # actually being expected, which is LOAD-BEARING and not an optimisation:
+    # when the user has opted out (and no policy mandates otherwise)
+    # `_mask_text_via_pii_pipeline` returns the text UNCHANGED without calling
+    # the pipeline. Caching that pass-through would let a later turn — with
+    # masking switched back ON — be served the raw document, sending PII
+    # straight to the LLM. Asking the same question the masking call asks keeps
+    # the two decisions from drifting apart.
+    _, _pii_expected = await _resolve_pii_masking_decision(request, user, features)
+    cache_enabled = bool(chat_id) and _pii_expected
+    _dbg_cached_docs = 0
 
     # C.2: open ONE aiohttp session for every chunk-masking call this request,
     # instead of one session per chunk. Same timeout/SSL as the existing inlet.
@@ -1545,10 +1719,6 @@ async def mask_sources_for_llm(
             docs = source.get('document', [])
             metas = source.get('metadata', [])
             src_meta = source.get('source', {}) or {}
-
-            # DoS guard: cap accumulated source text per source (sum of chunks).
-            if sum(len(d) for d in docs if isinstance(d, str)) > MAX_SOURCE_TEXT_CHARS:
-                raise PiiMaskingBlockedError('Source text exceeds MAX_SOURCE_TEXT_CHARS; blocked before LLM.')
 
             masked_docs = []
             for doc_idx, (doc, meta) in enumerate(zip(docs, metas)):
@@ -1565,18 +1735,36 @@ async def mask_sources_for_llm(
                 # than the pipeline's token cap so its tail is never silently
                 # truncated (TRAU-513). Short docs take a single masking call.
                 _orig_doc = doc
-                doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
-                    request,
-                    doc,
-                    session=session,
-                    chat_id=chat_id,
-                    user=user,
-                    model_id=model_id,
-                    models=models if models is not None else request.app.state.MODELS,
-                    features=features,
-                    source_marker=source_marker,
-                    post_retries=PII_MASK_POST_RETRIES,
+                cache_key = (
+                    _masked_source_cache_key(chat_id, meta.get('file_id'), doc)
+                    if cache_enabled and isinstance(doc, str)
+                    else None
                 )
+                cached = (
+                    _masked_source_cache_get(cache_key) if cache_key is not None else None
+                )
+                if cached is not None:
+                    doc, chunk_detections = cached
+                    _dbg_cached_docs += 1
+                else:
+                    doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
+                        request,
+                        doc,
+                        semaphore=semaphore,
+                        session=session,
+                        chat_id=chat_id,
+                        user=user,
+                        model_id=model_id,
+                        models=models if models is not None else request.app.state.MODELS,
+                        features=features,
+                        source_marker=source_marker,
+                        post_retries=PII_MASK_POST_RETRIES,
+                    )
+                    # Only reached when the call RETURNED. A failure raises
+                    # PiiMaskingBlockedError straight past here, so a run that
+                    # blew up never leaves an entry to be mistaken for a success.
+                    if cache_key is not None:
+                        _masked_source_cache_put(cache_key, doc, chunk_detections)
                 masked_docs.append(doc)
 
                 if PII_DEBUG:
@@ -1614,12 +1802,15 @@ async def mask_sources_for_llm(
     if PII_DEBUG:
         log.info(
             '[PII-DEBUG][SOURCES->LLM] full_context=%s sources=%d docs=%d '
-            'orig_chars=%d masked_entities=%d  <- this is what the LLM receives',
+            'cached_docs=%d orig_chars=%d masked_entities=%d elapsed=%.1fs '
+            ' <- this is what the LLM receives, and what it cost',
             getattr(request.app.state.config, 'RAG_FULL_CONTEXT', None),
             len(sources),
             _dbg_docs,
+            _dbg_cached_docs,
             _dbg_orig_chars,
             len(detections),
+            time.time() - _t0,
         )
     if PII_DEBUG_FILE:
         _pii_debug_dump(

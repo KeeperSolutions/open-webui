@@ -378,7 +378,9 @@ export const getFileDataContentById = async (token: string, id: string) => {
 	})
 		.then((r) => (r.ok ? r.json() : null))
 		.catch(() => null);
-	return res ?? { content: '', pii_detections: [], pii_scan_status: null };
+	return (
+		res ?? { content: '', pii_detections: [], pii_scan_status: null, pii_scan_truncated: false }
+	);
 };
 
 export const deleteAllFiles = async (token: string) => {

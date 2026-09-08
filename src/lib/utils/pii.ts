@@ -26,6 +26,58 @@ export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
  * send) falls back to its B2 detections — scoped to the files on THIS message so PII
  * from other turns' attachments doesn't bleed in. Message PII (no `fileId`) is always kept.
  */
+/**
+ * Which files the ingest scan is allowed to speak for on the card.
+ *
+ * A covered file is displayed from `fileItems` alone and its send-time (B2)
+ * detections are dropped by `scopeCardDetections`, so being covered means
+ * claiming the file's list is COMPLETE.
+ *
+ * A truncated scan cannot make that claim. The backend scan reads only the
+ * first `PII_SCAN_MAX_CHARS` of a file; measured on staging, a 167 460-char
+ * document was scanned to 50 000 and the card showed 28 detections where the
+ * whole document holds 163 — and because the scan reported `completed`, the
+ * send-time detections carrying the other 135 were suppressed too. Excluding
+ * truncated files lets both sources through; the card already dedupes by
+ * (type, value, source), so the overlapping prefix collapses instead of
+ * double-counting.
+ *
+ * `running` still counts as covered: the card shows a spinner and re-fetches,
+ * which is better than briefly listing a partial B2 set and then swapping it.
+ */
+/**
+ * Whether the backend scans an uploaded file for PII at INGEST.
+ *
+ * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`), because the send-time pass
+ * already covers everything that reaches the LLM and the preview cost a second
+ * full trip through the pipeline for a number the card then had to correct.
+ *
+ * The card needs to know because a file whose `pii_scan_status` is null means
+ * "no scan has written yet" — worth briefly polling for when a scan is coming,
+ * and pure waste when none is: each retry re-fetches the file's ENTIRE content,
+ * so a 167 KB attachment turned one 167 KB request into five.
+ *
+ * Anything other than an explicit `true` is read as off: guessing wrong in that
+ * direction only costs a wait for a scan that never writes.
+ */
+export function piiIngestScanEnabled(): boolean {
+	return get(config)?.features?.pii_ingest_scan === true;
+}
+
+export function ingestCoveredFileIds(
+	files: { id: string; pii_scan_status?: string | null; pii_scan_truncated?: boolean }[]
+): Set<string> {
+	return new Set(
+		(files ?? [])
+			.filter(
+				(f) =>
+					(f.pii_scan_status === 'completed' || f.pii_scan_status === 'running') &&
+					!f.pii_scan_truncated
+			)
+			.map((f) => f.id)
+	);
+}
+
 export function scopeCardDetections<T extends { fileId?: string | null }>(
 	detections: T[],
 	ingestCoveredFileIds: Set<string>,

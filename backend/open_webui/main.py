@@ -522,6 +522,7 @@ from open_webui.routers import (
     utils,
 )
 from open_webui.routers.retrieval import (
+    ENABLE_INGEST_PII_SCAN,
     get_ef,
     get_embedding_function,
     get_reranking_function,
@@ -2500,6 +2501,10 @@ async def get_app_config(request: Request):
                     # raw set: the frontend picks the first id it finds a valve for,
                     # so the order must not depend on set hashing.
                     'pii_filter_ids': sorted(PII_FILTER_IDS),
+                    # Whether an uploaded file is scanned for PII at ingest. The card
+                    # polls for that scan's result, and each poll re-fetches the file's
+                    # whole content — so it has to know when no scan is coming.
+                    'pii_ingest_scan': ENABLE_INGEST_PII_SCAN,
                     'enable_trustminder_feedback': ENABLE_TRUSTMINDER_FEEDBACK,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
