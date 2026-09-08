@@ -60,18 +60,20 @@
 
 	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
+	import { getFolderById } from '$lib/apis/folders';
+	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
-	import { getTools } from '$lib/apis/tools';
-	import { getSkills } from '$lib/apis/skills';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { initiateOAuthRedirect } from '$lib/apis/configs';
+	import { matchKeybinding, Shortcut } from '$lib/shortcuts';
 
 	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
+	import ModelSelector from './ModelSelector.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
 	import SkillsModal from './SkillsModal.svelte';
@@ -87,7 +89,9 @@
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
 	import Keyframes from '../icons/Keyframes.svelte';
+	import Cube from '../icons/Cube.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+	import Mic from '../icons/Mic.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import Terminal from '../icons/Terminal.svelte';
@@ -119,9 +123,16 @@
 
 	export let onUpload: Function = (e) => {};
 	export let onChange: Function = () => {};
+	export let onWebSearchToggle: Function = () => {};
 
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
+	export let compactHandler: Function = () => {};
+	export let statusHandler: Function = () => {};
+	export let forkHandler: Function = () => {};
+	export let chatId = '';
+	export let contextUsage = null;
+	export let contextCompactionEnabled = false;
 
 	export let autoScroll = false;
 	export let generating = false;
@@ -132,6 +143,11 @@
 
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
+	$: hasChatVariables = selectedModelIds.some(
+		(modelId) =>
+			($models.find((model) => model.id === modelId)?.info?.meta?.chat_variables_schema?.fields
+				?.length ?? 0) > 0
+	);
 
 	export let history;
 	export let taskIds = null;
@@ -140,6 +156,7 @@
 		(taskIds && taskIds.length > 0) ||
 		(history.currentId && history.messages[history.currentId]?.done != true) ||
 		generating;
+	$: canCompact = !!history?.currentId;
 
 	export let prompt = '';
 	export let files = [];
@@ -171,6 +188,8 @@
 	let inputVariableValues = {};
 
 	let showValvesModal = false;
+	let showStatusPanel = false;
+	let copiedStatusChatId = false;
 	let selectedValvesType = 'tool'; // 'tool' or 'function'
 	let selectedValvesItemId = null;
 	let integrationsMenuCloseOnOutsideClick = true;
@@ -371,6 +390,118 @@
 		}
 	};
 
+	export const showStatus = async () => {
+		showStatusPanel = true;
+		await tick();
+		document.getElementById('chat-input')?.focus();
+	};
+
+	const formatTokenCount = (value: number) => {
+		if (value >= 1_000_000) return `${trimNumber(value / 1_000_000)}m`;
+		if (value >= 1_000) return `${trimNumber(value / 1_000)}k`;
+		return String(value ?? 0);
+	};
+
+	const trimNumber = (value: number) =>
+		value >= 10 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, '');
+
+	const estimateTokens = (value) => {
+		if (value === null || value === undefined || value === '') {
+			return 0;
+		}
+		if (typeof value !== 'string') {
+			try {
+				value = JSON.stringify(value);
+			} catch {
+				value = String(value);
+			}
+		}
+		return Math.max(1, Math.floor(value.length / 4));
+	};
+
+	const estimateMessagesTokens = (messages) =>
+		messages.reduce((total, message) => {
+			let next = total + 4 + estimateTokens(message.content);
+			next += estimateTokens(message.output);
+			next += estimateTokens(message.tool_calls);
+			next += estimateTokens(message.files);
+			return next;
+		}, 0);
+
+	const getLocalContextUsage = () => {
+		if (!history?.currentId) {
+			return null;
+		}
+
+		const messages = createMessagesList(history, history.currentId);
+		if (!messages.length) {
+			return null;
+		}
+
+		let summary = '';
+		let startIdx = 0;
+		for (let idx = 0; idx < messages.length; idx += 1) {
+			const value = messages[idx]?.contextSummary ?? messages[idx]?.context_summary;
+			if (typeof value === 'string' && value.trim()) {
+				summary = value;
+				startIdx = idx;
+			}
+		}
+
+		const activeMessages = messages.slice(startIdx);
+		let estimatedTokens = estimateTokens($settings?.system ?? '');
+		let hasUsageCheckpoint = false;
+
+		for (let idx = activeMessages.length - 1; idx >= 0; idx -= 1) {
+			const usage = activeMessages[idx]?.usage ?? activeMessages[idx]?.info?.usage;
+			const inputTokens = usage?.input_tokens ?? usage?.prompt_tokens;
+			if (inputTokens) {
+				hasUsageCheckpoint = true;
+				estimatedTokens =
+					Number(inputTokens || 0) +
+					Number(usage.output_tokens ?? usage.completion_tokens ?? 0) +
+					estimateMessagesTokens(activeMessages.slice(idx + 1));
+				break;
+			}
+		}
+
+		if (!hasUsageCheckpoint) {
+			estimatedTokens += estimateTokens(summary) + estimateMessagesTokens(activeMessages);
+		}
+
+		return {
+			tokens: estimatedTokens,
+			estimated_tokens: estimatedTokens,
+			threshold: null,
+			percent: null,
+			source: 'estimated'
+		};
+	};
+
+	const copyStatusChatId = async () => {
+		if (!chatId) return;
+		await navigator.clipboard.writeText(chatId);
+		copiedStatusChatId = true;
+		setTimeout(() => {
+			copiedStatusChatId = false;
+		}, 1600);
+	};
+
+	$: statusContextUsage = contextUsage ?? getLocalContextUsage();
+	$: contextHasThreshold = Number(statusContextUsage?.threshold) > 0;
+	$: contextPercent = contextHasThreshold
+		? Math.max(0, Math.round(statusContextUsage?.percent ?? 0))
+		: null;
+	$: contextTokens = formatTokenCount(
+		statusContextUsage?.estimated_tokens || statusContextUsage?.tokens || 0
+	);
+	$: contextValue = statusContextUsage
+		? contextHasThreshold
+			? `${contextPercent}% ${contextTokens}/${formatTokenCount(statusContextUsage.threshold)}`
+			: `${contextTokens} ${$i18n.t('tokens')}`
+		: $i18n.t('unknown');
+	$: contextBarPercent = contextHasThreshold ? Math.min(contextPercent, 100) : 0;
+
 	const getCommand = () => {
 		const chatInput = document.getElementById('chat-input');
 		let word = '';
@@ -491,45 +622,68 @@
 	let showInputModal = false;
 
 	export let dragged = false;
+	export let dropzoneId = 'chat-pane';
 	let shiftKey = false;
 
 	let user = null;
 	export let placeholder = '';
 
-	let visionCapableModels = [];
-	$: visionCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.vision ?? true
+	type ModelCapability =
+		| 'vision'
+		| 'file_upload'
+		| 'web_search'
+		| 'image_generation'
+		| 'code_interpreter'
+		| 'terminal';
+	type ModelCapabilitiesById = Record<string, Partial<Record<ModelCapability, boolean>>>;
+
+	let modelCapabilitiesById: ModelCapabilitiesById = {};
+	$: modelCapabilitiesById = Object.fromEntries(
+		($models ?? []).map((model) => [model.id, model.info?.meta?.capabilities ?? {}])
 	);
 
+	const getCapableModelIds = (
+		modelIds: string[],
+		capability: ModelCapability,
+		capabilitiesById: ModelCapabilitiesById
+	) => modelIds.filter((id) => capabilitiesById[id]?.[capability] ?? true);
+
+	let visionCapableModels = [];
+	$: visionCapableModels = getCapableModelIds(selectedModelIds, 'vision', modelCapabilitiesById);
+
 	let fileUploadCapableModels = [];
-	$: fileUploadCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.file_upload ?? true
+	$: fileUploadCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'file_upload',
+		modelCapabilitiesById
 	);
 
 	let webSearchCapableModels = [];
-	$: webSearchCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
+	$: webSearchCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'web_search',
+		modelCapabilitiesById
 	);
 
 	let imageGenerationCapableModels = [];
-	$: imageGenerationCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.image_generation ?? true
+	$: imageGenerationCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'image_generation',
+		modelCapabilitiesById
 	);
 
 	let codeInterpreterCapableModels = [];
-	$: codeInterpreterCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
+	$: codeInterpreterCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'code_interpreter',
+		modelCapabilitiesById
 	);
 
 	let terminalCapableModels = [];
-	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	$: terminalCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'terminal',
+		modelCapabilitiesById
 	);
 
 	let toggleFilters = [];
@@ -545,23 +699,20 @@
 
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			webSearchCapableModels.length &&
+		selectedModelIds.length === webSearchCapableModels.length &&
 		$config?.features?.enable_web_search &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.web_search);
 
 	let showImageGenerationButton = false;
 	$: showImageGenerationButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			imageGenerationCapableModels.length &&
+		selectedModelIds.length === imageGenerationCapableModels.length &&
 		$config?.features?.enable_image_generation &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
 
 	let showCodeInterpreterButton = false;
 	$: showCodeInterpreterButton =
 		!$selectedTerminalId &&
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			codeInterpreterCapableModels.length &&
+		selectedModelIds.length === codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
@@ -571,7 +722,7 @@
 	}
 
 	// Clear selected terminal when model doesn't support terminal
-	$: if ($selectedTerminalId && terminalCapableModels.length === 0) {
+	$: if ($selectedTerminalId && selectedModelIds.length > 0 && terminalCapableModels.length === 0) {
 		selectedTerminalId.set(null);
 	}
 
@@ -627,7 +778,7 @@
 			return null;
 		}
 
-		if (fileUploadCapableModels.length !== selectedModels.length) {
+		if (fileUploadCapableModels.length !== selectedModelIds.length) {
 			toast.error($i18n.t('Model(s) do not support file upload'));
 			return null;
 		}
@@ -644,6 +795,9 @@
 			size: file.size,
 			error: '',
 			itemId: tempItemId,
+			// Stamp the user's default upload mode so the sent payload carries it;
+			// the per-file toggle in FileItemModal can still override it afterwards.
+			...($settings?.defaultUploadContext === 'full' ? { context: 'full' } : {}),
 			...itemData
 		};
 
@@ -863,8 +1017,13 @@
 	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
-		// Check if a file or a sidebar chat item is being dragged.
-		if (e.dataTransfer?.types?.includes('Files') || e.dataTransfer?.types?.includes('text/plain')) {
+		// Check if a file or a sidebar chat/folder item is being dragged.
+		// Use a custom MIME type to distinguish intentional drags from SortableJS reorder drags
+		// (e.g. Notes, Workspace, pinned Models), which also set 'text/plain'.
+		if (
+			e.dataTransfer?.types?.includes('Files') ||
+			e.dataTransfer?.types?.includes('application/x-open-webui-drag')
+		) {
 			dragged = true;
 		} else {
 			dragged = false;
@@ -882,7 +1041,7 @@
 		e.preventDefault();
 		console.log(e);
 
-		// Check if the dropped data is a sidebar chat item
+		// Check if the dropped data is a sidebar chat, folder, note, or model item
 		const textData = e.dataTransfer?.getData('text/plain');
 		if (textData) {
 			try {
@@ -901,6 +1060,49 @@
 						if (!files.find((f) => f.id === chatItem.id)) {
 							files = [...files, chatItem];
 						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'folder' && data.id) {
+					// Fetch the folder to get its name, then add as a reference folder
+					const folder = await getFolderById(localStorage.token, data.id);
+					if (folder) {
+						const folderItem = {
+							type: 'folder',
+							id: folder.id,
+							name: folder.name,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === folderItem.id)) {
+							files = [...files, folderItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'note' && data.id) {
+					// Fetch the note to get its title, then add as a reference note
+					const note = await getNoteById(localStorage.token, data.id);
+					if (note) {
+						const noteItem = {
+							type: 'note',
+							id: note.id,
+							name: note.title,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === noteItem.id)) {
+							files = [...files, noteItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'model' && data.id) {
+					// Find the model from the store and set as @-selected model
+					const model = $models.find((m) => m.id === data.id);
+					if (model) {
+						atSelectedModel = model;
 					}
 					dragged = false;
 					e.stopPropagation();
@@ -927,8 +1129,10 @@
 			shiftKey = true;
 		}
 
-		// Cmd/Ctrl+Shift+L to toggle dictation
-		if (e.key.toLowerCase() === 'l' && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+		if (
+			$settings?.keyboardShortcuts !== false &&
+			matchKeybinding(e) === Shortcut.TOGGLE_DICTATION
+		) {
 			e.preventDefault();
 			if (recording) {
 				// Confirm and stop recording
@@ -1002,6 +1206,15 @@
 				char: '/',
 				render: getSuggestionRenderer(CommandSuggestionList, {
 					i18n,
+					canCompact: () => !!history?.currentId && contextCompactionEnabled,
+					compactDisabled: () => isActive,
+					canStatus: () => !!history?.currentId,
+					canFork: () => !!history?.currentId,
+					forkDisabled: () => isActive,
+					contextUsage: () => statusContextUsage,
+					onCompact: compactHandler,
+					onStatus: statusHandler,
+					onFork: forkHandler,
 					onSelect: (e) => {
 						const { type, data } = e;
 
@@ -1125,15 +1338,12 @@
 			await tick();
 			if (isDestroyed) return;
 
-			dropzoneElement = document.getElementById('chat-pane');
+			dropzoneElement = document.getElementById(dropzoneId);
 			if (dropzoneElement) {
 				dropzoneElement.addEventListener('dragover', onDragOver, true);
 				dropzoneElement.addEventListener('drop', onDrop, true);
 				dropzoneElement.addEventListener('dragleave', onDragLeave);
 			}
-
-			tools.set(await getTools(localStorage.token));
-			skills.set(await getSkills(localStorage.token));
 		};
 		initialize();
 
@@ -1192,12 +1402,12 @@
 />
 
 {#if loaded}
-	<div class="w-full font-primary">
+	<div class="w-full">
 		<div class=" mx-auto inset-x-0 bg-transparent flex justify-center">
 			<div
 				class="flex flex-col px-3 {($settings?.widescreenMode ?? null)
 					? 'max-w-full'
-					: 'max-w-6xl'} w-full"
+					: 'max-w-[58rem]'} w-full"
 			>
 				<div class="relative">
 					{#if autoScroll === false && history?.currentId}
@@ -1205,8 +1415,8 @@
 							class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
 						>
 							<button
-								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
 								aria-label={$i18n.t('Scroll to bottom')}
+								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
 								on:click={() => {
 									autoScroll = true;
 									scrollToBottom();
@@ -1235,7 +1445,7 @@
 			<div
 				class="{($settings?.widescreenMode ?? null)
 					? 'max-w-full'
-					: 'max-w-6xl'} px-2.5 mx-auto inset-x-0"
+					: 'max-w-[58rem]'} px-2.5 mx-auto inset-x-0"
 			>
 				<div class="">
 					<input
@@ -1290,8 +1500,8 @@
 					>
 						<button
 							id="generate-message-pair-button"
+							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
-							aria-label="Generate message pair"
 							on:click={() => createMessagePair(prompt)}
 						></button>
 
@@ -1320,6 +1530,84 @@
 							</div>
 						{/if}
 
+						{#if showStatusPanel}
+							<div class="mx-1 rounded-2xl bg-white text-xs dark:bg-gray-900">
+								<div class="flex items-center justify-between px-3 py-1.5">
+									<div class="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+										<span>Status</span>
+									</div>
+
+									<button
+										type="button"
+										class="text-xs text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
+										on:click={() => {
+											showStatusPanel = false;
+										}}
+									>
+										Close
+									</button>
+								</div>
+
+								<div class="space-y-0.5 px-3 pb-2">
+									<div class="rounded-xl py-0.5 text-gray-600 dark:text-gray-400">
+										<div class="flex min-h-4 items-center gap-3">
+											<span class="min-w-0 flex-1 truncate">Context usage</span>
+											<span
+												class="shrink-0 font-mono text-[0.625rem] text-gray-400 dark:text-gray-600"
+											>
+												{contextValue}
+											</span>
+										</div>
+										{#if contextHasThreshold}
+											<div
+												class="mt-1.5 h-0.5 overflow-hidden rounded-full bg-gray-100 dark:bg-white/8"
+											>
+												<div
+													class="h-full rounded-full bg-gray-300 dark:bg-white/20"
+													style={`width: ${contextBarPercent}%`}
+												></div>
+											</div>
+										{/if}
+									</div>
+
+									{#if messageQueue.length}
+										<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+											<span class="min-w-0 flex-1 truncate">Queued messages</span>
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												{messageQueue.length}
+											</span>
+										</div>
+									{/if}
+
+									{#if chatTasks.length}
+										<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+											<span class="min-w-0 flex-1 truncate">Tasks</span>
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												{chatTasks.length}
+											</span>
+										</div>
+									{/if}
+
+									<div class="flex min-h-5 items-center gap-3 text-gray-600 dark:text-gray-400">
+										<span class="min-w-0 flex-1 truncate">Chat ID</span>
+										{#if chatId}
+											<button
+												type="button"
+												class="min-w-0 max-w-[18rem] truncate font-mono text-[0.625rem] text-gray-400 underline-offset-2 transition-colors duration-75 hover:text-gray-700 hover:underline dark:text-gray-600 dark:hover:text-gray-200"
+												on:click={copyStatusChatId}
+											>
+												{copiedStatusChatId ? $i18n.t('Copied') : chatId}
+											</button>
+										{:else}
+											<span class="font-mono text-[0.625rem] text-gray-400 dark:text-gray-600">
+												none
+											</span>
+										{/if}
+									</div>
+								</div>
+							</div>
+						{/if}
+
 						<div
 							id="message-input-container"
 							class="flex-1 flex flex-col relative w-full rounded-[24px] border bg-hg-bg-surface dark:bg-gray-850 shadow-[0px_4px_24px_-8px_rgba(0,0,0,0.06)] dark:shadow-none text-hg-text-primary dark:text-gray-100 transition px-1 {$temporaryChatEnabled
@@ -1328,7 +1616,7 @@
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
-								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
+								<div class="px-2.5 pt-2.5 text-left w-full flex flex-col z-10">
 									<div class="flex items-center justify-between w-full">
 										<div class="pl-[1px] flex items-center gap-2 text-sm dark:text-gray-500">
 											<img
@@ -1356,7 +1644,7 @@
 
 							{#if files.length > 0}
 								<div
-									class="mx-2 mt-2.5 pb-1.5 flex items-center flex-wrap gap-2"
+									class="mx-2 mt-2 pb-1 flex items-center flex-wrap gap-1.5"
 									dir={$settings?.chatDirection ?? 'auto'}
 								>
 									{#each files as file, fileIdx}
@@ -1372,11 +1660,11 @@
 														alt=""
 														imageClassName=" size-10 rounded-xl object-cover"
 													/>
-													{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
+													{#if selectedModelIds.length !== visionCapableModels.length}
 														<Tooltip
 															className=" absolute top-1 left-1"
 															content={$i18n.t('{{ models }}', {
-																models: [...(atSelectedModel ? [atSelectedModel] : selectedModels)]
+																models: selectedModelIds
 																	.filter((id) => !visionCapableModels.includes(id))
 																	.join(', ')
 															})}
@@ -1449,13 +1737,13 @@
 								</div>
 							{/if}
 
-							<div class="px-2.5">
+							<div class="px-2">
 								<div
-									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pb-1 px-1 resize-none h-fit max-h-96 overflow-auto {files.length ===
+									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pb-0.5 px-1 resize-none h-fit max-h-96 overflow-auto {files.length ===
 									0
 										? atSelectedModel !== undefined
-											? 'pt-1.5'
-											: 'pt-2.5'
+											? 'pt-1'
+											: 'pt-2'
 										: ''}"
 									id="chat-input-container"
 								>
@@ -1507,7 +1795,7 @@
 														($settings?.promptAutocomplete ?? false)}
 													generateAutoCompletion={async (text) => {
 														if (selectedModelIds.length === 0 || !selectedModelIds.at(0)) {
-															toast.error($i18n.t('Please select a model first.'));
+															return null;
 														}
 
 														const res = await generateAutoCompletion(
@@ -1645,11 +1933,11 @@
 								</div>
 							</div>
 
-							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
-								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
+							<div class=" flex justify-between mt-0.5 mb-2 mx-0.5 max-w-full" dir="ltr">
+								<div class="ml-1 self-end flex items-center flex-1 min-w-0">
 									<InputMenu
 										bind:files
-										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
+										selectedModels={selectedModelIds}
 										{fileUploadCapableModels}
 										{screenCaptureHandler}
 										{inputFilesHandler}
@@ -1702,7 +1990,7 @@
 										<button
 											type="button"
 											id="input-menu-button"
-											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
 											aria-label={$i18n.t('More')}
 										>
 											<HgIconPlus class="w-5 h-5 text-hg-text-tertiary dark:text-gray-400" />
@@ -1711,295 +1999,320 @@
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-hg-border dark:bg-gray-700"
-										></div>
+											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
+										/>
 									{/if}
 
-									<Tooltip content={$i18n.t('Settings')} placement="top">
-										<button
-											type="button"
-											id="settings-button"
-											class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-											on:click={() => showControls.update((v) => !v)}
-										>
-											<HgIconSettings class="w-5 h-5" />
-										</button>
-									</Tooltip>
+									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
+										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+											<IntegrationsMenu
+												selectedModels={selectedModelIds}
+												{toggleFilters}
+												{showWebSearchButton}
+												{showImageGenerationButton}
+												{showCodeInterpreterButton}
+												bind:selectedToolIds
+												bind:selectedSkillIds
+												bind:selectedFilterIds
+												bind:webSearchEnabled
+												bind:imageGenerationEnabled
+												bind:codeInterpreterEnabled
+												{onWebSearchToggle}
+												closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
+												onShowValves={(e) => {
+													const { type, id } = e;
+													selectedValvesType = type;
+													selectedValvesItemId = id;
+													showValvesModal = true;
+													integrationsMenuCloseOnOutsideClick = false;
+												}}
+												onClose={async () => {
+													await tick();
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
-										<IntegrationsMenu
-											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-											{toggleFilters}
-											{showWebSearchButton}
-											{showImageGenerationButton}
-											{showCodeInterpreterButton}
-											bind:selectedToolIds
-											bind:selectedSkillIds
-											bind:selectedFilterIds
-											bind:webSearchEnabled
-											bind:imageGenerationEnabled
-											bind:codeInterpreterEnabled
-											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-											onShowValves={(e) => {
-												const { type, id } = e;
-												selectedValvesType = type;
-												selectedValvesItemId = id;
-												showValvesModal = true;
-												integrationsMenuCloseOnOutsideClick = false;
-											}}
-											onClose={async () => {
-												await tick();
-
-												const chatInput = document.getElementById('chat-input');
-												chatInput?.focus();
-											}}
-										>
-											<button
-												type="button"
-												id="integration-menu-button"
-												class="bg-transparent hover:bg-hg-bg-muted dark:hover:bg-gray-700 text-hg-text-secondary dark:text-gray-400 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-												aria-label={$i18n.t('Integrations')}
-											>
-												<Component className="size-4.5" strokeWidth="1.5" />
-											</button>
-										</IntegrationsMenu>
-									{/if}
-
-									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
-										<div class="ml-1 flex gap-1.5">
-											<Tooltip content={$i18n.t('Valves')} placement="top">
-												<button
-													type="button"
-													id="model-valves-button"
-													class="bg-transparent hover:bg-hg-bg-muted text-hg-text-secondary rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-													on:click={() => {
-														selectedValvesType = 'function';
-														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
-														showValvesModal = true;
-													}}
-												>
-													<Knobs className="size-4" strokeWidth="1.5" />
-												</button>
-											</Tooltip>
-										</div>
-									{/if}
-
-									<div class="ml-1 flex gap-1.5">
-										{#if (selectedToolIds ?? []).length > 0}
-											<Tooltip
-												content={$i18n.t('{{COUNT}} Available Tools', {
-													COUNT: (selectedToolIds ?? []).length
-												})}
+													const chatInput = document.getElementById('chat-input');
+													chatInput?.focus();
+												}}
 											>
 												<button
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-hg-text-secondary hover:text-hg-text-primary rounded-lg self-center transition"
-													aria-label="Available Tools"
 													type="button"
-													on:click={() => {
-														showTools = !showTools;
-													}}
+													id="integration-menu-button"
+													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden shrink-0"
+													aria-label={$i18n.t('Integrations')}
 												>
-													<Wrench className="size-4" strokeWidth="1.75" />
-
-													<span class="text-sm">
-														{(selectedToolIds ?? []).length}
-													</span>
+													<Component className="size-4.5" strokeWidth="1.5" />
 												</button>
-											</Tooltip>
+											</IntegrationsMenu>
 										{/if}
 
-										{#if (selectedSkillIds ?? []).length > 0}
-											<Tooltip
-												content={$i18n.t('{{COUNT}} Available Skills', {
-													COUNT: (selectedSkillIds ?? []).length
-												})}
-											>
-												<button
-													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-													aria-label="Available Skills"
-													type="button"
-													on:click={() => {
-														showSkills = !showSkills;
-													}}
-												>
-													<Keyframes className="size-4" strokeWidth="1.75" />
-
-													<span class="text-sm">
-														{(selectedSkillIds ?? []).length}
-													</span>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#each selectedFilterIds as filterId (filterId)}
-											{@const filter = toggleFilters.find((f) => f.id === filterId)}
-											{#if filter}
-												<Tooltip content={filter?.name} placement="top">
+										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
+											<div class="ml-1 flex gap-1.5 shrink-0">
+												<Tooltip content={$i18n.t('Valves')} placement="top">
 													<button
-														on:click|preventDefault={() => {
-															if (
-																filter?.has_user_valves &&
-																($_user?.role === 'admin' ||
-																	($_user?.permissions?.chat?.valves ?? true))
-															) {
-																selectedValvesType = 'function';
-																selectedValvesItemId = filterId;
-																showValvesModal = true;
-															} else {
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
-															}
-														}}
 														type="button"
-														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-															filterId
-														)
-															? 'text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-															: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} capitalize"
+														id="model-valves-button"
+														class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden"
+														on:click={() => {
+															selectedValvesType = 'function';
+															selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
+															showValvesModal = true;
+														}}
 													>
-														{#if filter?.icon}
-															<div class="size-4 items-center flex justify-center">
-																<img
-																	src={filter.icon}
-																	class="size-3.5 {filter.icon.includes('data:image/svg')
-																		? 'dark:invert-[80%]'
-																		: ''}"
-																	style="fill: currentColor;"
-																	alt={filter.name}
-																/>
-															</div>
-														{:else}
-															<Sparkles className="size-4" strokeWidth="1.75" />
-														{/if}
-														<!-- svelte-ignore a11y-click-events-have-key-events -->
-														<!-- svelte-ignore a11y-no-static-element-interactions -->
-														<div
-															class="hidden group-hover:block"
-															on:click={(e) => {
-																e.stopPropagation();
-																e.preventDefault();
-																selectedFilterIds = selectedFilterIds.filter(
-																	(id) => id !== filterId
-																);
+														<Knobs className="size-4" strokeWidth="1.5" />
+													</button>
+												</Tooltip>
+											</div>
+										{/if}
+
+										<div class="ml-1 flex gap-1.5 shrink-0">
+											{#if (selectedToolIds ?? []).length > 0}
+												<Tooltip
+													content={$i18n.t('{{COUNT}} Available Tools', {
+														COUNT: (selectedToolIds ?? []).length
+													})}
+												>
+													<button
+														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+														aria-label="Available Tools"
+														type="button"
+														on:click={() => {
+															showTools = !showTools;
+														}}
+													>
+														<Wrench className="size-4" strokeWidth="1.75" />
+
+														<span class="text-sm">
+															{(selectedToolIds ?? []).length}
+														</span>
+													</button>
+												</Tooltip>
+											{/if}
+
+											{#if (selectedSkillIds ?? []).length > 0}
+												<Tooltip
+													content={$i18n.t('{{COUNT}} Available Skills', {
+														COUNT: (selectedSkillIds ?? []).length
+													})}
+												>
+													<button
+														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+														aria-label="Available Skills"
+														type="button"
+														on:click={() => {
+															showSkills = !showSkills;
+														}}
+													>
+														<Cube className="size-4" strokeWidth="1.75" />
+
+														<span class="text-sm">
+															{(selectedSkillIds ?? []).length}
+														</span>
+													</button>
+												</Tooltip>
+											{/if}
+
+											{#each selectedFilterIds as filterId (filterId)}
+												{@const filter = toggleFilters.find((f) => f.id === filterId)}
+												{#if filter}
+													<Tooltip content={filter?.name} placement="top">
+														<button
+															on:click|preventDefault={() => {
+																if (
+																	filter?.has_user_valves &&
+																	($_user?.role === 'admin' ||
+																		($_user?.permissions?.chat?.valves ?? true))
+																) {
+																	selectedValvesType = 'function';
+																	selectedValvesItemId = filterId;
+																	showValvesModal = true;
+																} else {
+																	selectedFilterIds = selectedFilterIds.filter(
+																		(id) => id !== filterId
+																	);
+																}
 															}}
+															type="button"
+															class="group p-[6px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
+																filterId
+															)
+																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
+																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
 														>
+															{#if filter?.icon}
+																<div class="size-4 items-center flex justify-center">
+																	<img
+																		src={filter.icon}
+																		class="size-3.5 {filter.icon.includes('data:image/svg')
+																			? 'dark:invert-[80%]'
+																			: ''}"
+																		style="fill: currentColor;"
+																		alt={filter.name}
+																	/>
+																</div>
+															{:else}
+																<Sparkles className="size-4" strokeWidth="1.75" />
+															{/if}
+															<!-- svelte-ignore a11y-click-events-have-key-events -->
+															<!-- svelte-ignore a11y-no-static-element-interactions -->
+															<div
+																class="hidden group-hover:block"
+																on:click={(e) => {
+																	e.stopPropagation();
+																	e.preventDefault();
+																	selectedFilterIds = selectedFilterIds.filter(
+																		(id) => id !== filterId
+																	);
+																}}
+															>
+																<XMark className="size-4" strokeWidth="1.75" />
+															</div>
+														</button>
+													</Tooltip>
+												{/if}
+											{/each}
+
+											{#if webSearchEnabled}
+												<Tooltip content={$i18n.t('Web Search')} placement="top">
+													<button
+														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														type="button"
+														class="group p-[6px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
+														($settings?.webSearch ?? false) === 'always'
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+													>
+														<GlobeAlt className="size-4" strokeWidth="1.75" />
+														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>
 													</button>
 												</Tooltip>
 											{/if}
-										{/each}
 
-										{#if webSearchEnabled}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-													($settings?.webSearch ?? false) === 'always'
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
-												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
+											{#if imageGenerationEnabled}
+												<Tooltip content={$i18n.t('Image')} placement="top">
+													<button
+														on:click|preventDefault={() =>
+															(imageGenerationEnabled = !imageGenerationEnabled)}
+														type="button"
+														class="group p-[6px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+													>
+														<Photo className="size-4" strokeWidth="1.75" />
+														<div class="hidden group-hover:block">
+															<XMark className="size-4" strokeWidth="1.75" />
+														</div>
+													</button>
+												</Tooltip>
+											{/if}
 
-										{#if imageGenerationEnabled}
-											<Tooltip content={$i18n.t('Image')} placement="top">
-												<button
-													on:click|preventDefault={() =>
-														(imageGenerationEnabled = !imageGenerationEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '}"
-												>
-													<Photo className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
+											{#if codeInterpreterEnabled}
+												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
+													<button
+														aria-label={codeInterpreterEnabled
+															? $i18n.t('Disable Code Interpreter')
+															: $i18n.t('Enable Code Interpreter')}
+														aria-pressed={codeInterpreterEnabled}
+														on:click|preventDefault={() =>
+															(codeInterpreterEnabled = !codeInterpreterEnabled)}
+														type="button"
+														class=" group p-[6px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+														false)
+															? 'm-1'
+															: 'focus:outline-hidden rounded-full'}"
+													>
+														<Terminal className="size-3.5" strokeWidth="2" />
 
-										{#if codeInterpreterEnabled}
-											<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-												<button
-													aria-label={codeInterpreterEnabled
-														? $i18n.t('Disable Code Interpreter')
-														: $i18n.t('Enable Code Interpreter')}
-													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() =>
-														(codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
-													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-														? ' text-hg-blue bg-blue-50 hover:bg-blue-100 border border-blue-200/60'
-														: 'bg-transparent text-hg-text-secondary hover:bg-hg-bg-muted '} {($settings?.highContrastMode ??
-													false)
-														? 'm-1'
-														: 'focus:outline-hidden rounded-full'}"
-												>
-													<Terminal className="size-3.5" strokeWidth="2" />
+														<div class="hidden group-hover:block">
+															<XMark className="size-4" strokeWidth="1.75" />
+														</div>
+													</button>
+												</Tooltip>
+											{/if}
 
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#each pendingOAuthTools as pendingTool (pendingTool.id)}
-											<Tooltip content={$i18n.t('Click to connect')} placement="top">
-												<button
-													on:click|preventDefault={() => {
-														sessionStorage.setItem('pendingOAuthToolId', pendingTool.id);
-														const authUrl = getOAuthClientAuthorizationUrl(
-															pendingTool.serverId,
-															pendingTool.authType ?? 'mcp'
-														);
-														window.open(authUrl, '_self', 'noopener');
-													}}
-													type="button"
-													class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden
+											{#each pendingOAuthTools as pendingTool (pendingTool.id)}
+												<Tooltip content={$i18n.t('Click to connect')} placement="top">
+													<button
+														on:click|preventDefault={() => {
+															initiateOAuthRedirect(pendingTool);
+														}}
+														type="button"
+														class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden
 														text-amber-600 dark:text-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-400/10 dark:hover:bg-amber-600/10 border border-amber-200/40 dark:border-amber-500/20"
-												>
-													<Wrench className="size-3.5" strokeWidth="1.75" />
-													<span class="truncate">{pendingTool.name}</span>
-												</button>
-											</Tooltip>
-										{/each}
+													>
+														<Wrench className="size-3.5" strokeWidth="1.75" />
+														<span class="truncate">{pendingTool.name}</span>
+													</button>
+												</Tooltip>
+											{/each}
+
+											{#if !history?.currentId || history.messages[history.currentId]?.done == true}
+												<!-- Terminal Server Selector -->
+												{@const hasDirectToolServerAccess =
+													$_user?.role === 'admin' ||
+													($_user?.permissions?.features?.direct_tool_servers ?? true)}
+												{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
+													<TerminalMenu bind:show={showTerminalMenu} />
+												{/if}
+											{/if}
+										</div>
 									</div>
 								</div>
 
-								<div class="self-end flex items-center gap-2 mr-1 shrink-0">
-									{#if isActive && prompt === '' && files.length === 0}
-										<Tooltip content={$i18n.t('Stop')}>
+								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.5px]">
+									<div class="flex min-w-0 max-w-[10rem] items-center sm:max-w-[13rem]">
+										<ModelSelector
+											bind:selectedModels
+											showSetDefault={!history?.currentId}
+											placement="auto"
+											align="end"
+											triggerClassName="items-center gap-1.5 rounded-lg pl-2 pr-1.5 py-1 text-[13px] font-normal text-gray-600 transition-colors duration-100 hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+										/>
+									</div>
+
+									{#if hasChatVariables}
+										<Tooltip content={$i18n.t('Chat Variables')} placement="top">
 											<button
-												class="bg-hg-bg-surface dark:bg-gray-700 hover:bg-hg-bg-muted dark:hover:bg-gray-600 text-hg-text-primary dark:text-gray-100 border border-hg-border dark:border-transparent transition rounded-full p-1.5"
-												aria-label={$i18n.t('Stop')}
+												type="button"
+												id="chat-variables-button"
+												class="flex size-[1.875rem] shrink-0 items-center justify-center rounded-full bg-transparent text-gray-500 transition-colors hover:text-gray-800 focus:outline-hidden dark:text-gray-400 dark:hover:text-gray-100"
+												aria-label={$i18n.t('Chat Variables')}
 												on:click={() => {
-													stopResponse();
+													dispatch('chatVariables');
 												}}
 											>
-												<svg
-													xmlns="http://www.w3.org/2000/svg"
-													viewBox="0 0 24 24"
-													fill="currentColor"
-													class="size-5"
-												>
-													<path
-														fill-rule="evenodd"
-														d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
-														clip-rule="evenodd"
-													/>
-												</svg>
+												<Knobs className="size-4" strokeWidth="1.5" />
 											</button>
 										</Tooltip>
+									{/if}
+
+									{#if isActive && prompt === '' && files.length === 0}
+										<div class=" flex items-center">
+											<Tooltip content={$i18n.t('Stop')}>
+												<button
+													aria-label={$i18n.t('Stop')}
+													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-[5px]"
+													on:click={() => {
+														stopResponse();
+													}}
+												>
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														viewBox="0 0 24 24"
+														fill="currentColor"
+														class="size-5"
+													>
+														<path
+															fill-rule="evenodd"
+															d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm6-2.438c0-.724.588-1.312 1.313-1.312h4.874c.725 0 1.313.588 1.313 1.313v4.874c0 .725-.588 1.313-1.313 1.313H9.564a1.312 1.312 0 01-1.313-1.313V9.564z"
+															clip-rule="evenodd"
+														/>
+													</svg>
+												</button>
+											</Tooltip>
+										</div>
 									{:else}
 										<!-- PII Masking toggle (stub) -->
 										<Tooltip
@@ -2079,19 +2392,12 @@
 										{/if}
 
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
-											<!-- Terminal Server Selector -->
-											{@const hasDirectToolServerAccess =
-												$_user?.role === 'admin' ||
-												($_user?.permissions?.features?.direct_tool_servers ?? true)}
-											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
-												<TerminalMenu bind:show={showTerminalMenu} />
-											{/if}
-
 											{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)}
+												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
 														id="voice-input-button"
-														class="text-hg-text-secondary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100 transition rounded-full p-1.5 self-center"
+														class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center mr-0.5"
 														type="button"
 														on:click={async () => {
 															try {
@@ -2202,7 +2508,6 @@
 														class="{!(prompt === '' && files.length === 0) || uploadPending
 															? 'bg-hg-blue text-white hover:bg-blue-700'
 															: 'bg-hg-bg-muted text-hg-text-tertiary disabled'} transition rounded-full p-1.5 self-center"
-														aria-label={$i18n.t('Send message')}
 														type="submit"
 														disabled={(prompt === '' && files.length === 0) || uploadPending}
 													>

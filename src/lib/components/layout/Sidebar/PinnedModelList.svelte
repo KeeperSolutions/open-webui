@@ -9,7 +9,6 @@
 	import PinnedModelItem from './PinnedModelItem.svelte';
 
 	export let selectedChatId = null;
-	export let shiftKey = false;
 
 	let pinnedModels = [];
 
@@ -18,6 +17,15 @@
 		if (pinnedModelsList && !$mobile) {
 			new Sortable(pinnedModelsList, {
 				animation: 150,
+				setData: function (dataTransfer, dragEl) {
+					dataTransfer.setData(
+						'text/plain',
+						JSON.stringify({
+							type: 'model',
+							id: dragEl.dataset.id
+						})
+					);
+				},
 				onUpdate: async (event) => {
 					const modelId = event.item.dataset.id;
 					const newIndex = event.newIndex;
@@ -88,7 +96,6 @@
 		{#if model}
 			<PinnedModelItem
 				{model}
-				{shiftKey}
 				onClick={() => {
 					selectedChatId = null;
 					chatId.set('');

@@ -37,7 +37,7 @@
 </script>
 
 {#key mounted}
-	<div class="m-auto w-full max-w-6xl px-8 lg:px-20">
+	<div class="m-auto w-full max-w-[58rem] px-8 lg:px-20">
 		<div class="flex justify-start">
 			<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 200 }}>
 				{#each models as model, modelIdx}
@@ -77,14 +77,14 @@
 				className="w-full flex justify-start mb-0.5"
 				placement="top"
 			>
-				<div class="flex items-center gap-2 text-gray-500 text-lg mt-2 w-fit">
-					<EyeSlash strokeWidth="2.5" className="size-5" />{$i18n.t('Temporary Chat')}
+				<div class="flex items-center gap-1.5 text-gray-500 text-xs mt-1 w-fit">
+					<EyeSlash strokeWidth="2" className="size-3.5" />{$i18n.t('Temporary Chat')}
 				</div>
 			</Tooltip>
 		{/if}
 
 		<div
-			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 text-left flex items-center gap-4 font-primary"
+			class=" mt-2 mb-4 text-3xl text-gray-800 dark:text-gray-100 text-left flex items-center gap-4"
 		>
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
@@ -133,7 +133,7 @@
 			</div>
 		</div>
 
-		<div class=" w-full font-primary" in:fade={{ duration: 200, delay: 300 }}>
+		<div class=" w-full" in:fade={{ duration: 200, delay: 300 }}>
 			<Suggestions
 				className="grid grid-cols-2"
 				suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from open_webui.config import CACHE_DIR
 from open_webui.utils.pii_policy import group_enforces_pii_masking
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import (
@@ -71,6 +72,7 @@ async def get_groups(
 
 @router.post('/create', response_model=Optional[GroupResponse])
 async def create_new_group(
+    request: Request,
     form_data: GroupForm,
     user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
@@ -78,6 +80,13 @@ async def create_new_group(
     try:
         group = await Groups.insert_new_group(user.id, form_data, db=db)
         if group:
+            await publish_event(
+                request,
+                EVENTS.GROUP_CREATED,
+                actor=user,
+                subject_id=group.id,
+                data={'name': group.name},
+            )
             return GroupResponse(
                 **group.model_dump(),
                 member_count=await Groups.get_group_member_count_by_id(group.id, db=db),
@@ -87,11 +96,13 @@ async def create_new_group(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error creating group'),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f'Error creating a new group: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error creating group'),
         )
 
 
@@ -170,7 +181,7 @@ async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSes
         log.exception(f'Error adding users to group {id}: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error getting group members'),
         )
 
 
@@ -181,6 +192,7 @@ async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSes
 
 @router.post('/id/{id}/update', response_model=Optional[GroupResponse])
 async def update_group_by_id(
+    request: Request,
     id: str,
     form_data: GroupPolicyUpdateForm,
     user=Depends(get_admin_user),
@@ -253,6 +265,13 @@ async def update_group_by_id(
                 f'the audit log now claims a change that did not happen.'
             )
         if group:
+            await publish_event(
+                request,
+                EVENTS.GROUP_UPDATED,
+                actor=user,
+                subject_id=id,
+                data={'name': group.name},
+            )
             return GroupResponse(
                 **group.model_dump(),
                 member_count=await Groups.get_group_member_count_by_id(group.id, db=db),
@@ -262,11 +281,13 @@ async def update_group_by_id(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error updating group'),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f'Error updating group {id}: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error updating group'),
         )
 
 
@@ -411,6 +432,7 @@ async def _audit_membership_change(
 
 @router.post('/id/{id}/users/add', response_model=Optional[GroupResponse])
 async def add_user_to_group(
+    request: Request,
     id: str,
     form_data: GroupMembershipForm,
     user=Depends(get_admin_user),
@@ -441,6 +463,13 @@ async def add_user_to_group(
     try:
         group = await Groups.add_users_to_group(id, form_data.user_ids, db=db)
         if group:
+            await publish_event(
+                request,
+                EVENTS.GROUP_MEMBER_ADDED,
+                actor=user,
+                subject_id=id,
+                data={'user_ids': form_data.user_ids},
+            )
             return GroupResponse(
                 **group.model_dump(),
                 member_count=await Groups.get_group_member_count_by_id(group.id, db=db),
@@ -450,16 +479,19 @@ async def add_user_to_group(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error adding users to group'),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f'Error adding users to group {id}: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error adding users to group'),
         )
 
 
 @router.post('/id/{id}/users/remove', response_model=Optional[GroupResponse])
 async def remove_users_from_group(
+    request: Request,
     id: str,
     form_data: GroupMembershipForm,
     user=Depends(get_admin_user),
@@ -480,6 +512,13 @@ async def remove_users_from_group(
     try:
         group = await Groups.remove_users_from_group(id, form_data.user_ids, db=db)
         if group:
+            await publish_event(
+                request,
+                EVENTS.GROUP_MEMBER_REMOVED,
+                actor=user,
+                subject_id=id,
+                data={'user_ids': form_data.user_ids},
+            )
             return GroupResponse(
                 **group.model_dump(),
                 member_count=await Groups.get_group_member_count_by_id(group.id, db=db),
@@ -489,11 +528,13 @@ async def remove_users_from_group(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error removing users from group'),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f'Error removing users from group {id}: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error removing users from group'),
         )
 
 
@@ -503,21 +544,31 @@ async def remove_users_from_group(
 
 
 @router.delete('/id/{id}/delete', response_model=bool)
-async def delete_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_group_by_id(
+    request: Request, id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
     try:
         result = await Groups.delete_group_by_id(id, db=db)
         if result:
+            await publish_event(
+                request,
+                EVENTS.GROUP_DELETED,
+                actor=user,
+                subject_id=id,
+            )
             return result
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT('Error deleting group'),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f'Error deleting group {id}: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error deleting group'),
         )
 
 

@@ -69,5 +69,12 @@
 </script>
 
 {#if model}
-	<ModelEditor edit={true} {model} {onSubmit} />
+	<ModelEditor
+		edit={true}
+		{model}
+		{onSubmit}
+		onBack={async () => {
+			await goto('/workspace/models');
+		}}
+	/>
 {/if}

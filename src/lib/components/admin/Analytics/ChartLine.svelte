@@ -47,7 +47,7 @@
 <div class="relative w-full" style="height:{height}px">
 	<svg
 		viewBox="0 0 {w} {height - 20}"
-		class="h-[calc(100%-20px)] w-full"
+		class="absolute inset-x-0 top-0 h-[calc(100%-20px)] w-full"
 		preserveAspectRatio="none"
 		role="img"
 		aria-label="Line chart of message counts by model over time"
@@ -90,7 +90,7 @@
 			: period === 'year' || period === 'all'
 				? 'M/D/YY'
 				: 'M/D'}
-		<div class="flex justify-between px-0.5 text-[10px] text-gray-400">
+		<div class="absolute inset-x-0 bottom-0 flex justify-between px-0.5 text-[10px] text-gray-400">
 			{#each Array(labelCount) as _, i}
 				{@const idx = i === labelCount - 1 ? data.length - 1 : Math.min(i * step, data.length - 1)}
 				{#if data[idx]}
