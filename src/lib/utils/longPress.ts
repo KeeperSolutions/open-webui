@@ -1,9 +1,9 @@
 // Press-and-hold gesture for touch devices, which have no hover to reveal a row's actions.
-// Attach to an ancestor of the row's own click target, so the release can be swallowed
-// in the capture phase before it reaches it.
 
 const DEFAULT_DURATION_MS = 500;
 const MOVE_TOLERANCE_PX = 10;
+// Upper bound for the click a browser sends after touchend.
+const CLICK_WINDOW_MS = 700;
 
 export type LongPressParams = {
 	// Only armed while true, so pointer devices keep their native context menu.
@@ -21,8 +21,8 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 	let timeout: ReturnType<typeof setTimeout> | null = null;
 	let origin: { x: number; y: number } | null = null;
 
-	// Set once the hold fired, so the click that follows touchend does not act on the row.
-	let handled = false;
+	// Live while the click produced by the hold still has to be swallowed.
+	let swallowTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	const isEnabled = () => current.enabled !== false;
 	const suppressesNativeMenu = () => current.suppressNativeMenu ?? isEnabled();
@@ -38,7 +38,7 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 	const onTouchStart = (event: TouchEvent) => {
 		cancel();
-		handled = false;
+		stopSwallowingClick();
 
 		if (!isEnabled() || event.touches.length !== 1) return;
 
@@ -48,7 +48,7 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 		timeout = setTimeout(() => {
 			timeout = null;
 			origin = null;
-			handled = true;
+			startSwallowingClick();
 
 			current.onLongPress();
 			navigator.vibrate?.(10);
@@ -77,14 +77,27 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 		event.preventDefault();
 	};
 
+	// On document, because a listener here would lose the race when the node handles the click itself.
 	const onClickCapture = (event: MouseEvent) => {
-		if (!handled) return;
-
-		handled = false;
+		stopSwallowingClick();
 
 		event.preventDefault();
 		event.stopPropagation();
 	};
+
+	const startSwallowingClick = () => {
+		document.addEventListener('click', onClickCapture, true);
+		swallowTimeout = setTimeout(stopSwallowingClick, CLICK_WINDOW_MS);
+	};
+
+	function stopSwallowingClick() {
+		if (swallowTimeout) {
+			clearTimeout(swallowTimeout);
+			swallowTimeout = null;
+		}
+
+		document.removeEventListener('click', onClickCapture, true);
+	}
 
 	// Suppresses the iOS callout and text selection; both properties inherit to the row.
 	const applyTouchStyles = () => {
@@ -104,7 +117,6 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 	node.addEventListener('touchend', cancel);
 	node.addEventListener('touchcancel', cancel);
 	node.addEventListener('contextmenu', onContextMenu);
-	node.addEventListener('click', onClickCapture, true);
 
 	return {
 		update(next: LongPressParams) {
@@ -113,18 +125,18 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 			if (!isEnabled()) {
 				cancel();
-				handled = false;
+				stopSwallowingClick();
 			}
 		},
 		destroy() {
 			cancel();
+			stopSwallowingClick();
 
 			node.removeEventListener('touchstart', onTouchStart);
 			node.removeEventListener('touchmove', onTouchMove);
 			node.removeEventListener('touchend', cancel);
 			node.removeEventListener('touchcancel', cancel);
 			node.removeEventListener('contextmenu', onContextMenu);
-			node.removeEventListener('click', onClickCapture, true);
 		}
 	};
 }

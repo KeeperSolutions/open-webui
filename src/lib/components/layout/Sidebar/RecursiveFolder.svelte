@@ -763,6 +763,7 @@
 					}
 				}}
 				on:dblclick={(e) => {
+					if ($mobile) return;
 					if (folders[folderId]?.shared && folders[folderId]?.permission !== 'write') return;
 					if (clickTimer) {
 						clearTimeout(clickTimer); // cancel the single-click action
@@ -794,7 +795,9 @@
 				}}
 			>
 				<button
-					class="text-gray-600 dark:text-gray-400 transition-all p-1 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-lg"
+					class="text-gray-600 dark:text-gray-400 transition-all {$mobile
+						? 'p-2.5 -m-1.5'
+						: 'p-1'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-lg"
 					on:click={(e) => {
 						e.stopPropagation();
 						e.stopImmediatePropagation();
@@ -803,11 +806,11 @@
 					}}
 				>
 					{#if folders[folderId]?.meta?.icon}
-						<div class="flex group-hover:hidden transition-all">
+						<div class="flex {$mobile ? '' : 'group-hover:hidden'} transition-all">
 							<Emoji className="size-3.5" shortCode={folders[folderId].meta.icon} />
 						</div>
 
-						<div class="hidden group-hover:flex transition-all p-[1px]">
+						<div class="hidden {$mobile ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
 								<ChevronDown className=" size-3" strokeWidth="1.5" />
 							{:else}
@@ -815,11 +818,11 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="flex group-hover:hidden transition-all">
+						<div class="flex {$mobile ? '' : 'group-hover:hidden'} transition-all">
 							<FolderIcon className="size-3.5" strokeWidth="1.5" />
 						</div>
 
-						<div class="hidden group-hover:flex transition-all p-[1px]">
+						<div class="hidden {$mobile ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
 								<ChevronDown className=" size-3" strokeWidth="1.5" />
 							{:else}

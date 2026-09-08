@@ -591,7 +591,7 @@
 					lastReadAt = Date.now() / 1000;
 				}}
 				ondblclick={async (e) => {
-					if (readonly) return;
+					if ($mobile || readonly) return;
 					e.preventDefault();
 					e.stopPropagation();
 

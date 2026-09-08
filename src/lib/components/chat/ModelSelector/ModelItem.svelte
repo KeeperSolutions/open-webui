@@ -6,6 +6,7 @@
 
 	import { mobile, settings, user } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { longPress } from '$lib/utils/longPress';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
@@ -58,6 +59,12 @@
 		: ''} {isSelected ? 'bg-gray-50/70 dark:bg-gray-800/60' : ''}"
 	data-arrow-selected={index === selectedModelIdx}
 	data-value={item.value}
+	use:longPress={{
+		enabled: $mobile && !selectionOnly,
+		onLongPress: () => {
+			showMenu = true;
+		}
+	}}
 	on:click={() => {
 		onClick();
 	}}
@@ -272,7 +279,7 @@
 			>
 				<button
 					aria-label={`${$i18n.t('More Options')}`}
-					class="flex"
+					class="flex {$mobile ? 'invisible' : ''}"
 					on:click={(e) => {
 						e.preventDefault();
 						e.stopPropagation();
