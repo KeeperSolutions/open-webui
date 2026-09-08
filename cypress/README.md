@@ -1,18 +1,20 @@
 # E2E tests — post-upgrade regression gate
 
-Two specs, run against a **real backend + real local Ollama** on a
-fresh scratch DB. `npm run e2e` runs both.
+Three specs, run against a **real backend + real local Ollama** on a
+fresh scratch DB. `npm run e2e` runs all of them.
 
 **⚠️ Run order matters — the specs are numbered.** Cypress runs specs
-alphabetically, so `01-` before `02-`. Spec 01 does the signup **and
-creates + approves the regular user and shares the model with them**;
-spec 02 logs in **as that regular user**. Running `02` alone against a
-backend where `01` never ran fails loudly with a run-order hint.
+alphabetically, so `01-` before `02-` before `03-`. Spec 01 does the
+signup **and creates + approves the regular user and shares the model
+with them**; spec 02 logs in **as that regular user**; spec 03 reuses
+spec 01's admin account. Running `02` or `03` alone against a backend
+where `01` never ran fails loudly with a run-order hint.
 
 | Spec | Role | Covers |
 |---|---|---|
 | `01-core-flow.cy.ts` | admin, then regular user | first signup → admin, model select, chat round-trip, **creates + approves the regular user + shares the model**, permission boundary (Playground), logout, regular-user login + chat |
 | `02-chat-depth.cy.ts` | regular (non-admin) user | chat persistence across a full reload (save + re-decrypt), sidebar history, New Chat clears the transcript/URL, reopening a chat, **regenerate** produces a branched + completed version |
+| `03-featured-models.cy.ts` | admin | Featured Models admin curation form + field-limit validation (provider required/length, tag length), save gate, and the curated entries surfacing on the chat model selector's Featured pill |
 
 Spec 02 is regular-user on purpose: persistence, reload, history and
 regenerate are things *every* user does, and a merge can break them (or
@@ -86,7 +88,7 @@ Ctrl-C.
 
 ```bash
 # with Ollama running + the model pulled:
-CYPRESS_E2E_MODEL=gemma3:1b npm run e2e                    # both specs, in order
+CYPRESS_E2E_MODEL=gemma3:1b npm run e2e                    # all specs, in order
 CYPRESS_E2E_MODEL=gemma3:1b npm run e2e -- --spec cypress/e2e/01-core-flow.cy.ts
 
 ```
@@ -112,7 +114,7 @@ alive (full log saved + path printed; `E2E_FLAKE_VERBOSE=1` to stream
 everything). Forwards extra args to `npm run e2e`:
 
 ```bash
-CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake            # 5 runs, both specs
+CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake            # 5 runs, all specs
 CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake 10         # 10 runs
 CYPRESS_E2E_MODEL=qwen2.5:7b npm run e2e:flake 10 -- --spec cypress/e2e/02-chat-depth.cy.ts
 ```

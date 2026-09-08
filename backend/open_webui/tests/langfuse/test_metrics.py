@@ -319,7 +319,17 @@ def test_build_metrics_query_structure():
 
 # ---------- load_env fallbacks ----------
 
-_LANGFUSE_ENV_VARS = ["LANGFUSE_PK", "LANGFUSE_SK", "LANGFUSE_HOST", "PK", "SK", "HOST"]
+_LANGFUSE_ENV_VARS = [
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PK",
+    "LANGFUSE_SK",
+    "LANGFUSE_HOST",
+    "PK",
+    "SK",
+    "HOST",
+]
 
 
 @pytest.fixture

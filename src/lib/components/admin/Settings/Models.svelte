@@ -49,6 +49,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
+	import Star from '$lib/components/icons/Star.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
@@ -304,10 +305,15 @@
 	const saveModelOrder = async (orderedModelIds: string[]) => {
 		savingModelOrder = true;
 
+		// setModelsConfig (POST /configs/models) writes the whole config form in
+		// one call. FEATURED_MODELS isn't edited from this action, but it still
+		// has to be carried through here — an omitted field is treated as "clear
+		// it", so leaving it out would silently empty the featured list.
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: defaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: defaultPinnedModelIds.join(','),
 			MODEL_ORDER_LIST: orderedModelIds,
+			FEATURED_MODELS: modelsConfig?.FEATURED_MODELS ?? [],
 			DEFAULT_MODEL_METADATA: modelsConfig?.DEFAULT_MODEL_METADATA ?? null,
 			DEFAULT_MODEL_PARAMS: modelsConfig?.DEFAULT_MODEL_PARAMS ?? null
 		}).catch((error) => {
@@ -355,10 +361,15 @@
 		defaultModelIds = nextDefaultModelIds;
 		defaultPinnedModelIds = nextDefaultPinnedModelIds;
 
+		// setModelsConfig (POST /configs/models) writes the whole config form in
+		// one call. FEATURED_MODELS isn't edited from this action, but it still
+		// has to be carried through here — an omitted field is treated as "clear
+		// it", so leaving it out would silently empty the featured list.
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: nextDefaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: nextDefaultPinnedModelIds.join(','),
 			MODEL_ORDER_LIST: modelsConfig?.MODEL_ORDER_LIST ?? [],
+			FEATURED_MODELS: modelsConfig?.FEATURED_MODELS ?? [],
 			DEFAULT_MODEL_METADATA: modelsConfig?.DEFAULT_MODEL_METADATA ?? null,
 			DEFAULT_MODEL_PARAMS: modelsConfig?.DEFAULT_MODEL_PARAMS ?? null
 		}).catch((error) => {
@@ -766,6 +777,19 @@
 							}
 						}}
 					>
+						{#if $user?.role === 'admin'}
+							<button
+								class="flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-[13px] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
+								type="button"
+								on:click={() => {
+									showFeaturedModelsModal = true;
+								}}
+							>
+								<Star className="size-3.5" strokeWidth="2" />
+								<span>{$i18n.t('Featured models')}</span>
+							</button>
+						{/if}
+
 						<div
 							class="flex w-fit gap-0.5 text-center text-sm rounded-full bg-transparent whitespace-nowrap"
 						>
@@ -833,19 +857,6 @@
 										<Wrench className="size-3.5" />
 										<div class="flex items-center">{$i18n.t('Manage')}</div>
 									</button>
-
-									{#if $user?.role === 'admin'}
-										<button
-											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
-											type="button"
-											on:click={() => {
-												showFeaturedModelsModal = true;
-											}}
-										>
-											<Wrench className="size-3.5" />
-											<div class="flex items-center">{$i18n.t('Featured Models')}</div>
-										</button>
-									{/if}
 
 									<button
 										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"

@@ -107,9 +107,11 @@ FRONTEND_PID=""
 
 cleanup() {
 	local ec=$?
-	for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
+	for entry in "frontend:$FRONTEND_PID" "backend:$BACKEND_PID"; do
+		local label="${entry%%:*}"
+		local pid="${entry#*:}"
 		if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-			echo "==> stopping pid $pid"
+			echo "==> stopping $label (pid $pid)"
 			# kill the whole process group (Vite / uvicorn spawn children)
 			kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
 			wait "$pid" 2>/dev/null || true
@@ -164,6 +166,14 @@ echo "==> model under test:  $CYPRESS_E2E_MODEL"
 	# dev mode: the frontend calls the API at :8080 from the :5173 origin.
 	export CORS_ALLOW_ORIGIN="$FRONTEND_URL;$BACKEND_URL"
 	export PYTHONPATH="$REPO_ROOT/backend:${PYTHONPATH:-}"
+	# The scratch DB has no PII pipeline connection registered. Left at its
+	# default (pii_filter,pii_filter_pipeline), assert_pii_masking_available()
+	# (routers/pipelines.py) fail-closes and refuses every chat message — there
+	# is nothing here for the guard to protect, so disable fail-closed
+	# enforcement for this run. This block runs AFTER sourcing .env above
+	# specifically to force scratch-DB-only values over whatever a developer's
+	# own backend/.env happens to set.
+	export PII_FILTER_IDS=
 
 	# Prefer the project venv (the machine's default `python` is often an
 	# unrelated venv); fall back to whatever `python` is active.
@@ -220,8 +230,15 @@ wait_for() {
 
 # backend runs DB migrations on boot — give it room
 wait_for "backend"  "$BACKEND_URL/health"  "$BACKEND_PID"  90
-# first `npm run dev` also runs pyodide:fetch (cached after the first time)
-wait_for "frontend" "$FRONTEND_URL"        "$FRONTEND_PID" 120
+# first `npm run dev` also runs pyodide:fetch (cached after the first time).
+# Probe /@vite/client, not "/": the bare root responds as soon as Vite's HTTP
+# server accepts connections, well before it has finished the initial
+# optimizeDeps scan and transformed the client entry module — a Cypress visit
+# landing in that window intermittently sees "Failed to fetch dynamically
+# imported module" on the very first navigation. /@vite/client is Vite's own
+# HMR client script; it 404s/hangs until the dev server can actually serve
+# transformed modules, so a successful fetch here means real navigation is safe.
+wait_for "frontend" "$FRONTEND_URL/@vite/client" "$FRONTEND_PID" 120
 
 echo "==> running cypress"
 CYPRESS_BASE_URL="$FRONTEND_URL" npx cypress run "$@"

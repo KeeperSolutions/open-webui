@@ -12,7 +12,7 @@ All specs run against a **real backend + real local Ollama** on a
 **fresh scratch DB** (`npm run e2e`). They run **in file-number order**
 (Cypress runs specs alphabetically) and **state carries between them**:
 spec 01 creates the regular-user account (and shares the model) that
-spec 02 logs into.
+spec 02 logs into; spec 03 reuses the admin account spec 01 establishes.
 
 ---
 
@@ -86,3 +86,60 @@ admin path and every backend unit test stay green.
 | 8 | **Reload again** | Same URL; prompt visible; the version pager **persists** | Both response versions were saved, not just the latest |
 
 **testIsolation:** `false` — same reason as spec 01.
+
+---
+
+## 03 — Featured Models (`03-featured-models.cy.ts`)
+
+**Role:** admin (logs back in — signup is disabled after spec 01's
+first admin).
+**Purpose:** end-to-end coverage of TRAU-542's "Featured Models"
+feature — admin curation form + its field-limit validation, and the
+curated entries actually surfacing in the chat model selector. The
+validation logic itself (`featuredModels.ts` / the backend
+`ModelsConfigForm._validate_featured_models` pydantic validator) has
+unit/pytest coverage; this spec is the one place that drives the real
+form and the real dropdown to prove the two layers agree and the UI
+actually enforces what the validators enforce.
+
+**Depends on spec 01** having run first (reuses its admin account and
+`CYPRESS_E2E_MODEL`).
+
+### Scenario
+
+| # | Step | Asserts | Guards against |
+|---|---|---|---|
+| 1 | Log in as admin (`registerAdmin` — form-login path, signup is closed) | Authenticated session | — |
+| 2 | User menu → Admin Panel → Settings → search "models" → Models tab | "Featured models" toolbar button visible | The navigation path itself — "Settings" opens `SettingsModal.svelte` (a searchable sidebar of tabs with no stable per-tab id, distinct from the flat `admin/Settings.svelte` tab bar), which renders the same `admin/Settings/Models.svelte` this feature lives in |
+| 3 | Click "Featured models" | Modal opens with the "shown at the top of the model selector…" blurb | `FeaturedModelsModal` wiring survived the 0.11.0 admin-UI rewrite |
+| 4 | Pick `CYPRESS_E2E_MODEL` from the add-model select | Save is **disabled** (fresh entry has no provider name) | `validateFeaturedModels` blocking an empty provider on the very first render, not just after a blur |
+| 5 | Type a 2-char provider name | Save stays **disabled**; the "3–24 characters" hint is visible | The provider length floor (`PROVIDER_NAME_MIN`) |
+| 6 | Fix the provider name to a valid value | Save **enables** | The gate clears once the entry becomes valid |
+| 7 | Force a tag value past the 10-char HTML `maxlength` (`invoke('val', …)` + `input` event, bypassing the attribute the way a paste would) | Save **disabled**; clicking it anyway surfaces `"Each tag must be 10 characters or fewer."` via toast | The **Svelte-side** validator (`validateFeaturedModels`), not just the HTML `maxlength` attribute, is what actually blocks the save |
+| 8 | Fill 3 tags within the limit, Save | `"Featured models saved successfully"` toast; modal closes | The full valid-entry save path, `setModelsConfig` round-trip |
+| 9 | Return to `/chat` | Composer present | — |
+| 10 | Open the model selector | The **Featured** pill is `aria-pressed="true"` by default; the featured listbox is visible | `toggleOpen`'s `featuredModels.length > 0 → 'featured'` default (opens on Featured regardless of whether the current/default model is one of the curated entries) |
+| 11 | Inspect the featured card | Curated provider name and all 3 curated tags are visible on the card | `ModelItem.svelte`'s `featured` rendering (`featuredNameHead`/`Tail`, `featuredTags` chips) actually reflects what was saved — not a stale/best-effort description fallback |
+| 12 | Remove the entry and Save (cleanup) | `"No featured models added yet."` then the success toast | Leaves the scratch DB's featured config empty for the next run |
+
+**testIsolation:** `false` — same reason as spec 01. `Modal.svelte`
+portals to `document.body`, and the Featured Models modal opens on top
+of the still-open Settings modal, so `[role="dialog"][aria-modal="true"]`
+matches **two** elements at once while it's up — all in-modal selectors
+target `.last()` of that set to land on the topmost (Featured) one
+rather than the Settings modal underneath.
+
+`openAdminModelsSettings()` waits 300ms after `#search-input-settings-modal`
+becomes visible before `.clear()`/`.type()`-ing into it. `Modal.svelte`'s
+content is `{#if show}`-gated — every open is a fresh mount, entering with a
+200ms `flyAndScale` + `fade` transition (`utils/transitions/index.ts`). Seen
+flaking a few times across repeated `e2e:flake` checks
+(`CypressError: cy.type() failed because it targeted a disabled element`),
+always on this input, always on the *second* reopen of the Settings modal
+(the cleanup step) — never on the first. The element is never actually
+`disabled` anywhere in the Svelte source; a `.should('not.be.disabled')`
+guard alone didn't fix it (it trivially passes — the attribute is never
+set), which points at the element being mid-transition and not yet
+Cypress-actionable rather than a real disabled state. The fixed wait
+outlasts the transition; a cleaner fix (asserting the element has settled
+to its final transform/opacity) would be worth revisiting if this recurs.

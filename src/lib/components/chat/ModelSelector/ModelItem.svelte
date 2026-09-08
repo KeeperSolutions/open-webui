@@ -30,9 +30,16 @@
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
 	export let deleteModelHandler: (model: any) => void = () => {};
+	export let setDefaultHandler: (modelId: string) => void = () => {};
+	export let isDefault = false;
 	export let selectionOnly = false;
 
 	export let onClick: () => void = () => {};
+
+	// Set by Selector.svelte when this row is rendered inside the "Featured" pill.
+	// Featured rows use a two-line card: curated provider + name on line 1, curated
+	// tags (or the model description) on line 2.
+	export let featured = false;
 
 	const copyLinkHandler = async (model) => {
 		const baseUrl = window.location.origin;
@@ -47,14 +54,36 @@
 
 	let showMenu = false;
 	$: isSelected = compareEnabled ? selectedValues.includes(item.value) : value === item.value;
+
+	// `providerName` is a curated brand name ("Google"), set only on featured
+	// entries by featuredToItem() in featuredModels.ts. It is deliberately NOT
+	// derived from the model's `owned_by` — that is infrastructure ("ollama"), not
+	// a brand — so it stays empty for All/Local rows.
+	$: providerDisplay = featured ? ((item?.providerName as string) ?? '') : '';
+
+	// Featured line 1 is two-tone: provider in primary, model name in tertiary,
+	// separated by an en-dash. With no curated provider, fall back to just the
+	// label (no separator).
+	$: featuredNameHead = providerDisplay || (item?.label ?? '').trim();
+	$: featuredNameTail = providerDisplay ? ` – ${(item?.label ?? '').trim()}` : '';
+
+	// Featured line 2: the curated tags as chips (up to 3), else the description.
+	$: featuredTags = featured
+		? (item?.model?.tags ?? [])
+				.map((t: { name?: string }) => t?.name)
+				.filter(Boolean)
+				.slice(0, 3)
+		: [];
+	$: featuredDescription = (item?.model?.info?.meta?.description ?? '').trim();
 </script>
 
 <button
 	role="option"
 	aria-selected={isSelected}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
-	class="group/item flex h-8 w-full cursor-pointer select-none items-center rounded-xl px-2 text-left text-[13px] font-normal text-gray-700 outline-hidden transition-colors duration-75 hover:bg-gray-50/40 dark:text-gray-100 dark:hover:bg-gray-800/40 {index ===
-		selectedModelIdx && !compareEnabled
+	class="group/item flex w-full cursor-pointer select-none items-center rounded-xl px-2 text-left text-[13px] font-normal text-gray-700 outline-hidden transition-colors duration-75 hover:bg-gray-50/40 dark:text-gray-100 dark:hover:bg-gray-800/40 {featured
+		? 'py-2'
+		: 'h-8'} {index === selectedModelIdx && !compareEnabled
 		? 'bg-gray-50/70 dark:bg-gray-800/60'
 		: ''} {isSelected ? 'bg-gray-50/70 dark:bg-gray-800/60' : ''}"
 	data-arrow-selected={index === selectedModelIdx}
@@ -101,15 +130,56 @@
 				</Tooltip>
 			</div>
 
-			<div class="flex min-w-0 items-center">
-				<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
-					<div class="line-clamp-1">
-						{item.label}
-					</div>
-				</Tooltip>
-			</div>
+			{#if featured}
+				<div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
+					<Tooltip
+						content={`${item.label} (${item.value})`}
+						placement="top-start"
+						className="min-w-0"
+					>
+						<div class="line-clamp-1 font-medium leading-tight">
+							<span class="text-gray-700 dark:text-gray-100">{featuredNameHead}</span><span
+								class="text-gray-400 dark:text-gray-500">{featuredNameTail}</span
+							>
+						</div>
+					</Tooltip>
+					{#if featuredTags.length > 0}
+						<div class="flex flex-wrap items-center gap-1">
+							{#each featuredTags as tag}
+								<span
+									class="rounded bg-gray-500/15 px-1.5 py-px text-[10px] font-medium uppercase leading-4 tracking-wide text-gray-500 dark:text-gray-400"
+								>
+									{tag}
+								</span>
+							{/each}
+						</div>
+					{:else if featuredDescription}
+						<div class="line-clamp-1 text-[11px] text-gray-400 dark:text-gray-500">
+							{featuredDescription}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="flex min-w-0 items-center">
+					<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
+						<div class="line-clamp-1">
+							{item.label}
+						</div>
+					</Tooltip>
+				</div>
+			{/if}
 
 			<div class="flex shrink-0 items-center gap-1.5">
+				{#if isDefault}
+					<Tooltip content={$i18n.t('Default model')} className="self-end">
+						<span
+							class="rounded-full bg-hg-info-bg px-1.5 py-px text-[10px] font-medium uppercase leading-4 tracking-wide text-hg-info-text dark:bg-hg-blue/20 dark:text-hg-blue"
+						>
+							{$i18n.t('Default')}
+						</span>
+					</Tooltip>
+				{/if}
+
 				{#if item.model.owned_by === 'ollama'}
 					{#if (item.model.ollama?.details?.parameter_size ?? '') !== ''}
 						<div class="flex items-center translate-y-[0.5px]">
@@ -158,7 +228,7 @@
 
 				<!-- {JSON.stringify(item.info)} -->
 
-				{#if (item?.model?.tags ?? []).length > 0}
+				{#if !featured && (item?.model?.tags ?? []).length > 0}
 					{#key item.model.id}
 						<Tooltip elementId="tags-{item.model.id}">
 							<div slot="tooltip" id="tags-{item.model.id}">
@@ -273,6 +343,8 @@
 				model={item.model}
 				{pinModelHandler}
 				{deleteModelHandler}
+				{setDefaultHandler}
+				{isDefault}
 				copyLinkHandler={() => {
 					copyLinkHandler(item.model);
 				}}

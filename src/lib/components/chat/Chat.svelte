@@ -3896,6 +3896,7 @@
 							}}
 							{history}
 							title={$chatTitle}
+							bind:selectedModels
 							shareEnabled={!!history.currentId}
 							{initNewChat}
 							scrollToTop={!isNearTop ? scrollToTop : null}
