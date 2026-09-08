@@ -31,6 +31,28 @@ def _positive_int_env(name, default):
     return value if value > 0 else default
 
 
+
+def _positive_float_env(name, default):
+    """Like `_positive_int_env`, for a rate rather than a count.
+
+    Rejects NaN and infinity as well as zero and negatives: `float('nan')`
+    passes a `> 0` test in neither direction and would silently make
+    `max_maskable_chars()` nonsense, while `inf` would admit every document and
+    then blow the deadline. Both fail closed, and both are impossible to
+    diagnose from the error the user sees.
+    """
+    raw = os.getenv(name, '').strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value != value or value in (float('inf'), float('-inf')):  # NaN / +-inf
+        return default
+    return value if value > 0 else default
+
+
 # Characters per masking call. NOT a throughput knob: bigger chunks do not go
 # faster (the rate is flat), they only eat the per-request margin — 6000 chars
 # already measures ~25 s against a 30 s budget. 1800 chars is ~8 s.
@@ -77,20 +99,24 @@ PII_INLET_CONCURRENCY = 4
 # `max_maskable_chars()` is arithmetic on this number, so raising it raises the
 # cap and changes nothing else.
 #
-# 600s (10 min) admits ~187 000 characters at the currently measured rate. That
-# is a deliberately uncomfortable number. It is this large only because the
-# staging pipeline is pinned to ONE instance
-# (`autoscaling.knative.dev/maxScale: 1` on the revision), so it masks at
-# ~310 chars/s however many chunks we send it. Letting that service scale out is
-# the real fix, after which this should come back down — at 8 instances the same
-# 187 000 characters take ~100s.
+# It was 600s (10 min), and the comment here said that was "deliberately
+# uncomfortable ... this large only because the staging pipeline is pinned to
+# ONE instance ... Letting that service scale out is the real fix, after which
+# this should come back down." That has now happened: the revision's maxScale
+# and containerConcurrency were raised and the measured rate went from ~310 to
+# 1 574 chars/s. So it comes back down.
+#
+# 240s buys MORE capacity than the old 600s did, not less, because the rate
+# rose faster than the budget fell: the cap goes from ~259 000 to ~288 000
+# characters while the worst-case wait drops from ten minutes to four.
 #
 # WARNING: this budget is only real if the transport survives it. The chat
 # request stays open for the entire masking run, so a platform request timeout
 # shorter than this turns a clean, actionable refusal into a dropped connection
 # — strictly worse than the behaviour this ticket replaced. Cloud Run's default
-# is 300s. Set the env var per environment instead of assuming the default fits.
-PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 600)
+# is 300s, which 240s fits inside with margin; 600s did not. Set the env var
+# per environment instead of assuming the default fits.
+PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 240)
 
 # Per-chunk retries for transient failures (cold start, 5xx, dropped
 # connection). Retrying one ~8 s chunk is far cheaper than failing a whole turn.
@@ -139,10 +165,28 @@ PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 # is the wait-then-refuse this ticket exists to remove. Being wrong low only
 # costs cap headroom; being wrong high costs the user ten minutes and a refusal.
 #
-# Sizing at 1.8: cap ~259 000 characters (~80 pages of Word), which the pipeline
-# really masks in ~486 s at 533 chars/s — comfortably inside the 600 s budget, so
-# the guard and the deadline agree instead of contradicting each other.
-PII_INLET_EFFECTIVE_SPEEDUP = 1.8
+# RECALIBRATED 2026-09-08. The paragraph above ends "When the pipeline is allowed
+# to scale out ... this is the one number to raise", and that is exactly what
+# happened — the staging revision's maxScale and containerConcurrency were
+# raised. Measured immediately after, end to end through `mask_sources_for_llm`:
+#
+#   one 50-page attachment, 167 460 chars -> 106.4 s -> 1 574 chars/s (6.6x)
+#
+# 5.0, not the measured 6.6: still one sample, still an otherwise idle pipeline,
+# and a second user masking at the same time comes straight off it. 5.0 gives an
+# effective 1 200 chars/s, which the same run beat by 30%.
+#
+# It is env-overridable because it is a claim about INFRASTRUCTURE, not about
+# this repo: the number is wrong the moment someone rescales the service, and an
+# operator must be able to correct it without a deploy. Being wrong high is now
+# survivable in a way it was not before — the masking paths enforce a real
+# `asyncio.wait_for` deadline, so an optimistic estimate ends in a bounded
+# refusal rather than an unbounded wait.
+#
+# Sizing at 5.0: cap ~288 000 characters (~90 pages of Word), masked in ~183 s at
+# the measured rate — inside the 240 s budget, so the guard and the deadline
+# agree instead of contradicting each other.
+PII_INLET_EFFECTIVE_SPEEDUP = _positive_float_env('PII_INLET_EFFECTIVE_SPEEDUP', 5.0)
 
 
 def estimated_masking_seconds(skeleton_chars, chunked_chars):

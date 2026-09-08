@@ -416,9 +416,9 @@ def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal
     clobber each other — so completions must be throttled, and the terminal
     one (which stops the shimmer) must never be among the dropped ones.
 
-    Twenty, not ten: with a 600s budget the largest admissible paste is ~104
-    chunks, and ten events would leave ~80s of an eight-minute wait with a
-    frozen number."""
+    Twenty, not ten: the largest admissible paste is ~160 chunks, and ten
+    events would leave whole minutes of the wait with a frozen number —
+    indistinguishable from a hung request."""
     import open_webui.utils.middleware as M
 
     events = []
