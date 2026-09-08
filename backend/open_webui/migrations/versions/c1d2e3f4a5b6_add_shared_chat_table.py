@@ -122,6 +122,7 @@ def upgrade():
         if not original:
             continue
 
+        # Check if shared_chat record already exists (idempotent)
         existing_shared = conn.execute(
             sa.select(shared_chat_id_t.c.id).where(shared_chat_id_t.c.id == share_token)
         ).fetchone()
@@ -140,6 +141,7 @@ def upgrade():
             )
             session.commit()
 
+        # Check if access_grant record already exists (idempotent)
         existing_grant = conn.execute(
             sa.select(access_grant_t.c.id).where(
                 sa.and_(
@@ -153,7 +155,7 @@ def upgrade():
         ).fetchone()
 
         if not existing_grant:
-            # user:*:read grant for backward compat
+            # Create user:*:read grant for backward compat
             conn.execute(
                 access_grant_t.insert().values(
                     id=str(uuid.uuid4()),

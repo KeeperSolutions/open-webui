@@ -32,8 +32,9 @@ TASKS_BILLED_PATHS = {
 # Config/utility endpoints — not embedding/LLM/TTS/STT calls, deliberately
 # left on get_verified_user. Regression-guarded the other direction so
 # nobody "fixes" these the same way without a deliberate decision.
+# (`/active/chats` was removed in the v0.11.0 merge — upstream tracks active
+# chats via the socket `setChatActive` path, not a REST endpoint.)
 TASKS_UNBILLED_PATHS = {
-    "/active/chats",
     "/config",
 }
 

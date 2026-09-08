@@ -10,6 +10,7 @@ from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.users import UserResponse, Users
+from open_webui.utils.valves import decrypt_valves, encrypt_valves
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import BigInteger, Column, String, Text, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,13 +36,15 @@ class Tool(Base):  # database table definition
 class ToolMeta(BaseModel):
     description: str | None = None
     manifest: dict | None = {}
+    has_user_valves: bool = False
 
 
 class ToolModel(BaseModel):
     id: str
-    user_id: str
+    user_id: str | None = None  # may be null for legacy/malformed records
     name: str
-    content: str
+    # None when listed with defer_content=True (source skipped for listings)
+    content: str | None = None
     specs: list[dict]
     meta: ToolMeta
     access_grants: list[AccessGrantModel] = Field(default_factory=list)
@@ -63,7 +66,7 @@ class ToolUserModel(ToolModel):
 
 class ToolResponse(BaseModel):
     id: str
-    user_id: str
+    user_id: str | None = None  # may be null for legacy/malformed records
     name: str
     meta: ToolMeta
     access_grants: list[AccessGrantModel] = Field(default_factory=list)
@@ -103,11 +106,11 @@ class ToolsTable:
         access_grants: list[AccessGrantModel | None] = None,
         db: AsyncSession | None = None,
     ) -> ToolModel:
-        tool_data = ToolModel.model_validate(tool).model_dump(exclude={'access_grants'})
-        tool_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(tool_data['id'], db=db)
+        tool_model = ToolModel.model_validate(tool)
+        tool_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(tool_model.id, db=db)
         )
-        return ToolModel.model_validate(tool_data)
+        return tool_model
 
     async def insert_new_tool(
         self,
@@ -129,7 +132,6 @@ class ToolsTable:
                 )
                 db.add(result)
                 await db.commit()
-                await db.refresh(result)
                 await AccessGrants.set_access_grants('tool', result.id, form_data.access_grants, db=db)
                 if result:
                     return await self._to_tool_model(result, db=db)
@@ -169,11 +171,18 @@ class ToolsTable:
 
     async def get_tools(self, defer_content: bool = False, db: AsyncSession | None = None) -> list[ToolUserModel]:
         async with get_async_db_context(db) as db:
-            stmt = select(Tool).order_by(Tool.updated_at.desc())
             if defer_content:
-                stmt = stmt
-            result = await db.execute(stmt)
-            all_tools = result.scalars().all()
+                # Skip Tool.content (plugin source, potentially large) via a
+                # column select; Row attributes satisfy from_attributes.
+                result = await db.execute(
+                    select(
+                        Tool.id, Tool.user_id, Tool.name, Tool.specs, Tool.meta, Tool.updated_at, Tool.created_at
+                    ).order_by(Tool.updated_at.desc())
+                )
+                all_tools = result.all()
+            else:
+                result = await db.execute(select(Tool).order_by(Tool.updated_at.desc()))
+                all_tools = result.scalars().all()
 
             user_ids = list(set(tool.user_id for tool in all_tools))
             tool_ids = [tool.id for tool in all_tools]
@@ -212,27 +221,23 @@ class ToolsTable:
         user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
         user_group_ids = {group.id for group in user_groups}
 
-        result = []
-        for tool in tools:
-            if tool.user_id == user_id:
-                result.append(tool)
-            elif await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='tool',
-                resource_id=tool.id,
-                permission=permission,
-                user_group_ids=user_group_ids,
-                db=db,
-            ):
-                result.append(tool)
-        return result
+        # One grants query for all non-owned tools instead of one per tool
+        accessible_ids = await AccessGrants.get_accessible_resource_ids(
+            user_id=user_id,
+            resource_type='tool',
+            resource_ids=[tool.id for tool in tools if tool.user_id != user_id],
+            permission=permission,
+            user_group_ids=user_group_ids,
+            db=db,
+        )
+        return [tool for tool in tools if tool.user_id == user_id or tool.id in accessible_ids]
 
     async def get_tool_valves_by_id(self, id: str, db: AsyncSession | None = None) -> dict | None:
         try:
             async with get_async_db_context(db) as db:
                 tool = await db.get(Tool, id)
-                return tool.valves if tool.valves else {}
-        except Exception as e:
+                return decrypt_valves(tool.valves if tool else None)
+        except Exception:
             log.exception(f'Error getting tool valves by id {id}')
             return None
 
@@ -241,7 +246,9 @@ class ToolsTable:
     ) -> ToolValves | None:
         try:
             async with get_async_db_context(db) as db:
-                await db.execute(update(Tool).filter_by(id=id).values(valves=valves, updated_at=int(time.time())))
+                await db.execute(
+                    update(Tool).filter_by(id=id).values(valves=encrypt_valves(valves), updated_at=int(time.time()))
+                )
                 await db.commit()
                 return await self.get_tool_by_id(id, db=db)
         except Exception:
@@ -260,7 +267,7 @@ class ToolsTable:
             if 'valves' not in user_settings['tools']:
                 user_settings['tools']['valves'] = {}
 
-            return user_settings['tools']['valves'].get(id, {})
+            return decrypt_valves(user_settings['tools']['valves'].get(id))
         except Exception as e:
             log.exception(f'Error getting user values by id {id} and user_id {user_id}: {e}')
             return None
@@ -278,12 +285,12 @@ class ToolsTable:
             if 'valves' not in user_settings['tools']:
                 user_settings['tools']['valves'] = {}
 
-            user_settings['tools']['valves'][id] = valves
+            user_settings['tools']['valves'][id] = encrypt_valves(valves)
 
             # Update the user settings in the database
             await Users.update_user_by_id(user_id, {'settings': user_settings}, db=db)
 
-            return user_settings['tools']['valves'][id]
+            return valves
         except Exception as e:
             log.exception(f'Error updating user valves by id {id} and user_id {user_id}: {e}')
             return None
@@ -297,8 +304,8 @@ class ToolsTable:
                 if access_grants is not None:
                     await AccessGrants.set_access_grants('tool', id, access_grants, db=db)
 
-                tool = await db.get(Tool, id)
-                await db.refresh(tool)
+                # populate_existing: the Core update above bypasses any identity-map copy
+                tool = await db.get(Tool, id, populate_existing=True)
                 return await self._to_tool_model(tool, db=db)
         except Exception:
             return None

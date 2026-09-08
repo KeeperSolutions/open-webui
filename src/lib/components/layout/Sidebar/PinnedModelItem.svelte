@@ -8,10 +8,9 @@
 	import { resolveTheme } from '$lib/utils/theme';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import PinSlash from '$lib/components/icons/PinSlash.svelte';
+	import PinSlash from './icons/PinSlash.svelte';
 
 	export let model = null;
-	export let shiftKey = false;
 	export let onClick = () => {};
 	export let onUnpin = () => {};
 
@@ -31,8 +30,8 @@
 		}}
 	>
 		<a
-			class="grow flex items-center space-x-2.5 rounded-xl px-2.5 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition"
-			href="/?model={model?.id}"
+			class="grow flex items-center space-x-2 rounded-xl px-2 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition"
+			href="/?model={encodeURIComponent(model.id)}"
 			on:click={onClick}
 			draggable="false"
 		>
@@ -48,13 +47,13 @@
 			</div>
 
 			<div class="flex self-center translate-y-[0.5px]">
-				<div class=" self-center text-sm font-primary line-clamp-1">
+				<div class=" self-center text-[13px] leading-5 line-clamp-1">
 					{model?.name ?? model.id}
 				</div>
 			</div>
 		</a>
 
-		{#if mouseOver && shiftKey && onUnpin}
+		{#if mouseOver && onUnpin}
 			<div class="absolute right-5 top-2.5">
 				<div class=" flex items-center self-center space-x-1.5">
 					<Tooltip content={$i18n.t('Unpin')} className="flex items-center">
@@ -65,7 +64,7 @@
 							}}
 							type="button"
 						>
-							<PinSlash className="size-3.5" strokeWidth="2" />
+							<PinSlash className="size-3.5" strokeWidth="1.5" />
 						</button>
 					</Tooltip>
 				</div>

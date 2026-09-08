@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { WEBUI_NAME, user } from '$lib/stores';
 	import { handleAuthSuccess } from '$lib/utils/auth';
 
@@ -17,7 +18,8 @@
 	let carouselDismissed = false;
 
 	onMount(() => {
-		if ($user) goto('/chat');
+		// Keep the query string, or /?model=<id> loses it before the chat reads it.
+		if ($user) goto(`/chat${$page.url.search}`);
 	});
 
 	const onSuccess = async (e: CustomEvent) => {
