@@ -1502,3 +1502,122 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
     assert counts[0] == 1
     assert counts[-1] == 3
     assert events[-1]['data']['done'] is True
+
+
+# ---------------------------------------------------------------------------
+# U41-U43  A real deadline, not just a forecast
+#
+# The budget check at the top of `mask_sources_for_llm` is a PRE-FLIGHT
+# ESTIMATE: it prices the work from a modelled throughput and refuses before
+# the first POST. Nothing bounded the actual run. When the pipeline was slower
+# than the model — a cold start, contention, a degraded revision — the request
+# simply kept going: per-POST socket timeouts times retries times ~93
+# sub-chunks, with the chat request held open the whole time. That is the
+# wait-then-hang the prompt path removed, still living here.
+#
+# The deadline is also what lets the estimate be recalibrated upwards at all.
+# An optimistic forecast without one turns into an unbounded wait; with one it
+# turns into a bounded wait and a clear refusal.
+# ---------------------------------------------------------------------------
+
+
+def _patch_budget(seconds):
+    return patch("open_webui.utils.middleware.PII_INLET_TOTAL_BUDGET_S", seconds)
+
+
+def test_u41_masking_that_outruns_the_budget_is_stopped_not_left_running():
+    """A slow pipeline must end in a bounded refusal, not an open-ended wait."""
+    captured = []
+    with _patch_mw_session(captured, behavior="echo", delay=2.0), _patch_policy(
+        False
+    ), _patch_budget(1.0):
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    _file_sources("John Smith lives in Zagreb"),
+                    "q",
+                    chat_id="chat-slow",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+    assert captured, "guard: the estimate must have let this through so the DEADLINE is what fired"
+
+
+def test_u42_a_run_stopped_by_the_deadline_caches_nothing():
+    """Fail-closed across turns: an abandoned run has no result, and must not
+    leave a half-finished one behind for the next turn to serve."""
+    sources = _file_sources("John Smith lives in Zagreb")
+
+    with _patch_mw_session([], behavior="echo", delay=2.0), _patch_policy(False), _patch_budget(
+        1.0
+    ):
+        with pytest.raises(PiiMaskingBlockedError):
+            _run(
+                apply_source_context_to_messages(
+                    _make_request(),
+                    [{"role": "user", "content": "q"}],
+                    sources,
+                    "q",
+                    chat_id="chat-slow",
+                    user=_make_user(),
+                    model_id="gpt-4",
+                    models=_make_models(),
+                    features={"pii_masking": True},
+                )
+            )
+
+    _, posts = _mask_call(sources, chat_id="chat-slow")
+    assert posts, "a run killed by the deadline poisoned the cache"
+
+
+def test_u43_a_normal_run_is_not_cut_short_by_the_deadline():
+    """The other half: the deadline must bound the pathological case without
+    touching a healthy one."""
+    captured = []
+    with _patch_mw_session(captured, behavior="mask", masked_text="[PERSON_1]"), _patch_policy(
+        False
+    ), _patch_budget(30):
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources("John Smith"),
+                "q",
+                chat_id="chat-ok",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+            )
+        )
+    assert "[PERSON_1]" in json.dumps(result)
+
+
+def test_u44_the_budget_does_not_charge_for_documents_it_will_not_mask():
+    """The forecast has to price the work that is actually left.
+
+    It summed EVERY source character, cached or not, so a turn could be refused
+    as "too large to mask safely" for work it was about to skip entirely: a
+    cached 200 000-char attachment plus a new 150 000-char one is 350 000 on
+    paper, past the cap, while the real cost is the 150 000. That also
+    contradicts the deadline right below it, which bounds real work — the two
+    must agree or the guard is refusing imaginary time.
+    """
+    from open_webui.utils.pii_chunking import max_maskable_chars
+
+    cap = max_maskable_chars()
+    big = "a" * int(cap * 0.7)
+    extra = "b" * int(cap * 0.5)
+    assert len(big) + len(extra) > cap, "fixture must exceed the cap when summed"
+
+    warm = _file_sources(big, name="a.pdf", file_id="f1")
+    _mask_call(warm)  # turn 1: masks and caches the big one
+
+    both = warm + _file_sources(extra, name="b.pdf", file_id="f2")
+    result, _ = _mask_call(both)
+    assert "[PERSON_1]" in json.dumps(result), "refused a turn for work it was not going to do"

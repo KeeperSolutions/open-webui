@@ -1789,33 +1789,6 @@ async def mask_sources_for_llm(
     _dbg_orig_chars = 0
     _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
 
-    # Budget guard, before any POST. Charged across EVERY source, not per
-    # source: wall clock is a property of the request, and a per-source cap let
-    # N attachments multiply the real cost N times over. Past the budget the
-    # honest answer is an immediate refusal — the alternative is a request that
-    # masks for minutes and is refused anyway, which is precisely the
-    # wait-then-refuse the prompt path removed.
-    #
-    # `estimated_masking_seconds(0, chars)` prices everything as chunked work
-    # (there is no skeleton call on this path), so the admissible total is
-    # exactly `max_maskable_chars()` — the same number the prompt path allows,
-    # so the same document costs the same whether pasted or attached.
-    total_source_chars = sum(
-        len(d)
-        for source in sources
-        for d in (source.get('document') or [])
-        if isinstance(d, str)
-    )
-    if estimated_masking_seconds(0, total_source_chars) > PII_INLET_TOTAL_BUDGET_S:
-        raise PiiMaskingBlockedError(
-            'These attachments are too large to mask safely. Remove one, or shorten them.'
-        )
-
-    # ONE bound for the whole request. Created here rather than per document so
-    # five attachments cannot open five times the fan-out at a pipeline that
-    # serializes NER on a single thread anyway.
-    semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
-
     # Whether a result from this request is safe to remember. Gated on masking
     # actually being expected, which is LOAD-BEARING and not an optimisation:
     # when the user has opted out (and no policy mandates otherwise)
@@ -1828,14 +1801,24 @@ async def mask_sources_for_llm(
     cache_enabled = bool(chat_id) and _pii_expected
     _dbg_cached_docs = 0
 
-    # Resolve every cache lookup up front so the progress total is the work
-    # actually left to do. Counting DOCUMENTS would leave the bar at 0/1 for a
-    # whole two-minute wait (one attachment is one document but ~93 POSTs), and
-    # counting cached documents would fill a bar for work that never happens.
+    # Resolve every cache lookup up front, before both the budget guard and the
+    # progress total, so each of them prices the work actually LEFT TO DO.
+    #
+    # For progress: counting DOCUMENTS would leave the bar at 0/1 for a whole
+    # two-minute wait (one attachment is one document but ~93 POSTs), and
+    # counting cached ones would fill a bar for work that never happens.
+    #
+    # For the budget: it used to sum every source character, cached or not, so a
+    # turn could be refused as "too large" for work it was about to skip — a
+    # cached 200 000-char attachment plus a new 150 000-char one is 350 000 on
+    # paper and past the cap, while the real cost is the 150 000. That also
+    # contradicted the deadline below, which bounds real work.
+    #
     # Splitting here and again inside the masking call is pure string work,
     # microseconds against a network round trip.
     resolved: dict = {}
     total_pieces = 0
+    uncached_chars = 0
     for _s_idx, _source in enumerate(sources):
         _docs = _source.get('document', []) or []
         _metas = _source.get('metadata', []) or []
@@ -1850,6 +1833,28 @@ async def mask_sources_for_llm(
             resolved[(_s_idx, _d_idx)] = (_key, _hit)
             if _hit is None and isinstance(_doc, str) and _doc:
                 total_pieces += len(split_text_for_pii(_doc))
+                uncached_chars += len(_doc)
+
+    # Budget guard, before any POST. Charged across EVERY source, not per
+    # source: wall clock is a property of the request, and a per-source cap let
+    # N attachments multiply the real cost N times over. Past the budget the
+    # honest answer is an immediate refusal — the alternative is a request that
+    # masks for minutes and is refused anyway, which is precisely the
+    # wait-then-refuse the prompt path removed.
+    #
+    # `estimated_masking_seconds(0, chars)` prices everything as chunked work
+    # (there is no skeleton call on this path), so the admissible total is
+    # exactly `max_maskable_chars()` — the same number the prompt path allows,
+    # so the same document costs the same whether pasted or attached.
+    if estimated_masking_seconds(0, uncached_chars) > PII_INLET_TOTAL_BUDGET_S:
+        raise PiiMaskingBlockedError(
+            'These attachments are too large to mask safely. Remove one, or shorten them.'
+        )
+
+    # ONE bound for the whole request. Created here rather than per document so
+    # five attachments cannot open five times the fan-out at a pipeline that
+    # serializes NER on a single thread anyway.
+    semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
 
     _done_pieces = 0
 
@@ -1862,84 +1867,107 @@ async def mask_sources_for_llm(
     # C.2: open ONE aiohttp session for every chunk-masking call this request,
     # instead of one session per chunk. Same timeout/SSL as the existing inlet.
     timeout = aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=30)
-    async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
-        for src_idx, source in enumerate(sources):
-            docs = source.get('document', [])
-            metas = source.get('metadata', [])
-            src_meta = source.get('source', {}) or {}
 
-            masked_docs = []
-            for doc_idx, (doc, meta) in enumerate(zip(docs, metas)):
-                meta = meta if isinstance(meta, dict) else {}
-                # File-source marker so the vault records this PII as file/tool-sourced.
-                source_marker = {
-                    'type': src_meta.get('type'),
-                    'name': src_meta.get('name'),
-                    'file_id': meta.get('file_id'),
-                    'note_id': meta.get('note_id'),
-                }
-                # Mask the chunk via the external Presidio inlet BEFORE the wrap.
-                # _mask_long_text_via_pii_pipeline sub-chunks any document longer
-                # than the pipeline's token cap so its tail is never silently
-                # truncated (TRAU-513). Short docs take a single masking call.
-                _orig_doc = doc
-                cache_key, cached = resolved.get((src_idx, doc_idx), (None, None))
-                if cached is not None:
-                    doc, chunk_detections = cached
-                    _dbg_cached_docs += 1
-                else:
-                    doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
-                        request,
-                        doc,
-                        semaphore=semaphore,
-                        session=session,
-                        chat_id=chat_id,
-                        user=user,
-                        model_id=model_id,
-                        models=models if models is not None else request.app.state.MODELS,
-                        features=features,
-                        source_marker=source_marker,
-                        post_retries=PII_MASK_POST_RETRIES,
-                        on_piece=_piece_done,
-                    )
-                    # Only reached when the call RETURNED. A failure raises
-                    # PiiMaskingBlockedError straight past here, so a run that
-                    # blew up never leaves an entry to be mistaken for a success.
-                    if cache_key is not None:
-                        _masked_source_cache_put(cache_key, doc, chunk_detections)
-                masked_docs.append(doc)
+    async def _mask_every_source():
+        nonlocal _dbg_docs, _dbg_orig_chars, _dbg_cached_docs
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            for src_idx, source in enumerate(sources):
+                docs = source.get('document', [])
+                metas = source.get('metadata', [])
+                src_meta = source.get('source', {}) or {}
 
-                if PII_DEBUG:
-                    _dbg_docs += 1
-                    _dbg_orig_chars += len(_orig_doc) if isinstance(_orig_doc, str) else 0
-                if PII_DEBUG_FILE:
-                    _dbg_blocks.append(
-                        (
-                            _orig_doc if isinstance(_orig_doc, str) else str(_orig_doc),
-                            doc if isinstance(doc, str) else str(doc),
-                            f"{src_meta.get('name') or src_meta.get('type') or 'source'} doc={doc_idx}",
+                masked_docs = []
+                for doc_idx, (doc, meta) in enumerate(zip(docs, metas)):
+                    meta = meta if isinstance(meta, dict) else {}
+                    # File-source marker so the vault records this PII as file/tool-sourced.
+                    source_marker = {
+                        'type': src_meta.get('type'),
+                        'name': src_meta.get('name'),
+                        'file_id': meta.get('file_id'),
+                        'note_id': meta.get('note_id'),
+                    }
+                    # Mask the chunk via the external Presidio inlet BEFORE the wrap.
+                    # _mask_long_text_via_pii_pipeline sub-chunks any document longer
+                    # than the pipeline's token cap so its tail is never silently
+                    # truncated (TRAU-513). Short docs take a single masking call.
+                    _orig_doc = doc
+                    cache_key, cached = resolved.get((src_idx, doc_idx), (None, None))
+                    if cached is not None:
+                        doc, chunk_detections = cached
+                        _dbg_cached_docs += 1
+                    else:
+                        doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
+                            request,
+                            doc,
+                            semaphore=semaphore,
+                            session=session,
+                            chat_id=chat_id,
+                            user=user,
+                            model_id=model_id,
+                            models=models if models is not None else request.app.state.MODELS,
+                            features=features,
+                            source_marker=source_marker,
+                            post_retries=PII_MASK_POST_RETRIES,
+                            on_piece=_piece_done,
                         )
-                    )
+                        # Only reached when the call RETURNED. A failure raises
+                        # PiiMaskingBlockedError straight past here, so a run that
+                        # blew up never leaves an entry to be mistaken for a success.
+                        if cache_key is not None:
+                            _masked_source_cache_put(cache_key, doc, chunk_detections)
+                    masked_docs.append(doc)
 
-                # B2: tag each chunk-relative detection with the file + chunk it
-                # came from. The frontend slices the value out of the ORIGINAL
-                # chunk it already holds (citations) — no value travels here.
-                file_id = meta.get('file_id') or src_meta.get('id')
-                file_name = src_meta.get('name')
-                for d in chunk_detections:
-                    detections.append(
-                        {
-                            'type': d['type'],
-                            'start': d['start'],
-                            'end': d['end'],
-                            'fileId': file_id,
-                            'fileName': file_name,
-                            'docIdx': doc_idx,
-                        }
-                    )
+                    if PII_DEBUG:
+                        _dbg_docs += 1
+                        _dbg_orig_chars += len(_orig_doc) if isinstance(_orig_doc, str) else 0
+                    if PII_DEBUG_FILE:
+                        _dbg_blocks.append(
+                            (
+                                _orig_doc if isinstance(_orig_doc, str) else str(_orig_doc),
+                                doc if isinstance(doc, str) else str(doc),
+                                f"{src_meta.get('name') or src_meta.get('type') or 'source'} doc={doc_idx}",
+                            )
+                        )
 
-            masked_source = {**source, 'document': masked_docs}
-            masked_sources.append(masked_source)
+                    # B2: tag each chunk-relative detection with the file + chunk it
+                    # came from. The frontend slices the value out of the ORIGINAL
+                    # chunk it already holds (citations) — no value travels here.
+                    file_id = meta.get('file_id') or src_meta.get('id')
+                    file_name = src_meta.get('name')
+                    for d in chunk_detections:
+                        detections.append(
+                            {
+                                'type': d['type'],
+                                'start': d['start'],
+                                'end': d['end'],
+                                'fileId': file_id,
+                                'fileName': file_name,
+                                'docIdx': doc_idx,
+                            }
+                        )
+
+                masked_source = {**source, 'document': masked_docs}
+                masked_sources.append(masked_source)
+
+    # THE deadline. The check at the top of this function is a forecast — it
+    # prices the work from a modelled throughput and refuses before the first
+    # POST. Nothing bounded the actual run, so whenever the pipeline was slower
+    # than the model (cold start, contention, a degraded revision) the request
+    # kept going: per-POST socket timeouts x retries x every sub-chunk, with the
+    # chat request held open throughout. This turns that into a bounded wait and
+    # a refusal the user can act on.
+    #
+    # Fail-closed by construction: `wait_for` cancels the gather, so no
+    # partially-masked document is ever assembled, and the cache write sits
+    # AFTER the masking call inside the cancelled task — nothing half-finished
+    # is left behind for the next turn to serve.
+    try:
+        await asyncio.wait_for(_mask_every_source(), timeout=PII_INLET_TOTAL_BUDGET_S)
+    except asyncio.TimeoutError:
+        raise PiiMaskingBlockedError(
+            'Masking the attached files did not finish in time, so nothing was sent. '
+            'Try again, or use a smaller document.'
+        )
 
     if PII_DEBUG:
         log.info(
