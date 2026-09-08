@@ -61,6 +61,7 @@ from open_webui.routers.pipelines import (
     get_sorted_filters,
     process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
+    resolve_pii_masking_enforced,
 )
 from open_webui.routers.retrieval import (
     SearchForm,
@@ -1083,10 +1084,22 @@ async def _mask_text_via_pii_pipeline(
         models = request.app.state.MODELS
 
     # Decision 2 — empty-filter semantics. Masking is "expected" unless explicitly
-    # disabled via features.pii_masking=False (default-on).
+    # disabled via features.pii_masking=False (default-on)...
     features = features if isinstance(features, dict) else {}
     request_pii = features.get("pii_masking")
-    pii_expected = request_pii is not False
+
+    # ...EXCEPT when team policy mandates masking, which beats the per-request
+    # flag exactly as it already does on the prompt path (`routers/pipelines.py`:
+    # `if policy_enforced and filter_id in PII_FILTER_IDS`). Without this, a user
+    # under a mandated policy could switch the toggle off and send an
+    # attachment's contents to the LLM unmasked while their prompt stayed
+    # masked — defeating the enforcement layer through the file path alone.
+    #
+    # `resolve_pii_masking_enforced` is memoized per request (on `request.state`,
+    # keyed by user id) and fails closed, so this costs ONE permission lookup per
+    # request even though every source chunk passes through here.
+    policy_enforced = await resolve_pii_masking_enforced(request, user)
+    pii_expected = policy_enforced or request_pii is not False
 
     if model_id not in models:
         # Cannot resolve the filter machinery for an unknown model -> leak risk.
@@ -1164,6 +1177,14 @@ async def _mask_text_via_pii_pipeline(
             per_filter_valves = {}
         if isinstance(request_pii, bool):
             per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
+        # The second half of the same guard, and the load-bearing one: the
+        # pipeline decides solely from `UserValves.pii_masking_enabled` (it does
+        # not read `features` at all — see its early return on opt-out), so
+        # forcing `pii_expected` above without this would still hand it
+        # "do not mask". Applied LAST on purpose: reversing these two blocks
+        # gives the user's False the final word over the policy.
+        if policy_enforced:
+            per_filter_valves = {**per_filter_valves, "pii_masking_enabled": True}
         user_with_valves = {**base_user_dict, "valves": per_filter_valves}
 
         headers = {"Authorization": f"Bearer {key}"}

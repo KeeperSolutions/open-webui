@@ -103,6 +103,19 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _patch_policy(enforced):
+    """Pin the team PII-masking policy for one test.
+
+    Patched in the middleware namespace because that is where the name is bound
+    (`from open_webui.routers.pipelines import resolve_pii_masking_enforced`);
+    patching the router module would not affect the already-imported reference.
+    """
+    return patch(
+        "open_webui.utils.middleware.resolve_pii_masking_enforced",
+        AsyncMock(return_value=enforced),
+    )
+
+
 def _patch_mw_session(captured: list, *, behavior="echo", masked_text=None, detections=None):
     """Patch middleware.aiohttp.ClientSession.
 
@@ -339,10 +352,15 @@ def test_u7_empty_filters_pii_expected_blocks():
 
 
 def test_u8_empty_filters_not_pii_expected_passes():
-    """No filter pipeline AND masking explicitly disabled -> benign PASS."""
+    """No filter pipeline AND masking explicitly disabled -> benign PASS.
+
+    The opt-out is only valid while team policy does not mandate masking, so
+    that precondition is now pinned explicitly rather than left to whatever the
+    resolver makes of a MagicMock request (it fails closed, i.e. ENFORCED).
+    """
     captured = []
     msgs = [{"role": "user", "content": "q"}]
-    with _patch_mw_session(captured, behavior="echo"):
+    with _patch_mw_session(captured, behavior="echo"), _patch_policy(False):
         result, _, _ = _run(
             apply_source_context_to_messages(
                 _make_request(),
@@ -832,3 +850,66 @@ def test_u18_chat_time_retry_exhausted_still_fail_closed():
                 )
             )
     assert len(captured) == PII_MASK_POST_RETRIES  # tried exactly N times, then blocked
+
+
+# ---------------------------------------------------------------------------
+# U19  Team policy overrides a user who switched masking off
+# ---------------------------------------------------------------------------
+
+
+def test_u19_team_policy_overrides_a_user_who_disabled_masking():
+    """A mandated policy must beat `features.pii_masking = False` for FILE text
+    exactly as it already does for the prompt.
+
+    The prompt path resolves the policy and forces the valve back on
+    (`routers/pipelines.py`, `if policy_enforced and filter_id in PII_FILTER_IDS`).
+    This path decided from the request flag alone, so a user under a mandated
+    policy could switch the toggle off and send an attachment's contents to the
+    LLM unmasked — the prompt masked, the file not. That is the precise thing
+    the enforcement layer exists to prevent.
+    """
+    captured = []
+    msgs = [{"role": "user", "content": "q"}]
+    with _patch_mw_session(captured, behavior="mask", masked_text="[PERSON_1]"), _patch_policy(True):
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                msgs,
+                _file_sources("John Smith"),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": False},
+            )
+        )
+
+    assert captured, "policy mandates masking; the source text must reach the pipeline"
+    rendered = json.dumps(result)
+    assert "John Smith" not in rendered, "file PII reached the LLM despite a mandated policy"
+    assert "[PERSON_1]" in rendered
+
+
+def test_u20_without_a_mandated_policy_the_user_opt_out_still_holds():
+    """The other half: the policy must not become an unconditional override.
+    With no mandate, `pii_masking = False` still means no masking call."""
+    captured = []
+    msgs = [{"role": "user", "content": "q"}]
+    with _patch_mw_session(captured, behavior="mask", masked_text="[PERSON_1]"), _patch_policy(False):
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                msgs,
+                _file_sources("John Smith"),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": False},
+            )
+        )
+
+    assert captured == [], "nothing should be routed to Presidio when the user opted out"
+    assert "John Smith" in json.dumps(result)
