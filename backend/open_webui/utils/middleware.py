@@ -1385,7 +1385,9 @@ async def _mask_text_via_pii_pipeline(
     return masked, detections
 
 
-async def _mask_long_text_via_pii_pipeline(request, text, *, semaphore=None, **kwargs):
+async def _mask_long_text_via_pii_pipeline(
+    request, text, *, semaphore=None, on_piece=None, **kwargs
+):
     """Mask one source ``document`` that may exceed the external pipeline's
     per-call budget (TRAU-513). Splits the document into sub-chunks under the
     cap (boundary-aware — never cutting an entity), masks them CONCURRENTLY via
@@ -1421,9 +1423,23 @@ async def _mask_long_text_via_pii_pipeline(request, text, *, semaphore=None, **k
         return text, []
 
     pieces = split_text_for_pii(text)
+    def _note_piece():
+        """Report one finished sub-chunk, never letting the report break the
+        masking. `asyncio.gather` below runs without `return_exceptions`, so an
+        exception escaping here would abandon a half-masked document — a
+        progress bar must not be able to do that."""
+        if on_piece is None:
+            return
+        try:
+            on_piece()
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] progress callback failed: {e}')
+
     if len(pieces) == 1:
         # Fast path: short doc -> unchanged single-call behaviour.
-        return await _mask_text_via_pii_pipeline(request, text, **kwargs)
+        result = await _mask_text_via_pii_pipeline(request, text, **kwargs)
+        _note_piece()
+        return result
 
     sem = semaphore if semaphore is not None else asyncio.Semaphore(PII_INLET_CONCURRENCY)
     masked_pieces: dict[int, str] = {}
@@ -1443,6 +1459,7 @@ async def _mask_long_text_via_pii_pipeline(request, text, *, semaphore=None, **k
             }
             for d in piece_dets
         ]
+        _note_piece()
 
     await asyncio.gather(
         *(_mask_piece(i, start, piece) for i, (start, piece) in enumerate(pieces))
@@ -1642,6 +1659,105 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     return context_string
 
 
+# Strong references to in-flight progress-event tasks. `asyncio.create_task`
+# only holds a WEAK reference to the task it schedules — with nothing else
+# referencing it, the task can be garbage-collected before it runs (ruff
+# RUF006). This set is that reference; `_pii_progress_task_done` below
+# removes each task once it finishes.
+_pii_progress_tasks: set = set()
+
+
+def _pii_progress_task_done(task):
+    _pii_progress_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    # A raised exception here must never surface as an unretrieved-task-
+    # exception warning — a progress event is diagnostics, not the masking
+    # path it reports on.
+    if exc is not None:
+        log.debug(f'[pii_chunking] progress event task failed: {exc}')
+
+
+def _should_emit_pii_progress(done, total):
+    """Whether a PII-masking progress update is worth persisting.
+
+    Each status event drives a non-atomic read-modify-write of the WHOLE chat
+    row (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
+    `update_chat_by_id`, no optimistic-concurrency check): fetch the chat,
+    append to `statusHistory`, write the entire document back. Emitting once
+    per chunk on a large paste (dozens to ~100 chunks, up to
+    `PII_INLET_CONCURRENCY` of those in flight concurrently) turns into that
+    many concurrent whole-row rewrites, which can clobber each other's
+    appended entries. Throttle to roughly twenty events total instead: always
+    the first completion and the terminal one (so the bar always starts and
+    always reaches 100%), otherwise only every ~5% of the work.
+
+    Twenty rather than ten because raising `PII_INLET_TOTAL_BUDGET_S`
+    multiplied the largest admissible chunk count by about five. At ten events
+    a ~190 000-character paste would update once every ~80s of an eight-minute
+    wait — indistinguishable from a hung request. Not raised further because
+    the cost here is concurrent whole-row rewrites, not websocket traffic, and
+    the shimmer in `StatusItem.svelte` already carries liveness between
+    updates; the number does not have to.
+    """
+    if done <= 1 or done >= total:
+        return True
+    step = max(1, total // 20)
+    return done % step == 0
+
+
+def _pii_progress_emitter(event_emitter):
+    """Adapt a synchronous `on_progress(done, total)` callback to the async
+    status-event channel.
+
+    Ported from the prompt path (`fix/TRAU-543`) so an attachment reports the
+    same signal, through the same renderer, as a large paste: masking a
+    document costs the same minutes and showed nothing at all. Two producers
+    now call it — the inlet's chunked prompt masking there, and
+    `mask_sources_for_llm` here.
+
+    The callback fires from inside `asyncio.gather`, so it cannot await; the
+    event is scheduled instead. Best-effort by construction — a progress event
+    that fails to emit must never affect masking, which is a security path:
+    the producer calls `on_progress` from inside `_mask_piece`'s retry `try`,
+    so a synchronous exception escaping here would be caught as a transient
+    chunk failure and cause a spurious re-POST of an already-masked chunk.
+    """
+
+    def on_progress(done, total):
+        try:
+            # Inside the try on purpose: `done >= total` here and inside the
+            # throttle helper is a comparison on whatever the producer hands
+            # us. If a future change ever passes a non-comparable `total`
+            # (e.g. None), that must be swallowed too — not just the
+            # scheduling below it — or the propagating TypeError lands in
+            # `_mask_piece`'s retry `try` and triggers a spurious re-POST of
+            # an already-masked chunk.
+            if not _should_emit_pii_progress(done, total):
+                return
+            task = asyncio.create_task(
+                event_emitter(
+                    {
+                        'type': 'status',
+                        'data': {
+                            'action': 'pii_masking',
+                            'description': 'Masking sensitive data',
+                            'count': done,
+                            'total': total,
+                            'done': done >= total,
+                        },
+                    }
+                )
+            )
+            _pii_progress_tasks.add(task)
+            task.add_done_callback(_pii_progress_task_done)
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] could not emit progress: {e}')
+
+    return on_progress
+
+
 async def mask_sources_for_llm(
     request: Request,
     sources: list,
@@ -1650,6 +1766,7 @@ async def mask_sources_for_llm(
     model_id: Optional[str] = None,
     models=None,
     features=None,
+    on_progress=None,
 ) -> tuple[list, list[dict]]:
     """
     Task 3.6 (file/tool-attachment PII): route every source ``document`` chunk
@@ -1711,11 +1828,42 @@ async def mask_sources_for_llm(
     cache_enabled = bool(chat_id) and _pii_expected
     _dbg_cached_docs = 0
 
+    # Resolve every cache lookup up front so the progress total is the work
+    # actually left to do. Counting DOCUMENTS would leave the bar at 0/1 for a
+    # whole two-minute wait (one attachment is one document but ~93 POSTs), and
+    # counting cached documents would fill a bar for work that never happens.
+    # Splitting here and again inside the masking call is pure string work,
+    # microseconds against a network round trip.
+    resolved: dict = {}
+    total_pieces = 0
+    for _s_idx, _source in enumerate(sources):
+        _docs = _source.get('document', []) or []
+        _metas = _source.get('metadata', []) or []
+        for _d_idx, (_doc, _meta) in enumerate(zip(_docs, _metas)):
+            _meta = _meta if isinstance(_meta, dict) else {}
+            _key = (
+                _masked_source_cache_key(chat_id, _meta.get('file_id'), _doc)
+                if cache_enabled and isinstance(_doc, str)
+                else None
+            )
+            _hit = _masked_source_cache_get(_key) if _key is not None else None
+            resolved[(_s_idx, _d_idx)] = (_key, _hit)
+            if _hit is None and isinstance(_doc, str) and _doc:
+                total_pieces += len(split_text_for_pii(_doc))
+
+    _done_pieces = 0
+
+    def _piece_done():
+        nonlocal _done_pieces
+        _done_pieces += 1
+        if on_progress is not None and total_pieces:
+            on_progress(_done_pieces, total_pieces)
+
     # C.2: open ONE aiohttp session for every chunk-masking call this request,
     # instead of one session per chunk. Same timeout/SSL as the existing inlet.
     timeout = aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=30)
     async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
-        for source in sources:
+        for src_idx, source in enumerate(sources):
             docs = source.get('document', [])
             metas = source.get('metadata', [])
             src_meta = source.get('source', {}) or {}
@@ -1735,14 +1883,7 @@ async def mask_sources_for_llm(
                 # than the pipeline's token cap so its tail is never silently
                 # truncated (TRAU-513). Short docs take a single masking call.
                 _orig_doc = doc
-                cache_key = (
-                    _masked_source_cache_key(chat_id, meta.get('file_id'), doc)
-                    if cache_enabled and isinstance(doc, str)
-                    else None
-                )
-                cached = (
-                    _masked_source_cache_get(cache_key) if cache_key is not None else None
-                )
+                cache_key, cached = resolved.get((src_idx, doc_idx), (None, None))
                 if cached is not None:
                     doc, chunk_detections = cached
                     _dbg_cached_docs += 1
@@ -1759,6 +1900,7 @@ async def mask_sources_for_llm(
                         features=features,
                         source_marker=source_marker,
                         post_retries=PII_MASK_POST_RETRIES,
+                        on_piece=_piece_done,
                     )
                     # Only reached when the call RETURNED. A failure raises
                     # PiiMaskingBlockedError straight past here, so a run that
@@ -1838,6 +1980,7 @@ async def apply_source_context_to_messages(
     model_id: Optional[str] = None,
     models=None,
     features=None,
+    on_progress=None,
 ) -> tuple[list, list[dict], list]:
     """
     Build source context from citation sources and apply to messages.
@@ -1867,6 +2010,7 @@ async def apply_source_context_to_messages(
             model_id=model_id,
             models=models,
             features=features,
+            on_progress=on_progress,
         )
     else:
         masked_sources, detections = sources, []
@@ -3850,6 +3994,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             model_id=form_data['model'],
             models=models,
             features=features,
+            # Same signal, same renderer as a large paste: masking a document
+            # costs the same minutes and used to show nothing at all.
+            on_progress=(_pii_progress_emitter(event_emitter) if event_emitter else None),
         )
         # The native tool-call loop re-renders metadata['sources'] into the RAG
         # template. Hand it the PII-masked copy so that re-render cannot put

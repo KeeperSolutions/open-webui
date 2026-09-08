@@ -1207,3 +1207,298 @@ def test_u30_cached_detections_are_still_tagged_with_their_file():
     assert first_dets and first_dets[0]["fileId"] == "file-1"
     assert first_dets[0]["fileName"] == "doc.pdf"
     assert first_dets[0]["docIdx"] == 0
+
+
+# ---------------------------------------------------------------------------
+# U31-U33  Masking progress for attachments
+#
+# The prompt path reports progress per sub-chunk (`fix/TRAU-543`), so a large
+# paste shows "Masking sensitive data… 8/91" instead of a dead spinner. A
+# document costs the same minutes and showed nothing at all. Same signal, same
+# renderer — only the producer is new.
+# ---------------------------------------------------------------------------
+
+
+def _progress_call(sources, *, chat_id="chat-1", captured=None):
+    """Run the hook with a recording progress callback. Returns [(done, total)]."""
+    progress: list = []
+    captured = [] if captured is None else captured
+    with _patch_mw_session(captured, behavior="echo"), _patch_policy(False):
+        _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                sources,
+                "q",
+                chat_id=chat_id,
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+                on_progress=lambda done, total: progress.append((done, total)),
+            )
+        )
+    return progress
+
+
+def test_u31_progress_counts_sub_chunks_not_documents():
+    """One attachment is one document but many POSTs. Reporting documents would
+    sit at 0/1 for the whole wait, which is the dead spinner this replaces."""
+    text = "x" * (PII_MASK_CHUNK_CHARS * 3 + 10)
+    expected_pieces = len(_split_text_for_pii(text))
+    assert expected_pieces > 1, "fixture must actually split"
+
+    progress = _progress_call(_file_sources(text))
+
+    assert progress, "a chunked document reported no progress at all"
+    assert {t for _d, t in progress} == {expected_pieces}, "the total must not move"
+    assert sorted(d for d, _t in progress) == list(range(1, expected_pieces + 1))
+
+
+def test_u32_the_total_spans_every_attachment_not_each_one_separately():
+    """Two files masked in one turn are one wait, so they are one bar. A
+    per-file total would restart the count halfway through."""
+    text = "y" * (PII_MASK_CHUNK_CHARS * 2 + 10)
+    per_file = len(_split_text_for_pii(text))
+    sources = _file_sources(text, name="a.pdf", file_id="f1") + _file_sources(
+        text + "z", name="b.pdf", file_id="f2"
+    )
+
+    progress = _progress_call(sources)
+
+    totals = {t for _d, t in progress}
+    assert len(totals) == 1, f"the total changed mid-run: {totals}"
+    assert totals.pop() >= per_file * 2
+
+
+def test_u33_cached_documents_are_not_counted_as_work():
+    """After the per-chat cache warms, a turn does no masking. Showing a bar
+    that fills instantly would claim work that never happened."""
+    text = "x" * (PII_MASK_CHUNK_CHARS * 3 + 10)
+    sources = _file_sources(text)
+
+    first = _progress_call(sources)
+    assert first, "the first turn does the work and must report it"
+
+    posts: list = []
+    second = _progress_call(sources, captured=posts)
+    assert posts == [], "guard: the second turn must be a cache hit"
+    assert second == [], "a fully cached turn reported masking progress it never did"
+
+
+def test_u34_a_broken_progress_callback_cannot_break_masking():
+    """Progress is diagnostics. Masking is a security path — it must not fail
+    because the thing watching it did."""
+    text = "x" * (PII_MASK_CHUNK_CHARS * 2 + 10)
+
+    def _boom(done, total):
+        raise RuntimeError("status channel died")
+
+    captured = []
+    with _patch_mw_session(captured, behavior="mask", masked_text="[PERSON_1]"), _patch_policy(
+        False
+    ):
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources(text),
+                "q",
+                chat_id="chat-boom",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": True},
+                on_progress=_boom,
+            )
+        )
+
+    assert captured, "masking must still have run"
+    assert "[PERSON_1]" in json.dumps(result)
+
+
+# ---------------------------------------------------------------------------
+# U35-U40  The progress emitter itself
+#
+# Ported verbatim with `_pii_progress_emitter` / `_should_emit_pii_progress`
+# from the prompt path (`fix/TRAU-543`), because copying ~100 lines of code to
+# a branch and leaving its tests behind is how the copy quietly rots. The
+# subject is the emitter, not the producer; the file-path producer that now
+# also calls it is covered by U31-U34 above.
+# ---------------------------------------------------------------------------
+
+import open_webui.utils.middleware as M
+
+def test_chat_path_emits_a_pii_masking_status_event():
+    """The user waits ~65 s for a 50-page paste. Silence reads as a hang, so the
+    wait must be visible; the final event must mark itself done or the shimmer
+    never stops.
+
+    Driven inside a running loop on purpose: the emitter schedules with
+    `asyncio.create_task`, which has no loop to attach to outside one — the
+    production caller is always inside `asyncio.gather`."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 2)
+        on_progress(2, 2)
+        await asyncio.sleep(0)  # let the scheduled tasks run
+        await asyncio.sleep(0)
+
+    asyncio.run(drive())
+
+    assert [e['data']['action'] for e in events] == ['pii_masking', 'pii_masking']
+    assert events[0]['data']['done'] is False
+    assert events[-1]['data']['done'] is True
+    assert events[-1]['data']['count'] == events[-1]['data']['total'] == 2
+
+def test_progress_swallows_a_synchronously_raising_emitter():
+    """If `event_emitter(...)` itself raises before returning a coroutine (a
+    non-async callable, or one that blows up before yielding), `on_progress`
+    must swallow it. The producer calls `on_progress` from inside
+    `_mask_piece`'s retry `try` — a synchronous exception escaping here would
+    be caught there as a transient chunk failure and cause a spurious re-POST
+    of an already-masked chunk."""
+    import open_webui.utils.middleware as M
+
+    def emitter(event):
+        raise RuntimeError('boom')
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 1)  # must not raise
+
+    asyncio.run(drive())  # must not raise
+
+def test_progress_retrieves_a_raising_coroutines_exception_via_the_done_callback():
+    """The event is scheduled with `asyncio.create_task`, so `event_emitter`'s
+    own body runs later, off the `on_progress` call stack — meaning an
+    exception raised there does NOT propagate to the caller regardless of
+    whether anything retrieves it. A bare "on_progress must not raise"
+    assertion is therefore true even for the bare `asyncio.create_task(...)`
+    call with no stored reference and no done-callback: Python only surfaces
+    an un-retrieved task exception later, through the event loop's default
+    exception handler, when the task is garbage-collected. What the
+    strong-reference set + `_pii_progress_task_done` actually buy is that the
+    exception gets RETRIEVED (`task.exception()`) instead of leaking to that
+    default handler. Assert the handler is never invoked — that is the
+    property this mechanism exists for."""
+    import gc
+
+    import open_webui.utils.middleware as M
+
+    async def emitter(event):
+        raise RuntimeError('boom')
+
+    handler_calls = []
+
+    async def drive():
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda _loop, context: handler_calls.append(context))
+
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 1)  # must not raise
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        # The done-callback should already have discarded the task from the
+        # module-level set by now. Drop whatever reference is left and force
+        # a collection so an un-retrieved exception can't hide behind GC
+        # timing — if the callback didn't run, this is what would surface it.
+        M._pii_progress_tasks.clear()
+        gc.collect()
+
+    asyncio.run(drive())  # must not raise
+
+    assert handler_calls == [], (
+        "the coroutine's exception must be retrieved via the done-callback, "
+        f"not surfaced to asyncio's default exception handler: {handler_calls}"
+    )
+
+def test_progress_swallows_a_malformed_total_raised_by_the_throttle_guard_itself():
+    """`_should_emit_pii_progress` starts with `if done <= 1 or done >=
+    total`: with `done=1` the `or` short-circuits before `total` is ever
+    compared, so `done=1` can't exercise this. `done=2` forces the second
+    operand to actually evaluate `done >= total`, so a non-comparable
+    `total` (e.g. None) raises a `TypeError` from INSIDE the guard call
+    itself — the exact statement whose position (inside vs. outside the
+    `try`) matters: if a future producer change ever passed such a `total`,
+    that must be swallowed like a scheduling failure, not propagate out of
+    `on_progress` and into `_mask_piece`'s retry `try`, where it would look
+    like a transient chunk failure and trigger a spurious re-POST of an
+    already-masked chunk."""
+    import open_webui.utils.middleware as M
+
+    async def emitter(event):
+        pass
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(2, None)  # must not raise — done=2 skips the done<=1 short-circuit
+
+    asyncio.run(drive())  # must not raise
+
+def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal_one():
+    """Every status event triggers a non-atomic whole-chat-row rewrite
+    (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
+    `update_chat_by_id`, no optimistic-concurrency check). Emitting per-chunk
+    on a large paste means dozens of concurrent whole-row rewrites that can
+    clobber each other — so completions must be throttled, and the terminal
+    one (which stops the shimmer) must never be among the dropped ones.
+
+    Twenty, not ten: with a 600s budget the largest admissible paste is ~104
+    chunks, and ten events would leave ~80s of an eight-minute wait with a
+    frozen number."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        for done in range(1, 101):
+            on_progress(done, 100)
+        for _ in range(200):
+            await asyncio.sleep(0)
+
+    asyncio.run(drive())
+
+    counts = [e['data']['count'] for e in events]
+    assert counts[0] == 1, 'first completion must always be reported'
+    assert counts[-1] == 100, 'last event reported must be the terminal one'
+    assert events[-1]['data']['done'] is True, 'terminal event must be marked done'
+    assert 2 <= len(events) <= 21, f'expected roughly twenty throttled events, got {len(events)}'
+
+def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():
+    """`total // 10` is 0 for any `total < 10`; the throttle must guard
+    against a modulo-by-zero there and still guarantee the first and terminal
+    events are reported."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 3)
+        on_progress(2, 3)
+        on_progress(3, 3)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(drive())  # must not raise (no ZeroDivisionError)
+
+    counts = [e['data']['count'] for e in events]
+    assert counts[0] == 1
+    assert counts[-1] == 3
+    assert events[-1]['data']['done'] is True
