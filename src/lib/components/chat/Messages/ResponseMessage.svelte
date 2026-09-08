@@ -56,6 +56,7 @@
 	import Error from './Error.svelte';
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
+	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -103,6 +104,13 @@
 				output?: string;
 				files?: { name: string; url: string }[];
 			};
+		}[];
+		connectorSuggestions?: {
+			connector: string;
+			name: string;
+			description: string;
+			icon: string;
+			connect_url: string;
 		}[];
 		info?: {
 			openai?: boolean;
@@ -913,6 +921,10 @@
 
 							{#if message.code_executions}
 								<CodeExecutions codeExecutions={message.code_executions} />
+							{/if}
+
+							{#if message.connectorSuggestions}
+								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
 							{/if}
 						</div>
 					</div>

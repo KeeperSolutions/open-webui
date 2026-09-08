@@ -42,10 +42,12 @@ from open_webui.env import (
 )
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
+from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.models.groups import Groups
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
 from open_webui.utils.chat_id import is_saved_chat_id
+from open_webui.utils.connector_registry import CONNECTOR_REGISTRY
 from open_webui.tools.builtin import (
     add_memory,
     calculate_timestamp,
@@ -56,6 +58,8 @@ from open_webui.tools.builtin import (
     delete_automation,
     delete_calendar_event,
     delete_memory,
+    drive_read,
+    drive_search,
     edit_image,
     execute_code,
     fetch_url,
@@ -86,6 +90,7 @@ from open_webui.tools.builtin import (
     search_memories,
     search_notes,
     search_web,
+    suggest_connector,
     timer,
     toggle_automation,
     update_automation,
@@ -678,6 +683,20 @@ async def get_builtin_tools(
         and await has_user_permission('web_search')
     ):
         builtin_functions.extend([search_web, fetch_url])
+
+    # Connectors - functional access once the user has connected the account (not gated by toolIds)
+    CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read]}
+    if is_builtin_tool_enabled('connectors'):
+        user_id = user.get('id')
+        all_connected = True
+        for connector in CONNECTOR_REGISTRY:
+            if user_id and await ConnectorConnections.get_by_user_and_connector(user_id, connector['id']):
+                builtin_functions.extend(CONNECTOR_FUNCTIONS.get(connector['id'], []))
+            else:
+                all_connected = False
+
+        if not all_connected:
+            builtin_functions.append(suggest_connector)
 
     # Add image generation/edit tools if builtin category enabled,
     # globally enabled, and allowed by model capability.

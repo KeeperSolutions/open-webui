@@ -4,8 +4,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import { getGoogleDriveStatus, disconnectGoogleDrive } from '$lib/apis/connectors';
+	import { connectConnector, getGoogleDriveStatus, disconnectGoogleDrive } from '$lib/apis/connectors';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import UserSettingSection from './UserSettingSection.svelte';
@@ -23,7 +22,7 @@
 	};
 
 	const connectHandler = () => {
-		window.location.href = `${WEBUI_API_BASE_URL}/connectors/google-drive/connect`;
+		connectConnector('/connectors/google-drive/connect');
 	};
 
 	const disconnectHandler = async () => {

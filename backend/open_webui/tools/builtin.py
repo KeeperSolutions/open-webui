@@ -58,6 +58,7 @@ from open_webui.tasks import stop_item_tasks
 from open_webui.events import EVENTS, publish_event
 from open_webui.socket.main import sio
 from open_webui.utils.chat_id import is_saved_chat_id
+from open_webui.utils.connector_registry import CONNECTOR_REGISTRY
 from open_webui.utils.notifications import notify_target
 from open_webui.utils.sanitize import sanitize_code
 
@@ -4360,3 +4361,211 @@ async def delete_calendar_event(
     except Exception as e:
         log.exception(f'delete_calendar_event error: {e}')
         return json.dumps({'error': str(e)})
+
+
+# =============================================================================
+# CONNECTORS
+# =============================================================================
+# OAuth-linked external accounts, exposed once the user connects them (see get_builtin_tools).
+
+GOOGLE_DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
+
+GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES = {
+    'application/vnd.google-apps.document': 'text/plain',
+    'application/vnd.google-apps.spreadsheet': 'text/csv',
+    'application/vnd.google-apps.presentation': 'text/plain',
+}
+
+DRIVE_MAX_RESPONSE_BYTES = 100_000
+
+
+async def drive_search(
+    query: str,
+    __user__: dict = None,
+) -> str:
+    """
+    Search the current user's Google Drive (including shared drives) by file name or content.
+
+    :param query: Search query matched against file name and content
+    :return: JSON with matching files (id, name, mime_type, modified_time, web_link) - use the id with drive_read to fetch a file's contents
+    """
+    import httpx
+
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    access_token = await get_valid_access_token(user_id) if user_id else None
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    try:
+        escaped_query = query.replace('\\', '\\\\').replace("'", "\\'")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                GOOGLE_DRIVE_FILES_URL,
+                headers={'Authorization': f'Bearer {access_token}'},
+                params={
+                    'q': f"fullText contains '{escaped_query}' or name contains '{escaped_query}'",
+                    'includeItemsFromAllDrives': 'true',
+                    'supportsAllDrives': 'true',
+                    'fields': 'files(id,name,mimeType,modifiedTime,webViewLink)',
+                    'pageSize': 10,
+                },
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive search failed: {response.status_code} {response.text}')
+            return json.dumps({'error': 'Failed to search Google Drive.'})
+
+        files = response.json().get('files', [])
+        return json.dumps(
+            {
+                'results': [
+                    {
+                        'id': f['id'],
+                        'name': f['name'],
+                        'mime_type': f['mimeType'],
+                        'modified_time': f.get('modifiedTime'),
+                        'web_link': f.get('webViewLink'),
+                    }
+                    for f in files
+                ]
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_search error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_read(
+    file_id: str,
+    __user__: dict = None,
+) -> str:
+    """
+    Read the contents of a Google Drive file by id (as returned by drive_search).
+
+    Google Docs/Sheets/Slides are exported to plain text/CSV. Other files (e.g. PDF, DOCX)
+    are downloaded directly if the owner allows it. Google Vids are not supported yet.
+    Large files are truncated with a note.
+
+    :param file_id: The Google Drive file id to read
+    :return: The file's text content, or an error message
+    """
+    import httpx
+    from urllib.parse import quote
+
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    access_token = await get_valid_access_token(user_id) if user_id else None
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+
+        async with httpx.AsyncClient() as client:
+            metadata_response = await client.get(
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                headers=headers,
+                params={'fields': 'mimeType,capabilities(canDownload)', 'supportsAllDrives': 'true'},
+            )
+
+            if metadata_response.status_code != 200:
+                log.error(
+                    f'Google Drive metadata fetch failed: {metadata_response.status_code} {metadata_response.text}'
+                )
+                return json.dumps({'error': 'Failed to read this file from Google Drive.'})
+
+            metadata = metadata_response.json()
+            mime_type = metadata['mimeType']
+
+            if mime_type in GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES:
+                content_response = await client.get(
+                    f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}/export',
+                    headers=headers,
+                    params={'mimeType': GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES[mime_type]},
+                )
+            elif mime_type.startswith('application/vnd.google-apps.'):
+                return json.dumps({'error': f"This file's format ({mime_type}) can't be read in the first release."})
+            else:
+                if not metadata.get('capabilities', {}).get('canDownload', True):
+                    return json.dumps({'error': 'The owner has restricted downloading of this file.'})
+
+                content_response = await client.get(
+                    f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                    headers=headers,
+                    params={'alt': 'media', 'supportsAllDrives': 'true'},
+                )
+
+        if content_response.status_code != 200:
+            log.error(f'Google Drive content fetch failed: {content_response.status_code} {content_response.text}')
+            return json.dumps({'error': 'Failed to read this file from Google Drive.'})
+
+        content_bytes = content_response.content
+        truncated = len(content_bytes) > DRIVE_MAX_RESPONSE_BYTES
+        content = content_bytes[:DRIVE_MAX_RESPONSE_BYTES].decode('utf-8', errors='replace')
+        if truncated:
+            content += '\n\n[Content truncated - file exceeds the maximum readable size.]'
+
+        return content
+    except Exception as e:
+        log.exception(f'drive_read error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def suggest_connector(
+    connector_id: str,
+    __user__: dict = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Suggest connecting a not-yet-connected connector (docstring replaced below with names).
+
+    :param connector_id: The id of the connector to suggest
+    :return: Confirmation that the suggestion was shown to the user
+    """
+    from open_webui.models.connector_connections import ConnectorConnections
+    from open_webui.utils.connector_registry import get_connector
+
+    connector = get_connector(connector_id)
+    if not connector:
+        return json.dumps({'error': f'Unknown connector: {connector_id}'})
+
+    user_id = (__user__ or {}).get('id')
+    if user_id and await ConnectorConnections.get_by_user_and_connector(user_id, connector_id):
+        return json.dumps({'status': 'already_connected', 'message': f'{connector["name"]} is already connected.'})
+
+    if __event_emitter__:
+        await __event_emitter__(
+            {
+                'type': 'chat:message:connector_suggestion',
+                'data': {
+                    'connector': connector['id'],
+                    'name': connector['name'],
+                    'description': connector['description'],
+                    'icon': connector['icon'],
+                    'connect_url': connector['connect_url'],
+                },
+            }
+        )
+
+    return json.dumps({'status': 'suggested', 'message': f'Suggested the {connector["name"]} connector to the user.'})
+
+
+# Built once at import time - the tool spec cache below keys off function identity.
+_connector_names = ', '.join(c['name'] for c in CONNECTOR_REGISTRY)
+suggest_connector.__doc__ = f"""
+Suggest connecting {_connector_names} when the user's request needs data from it and it
+isn't connected yet - call this instead of guessing with knowledge base or web search tools.
+
+Before calling this, tell the user in one short sentence that the connector isn't connected
+for this conversation, so you can't do what they asked yet. After calling this, add one short
+closing sentence inviting them to connect it so you can continue.
+
+:param connector_id: The id of the connector to suggest, one of:
+""" + '\n'.join(f'    - {c["id"]}: {c["name"]} ({c["description"]})' for c in CONNECTOR_REGISTRY) + """
+:return: Confirmation that the suggestion was shown to the user
+"""

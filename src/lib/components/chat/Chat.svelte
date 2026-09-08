@@ -1113,6 +1113,12 @@
 							message.sources = [data];
 						}
 					}
+				} else if (type === 'chat:message:connector_suggestion') {
+					if (message?.connectorSuggestions) {
+						message.connectorSuggestions.push(data);
+					} else {
+						message.connectorSuggestions = [data];
+					}
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
 					const toastContent = data?.content ?? '';

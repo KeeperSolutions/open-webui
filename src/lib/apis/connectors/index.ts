@@ -1,5 +1,9 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+export const connectConnector = (connectUrl: string) => {
+	window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+};
+
 export const getGoogleDriveStatus = async (token: string) => {
 	let error = null;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/connectors/google-drive/status`, {
