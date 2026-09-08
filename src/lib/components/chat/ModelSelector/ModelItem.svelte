@@ -4,7 +4,7 @@
 	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { mobile, settings, user } from '$lib/stores';
+	import { isTouchDevice, settings, user } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { longPress } from '$lib/utils/longPress';
 
@@ -60,7 +60,7 @@
 	data-arrow-selected={index === selectedModelIdx}
 	data-value={item.value}
 	use:longPress={{
-		enabled: $mobile && !selectionOnly,
+		enabled: $isTouchDevice && !selectionOnly,
 		onLongPress: () => {
 			showMenu = true;
 		}
@@ -279,7 +279,7 @@
 			>
 				<button
 					aria-label={`${$i18n.t('More Options')}`}
-					class="flex {$mobile ? 'invisible' : ''}"
+					class="flex {$isTouchDevice ? 'invisible' : ''}"
 					on:click={(e) => {
 						e.preventDefault();
 						e.stopPropagation();

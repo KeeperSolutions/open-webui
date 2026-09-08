@@ -20,6 +20,7 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 	let timeout: ReturnType<typeof setTimeout> | null = null;
 	let origin: { x: number; y: number } | null = null;
+	let firedLongPress = false;
 
 	// Live while the click produced by the hold still has to be swallowed.
 	let swallowTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -39,6 +40,7 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 	const onTouchStart = (event: TouchEvent) => {
 		cancel();
 		stopSwallowingClick();
+		firedLongPress = false;
 
 		if (!isEnabled() || event.touches.length !== 1) return;
 
@@ -48,11 +50,25 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 		timeout = setTimeout(() => {
 			timeout = null;
 			origin = null;
-			startSwallowingClick();
+			firedLongPress = true;
 
 			current.onLongPress();
 			navigator.vibrate?.(10);
 		}, current.duration ?? DEFAULT_DURATION_MS);
+	};
+
+	const onTouchEnd = () => {
+		cancel();
+
+		if (firedLongPress) {
+			firedLongPress = false;
+			startSwallowingClick();
+		}
+	};
+
+	const onTouchCancel = () => {
+		cancel();
+		firedLongPress = false;
 	};
 
 	// A press that turns into a scroll is not a long press.
@@ -79,6 +95,8 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 	// On document, because a listener here would lose the race when the node handles the click itself.
 	const onClickCapture = (event: MouseEvent) => {
+		if (!(event.target instanceof Node) || !node.contains(event.target)) return;
+
 		stopSwallowingClick();
 
 		event.preventDefault();
@@ -114,8 +132,8 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 	node.addEventListener('touchstart', onTouchStart, { passive: true });
 	node.addEventListener('touchmove', onTouchMove, { passive: true });
-	node.addEventListener('touchend', cancel);
-	node.addEventListener('touchcancel', cancel);
+	node.addEventListener('touchend', onTouchEnd);
+	node.addEventListener('touchcancel', onTouchCancel);
 	node.addEventListener('contextmenu', onContextMenu);
 
 	return {
@@ -126,6 +144,7 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 			if (!isEnabled()) {
 				cancel();
 				stopSwallowingClick();
+				firedLongPress = false;
 			}
 		},
 		destroy() {
@@ -134,8 +153,8 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 
 			node.removeEventListener('touchstart', onTouchStart);
 			node.removeEventListener('touchmove', onTouchMove);
-			node.removeEventListener('touchend', cancel);
-			node.removeEventListener('touchcancel', cancel);
+			node.removeEventListener('touchend', onTouchEnd);
+			node.removeEventListener('touchcancel', onTouchCancel);
 			node.removeEventListener('contextmenu', onContextMenu);
 		}
 	};

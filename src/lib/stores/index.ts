@@ -39,6 +39,7 @@ export const appData = writable(null);
 export const MODEL_DOWNLOAD_POOL = writable({});
 
 export const mobile = writable(false);
+export const isTouchDevice = writable(false);
 
 export const socket: Writable<null | Socket> = writable(null);
 export const socketConnected: Writable<boolean> = writable(true);

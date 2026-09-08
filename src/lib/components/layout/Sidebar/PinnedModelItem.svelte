@@ -4,7 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { mobile, theme } from '$lib/stores';
+	import { isTouchDevice, theme } from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -54,7 +54,7 @@
 		</a>
 
 		<!-- Touch devices have no hover, so the unpin button stays out on mobile. -->
-		{#if ($mobile || mouseOver) && onUnpin}
+		{#if ($isTouchDevice || mouseOver) && onUnpin}
 			<div class="absolute right-1 inset-y-0 mr-1.5 flex items-center">
 				<Tooltip content={$i18n.t('Unpin')} className="flex items-center">
 					<button

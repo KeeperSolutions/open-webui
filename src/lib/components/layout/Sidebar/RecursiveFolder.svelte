@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
-	import { chatId, mobile, selectedFolder, showSidebar, user } from '$lib/stores';
+	import { chatId, mobile, isTouchDevice, selectedFolder, showSidebar, user } from '$lib/stores';
 
 	import {
 		deleteFolderById,
@@ -741,8 +741,8 @@
 		<div
 			class="w-full group"
 			use:longPress={{
-				enabled: $mobile && !edit && canOpenFolderMenu,
-				suppressNativeMenu: $mobile && !edit,
+				enabled: $isTouchDevice && !edit && canOpenFolderMenu,
+				suppressNativeMenu: $isTouchDevice && !edit,
 				onLongPress: () => {
 					menuOpen = true;
 				}
@@ -763,7 +763,7 @@
 					}
 				}}
 				on:dblclick={(e) => {
-					if ($mobile) return;
+					if ($isTouchDevice) return;
 					if (folders[folderId]?.shared && folders[folderId]?.permission !== 'write') return;
 					if (clickTimer) {
 						clearTimeout(clickTimer); // cancel the single-click action
@@ -795,7 +795,7 @@
 				}}
 			>
 				<button
-					class="text-gray-600 dark:text-gray-400 transition-all {$mobile
+					class="text-gray-600 dark:text-gray-400 transition-all {$isTouchDevice
 						? 'p-2.5 -m-1.5'
 						: 'p-1'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-lg"
 					on:click={(e) => {
@@ -806,11 +806,11 @@
 					}}
 				>
 					{#if folders[folderId]?.meta?.icon}
-						<div class="flex {$mobile ? '' : 'group-hover:hidden'} transition-all">
+						<div class="flex {$isTouchDevice ? '' : 'group-hover:hidden'} transition-all">
 							<Emoji className="size-3.5" shortCode={folders[folderId].meta.icon} />
 						</div>
 
-						<div class="hidden {$mobile ? '' : 'group-hover:flex'} transition-all p-[1px]">
+						<div class="hidden {$isTouchDevice ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
 								<ChevronDown className=" size-3" strokeWidth="1.5" />
 							{:else}
@@ -818,11 +818,11 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="flex {$mobile ? '' : 'group-hover:hidden'} transition-all">
+						<div class="flex {$isTouchDevice ? '' : 'group-hover:hidden'} transition-all">
 							<FolderIcon className="size-3.5" strokeWidth="1.5" />
 						</div>
 
-						<div class="hidden {$mobile ? '' : 'group-hover:flex'} transition-all p-[1px]">
+						<div class="hidden {$isTouchDevice ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
 								<ChevronDown className=" size-3" strokeWidth="1.5" />
 							{:else}
@@ -877,7 +877,7 @@
 
 				{#if canOpenFolderMenu}
 					<button
-						class="absolute z-10 right-2 {$mobile
+						class="absolute z-10 right-2 {$isTouchDevice
 							? 'invisible'
 							: 'invisible group-hover:visible'} self-center flex items-center dark:text-gray-300"
 					>

@@ -34,6 +34,7 @@
 		chatId,
 		chatTitle as _chatTitle,
 		mobile,
+		isTouchDevice,
 		showSidebar,
 		tags,
 		selectedFolder,
@@ -131,7 +132,8 @@
 		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
 
 	// Inline actions are hover-only; on touch the menu is reached by holding the row instead.
-	$: showInlineActions = confirmEdit || (!$mobile && (id === $chatId || mouseOver || selected));
+	$: showInlineActions =
+		confirmEdit || (!$isTouchDevice && (id === $chatId || mouseOver || selected));
 
 	const loadChat = async () => {
 		if (!chat) {
@@ -510,8 +512,8 @@
 		mouseOver = false;
 	}}
 	use:longPress={{
-		enabled: $mobile && !readonly && !confirmEdit,
-		suppressNativeMenu: $mobile && !confirmEdit,
+		enabled: $isTouchDevice && !readonly && !confirmEdit,
+		suppressNativeMenu: $isTouchDevice && !confirmEdit,
 		onLongPress: openMenuHandler
 	}}
 >
@@ -591,7 +593,7 @@
 					lastReadAt = Date.now() / 1000;
 				}}
 				ondblclick={async (e) => {
-					if ($mobile || readonly) return;
+					if ($isTouchDevice || readonly) return;
 					e.preventDefault();
 					e.stopPropagation();
 
@@ -656,7 +658,7 @@
 			id="sidebar-chat-item-menu"
 			class="{showInlineActions
 				? 'selected'
-				: $mobile
+				: $isTouchDevice
 					? 'invisible'
 					: 'invisible group-hover:visible'} absolute {className === 'pr-2'
 				? 'right-[8px]'
