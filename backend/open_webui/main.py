@@ -495,6 +495,7 @@ from open_webui.routers import (
     channels,
     chats,
     configs,
+    connectors,
     evaluations,
     files,
     folders,
@@ -1590,6 +1591,7 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(providers.router, prefix='/api/v1/providers', tags=['providers'])
+app.include_router(connectors.router, prefix='/api/v1/connectors', tags=['connectors'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
