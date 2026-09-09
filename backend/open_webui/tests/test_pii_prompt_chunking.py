@@ -23,7 +23,10 @@ from open_webui.routers.pipelines import (  # noqa: E402
     PiiMaskingUnavailableError,
     process_pipeline_inlet_filter,
 )
-from open_webui.utils.pii_chunking import PII_INLET_CHUNK_CHARS  # noqa: E402
+from open_webui.utils.pii_chunking import (  # noqa: E402
+    PII_INLET_CHUNK_CHARS,
+    split_text_for_pii,
+)
 
 # NON-periodic on purpose (~13 500 chars -> many chunks). A literal `* 400`
 # repeat makes every masked piece a rotation of the same repeating unit, so
@@ -442,6 +445,152 @@ def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal
     assert 2 <= len(events) <= 21, f'expected roughly twenty throttled events, got {len(events)}'
 
 
+@pytest.mark.parametrize('total', [20, 25, 39, 40, 41, 59, 60, 99, 100, 150, 160])
+def test_the_throttle_stays_bounded_in_every_band_not_just_multiples_of_twenty(total):
+    """The stride must round UP. `total // 20` rounds it down, and a stride one
+    too small blows the cap wide open: every total from 20 to 39 floors to a
+    stride of 1 and emits EVERY completion — 39 concurrent whole-row rewrites
+    at the top of that band, which is precisely the clobbering the throttle
+    exists to prevent. The overshoot recurs in each band (31 events at 59).
+
+    The pre-existing throttle test only ever used `total=100`, which floors to
+    a stride of 5 and happens to land on 21 events, so it passed throughout.
+    `total=39` is a ~70 000-character paste — well inside what the budget
+    admits — so this was the live case, not a corner one.
+    """
+    import open_webui.utils.middleware as M
+
+    emitted = [done for done in range(1, total + 1) if M._should_emit_pii_progress(done, total)]
+
+    assert len(emitted) <= 21, f'expected at most ~twenty events for total={total}, got {len(emitted)}'
+    assert emitted[0] == 1, 'first completion must always be reported'
+    assert emitted[-1] == total, 'terminal completion must always be reported'
+
+
+def test_progress_emissions_are_serialized_so_a_stale_write_cannot_drop_the_terminal_event():
+    """Persisting a status is a non-atomic read-modify-write of the WHOLE chat
+    row: `add_message_status_to_chat_by_id_and_message_id` does
+    `session.get(Chat, id)` -> append to `statusHistory` -> `commit()`, with no
+    row lock and no optimistic-concurrency check. Two of those in flight at
+    once both read the same list, each appends only its own entry, and the
+    later commit wins — one entry is silently LOST. When the lost one is the
+    terminal `done: True` event, the shimmer in `StatusItem.svelte` never
+    stops, for the rest of the session and after a reload.
+
+    Throttling (`_should_emit_pii_progress`) cuts how OFTEN this happens; it
+    establishes no ordering whatsoever, so it cannot fix it. The emitter must
+    chain its emissions instead.
+
+    The fake emitter below reproduces that read-modify-write exactly, with the
+    first emission made the slowest so an unordered implementation is
+    guaranteed to interleave rather than merely being allowed to.
+    """
+    import open_webui.utils.middleware as M
+
+    row = []  # stands in for the chat row's `statusHistory`
+
+    async def emitter(event):
+        snapshot = list(row)  # READ
+        # Earlier events are slower, so a later one overtakes them unless the
+        # emissions are serialized.
+        await asyncio.sleep(0.02 * (5 - event['data']['count']))
+        row[:] = snapshot + [event]  # MODIFY-WRITE
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        for done in range(1, 6):
+            on_progress(done, 5)  # total=5 -> every completion passes the throttle
+        while M._pii_progress_tasks:
+            await asyncio.sleep(0.01)
+
+    asyncio.run(drive())
+
+    counts = [e['data']['count'] for e in row]
+    assert counts == [1, 2, 3, 4, 5], f'lost or reordered status entries: {counts}'
+    assert row[-1]['data']['done'] is True, 'the terminal event must survive as the last entry'
+
+
+def test_a_failed_request_terminates_the_open_masking_status():
+    """A refusal leaves the last `pii_masking` status at `done: false`, because
+    progress events only ever mark themselves done at `done >= total`.
+    `StatusHistory.svelte` renders its collapsed row from `history.at(-1)` and
+    `StatusItem.svelte` takes the shimmer from `status.done`, so the message
+    goes on advertising masking in progress underneath the error — and the
+    status is persisted in the chat row, so it still shimmers after a reload.
+    The error/cancel events that follow terminate the MESSAGE, not this entry.
+    """
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 40)  # the run then refuses at chunk 1 of 40
+        while M._pii_progress_tasks:
+            await asyncio.sleep(0)
+        assert events[-1]['data']['done'] is False, 'precondition: the status is still open'
+        await on_progress.finalize_on_failure()
+
+    asyncio.run(drive())
+
+    assert events[-1]['data']['done'] is True, 'the shimmer must stop on the failure path'
+    assert events[-1]['data']['action'] == 'pii_masking'
+    # The honest account of a run that stopped at one of forty — not a jump to
+    # 40/40, which would claim work that never happened.
+    assert events[-1]['data']['count'] == 1
+    assert events[-1]['data']['total'] == 40
+
+
+def test_terminating_an_already_finished_masking_status_emits_nothing():
+    """On the success path the terminal event has already gone out; appending a
+    second one would put a duplicate status entry in the persisted history."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        on_progress(1, 2)
+        on_progress(2, 2)
+        while M._pii_progress_tasks:
+            await asyncio.sleep(0)
+        before = len(events)
+        await on_progress.finalize_on_failure()
+        return before
+
+    before = asyncio.run(drive())
+
+    assert len(events) == before, 'no extra status entry after a completed run'
+    assert events[-1]['data']['done'] is True
+
+
+def test_terminating_a_run_that_never_reported_progress_emits_nothing():
+    """The ordinary non-chunked path never calls `on_progress` at all. A
+    failure there must not invent a `pii_masking` status for a message that
+    never showed one — that would be a spurious entry on the overwhelming
+    majority of chats."""
+    import open_webui.utils.middleware as M
+
+    events = []
+
+    async def emitter(event):
+        events.append(event)
+
+    async def drive():
+        on_progress = M._pii_progress_emitter(emitter)
+        await on_progress.finalize_on_failure()
+
+    asyncio.run(drive())
+
+    assert events == []
+
+
 def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():
     """`total // 10` is 0 for any `total < 10`; the throttle must guard
     against a modulo-by-zero there and still guarantee the first and terminal
@@ -458,8 +607,12 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
         on_progress(1, 3)
         on_progress(2, 3)
         on_progress(3, 3)
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Drained by watching the task set rather than by a fixed number of
+        # loop turns: emissions are chained, so each one needs its own
+        # scheduling round-trip and a hard-coded couple of yields would return
+        # before the terminal event had run.
+        while M._pii_progress_tasks:
+            await asyncio.sleep(0)
 
     asyncio.run(drive())  # must not raise (no ZeroDivisionError)
 
@@ -620,6 +773,84 @@ def test_malformed_chunk_detections_are_dropped_without_failing_the_request():
         assert set(d) == {'type', 'start', 'end'}
         assert isinstance(d['start'], int) and not isinstance(d['start'], bool)
         assert isinstance(d['end'], int) and not isinstance(d['end'], bool)
+
+
+def test_a_refused_request_cancels_its_remaining_chunk_calls():
+    """A bare `asyncio.gather` hands the FIRST exception to its awaiter and
+    leaves every sibling running. After the request has already been refused
+    those orphans keep issuing inlet POSTs — against a bottleneck that is
+    frequently why the first chunk failed at all — keep writing vault rows for
+    a prompt that will never be sent, and keep calling `on_progress`, so a
+    masking bar advances underneath an error the user was already shown.
+
+    Measured as "no POST is issued after the refusal": the mock records each
+    request synchronously in `post()`, while the wait lives in `__aenter__`, so
+    a chunk still queued behind the concurrency semaphore has not been recorded
+    yet. Driven inside a live loop rather than through `_run`, because
+    `asyncio.run` tears the loop down on return and would destroy exactly the
+    orphans under test.
+    """
+    sentinel = 'SENTINEL_ONLY_IN_ONE_CHUNK_c4b'
+    content = sentinel + ' ' + BIG
+    assert content.count(sentinel) == 1
+
+    seen = []
+
+    def _post(url, *, headers, json, ssl):
+        body = json['body']
+        text = body['messages'][0]['content']
+        seen.append(text)
+        if sentinel in text:
+            raise aiohttp.ClientConnectionError('boom')
+        out = {**body, 'messages': [{'role': 'user', 'content': text.upper()}]}
+        resp = MagicMock()
+        resp.json = AsyncMock(return_value=out)
+        resp.raise_for_status = MagicMock()
+        resp.content_type = 'application/json'
+
+        async def _enter(_self=None):
+            # Slow enough that siblings are mid-flight (or still queued behind
+            # the semaphore) when the bad chunk refuses.
+            await asyncio.sleep(0.05)
+            return resp
+
+        cm = MagicMock()
+        cm.__aenter__ = _enter
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    s = MagicMock()
+    s.post = _post
+    scm = MagicMock()
+    scm.__aenter__ = AsyncMock(return_value=s)
+    scm.__aexit__ = AsyncMock(return_value=False)
+
+    async def drive():
+        # One attempt, so the bad chunk refuses immediately instead of sitting
+        # through the retry backoff.
+        with (
+            patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=scm),
+            patch('open_webui.routers.pipelines.PII_INLET_CHUNK_RETRIES', 1),
+        ):
+            with pytest.raises(PiiMaskingUnavailableError):
+                await process_pipeline_inlet_filter(_request(), _payload(content), _user(), _models())
+            at_refusal = len(seen)
+            # Many times the per-chunk delay: ample for every orphan to finish
+            # and for the ones queued behind the semaphore to be admitted.
+            await asyncio.sleep(1.0)
+            return at_refusal, len(seen)
+
+    at_refusal, after_settling = asyncio.run(drive())
+
+    total_jobs = len([t for t in seen if t]) # sanity: work was left undone
+    assert at_refusal < len(split_text_for_pii(content)), (
+        'the fixture must leave chunks unstarted at the moment of refusal, '
+        f'otherwise this test cannot detect orphans (started={at_refusal})'
+    )
+    assert after_settling == at_refusal, (
+        f'{after_settling - at_refusal} chunk POST(s) were issued AFTER the request was '
+        f'already refused — siblings were not cancelled (total posts={total_jobs})'
+    )
 
 
 def test_one_bad_chunk_fails_the_whole_request_while_other_chunks_still_complete():

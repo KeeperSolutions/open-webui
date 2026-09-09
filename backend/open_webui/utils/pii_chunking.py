@@ -230,17 +230,106 @@ def max_maskable_chars():
     return int(PII_INLET_TOTAL_BUDGET_S / estimated_masking_seconds(0, 1))
 
 
+def _token_before(text, index):
+    """The whitespace-delimited token that ends at ``index`` (exclusive)."""
+    j = index
+    while j > 0 and not text[j - 1].isspace():
+        j -= 1
+    return text[j:index]
+
+
+def _token_after(text, index):
+    """The whitespace-delimited token that starts at ``index``."""
+    j = index
+    n = len(text)
+    while j < n and not text[j].isspace():
+        j += 1
+    return text[index:j]
+
+
+def _severs_spaced_entity(text, sep_index, split_at):
+    """Whether breaking between the token ending at ``sep_index`` and the one
+    starting at ``split_at`` would cut a SPACE-SEPARATED PII value in half.
+
+    A single space is a terrible break point precisely where it matters most:
+    `4111 1111 1111 1111`, `HR12 3456 7890 1234`, `+385 91 234 5678` and
+    `Ivan Horvat` are all one entity written with spaces in it. Cut one and
+    neither half is recognisable to the pipeline's recognisers, so BOTH halves
+    reach the model unmasked — a leak, not a degradation (see
+    `test_a_spaced_identifier_straddling_the_limit_is_not_severed`).
+
+    Two cheap signals cover the multi-token entities Presidio actually emits:
+
+      * both sides contain a digit -> a grouped identifier (card, IBAN, phone,
+        account/reference number) is being split between its groups;
+      * both sides start with a capital -> a PERSON / ORGANIZATION / LOCATION
+        is being split between its words.
+
+    Deliberately a heuristic on the SPLIT POINT rather than an attempt to
+    recognise entities here: this module is dependency-free by design (no
+    Presidio, no network), and moving a break a few words earlier costs
+    nothing, while getting it wrong costs a leak. False positives only shift
+    the break; they never drop or duplicate text.
+    """
+    left = _token_before(text, sep_index)
+    right = _token_after(text, split_at)
+    if not left or not right:
+        return False  # a run of whitespace — never inside an entity
+    if any(c.isdigit() for c in left) and any(c.isdigit() for c in right):
+        return True
+    if left[0].isupper() and right[0].isupper():
+        return True
+    return False
+
+
+def _space_split_point(text, start, window_end):
+    """Rightmost space break in ``(start, window_end)`` that does not sever a
+    spaced entity, else the rightmost space of any kind, else -1.
+
+    The fallback matters: when EVERY space in the window is unsafe (a window
+    that is nothing but a list of names, say) the choice is between an unsafe
+    space and a hard mid-token split, and the space is strictly better — it at
+    least keeps single-token values whole. So this can only ever improve on
+    the previous "take the last space" behaviour, never regress it.
+    """
+    fallback = -1
+    idx = text.rfind(' ', start, window_end)
+    while idx > start:
+        split_at = idx + 1  # keep the separator with the left piece
+        if fallback < 0:
+            fallback = split_at
+        if not _severs_spaced_entity(text, idx, split_at):
+            return split_at
+        idx = text.rfind(' ', start, idx)
+    return fallback
+
+
 def split_text_for_pii(text, max_chars=PII_INLET_CHUNK_CHARS):
     """Partition ``text`` into pieces no longer than ``max_chars`` whose
     concatenation is EXACTLY ``text`` (lossless — no dropped or duplicated
     chars). Breaks are taken at paragraph / line / space boundaries, in that
-    order of preference, so a multi-token PII span (credit card, IBAN, phone
-    number) is never cut across a piece boundary. Only when a single run of
-    non-whitespace exceeds ``max_chars`` is a hard mid-run split used.
+    order of preference, and a space break is additionally moved earlier when
+    it would cut a space-separated PII value in two (see
+    `_severs_spaced_entity`). Only when a window offers no usable break at all
+    is a hard mid-run split used.
+
+    Best-effort, not a guarantee: a window whose every space is unsafe still
+    breaks at a space, and a single unbroken run longer than ``max_chars``
+    still has to be cut somewhere. The common leak — a card, IBAN, phone
+    number or full name landing on the window edge of an ordinary paste — is
+    what this rules out.
 
     Returns a list of ``(start_offset, piece)`` tuples where ``start_offset`` is
     the piece's character offset within ``text``.
     """
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 1:
+        # Guarded rather than assumed: a non-positive limit makes the loop
+        # below non-terminating (`window_end` never advances past `i`, so it
+        # appends an empty piece forever). The only production caller uses the
+        # module constant, but the limit is an argument, so a future caller
+        # must fail loudly instead of hanging a request thread.
+        raise ValueError(f'max_chars must be a positive int, got {max_chars!r}')
+
     if not isinstance(text, str) or len(text) <= max_chars:
         return [(0, text)]
 
@@ -252,11 +341,13 @@ def split_text_for_pii(text, max_chars=PII_INLET_CHUNK_CHARS):
             break
         window_end = i + max_chars
         split_at = -1
-        for sep in ('\n\n', '\n', ' '):
+        for sep in ('\n\n', '\n'):
             idx = text.rfind(sep, i, window_end)
             if idx > i:
                 split_at = idx + len(sep)  # keep the separator with the piece
                 break
+        if split_at <= i:
+            split_at = _space_split_point(text, i, window_end)
         if split_at <= i:
             split_at = window_end  # no boundary in window -> hard split
         pieces.append((i, text[i:split_at]))

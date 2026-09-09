@@ -561,7 +561,34 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             filter_id,
             {'user': user_with_valves, 'body': skeleton},
         )
-        await asyncio.gather(*(_mask_piece(*job) for job in jobs))
+        # Structured, not bare `gather`: `asyncio.gather` propagates the FIRST
+        # exception to its awaiter while leaving every sibling running. Once a
+        # deliberate pipeline refusal or an exhausted retry has already failed
+        # this request closed, those orphans go on issuing inlet POSTs against
+        # a bottleneck that is often the very reason the first one failed,
+        # writing vault rows for a prompt that will never be sent, and calling
+        # `on_progress` — so a masking bar keeps advancing underneath an error
+        # the user has already been shown. Cancel them on the first failure and
+        # AWAIT the cancellation, so the in-flight aiohttp requests are actually
+        # torn down before this returns rather than merely marked for it.
+        #
+        # `BaseException` covers the deadline too: `wait_for` cancels this
+        # coroutine, and `gather` alone would then request its children's
+        # cancellation without waiting for it to take effect.
+        #
+        # Explicit tasks rather than `asyncio.TaskGroup`: a TaskGroup re-raises
+        # as an `ExceptionGroup`, which would break the `except HTTPException`
+        # contract at the call site (a pipeline saying no ON PURPOSE must reach
+        # the user as its own status, not as a generic masking outage). Re-
+        # raising here preserves the original exception type exactly.
+        tasks = [asyncio.create_task(_mask_piece(*job)) for job in jobs]
+        try:
+            await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         return skeleton_out
 
     try:

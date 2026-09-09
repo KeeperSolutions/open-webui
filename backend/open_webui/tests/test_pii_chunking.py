@@ -60,6 +60,51 @@ def test_an_entity_is_never_severed_by_a_break():
     assert any(iban in p for p in pieces)
 
 
+@pytest.mark.parametrize(
+    'value',
+    [
+        '4111 1111 1111 1111',  # credit card written in groups of four
+        'HR12 3456 7890 1234 567',  # IBAN in groups
+        '+385 91 234 5678',  # phone number
+        'Ivan Horvat',  # PERSON — two capitalised words
+    ],
+)
+def test_a_spaced_identifier_straddling_the_limit_is_not_severed(value):
+    """A SPACE-separated PII value must survive the break whole.
+
+    `test_an_entity_is_never_severed_by_a_break` only ever covered values with
+    no internal space, so it passed while the splitter happily cut
+    `4111 1111 1111 1111` into `...4111 ` + `1111 1111 1111`. Neither half is
+    a credit card to any recogniser, so BOTH halves reached the model
+    unmasked. Swept across the window edge because only a few of the ~20
+    offsets put a space of the value exactly at the limit.
+    """
+    for pad in range(1780, 1800):
+        text = 'a' * pad + ' ' + value + ' ostatak recenice koji ide dalje'
+        pieces = split_text_for_pii(text, max_chars=1800)
+        assert ''.join(p for _, p in pieces) == text  # still lossless
+        assert any(value in p for _, p in pieces), f'severed at pad={pad}'
+
+
+def test_an_all_unsafe_window_still_breaks_at_a_space():
+    """When every space in the window would sever an entity there is nothing
+    safe to pick, and a space is still strictly better than a hard mid-token
+    split — the fallback must not regress into cutting words in half."""
+    text = 'Ivan Horvat ' * 400
+    pieces = [p for _, p in split_text_for_pii(text, max_chars=1800)]
+    assert ''.join(pieces) == text
+    assert all(p.endswith(' ') for p in pieces[:-1])
+
+
+@pytest.mark.parametrize('bad', [0, -1, True, 1.5, '1800', None])
+def test_a_non_positive_chunk_limit_is_rejected_instead_of_looping_forever(bad):
+    """With `max_chars <= 0` the window never advances: the splitter appended
+    an empty piece and spun forever, hanging the request thread. The limit is
+    an argument, so it is validated rather than assumed."""
+    with pytest.raises(ValueError):
+        split_text_for_pii('x' * 5000, max_chars=bad)
+
+
 def test_budgets_are_consistent_with_the_measured_throughput():
     """Guards the numbers in Appendix A: at the measured rate a chunk must
     finish well inside the 60 s socket-read budget."""
