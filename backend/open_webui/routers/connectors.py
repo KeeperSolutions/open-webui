@@ -5,7 +5,7 @@ from datetime import timedelta
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import (
     GOOGLE_DRIVE_CONNECTOR_CLIENT_ID,
     GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET,
@@ -13,7 +13,13 @@ from open_webui.config import (
     WEBUI_URL,
 )
 from open_webui.models.connector_connections import ConnectorConnections
-from open_webui.utils.auth import create_token, decode_token, get_verified_user
+from open_webui.utils.auth import (
+    create_token,
+    decode_token,
+    get_verified_user,
+    invalidate_token,
+    is_valid_token,
+)
 from pydantic import BaseModel
 from starlette.responses import RedirectResponse
 
@@ -43,6 +49,8 @@ class ConnectorStatusResponse(BaseModel):
     connected: bool
     external_account: str | None = None
     connected_at: int | None = None
+    # Whether Google confirmed the token was revoked on disconnect; None when not applicable
+    revoked: bool | None = None
 
 
 @router.get('/google-drive/status', response_model=ConnectorStatusResponse)
@@ -83,10 +91,16 @@ async def connect_google_drive(user=Depends(get_verified_user)):
 
 
 @router.get('/google-drive/callback')
-async def google_drive_callback(code: str, state: str, user=Depends(get_verified_user)):
+async def google_drive_callback(code: str, state: str, request: Request, user=Depends(get_verified_user)):
     payload = decode_token(state)
     if not payload or payload.get('purpose') != 'gdrive_connect' or payload.get('user_id') != user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired connect request')
+
+    if not await is_valid_token(payload, request.app.state.redis):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired connect request')
+
+    # Burn the state now so it can't be replayed, regardless of whether the exchange below succeeds
+    await invalidate_token(request, state)
 
     async with httpx.AsyncClient() as client:
         token_response = await client.post(
@@ -136,17 +150,24 @@ async def google_drive_callback(code: str, state: str, user=Depends(get_verified
 async def disconnect_google_drive(user=Depends(get_verified_user)):
     connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
 
+    revoked = None
     if connection:
         revoke_token = connection.token.get('refresh_token') or connection.token.get('access_token')
+        revoked = False
         try:
             async with httpx.AsyncClient() as client:
-                await client.post(GOOGLE_REVOKE_URL, params={'token': revoke_token})
+                revoke_response = await client.post(GOOGLE_REVOKE_URL, params={'token': revoke_token})
+            revoked = revoke_response.status_code == 200
+            if not revoked:
+                log.warning(
+                    f'Google Drive revoke returned {revoke_response.status_code} for user {user.id}: {revoke_response.text}'
+                )
         except Exception as e:
             log.warning(f'Failed to revoke Google Drive token for user {user.id}: {e}')
 
         await ConnectorConnections.delete_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
 
-    return ConnectorStatusResponse(connected=False)
+    return ConnectorStatusResponse(connected=False, revoked=revoked)
 
 
 async def get_valid_access_token(user_id: str) -> str | None:

@@ -2,6 +2,7 @@ x.py
 yarn.lock
 .DS_Store
 .webui_secret_key
+.connector_token_encryption_key
 node_modules
 /build
 /.svelte-kit

@@ -53,11 +53,20 @@ class ConnectorConnectionModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ConnectorTokenEncryptionUnavailable(Exception):
+    """Raised when CONNECTOR_TOKEN_ENCRYPTION_KEY is missing or invalid at call time."""
+
+
 class ConnectorConnectionsTable:
     def __init__(self):
         self.encryption_key = CONNECTOR_TOKEN_ENCRYPTION_KEY
+        self.fernet = None
+
         if not self.encryption_key:
-            raise Exception('CONNECTOR_TOKEN_ENCRYPTION_KEY is not set')
+            # Don't raise here: this table is constructed at import time, so raising would
+            # crash the whole app on boot instead of just disabling this optional feature.
+            log.error('CONNECTOR_TOKEN_ENCRYPTION_KEY is not set - connector token storage is disabled')
+            return
 
         # check if encryption key is in the right format for Fernet (32 url-safe base64-encoded bytes)
         if len(self.encryption_key) != 44:
@@ -70,9 +79,11 @@ class ConnectorConnectionsTable:
             self.fernet = Fernet(self.encryption_key)
         except Exception as e:
             log.error(f'Error initializing Fernet with provided key: {e}')
-            raise
+            self.fernet = None
 
     def _encrypt_token(self, token: dict) -> str:
+        if not self.fernet:
+            raise ConnectorTokenEncryptionUnavailable('CONNECTOR_TOKEN_ENCRYPTION_KEY is not set')
         try:
             token_json = json.dumps(token)
             return self.fernet.encrypt(token_json.encode()).decode()
@@ -81,6 +92,8 @@ class ConnectorConnectionsTable:
             raise
 
     def _decrypt_token(self, token: str) -> dict:
+        if not self.fernet:
+            raise ConnectorTokenEncryptionUnavailable('CONNECTOR_TOKEN_ENCRYPTION_KEY is not set')
         try:
             decrypted = self.fernet.decrypt(token.encode()).decode()
             return json.loads(decrypted)
@@ -100,6 +113,9 @@ class ConnectorConnectionsTable:
 
                 try:
                     token = self._decrypt_token(row.token)
+                except ConnectorTokenEncryptionUnavailable:
+                    # Transient config issue, not corrupted data - leave the row alone
+                    return None
                 except Exception as e:
                     log.warning(
                         f'Deleting connector connection {row.id} due to decryption failure: {type(e).__name__}: {e}'

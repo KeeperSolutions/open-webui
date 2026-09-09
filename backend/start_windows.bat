@@ -47,8 +47,32 @@ IF "%WEBUI_SECRET_KEY% %WEBUI_JWT_SECRET_KEY%" == " " (
     SET /p WEBUI_SECRET_KEY=<%KEY_FILE%
 )
 
+SET "CONNECTOR_KEY_FILE=.connector_token_encryption_key"
+IF NOT "%CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE%" == "" (
+    SET "CONNECTOR_KEY_FILE=%CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE%"
+)
+IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%" == "" (
+    SET "CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH=24"
+)
+
+:: Check if CONNECTOR_TOKEN_ENCRYPTION_KEY is not set
+IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY%" == "" (
+    echo Loading CONNECTOR_TOKEN_ENCRYPTION_KEY from file, not provided as an environment variable.
+
+    IF NOT EXIST "%CONNECTOR_KEY_FILE%" (
+        echo Generating CONNECTOR_TOKEN_ENCRYPTION_KEY
+        SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<nul
+        FOR /L %%i IN (1,1,%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%) DO SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<!random!>>%CONNECTOR_KEY_FILE%
+        echo CONNECTOR_TOKEN_ENCRYPTION_KEY generated
+    )
+
+    echo Loading CONNECTOR_TOKEN_ENCRYPTION_KEY from %CONNECTOR_KEY_FILE%
+    SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<%CONNECTOR_KEY_FILE%
+)
+
 :: Execute uvicorn
 SET "WEBUI_SECRET_KEY=%WEBUI_SECRET_KEY%"
+SET "CONNECTOR_TOKEN_ENCRYPTION_KEY=%CONNECTOR_TOKEN_ENCRYPTION_KEY%"
 IF "%UVICORN_WORKERS%"=="" SET UVICORN_WORKERS=1
 uvicorn open_webui.main:app --host "%HOST%" --port "%PORT%" --forwarded-allow-ips %FORWARDED_ALLOW_IPS% --workers %UVICORN_WORKERS% --ws auto
 :: For ssl user uvicorn open_webui.main:app --host "%HOST%" --port "%PORT%" --forwarded-allow-ips '*' --ssl-keyfile "key.pem" --ssl-certfile "cert.pem" --ws auto

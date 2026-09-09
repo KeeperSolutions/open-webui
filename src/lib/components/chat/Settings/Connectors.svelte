@@ -34,7 +34,16 @@
 		if (res) {
 			connected = false;
 			externalAccount = null;
-			toast.success($i18n.t('Google Drive disconnected'));
+
+			if (res.revoked === false) {
+				toast.warning(
+					$i18n.t(
+						"Disconnected, but we couldn't confirm Google revoked access. You can also remove it from your Google Account permissions."
+					)
+				);
+			} else {
+				toast.success($i18n.t('Google Drive disconnected'));
+			}
 		}
 	};
 

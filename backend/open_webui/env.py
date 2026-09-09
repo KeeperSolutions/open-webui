@@ -822,7 +822,8 @@ OAUTH_CLIENT_INFO_ENCRYPTION_KEY = os.getenv('OAUTH_CLIENT_INFO_ENCRYPTION_KEY',
 
 OAUTH_SESSION_TOKEN_ENCRYPTION_KEY = os.getenv('OAUTH_SESSION_TOKEN_ENCRYPTION_KEY', WEBUI_SECRET_KEY)
 
-CONNECTOR_TOKEN_ENCRYPTION_KEY = os.getenv('CONNECTOR_TOKEN_ENCRYPTION_KEY', WEBUI_SECRET_KEY)
+# No hardcoded fallback by design: auto-generated/persisted by start.sh/start_windows.bat.
+CONNECTOR_TOKEN_ENCRYPTION_KEY = os.getenv('CONNECTOR_TOKEN_ENCRYPTION_KEY', '')
 
 # Maximum number of concurrent OAuth sessions per user per provider
 # This prevents unbounded session growth while allowing multi-device usage
