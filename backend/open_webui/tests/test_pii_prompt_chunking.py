@@ -1108,3 +1108,148 @@ def test_a_detection_with_an_unhashable_type_is_dropped_rather_than_crashing_the
     assert detections, 'the well-formed detection must survive'
     for d in detections:
         assert isinstance(d['type'], str)
+
+
+# ---------------------------------------------------------------------------
+# Platform back-pressure (429 / transient 5xx) is not a refusal
+#
+# `_post_inlet_once` turns EVERY non-2xx response into an HTTPException, and the
+# retry loop re-raised every HTTPException with "the pipeline said no on
+# purpose". True for 400/401/403/422 — false for 429, which is Cloud Run saying
+# it cannot schedule an instance right now and to try again. A single 429 on one
+# of ~94 chunks therefore killed the whole masking run: observed live at 25/94
+# with "Too Many Requests" after two minutes, on a paste that had worked before
+# the service was rescaled.
+# ---------------------------------------------------------------------------
+
+
+def _status_session(seen, *, status, fail_times):
+    """Mock inlet that answers `status` for the first `fail_times` POSTs, then
+    succeeds. Mirrors the real client path: `raise_for_status()` raises
+    `aiohttp.ClientResponseError`, which `_post_inlet_once` converts into an
+    HTTPException carrying that status."""
+    calls = {'n': 0}
+
+    def _post(url, *, headers, json, ssl):
+        body = json['body']
+        text = body['messages'][0]['content']
+        seen.append(text)
+        calls['n'] += 1
+        failing = calls['n'] <= fail_times
+
+        resp = MagicMock()
+        resp.status = status
+        resp.content_type = 'application/json'
+        if failing:
+            resp.json = AsyncMock(return_value={})
+
+            def _raise():
+                raise aiohttp.ClientResponseError(
+                    request_info=SimpleNamespace(
+                        real_url='http://pipeline/inlet',
+                        method='POST',
+                        url='http://pipeline/inlet',
+                        headers={},
+                    ),
+                    history=(),
+                    status=status,
+                    message='Too Many Requests',
+                )
+
+            resp.raise_for_status = _raise
+        else:
+            out = {**body, 'messages': [{'role': 'user', 'content': text.upper()}]}
+            resp.json = AsyncMock(return_value=out)
+            resp.raise_for_status = MagicMock()
+
+        async def _enter(_self=None):
+            return resp
+
+        cm = MagicMock()
+        cm.__aenter__ = _enter
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm
+
+    s = MagicMock()
+    s.post = _post
+    scm = MagicMock()
+    scm.__aenter__ = AsyncMock(return_value=s)
+    scm.__aexit__ = AsyncMock(return_value=False)
+    return scm
+
+
+def test_a_429_from_the_platform_is_retried_rather_than_failing_the_request():
+    """429 means "try again", not "no". Failing the whole prompt on the first
+    one throws away every chunk already masked."""
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_status_session(seen, status=429, fail_times=1),
+    ), patch('open_webui.routers.pipelines.asyncio.sleep', AsyncMock()):
+        out = _run(_payload(BIG))
+
+    assert out['messages'][0]['content'] == BIG.upper()
+
+
+def test_a_transient_5xx_is_retried_too():
+    """Cloud Run answers 503 while it is still bringing an instance up; that is
+    the same back-pressure wearing a different number."""
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_status_session(seen, status=503, fail_times=1),
+    ), patch('open_webui.routers.pipelines.asyncio.sleep', AsyncMock()):
+        out = _run(_payload(BIG))
+
+    assert out['messages'][0]['content'] == BIG.upper()
+
+
+def test_a_deliberate_refusal_is_still_not_retried():
+    """The other half. A 400 is the pipeline rejecting the request on purpose;
+    retrying it just triples the load and delays the same answer."""
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_status_session(seen, status=400, fail_times=10_000),
+    ), patch('open_webui.routers.pipelines.asyncio.sleep', AsyncMock()):
+        with pytest.raises(Exception) as excinfo:
+            _run(_payload(BIG))
+
+    assert not isinstance(excinfo.value, PiiMaskingUnavailableError), (
+        'a deliberate refusal must reach the user as itself, not as a masking outage'
+    )
+
+
+def test_a_429_that_never_clears_still_fails_closed():
+    """Retrying is bounded: once the attempts are spent the request is refused,
+    never forwarded unmasked."""
+    seen = []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession',
+        return_value=_status_session(seen, status=429, fail_times=10_000),
+    ), patch('open_webui.routers.pipelines.asyncio.sleep', AsyncMock()):
+        with pytest.raises(PiiMaskingUnavailableError):
+            _run(_payload(BIG))
+
+
+def test_the_bar_appears_before_the_first_chunk_finishes():
+    """The first progress event used to be `1/N`, reported when the first CHUNK
+    completed — and the skeleton POST runs to completion before any chunk even
+    starts. On a cold pipeline (made longer still by retrying platform
+    back-pressure) that left the user staring at a bare spinner for a minute
+    after sending, with no sign that masking had begun.
+
+    `total` is known before the first POST goes out, so announce it then: the
+    bar appears at `0/N` immediately and starts moving once chunks land.
+    """
+    seen, progress = [], []
+    with patch(
+        'open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)
+    ):
+        _run(_payload(BIG), on_progress=lambda done, total: progress.append((done, total)))
+
+    assert progress, 'a chunked prompt reported no progress at all'
+    first_done, first_total = progress[0]
+    assert first_done == 0, f'the first event was {progress[0]}, so the bar waited for a chunk'
+    assert first_total > 1, 'the total must be the real chunk count, known up front'
+    assert progress[-1] == (first_total, first_total), 'the terminal event must still close the bar'

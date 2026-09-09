@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import Optional
 
 import aiofiles
@@ -22,6 +23,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_FILE_STREAM_CHUNK_SIZE,
+    LLM_RETRY_RETRYABLE_STATUS,
     PII_FILTER_IDS,
 )
 from open_webui.events import EVENTS, publish_event
@@ -33,6 +35,7 @@ from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_CHARS,
     PII_INLET_CHUNK_RETRIES,
     PII_INLET_CONCURRENCY,
+    PII_INLET_RETRY_BACKOFF_S,
     PII_INLET_SKELETON_SAFETY_MARGIN,
     PII_INLET_TOTAL_BUDGET_S,
     estimated_masking_seconds,
@@ -230,6 +233,82 @@ async def _post_inlet_once(session, url, key, filter_id, request_data):
                 pass
             raise HTTPException(status_code=response.status, detail=e.message)
 
+
+
+async def _post_inlet_with_retry(
+    session, url, key, filter_id, request_data, *, semaphore=None, stats=None, fail_closed=True
+):
+    """One inlet POST, retried on TRANSIENT failure, refused on a deliberate one.
+
+    Two failure families reach us through `_post_inlet_once`, and they must not
+    be treated alike:
+
+      * a deliberate refusal (400 / 401 / 403 / 422) — the pipeline evaluated
+        the request and said no. Retrying triples the load and returns the same
+        answer, so it propagates untouched and reaches the user as its own
+        status;
+      * platform back-pressure (429, transient 5xx, the Cloudflare 52x) — the
+        service has no free instance yet and is starting one. That is "come
+        back", not "no".
+
+    Both arrived as `HTTPException`, and the chunk loop re-raised every one of
+    them as deliberate. A single 429 therefore killed a whole 94-chunk masking
+    run at 25/94, discarding two minutes of already-masked work. The SKELETON
+    call had no retry at all, which is worse: it runs first, so one 429 there
+    failed every request outright.
+
+    `LLM_RETRY_RETRYABLE_STATUS` rather than a second hand-kept list — it
+    already enumerates exactly these and is operator-overridable, and the PII
+    pipeline is an upstream HTTP service like any other here.
+
+    The two backoff schedules differ on purpose. A dropped connection clears in
+    milliseconds; a 429 means an instance is booting, which takes seconds, so
+    the linear schedule spent every attempt inside the first 1.5 s and re-failed
+    against the same cold fleet. `semaphore` is held around the POST only, never
+    across a backoff, so a sleeping retry does not hold a slot other chunks
+    could use.
+    """
+    last_exc = None
+    for attempt in range(PII_INLET_CHUNK_RETRIES):
+        try:
+            if semaphore is None:
+                return await _post_inlet_once(session, url, key, filter_id, request_data)
+            async with semaphore:
+                return await _post_inlet_once(session, url, key, filter_id, request_data)
+        except HTTPException as e:
+            if e.status_code not in LLM_RETRY_RETRYABLE_STATUS:
+                raise  # the pipeline said no on purpose
+            last_exc = e
+            delay = PII_INLET_RETRY_BACKOFF_S * (2**attempt)
+            # WARNING, not debug: this is the difference between "the pipeline
+            # is fine and something else is slow" and "we are spending the whole
+            # run waiting for instances to boot". Retrying used to be invisible,
+            # so a run that got slower had no evidence either way.
+            if stats is not None:
+                stats['retries'] = stats.get('retries', 0) + 1
+            log.warning(
+                '[pii_chunking] inlet returned %s (attempt %d/%d); retrying in %.1fs',
+                e.status_code,
+                attempt + 1,
+                PII_INLET_CHUNK_RETRIES,
+                delay,
+            )
+        except Exception as e:  # noqa: BLE001 — network/timeout; fail closed below
+            last_exc = e
+            delay = 0.5 * (attempt + 1)
+        if attempt + 1 < PII_INLET_CHUNK_RETRIES:
+            await asyncio.sleep(delay)
+    # What an exhausted retry means depends on WHO is asking, so the caller
+    # says. The chunked masking path has no fallback — a chunk that never
+    # succeeded means the message cannot be masked, which is
+    # `PiiMaskingUnavailableError`. The ordinary single-call path is shared by
+    # EVERY filter, including non-PII ones where a connection error must stay
+    # best-effort passthrough (a telemetry outage must not block chat); it
+    # therefore wants the original exception back so the per-filter fail-closed
+    # logic in `process_pipeline_inlet_filter` keeps making that decision.
+    if fail_closed:
+        raise PiiMaskingUnavailableError() from last_exc
+    raise last_exc
 
 # Background-task types (carried on `metadata.task`) for which the external
 # pipeline skips NER entirely and re-masks via the deterministic vault regex
@@ -505,6 +584,23 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
 
     total = len(jobs)
     done = 0
+    _t0 = time.time()
+    retry_stats: dict = {'retries': 0}
+
+    # Announce the size BEFORE the first POST. Progress used to start at `1/N`,
+    # reported when the first chunk completed — but the skeleton call below runs
+    # to completion before any chunk starts, so on a cold pipeline (longer still
+    # once platform back-pressure is retried rather than fatal) the user watched
+    # a bare spinner for a minute with no sign that masking had begun. `total` is
+    # already known here, so there is nothing to wait for.
+    #
+    # Guarded like every other call into this callback: progress is diagnostics
+    # and must never be able to fail the masking path.
+    if on_progress is not None:
+        try:
+            on_progress(0, total)
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] could not emit the opening progress event: {e}')
     semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
     results: dict[tuple[int, int], str] = {}
     # Each chunk's `metadata.pii_detections_public` (finding #5), keyed the
@@ -518,48 +614,34 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             **payload,
             'messages': [{**messages[msg_index], 'content': piece}],
         }
-        last_exc = None
-        for attempt in range(PII_INLET_CHUNK_RETRIES):
-            try:
-                async with semaphore:
-                    out = await _post_inlet_once(
-                        session,
-                        url,
-                        key,
-                        filter_id,
-                        {'user': user_with_valves, 'body': body},
-                    )
-                results[(msg_index, piece_index)] = out['messages'][0]['content']
-                piece_detections[(msg_index, piece_index)] = _shifted_pii_detections(out, piece_offset)
-            except HTTPException:
-                raise  # the pipeline said no on purpose; do not retry
-            except Exception as e:
-                last_exc = e
-                if attempt + 1 < PII_INLET_CHUNK_RETRIES:
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                continue
-            else:
-                # Finding #9: progress reporting lives OUTSIDE the retry
-                # try/except, after the result is already recorded. A
-                # callback that raises must never be mistaken for a transient
-                # chunk failure here — that would trigger a spurious re-POST
-                # of a chunk that already succeeded, pushing `done` past
-                # `total`. The production callback swallows everything
-                # (`_pii_progress_emitter`), so this is a latent-bug guard,
-                # not a live symptom.
-                done += 1
-                if on_progress is not None:
-                    on_progress(done, total)
-                return
-        raise PiiMaskingUnavailableError() from last_exc
+        out = await _post_inlet_with_retry(
+            session,
+            url,
+            key,
+            filter_id,
+            {'user': user_with_valves, 'body': body},
+            semaphore=semaphore,
+            stats=retry_stats,
+        )
+        results[(msg_index, piece_index)] = out['messages'][0]['content']
+        piece_detections[(msg_index, piece_index)] = _shifted_pii_detections(out, piece_offset)
+
+        # Finding #9: progress reporting lives OUTSIDE the retry, after the
+        # result is already recorded. A callback that raises must never be
+        # mistaken for a transient chunk failure — that would re-POST a chunk
+        # that already succeeded, pushing `done` past `total`.
+        done += 1
+        if on_progress is not None:
+            on_progress(done, total)
 
     async def _run_all():
-        skeleton_out = await _post_inlet_once(
+        skeleton_out = await _post_inlet_with_retry(
             session,
             url,
             key,
             filter_id,
             {'user': user_with_valves, 'body': skeleton},
+            stats=retry_stats,
         )
         # Structured, not bare `gather`: `asyncio.gather` propagates the FIRST
         # exception to its awaiter while leaving every sibling running. Once a
@@ -600,6 +682,16 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             total,
         )
         raise PiiMaskingUnavailableError() from e
+
+    # What the masking itself cost, separate from everything around it. Without
+    # this a slower turn is unattributable: chunk time, retry backoff and the
+    # model's own latency all land in the one number the user perceives.
+    log.info(
+        '[pii_chunking] masked %d chunks in %.1fs (%d retries)',
+        total,
+        time.time() - _t0,
+        retry_stats['retries'],
+    )
 
     # FAIL-CLOSED (finding #1): a missing/empty `messages` in the skeleton
     # response must never fall back to the caller's ORIGINAL, unmasked
@@ -803,7 +895,17 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                         on_progress,
                     )
                 else:
-                    payload = await _post_inlet_once(session, url, key, filter['id'], request_data)
+                    # The ORDINARY single-call path — every non-oversized chat
+                    # turn and every task generator (title / tags / follow-ups).
+                    # It had no retry at all, so one socket-read timeout or one
+                    # 429 failed it outright; observed live as a title
+                    # generation dying on `SocketTimeoutError` while the chunked
+                    # masking of the same turn was still saturating the pipeline.
+                    # Retrying the chunked path but not this one left the most
+                    # frequently taken path the most fragile.
+                    payload = await _post_inlet_with_retry(
+                        session, url, key, filter['id'], request_data, fail_closed=False
+                    )
             except PiiMaskingUnavailableError:
                 raise
             except HTTPException:

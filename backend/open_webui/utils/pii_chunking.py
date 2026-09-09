@@ -120,7 +120,20 @@ PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 240)
 
 # Per-chunk retries for transient failures (cold start, 5xx, dropped
 # connection). Retrying one ~8 s chunk is far cheaper than failing a whole turn.
-PII_INLET_CHUNK_RETRIES = 3
+#
+# Four, not three: the failures actually seen are Cloud Run bringing an instance
+# up, and three attempts on the linear network-error schedule below spent every
+# retry inside the first 1.5 s — long before a cold start finishes.
+PII_INLET_CHUNK_RETRIES = 4
+
+# First backoff for a chunk refused with a RETRYABLE STATUS (429 / transient
+# 5xx), doubling per attempt: 2 s, 4 s, 8 s. Deliberately far longer than the
+# schedule used for network errors, because these two failures mean different
+# things. A dropped connection clears in milliseconds; a 429 from Cloud Run
+# means the fleet has no free instance and one is being started, which takes
+# seconds. Retrying that in half a second just re-fails against the same cold
+# fleet and burns an attempt.
+PII_INLET_RETRY_BACKOFF_S = 2.0
 
 # Measured inlet throughput, characters per second (Appendix A). Everything
 # below is arithmetic on this number; re-measure before changing it.
