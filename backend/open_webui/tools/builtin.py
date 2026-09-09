@@ -4378,16 +4378,65 @@ GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES = {
 
 DRIVE_MAX_RESPONSE_BYTES = 100_000
 
+# Google Drive quota errors surface as 429, but can also come back as 403 with one of these reasons
+DRIVE_RATE_LIMIT_REASONS = {'userRateLimitExceeded', 'rateLimitExceeded', 'quotaExceeded'}
+
+
+def _drive_error_reason(response) -> str:
+    try:
+        return response.json().get('error', {}).get('errors', [{}])[0].get('reason', '')
+    except Exception:
+        return ''
+
+
+def _drive_is_rate_limited(response) -> bool:
+    if response.status_code == 429:
+        return True
+    return response.status_code == 403 and _drive_error_reason(response) in DRIVE_RATE_LIMIT_REASONS
+
+
+def _drive_retry_delay_seconds(response) -> float:
+    retry_after = response.headers.get('Retry-After')
+    if retry_after:
+        try:
+            return min(float(retry_after), 5.0)
+        except ValueError:
+            pass
+    return 1.5
+
+
+async def _drive_get(client, url: str, headers: dict, params: dict):
+    """GET against the Drive API, retrying once if the first attempt is rate-limited."""
+    response = await client.get(url, headers=headers, params=params)
+    if _drive_is_rate_limited(response):
+        await asyncio.sleep(_drive_retry_delay_seconds(response))
+        response = await client.get(url, headers=headers, params=params)
+    return response
+
+
+def _drive_error_message(response, fallback: str) -> str:
+    if _drive_is_rate_limited(response):
+        return 'Google Drive is rate-limited right now - try again in a moment.'
+    if response.status_code == 401:
+        return 'Google Drive access was revoked - please reconnect it in Settings.'
+    if response.status_code == 403:
+        return "You don't have permission to access this file or Drive."
+    if response.status_code == 404:
+        return 'This file no longer exists or was deleted.'
+    return fallback
+
 
 async def drive_search(
     query: str,
+    page_token: str = '',
     __user__: dict = None,
 ) -> str:
     """
     Search the current user's Google Drive (including shared drives) by file name or content.
 
     :param query: Search query matched against file name and content
-    :return: JSON with matching files (id, name, mime_type, modified_time, web_link) - use the id with drive_read to fetch a file's contents
+    :param page_token: Pass the next_page_token from a previous result to fetch the next page
+    :return: JSON with matching files (id, name, mime_type, modified_time, web_link) and an optional next_page_token if more results are available - use the file id with drive_read to fetch a file's contents
     """
     import httpx
 
@@ -4401,39 +4450,47 @@ async def drive_search(
     try:
         escaped_query = query.replace('\\', '\\\\').replace("'", "\\'")
 
+        params = {
+            'q': f"fullText contains '{escaped_query}' or name contains '{escaped_query}'",
+            'includeItemsFromAllDrives': 'true',
+            'supportsAllDrives': 'true',
+            'fields': 'nextPageToken, files(id,name,mimeType,modifiedTime,webViewLink)',
+            'pageSize': 25,
+        }
+        if page_token:
+            params['pageToken'] = page_token
+
         async with httpx.AsyncClient() as client:
-            response = await client.get(
+            response = await _drive_get(
+                client,
                 GOOGLE_DRIVE_FILES_URL,
                 headers={'Authorization': f'Bearer {access_token}'},
-                params={
-                    'q': f"fullText contains '{escaped_query}' or name contains '{escaped_query}'",
-                    'includeItemsFromAllDrives': 'true',
-                    'supportsAllDrives': 'true',
-                    'fields': 'files(id,name,mimeType,modifiedTime,webViewLink)',
-                    'pageSize': 10,
-                },
+                params=params,
             )
 
         if response.status_code != 200:
             log.error(f'Google Drive search failed: {response.status_code} {response.text}')
-            return json.dumps({'error': 'Failed to search Google Drive.'})
+            return json.dumps({'error': _drive_error_message(response, 'Failed to search Google Drive.')})
 
-        files = response.json().get('files', [])
-        return json.dumps(
-            {
-                'results': [
-                    {
-                        'id': f['id'],
-                        'name': f['name'],
-                        'mime_type': f['mimeType'],
-                        'modified_time': f.get('modifiedTime'),
-                        'web_link': f.get('webViewLink'),
-                    }
-                    for f in files
-                ]
-            },
-            ensure_ascii=False,
-        )
+        data = response.json()
+        files = data.get('files', [])
+        result = {
+            'results': [
+                {
+                    'id': f['id'],
+                    'name': f['name'],
+                    'mime_type': f['mimeType'],
+                    'modified_time': f.get('modifiedTime'),
+                    'web_link': f.get('webViewLink'),
+                }
+                for f in files
+            ]
+        }
+        if data.get('nextPageToken'):
+            result['next_page_token'] = data['nextPageToken']
+            result['note'] = 'More results are available - call drive_search again with this page_token to see them.'
+
+        return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         log.exception(f'drive_search error: {e}')
         return json.dumps({'error': str(e)})
@@ -4467,7 +4524,8 @@ async def drive_read(
         headers = {'Authorization': f'Bearer {access_token}'}
 
         async with httpx.AsyncClient() as client:
-            metadata_response = await client.get(
+            metadata_response = await _drive_get(
+                client,
                 f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
                 headers=headers,
                 params={'fields': 'mimeType,capabilities(canDownload)', 'supportsAllDrives': 'true'},
@@ -4477,13 +4535,16 @@ async def drive_read(
                 log.error(
                     f'Google Drive metadata fetch failed: {metadata_response.status_code} {metadata_response.text}'
                 )
-                return json.dumps({'error': 'Failed to read this file from Google Drive.'})
+                return json.dumps(
+                    {'error': _drive_error_message(metadata_response, 'Failed to read this file from Google Drive.')}
+                )
 
             metadata = metadata_response.json()
             mime_type = metadata['mimeType']
 
             if mime_type in GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES:
-                content_response = await client.get(
+                content_response = await _drive_get(
+                    client,
                     f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}/export',
                     headers=headers,
                     params={'mimeType': GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES[mime_type]},
@@ -4494,7 +4555,8 @@ async def drive_read(
                 if not metadata.get('capabilities', {}).get('canDownload', True):
                     return json.dumps({'error': 'The owner has restricted downloading of this file.'})
 
-                content_response = await client.get(
+                content_response = await _drive_get(
+                    client,
                     f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
                     headers=headers,
                     params={'alt': 'media', 'supportsAllDrives': 'true'},
@@ -4502,7 +4564,9 @@ async def drive_read(
 
         if content_response.status_code != 200:
             log.error(f'Google Drive content fetch failed: {content_response.status_code} {content_response.text}')
-            return json.dumps({'error': 'Failed to read this file from Google Drive.'})
+            return json.dumps(
+                {'error': _drive_error_message(content_response, 'Failed to read this file from Google Drive.')}
+            )
 
         content_bytes = content_response.content
         truncated = len(content_bytes) > DRIVE_MAX_RESPONSE_BYTES

@@ -10,7 +10,6 @@ from open_webui.config import (
     GOOGLE_DRIVE_CONNECTOR_CLIENT_ID,
     GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET,
     GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI,
-    WEBUI_URL,
 )
 from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.utils.auth import (
@@ -21,7 +20,7 @@ from open_webui.utils.auth import (
     is_valid_token,
 )
 from pydantic import BaseModel
-from starlette.responses import RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse
 
 log = logging.getLogger(__name__)
 
@@ -38,11 +37,30 @@ TOKEN_EXPIRY_BUFFER_SECONDS = 120
 
 _refresh_locks: dict[str, asyncio.Lock] = {}
 
+# Sweep out unheld locks once the table grows past this size
+_REFRESH_LOCKS_SWEEP_THRESHOLD = 1000
+
 
 def _get_refresh_lock(user_id: str) -> asyncio.Lock:
+    if len(_refresh_locks) > _REFRESH_LOCKS_SWEEP_THRESHOLD:
+        for uid, lock in list(_refresh_locks.items()):
+            if not lock.locked():
+                del _refresh_locks[uid]
+
     if user_id not in _refresh_locks:
         _refresh_locks[user_id] = asyncio.Lock()
     return _refresh_locks[user_id]
+
+
+def _connector_popup_response(message: str = 'You can close this window.') -> HTMLResponse:
+    """The connect flow runs in a popup window - close it instead of redirecting the popup itself."""
+    return HTMLResponse(f"""<!doctype html>
+<html>
+<body style="font-family: sans-serif; padding: 2rem;">
+<p>{message}</p>
+<script>window.close();</script>
+</body>
+</html>""")
 
 
 class ConnectorStatusResponse(BaseModel):
@@ -91,13 +109,27 @@ async def connect_google_drive(user=Depends(get_verified_user)):
 
 
 @router.get('/google-drive/callback')
-async def google_drive_callback(code: str, state: str, request: Request, user=Depends(get_verified_user)):
+async def google_drive_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    user=Depends(get_verified_user),
+):
+    if error:
+        # The user declined consent on Google's screen - not an app error, just close the popup
+        log.info(f'Google Drive connect declined by user {user.id}: {error}')
+        return _connector_popup_response()
+
+    if not code or not state:
+        return _connector_popup_response('Invalid or expired connect request.')
+
     payload = decode_token(state)
     if not payload or payload.get('purpose') != 'gdrive_connect' or payload.get('user_id') != user.id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired connect request')
+        return _connector_popup_response('Invalid or expired connect request.')
 
     if not await is_valid_token(payload, request.app.state.redis):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid or expired connect request')
+        return _connector_popup_response('Invalid or expired connect request.')
 
     # Burn the state now so it can't be replayed, regardless of whether the exchange below succeeds
     await invalidate_token(request, state)
@@ -116,7 +148,7 @@ async def google_drive_callback(code: str, state: str, request: Request, user=De
 
         if token_response.status_code != 200:
             log.error(f'Google Drive token exchange failed: {token_response.status_code} {token_response.text}')
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to connect Google Drive')
+            return _connector_popup_response('Failed to connect Google Drive.')
 
         token_data = token_response.json()
 
@@ -143,7 +175,7 @@ async def google_drive_callback(code: str, state: str, request: Request, user=De
         scopes=token_data.get('scope'),
     )
 
-    return RedirectResponse(f'{WEBUI_URL.value}/?settings=connectors')
+    return _connector_popup_response('Google Drive connected. This window will close automatically.')
 
 
 @router.post('/google-drive/disconnect', response_model=ConnectorStatusResponse)

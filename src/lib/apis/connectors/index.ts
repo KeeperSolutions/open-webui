@@ -1,7 +1,32 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-export const connectConnector = (connectUrl: string) => {
-	window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+export const connectConnector = (connectUrl: string): Promise<void> => {
+	return new Promise((resolve) => {
+		const width = 520;
+		const height = 680;
+		const left = window.screenX + (window.outerWidth - width) / 2;
+		const top = window.screenY + (window.outerHeight - height) / 2;
+
+		const popup = window.open(
+			`${WEBUI_API_BASE_URL}${connectUrl}`,
+			'connector-oauth',
+			`width=${width},height=${height},left=${left},top=${top}`
+		);
+
+		if (!popup) {
+			// Popup blocked - fall back to a full-page redirect
+			window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+			resolve();
+			return;
+		}
+
+		const interval = setInterval(() => {
+			if (popup.closed) {
+				clearInterval(interval);
+				resolve();
+			}
+		}, 500);
+	});
 };
 
 export const getGoogleDriveStatus = async (token: string) => {
