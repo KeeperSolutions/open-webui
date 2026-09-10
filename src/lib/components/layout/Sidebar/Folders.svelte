@@ -8,7 +8,6 @@
 	export let folderRegistry = {};
 
 	export let folders = {};
-	export let shiftKey = false;
 
 	export let onDelete = () => {};
 	export let onFolderUnreadCounts = () => {};
@@ -50,7 +49,6 @@
 		bind:folderRegistry
 		{folders}
 		{folderId}
-		{shiftKey}
 		{onDelete}
 		{onItemMove}
 		{onFolderUnreadCounts}
@@ -76,7 +74,6 @@
 			bind:folderRegistry
 			{folders}
 			{folderId}
-			{shiftKey}
 			{onDelete}
 			{onItemMove}
 			{onFolderUnreadCounts}

@@ -14,7 +14,7 @@
 		getChatPinnedStatusById,
 		toggleChatPinnedStatusById
 	} from '$lib/apis/chats';
-	import { chats, folders, settings, theme, user } from '$lib/stores';
+	import { chats, folders, mobile, settings, theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 	import { downloadChatAsPDF } from '$lib/apis/utils';
@@ -44,7 +44,8 @@
 
 	export let chatId = '';
 
-	let show = false;
+	export let showChatMenu = false;
+
 	let pinned = false;
 
 	let chat = null;
@@ -263,7 +264,7 @@
 		}
 	};
 
-	$: if (show) {
+	$: if (showChatMenu) {
 		checkPinned();
 	}
 </script>
@@ -290,14 +291,14 @@
 {/if}
 
 <Dropdown
-	bind:show
+	bind:show={showChatMenu}
 	onOpenChange={(state) => {
 		if (state === false) {
 			onClose();
 		}
 	}}
 >
-	<Tooltip content={$i18n.t('More')}>
+	<Tooltip content={$i18n.t('More')} touch={false}>
 		<slot />
 	</Tooltip>
 
@@ -306,12 +307,12 @@
 			{#if $user?.role === 'admin' || ($user.permissions?.chat?.share ?? true)}
 				<button
 					draggable="false"
-					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 					on:click={() => {
 						shareHandler();
 					}}
 				>
-					<ShareIcon className="size-3.5" strokeWidth="1.5" />
+					<ShareIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Share')}</div>
 				</button>
 			{/if}
@@ -321,15 +322,15 @@
 					<button
 						slot="trigger"
 						draggable="false"
-						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 					>
-						<DownloadIcon className="size-3.5" strokeWidth="1.5" />
+						<DownloadIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						<div class="flex items-center">{$i18n.t('Download')}</div>
 					</button>
 
 					<button
 						draggable="false"
-						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 						on:click={() => {
 							downloadJSONExport();
 						}}
@@ -339,7 +340,7 @@
 
 					<button
 						draggable="false"
-						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 						on:click={() => {
 							downloadTxt();
 						}}
@@ -349,7 +350,7 @@
 
 					<button
 						draggable="false"
-						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 select-none w-full"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 select-none w-full"
 						on:click={() => {
 							downloadPdf();
 						}}
@@ -361,25 +362,25 @@
 
 			<button
 				draggable="false"
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 				on:click={() => {
-					show = false;
+					showChatMenu = false;
 					renameHandler();
 				}}
 			>
-				<EditPencilIcon className="size-3.5" strokeWidth="1.5" />
+				<EditPencilIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Rename')}</div>
 			</button>
 
 			<button
 				draggable="false"
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 				on:click={() => {
-					show = false;
+					showChatMenu = false;
 					markUnreadHandler();
 				}}
 			>
-				<ChatCheckIcon className="size-3.5" strokeWidth="1.5" />
+				<ChatCheckIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Mark as unread')}</div>
 			</button>
 
@@ -387,17 +388,17 @@
 
 			<button
 				draggable="false"
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 				on:click={() => {
-					show = false;
+					showChatMenu = false;
 					pinHandler();
 				}}
 			>
 				{#if pinned}
-					<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+					<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Unpin')}</div>
 				{:else}
-					<PinIcon className="size-3.5" strokeWidth="1.5" />
+					<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Pin')}</div>
 				{/if}
 			</button>
@@ -405,13 +406,13 @@
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true)}
 				<button
 					draggable="false"
-					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 					on:click={() => {
-						show = false;
+						showChatMenu = false;
 						cloneChatHandler();
 					}}
 				>
-					<CopyIcon className="size-3.5" strokeWidth="1.5" />
+					<CopyIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Clone')}</div>
 				</button>
 			{/if}
@@ -421,22 +422,22 @@
 					<button
 						slot="trigger"
 						draggable="false"
-						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 select-none w-full"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 select-none w-full"
 					>
-						<FolderIcon className="size-3.5" />
+						<FolderIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 						<div class="flex items-center">{$i18n.t('Move')}</div>
 					</button>
 
 					{#each $folders.sort((a, b) => b.updated_at - a.updated_at) as folder}
 						<button
 							draggable="false"
-							class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 overflow-hidden w-full"
+							class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 overflow-hidden w-full"
 							on:click={() => {
 								moveChatHandler(chatId, folder.id);
 							}}
 						>
 							<div class="shrink-0">
-								<FolderIcon className="size-3.5" />
+								<FolderIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 							</div>
 
 							<div class="truncate">{folder?.name ?? 'Folder'}</div>
@@ -447,23 +448,23 @@
 
 			<button
 				draggable="false"
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 				on:click={() => {
 					archiveChatHandler();
 				}}
 			>
-				<ArchiveBoxIcon className="size-3.5" strokeWidth="1.7" />
+				<ArchiveBoxIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.7" />
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</button>
 
 			<button
 				draggable="false"
-				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 items-center rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 w-full"
 				on:click={() => {
 					deleteHandler();
 				}}
 			>
-				<TrashIcon className="size-3.5" strokeWidth="1.5" />
+				<TrashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</button>
 		</DropdownMenu>

@@ -30,14 +30,13 @@
 	import { goto } from '$app/navigation';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
 	import NotesIcon from './Sidebar/icons/Notes.svelte';
+	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
 
 	import ChatMenu from './Sidebar/ChatMenu.svelte';
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
-	import ArchiveBox from '../icons/ArchiveBox.svelte';
-	import GarbageBin from '../icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
 	dayjs.extend(calendar);
 	dayjs.extend(localizedFormat);
@@ -53,15 +52,6 @@
 	let editingChatId = null;
 	let editingChatTitle = '';
 
-	let shiftKey = false;
-
-	const onShiftKeyDown = (e) => {
-		if (e.key === 'Shift') shiftKey = true;
-	};
-
-	const onShiftKeyUp = (e) => {
-		if (e.key === 'Shift') shiftKey = false;
-	};
 	let generating = false;
 
 	const refreshSidebar = async () => {
@@ -533,8 +523,6 @@
 		];
 
 		document.addEventListener('keydown', onKeyDown);
-		document.addEventListener('keydown', onShiftKeyDown);
-		document.addEventListener('keyup', onShiftKeyUp);
 	});
 
 	onDestroy(() => {
@@ -542,8 +530,6 @@
 			clearTimeout(searchDebounceTimeout);
 		}
 		document.removeEventListener('keydown', onKeyDown);
-		document.removeEventListener('keydown', onShiftKeyDown);
-		document.removeEventListener('keyup', onShiftKeyUp);
 	});
 </script>
 
@@ -772,79 +758,42 @@
 								</div>
 
 								{#if editingChatId !== chat.id}
-									{#if shiftKey}
-										<div class="flex items-center space-x-1.5">
-											<Tooltip content={$i18n.t('Archive')} className="flex items-center">
-												<button
-													class="self-center dark:hover:text-white transition"
-													on:click|stopPropagation={() => {
-														archiveChatHandler(chat.id);
-													}}
-													type="button"
-												>
-													<ArchiveBox className="size-4 translate-y-[0.5px]" strokeWidth="2" />
-												</button>
-											</Tooltip>
-
-											<Tooltip content={$i18n.t('Delete')}>
-												<button
-													class="self-center dark:hover:text-white transition"
-													on:click|stopPropagation={() => {
-														deleteChatHandler(chat.id);
-													}}
-													type="button"
-												>
-													<GarbageBin strokeWidth="2" />
-												</button>
-											</Tooltip>
-										</div>
-									{:else}
-										<div class="flex items-center">
-											<ChatMenu
-												chatId={chat.id}
-												shareHandler={() => {
-													menuChatId = chat.id;
-													showShareChatModal = true;
-												}}
-												{moveChatHandler}
-												cloneChatHandler={() => {
-													cloneChatHandler(chat.id);
-												}}
-												archiveChatHandler={() => {
-													archiveChatHandler(chat.id);
-												}}
-												renameHandler={() => {
-													renameHandler(chat.id);
-												}}
-												deleteHandler={() => {
-													menuChatId = chat.id;
-													menuChatTitle = chat.title;
-													showDeleteConfirm = true;
-												}}
-												onClose={() => {}}
-												onPinChange={async () => {
-													await refreshSidebar();
-													await searchHandler();
-												}}
+									<div class="flex items-center">
+										<ChatMenu
+											chatId={chat.id}
+											shareHandler={() => {
+												menuChatId = chat.id;
+												showShareChatModal = true;
+											}}
+											{moveChatHandler}
+											cloneChatHandler={() => {
+												cloneChatHandler(chat.id);
+											}}
+											archiveChatHandler={() => {
+												archiveChatHandler(chat.id);
+											}}
+											renameHandler={() => {
+												renameHandler(chat.id);
+											}}
+											deleteHandler={() => {
+												menuChatId = chat.id;
+												menuChatTitle = chat.title;
+												showDeleteConfirm = true;
+											}}
+											onClose={() => {}}
+											onPinChange={async () => {
+												await refreshSidebar();
+												await searchHandler();
+											}}
+										>
+											<button
+												aria-label="Chat Menu"
+												class="self-center dark:hover:text-white transition"
 											>
-												<button
-													aria-label="Chat Menu"
-													class="self-center dark:hover:text-white transition"
-												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 16 16"
-														fill="currentColor"
-														class="w-4 h-4"
-													>
-														<path
-															d="M2 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM6.5 8a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0ZM12.5 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"
-														/>
-													</svg>
-												</button>
-											</ChatMenu>
-										</div>
-									{/if}
+												<MoreHorizontalIcon className="size-4" strokeWidth="2" />
+											</button>
+										</ChatMenu>
+									</div>
 								{/if}
 							</div>
 						</div>

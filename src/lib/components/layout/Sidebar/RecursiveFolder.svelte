@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 
-	import { chatId, mobile, selectedFolder, showSidebar, user } from '$lib/stores';
+	import { chatId, mobile, isTouchDevice, selectedFolder, showSidebar, user } from '$lib/stores';
 
 	import {
 		deleteFolderById,
@@ -41,6 +41,7 @@
 
 	import ChatItem from './ChatItem.svelte';
 	import FolderMenu from './Folders/FolderMenu.svelte';
+	import { longPress } from '$lib/utils/longPress';
 	import FolderShareModal from './Folders/FolderShareModal.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import FolderModal from './Folders/FolderModal.svelte';
@@ -51,7 +52,6 @@
 
 	export let folders;
 	export let folderId;
-	export let shiftKey = false;
 
 	export let className = '';
 
@@ -68,6 +68,11 @@
 	let showFolderModal = false;
 	let showShareModal = false;
 	let edit = false;
+
+	// Touch devices have no hover, so press-and-hold opens the folder menu instead.
+	let menuOpen = false;
+
+	$: canOpenFolderMenu = !folders[folderId]?.shared || folders[folderId]?.permission === 'write';
 
 	let showCreateSubFolderModal = false;
 	let createSubFolderParentId = null;
@@ -733,10 +738,21 @@
 			dispatch('open', state);
 		}}
 	>
-		<div class="w-full group">
+		<div
+			class="w-full group"
+			use:longPress={{
+				enabled: $isTouchDevice && !edit && canOpenFolderMenu,
+				suppressNativeMenu: $isTouchDevice && !edit,
+				onLongPress: () => {
+					menuOpen = true;
+				}
+			}}
+		>
 			<div
 				id="folder-{folderId}-button"
-				class="relative w-full py-1 px-1.5 rounded-xl flex items-center gap-1.5 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition {$selectedFolder?.id ===
+				class="relative w-full {$isTouchDevice
+					? 'py-2.5 px-2'
+					: 'py-1 px-1.5'} rounded-xl flex items-center gap-1.5 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition {$selectedFolder?.id ===
 				folderId
 					? 'bg-gray-100/80 dark:bg-gray-850/50 selected'
 					: ''}"
@@ -749,6 +765,7 @@
 					}
 				}}
 				on:dblclick={(e) => {
+					if ($isTouchDevice) return;
 					if (folders[folderId]?.shared && folders[folderId]?.permission !== 'write') return;
 					if (clickTimer) {
 						clearTimeout(clickTimer); // cancel the single-click action
@@ -780,7 +797,9 @@
 				}}
 			>
 				<button
-					class="text-gray-600 dark:text-gray-400 transition-all p-1 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-lg"
+					class="text-gray-600 dark:text-gray-400 transition-all {$isTouchDevice
+						? 'p-2.5 -m-1.5'
+						: 'p-1'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-lg"
 					on:click={(e) => {
 						e.stopPropagation();
 						e.stopImmediatePropagation();
@@ -789,33 +808,40 @@
 					}}
 				>
 					{#if folders[folderId]?.meta?.icon}
-						<div class="flex group-hover:hidden transition-all">
-							<Emoji className="size-3.5" shortCode={folders[folderId].meta.icon} />
+						<div class="flex {$isTouchDevice ? '' : 'group-hover:hidden'} transition-all">
+							<Emoji
+								className={$isTouchDevice ? 'size-4.5' : 'size-3.5'}
+								shortCode={folders[folderId].meta.icon}
+							/>
 						</div>
 
-						<div class="hidden group-hover:flex transition-all p-[1px]">
+						<div class="hidden {$isTouchDevice ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
-								<ChevronDown className=" size-3" strokeWidth="1.5" />
+								<ChevronDown className={$isTouchDevice ? 'size-4' : 'size-3'} strokeWidth="1.5" />
 							{:else}
-								<ChevronRight className=" size-3" strokeWidth="1.5" />
+								<ChevronRight className={$isTouchDevice ? 'size-4' : 'size-3'} strokeWidth="1.5" />
 							{/if}
 						</div>
 					{:else}
-						<div class="flex group-hover:hidden transition-all">
-							<FolderIcon className="size-3.5" strokeWidth="1.5" />
+						<div class="flex {$isTouchDevice ? '' : 'group-hover:hidden'} transition-all">
+							<FolderIcon className={$isTouchDevice ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 
-						<div class="hidden group-hover:flex transition-all p-[1px]">
+						<div class="hidden {$isTouchDevice ? '' : 'group-hover:flex'} transition-all p-[1px]">
 							{#if open}
-								<ChevronDown className=" size-3" strokeWidth="1.5" />
+								<ChevronDown className={$isTouchDevice ? 'size-4' : 'size-3'} strokeWidth="1.5" />
 							{:else}
-								<ChevronRight className=" size-3" strokeWidth="1.5" />
+								<ChevronRight className={$isTouchDevice ? 'size-4' : 'size-3'} strokeWidth="1.5" />
 							{/if}
 						</div>
 					{/if}
 				</button>
 
-				<div class="translate-y-[0.5px] flex min-w-0 flex-1 items-center gap-1.5 pr-6 text-start">
+				<div
+					class="translate-y-[0.5px] flex min-w-0 flex-1 items-center gap-1.5 {$isTouchDevice
+						? 'pr-12'
+						: 'pr-6'} text-start"
+				>
 					{#if edit}
 						<input
 							id="folder-{folderId}-input"
@@ -858,36 +884,72 @@
 					{/if}
 				</div>
 
-				{#if !folders[folderId]?.shared || folders[folderId]?.permission === 'write'}
-					<button
-						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+				{#if canOpenFolderMenu || $isTouchDevice}
+					<div
+						class="absolute z-10 {$isTouchDevice
+							? 'right-0 gap-0'
+							: 'right-2 gap-1'} inset-y-0 flex items-center"
 					>
-						<FolderMenu
-							onEdit={() => {
-								showFolderModal = true;
-							}}
-							onShare={() => {
-								showShareModal = true;
-							}}
-							onDelete={() => {
-								showDeleteConfirm = true;
-							}}
-							onExport={() => {
-								exportHandler();
-							}}
-							onCreateSubFolder={() => {
-								createSubFolderParentId = folderId;
-								showCreateSubFolderModal = true;
-							}}
-							onMarkAllRead={markAllReadHandler}
-						>
+						{#if canOpenFolderMenu}
 							<div
-								class="flex size-5 items-center justify-center self-center dark:hover:text-white transition m-0 touch-auto"
+								class="{$isTouchDevice
+									? 'invisible'
+									: 'invisible group-hover:visible'} self-center flex items-center dark:text-gray-300"
 							>
-								<MoreHorizontal className="size-3.5" strokeWidth="2" />
+								<FolderMenu
+									bind:showFolderMenu={menuOpen}
+									onEdit={() => {
+										showFolderModal = true;
+									}}
+									onShare={() => {
+										showShareModal = true;
+									}}
+									onDelete={() => {
+										showDeleteConfirm = true;
+									}}
+									onExport={() => {
+										exportHandler();
+									}}
+									onCreateSubFolder={() => {
+										createSubFolderParentId = folderId;
+										showCreateSubFolderModal = true;
+									}}
+									onMarkAllRead={markAllReadHandler}
+								>
+									<div
+										class="flex items-center justify-center self-center dark:hover:text-white transition m-0 touch-auto {$isTouchDevice
+											? 'size-8'
+											: 'size-5'}"
+									>
+										<MoreHorizontal
+											className={$isTouchDevice ? 'size-4' : 'size-3.5'}
+											strokeWidth="2"
+										/>
+									</div>
+								</FolderMenu>
 							</div>
-						</FolderMenu>
-					</button>
+						{/if}
+
+						{#if $isTouchDevice}
+							<button
+								class="{open
+									? 'text-gray-600 dark:text-gray-400'
+									: 'text-gray-300 dark:text-gray-600'} flex items-center justify-center size-8 shrink-0 mr-1"
+								on:click={(e) => {
+									e.stopPropagation();
+									e.stopImmediatePropagation();
+									open = !open;
+									isExpandedUpdateDebounceHandler();
+								}}
+							>
+								{#if open}
+									<ChevronDown className="size-4" strokeWidth="1.5" />
+								{:else}
+									<ChevronRight className="size-4" strokeWidth="1.5" />
+								{/if}
+							</button>
+						{/if}
+					</div>
 				{/if}
 			</div>
 		</div>
@@ -912,7 +974,6 @@
 								bind:folderRegistry
 								{folders}
 								folderId={childFolder.id}
-								{shiftKey}
 								parentDragged={dragged}
 								{onItemMove}
 								{onDelete}
@@ -941,7 +1002,6 @@
 							ownerName={folders[folderId]?.shared ? (chat.owner_name ?? null) : null}
 							ownerUserId={folders[folderId]?.shared && chat.owner_name ? chat.user_id : null}
 							readonly={chat.user_id !== $user?.id}
-							{shiftKey}
 							onReadStateChange={applyReadState}
 							on:change={(e) => {
 								dispatch('change', e.detail);
