@@ -1064,7 +1064,14 @@
 					for (const msg of outletMessages) {
 						if (msg?.id && history.messages[msg.id]) {
 							const existing = history.messages[msg.id];
-							if (existing.content !== msg.content) {
+							// `output` is the carrier the renderer prefers (ContentRenderer
+							// falls back to `content` only when `output` is empty), so a
+							// filter can change what the user sees while `content` stands
+							// still — a turn that only reasoned/called tools has no
+							// `content` at all. Gate on either carrier moving.
+							const outputChanged =
+								JSON.stringify(existing.output ?? null) !== JSON.stringify(msg.output ?? null);
+							if (existing.content !== msg.content || outputChanged) {
 								history.messages[msg.id] = {
 									...existing,
 									originalContent: existing.content,
