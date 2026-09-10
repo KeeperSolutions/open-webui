@@ -1119,6 +1119,12 @@
 					} else {
 						message.connectorSuggestions = [data];
 					}
+				} else if (type === 'chat:message:drive_document_created') {
+					if (message?.driveDocuments) {
+						message.driveDocuments.push(data);
+					} else {
+						message.driveDocuments = [data];
+					}
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
 					const toastContent = data?.content ?? '';

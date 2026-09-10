@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from datetime import timedelta
 from urllib.parse import urlencode
@@ -20,7 +21,7 @@ from open_webui.utils.auth import (
     is_valid_token,
 )
 from pydantic import BaseModel
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,16 @@ GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
 GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+
+GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
+GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
+
+# PDF has no native Google format, so it's downloaded via alt=media instead of exported
+GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
 
 # Refresh a bit before actual expiry to avoid handing out a token that expires mid-request
 TOKEN_EXPIRY_BUFFER_SECONDS = 120
@@ -98,7 +109,9 @@ async def connect_google_drive(user=Depends(get_verified_user)):
         'client_id': GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value,
         'redirect_uri': GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value,
         'response_type': 'code',
-        'scope': 'https://www.googleapis.com/auth/drive.readonly email',
+        # Requesting both scopes lets Google's consent screen offer them as separate,
+        # individually grantable items - the callback stores whatever the user actually approved.
+        'scope': f'{GOOGLE_DRIVE_READ_SCOPE} {GOOGLE_DRIVE_WRITE_SCOPE} email',
         'access_type': 'offline',
         'prompt': 'consent',
         'include_granted_scopes': 'true',
@@ -200,6 +213,51 @@ async def disconnect_google_drive(user=Depends(get_verified_user)):
         await ConnectorConnections.delete_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
 
     return ConnectorStatusResponse(connected=False, revoked=revoked)
+
+
+@router.get('/google-drive/download/{file_id}')
+async def download_google_drive_document(
+    file_id: str,
+    format: str,
+    filename: str = 'document',
+    user=Depends(get_verified_user),
+):
+    if format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
+
+    access_token = await get_valid_access_token(user.id)
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Drive isn't connected")
+
+    export_mime_type = GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES.get(format)
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    async with httpx.AsyncClient() as client:
+        if export_mime_type:
+            response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}/export',
+                headers=headers,
+                params={'mimeType': export_mime_type},
+            )
+        else:
+            response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}',
+                headers=headers,
+                params={'alt': 'media', 'supportsAllDrives': 'true'},
+            )
+
+    if response.status_code != 200:
+        log.error(f'Google Drive document download failed: {response.status_code} {response.text}')
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to download this document from Google Drive.'
+        )
+
+    safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
+    return Response(
+        content=response.content,
+        media_type=export_mime_type or response.headers.get('Content-Type', 'application/octet-stream'),
+        headers={'Content-Disposition': f'attachment; filename="{safe_filename}.{format}"'},
+    )
 
 
 async def get_valid_access_token(user_id: str) -> str | None:
