@@ -503,7 +503,7 @@
 <div
 	id="sidebar-chat-group"
 	bind:this={itemElement}
-	class=" w-full {className} relative group"
+	class=" w-full {className} relative group {$mobile ? 'mb-2' : ''}"
 	draggable={!confirmEdit && !readonly}
 	on:mouseenter={() => {
 		mouseOver = true;
@@ -520,7 +520,9 @@
 	{#if confirmEdit}
 		<div
 			id="sidebar-chat-item"
-			class=" w-full flex justify-between rounded-xl px-2 py-[6px] {id === $chatId || confirmEdit
+			class=" w-full flex justify-between rounded-xl {$mobile
+				? 'px-3 py-2.5'
+				: 'px-2 py-[6px]'} {id === $chatId || confirmEdit
 				? ($settings?.highContrastMode ?? false)
 					? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 					: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -565,7 +567,9 @@
 		>
 			<LinkPreview.Trigger
 				id="sidebar-chat-item"
-				class=" w-full flex justify-between rounded-xl px-2 py-[6px] {id === $chatId || confirmEdit
+				class=" w-full flex justify-between rounded-xl {$mobile
+					? 'px-3 py-2.5'
+					: 'px-2 py-[6px]'} {id === $chatId || confirmEdit
 					? ($settings?.highContrastMode ?? false)
 						? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 						: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -627,7 +631,9 @@
 					{/if}
 					<div
 						dir="auto"
-						class="text-left self-center overflow-hidden w-full h-[20px] truncate {unread
+						class="text-left self-center overflow-hidden w-full truncate {$mobile
+							? 'h-[24px] text-[15px]'
+							: 'h-[20px]'} {unread
 							? 'font-normal text-gray-800 dark:text-gray-200'
 							: ''} {showInlineActions && !readonly ? 'pr-12' : ''}"
 					>
@@ -637,7 +643,7 @@
 
 				<!-- Time ago indicator -->
 				{#if (updatedAt ?? createdAt) && !showInlineActions}
-					<div class="shrink-0 self-center text-[10px] text-gray-400 dark:text-gray-500 pl-2">
+					<div class="shrink-0 self-center text-[10px] text-gray-300 dark:text-gray-600 pl-2">
 						{formatTimeAgo((updatedAt ?? createdAt) as number)}
 					</div>
 				{/if}
@@ -684,7 +690,7 @@
 			{:else}
 				<div class="flex self-center z-10 items-end">
 					<ChatMenu
-						bind:show={menuOpen}
+						bind:showChatMenu={menuOpen}
 						chatId={id}
 						cloneChatHandler={() => {
 							cloneChatHandler(id);
@@ -710,12 +716,14 @@
 					>
 						<button
 							aria-label="Chat Menu"
-							class="flex size-5 items-center justify-center self-center hover:text-black dark:hover:text-white transition m-0"
+							class="flex items-center justify-center self-center hover:text-black dark:hover:text-white transition m-0 {$mobile
+								? 'size-8'
+								: 'size-5'}"
 							on:click={() => {
 								dispatch('select');
 							}}
 						>
-							<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+							<MoreHorizontalIcon className={$mobile ? 'size-4' : 'size-3.5'} strokeWidth="2" />
 						</button>
 					</ChatMenu>
 

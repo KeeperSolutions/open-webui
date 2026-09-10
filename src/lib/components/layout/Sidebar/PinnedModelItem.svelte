@@ -30,16 +30,20 @@
 		}}
 	>
 		<a
-			class="grow flex items-center space-x-2 rounded-xl px-2 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition"
+			class="grow flex items-center space-x-2 rounded-xl px-2 py-[7px] group-hover:bg-gray-100 dark:group-hover:bg-gray-900 transition select-none [-webkit-touch-callout:none] [-webkit-user-drag:none]"
 			href="/?model={encodeURIComponent(model.id)}"
 			on:click={onClick}
+			on:contextmenu={(e) => {
+				if ($isTouchDevice) e.preventDefault();
+			}}
 			draggable="false"
 		>
 			<div class="self-center shrink-0">
 				<img
 					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model.id}&theme=${resolveTheme($theme)}&lang=${$i18n.language}`}
-					class=" size-5 rounded-full -translate-x-[0.5px]"
+					class=" size-5 rounded-full -translate-x-[0.5px] pointer-events-none [-webkit-user-drag:none]"
 					alt="logo"
+					draggable="false"
 					on:error={(e) => {
 						e.currentTarget.src = '/favicon.png';
 					}}
@@ -58,7 +62,9 @@
 			<div class="absolute right-1 inset-y-0 mr-1.5 flex items-center">
 				<Tooltip content={$i18n.t('Unpin')} className="flex items-center">
 					<button
-						class="flex size-5 items-center justify-center self-center hover:text-black dark:hover:text-white transition m-0"
+						class="flex size-5 items-center justify-center self-center transition m-0 {$isTouchDevice
+							? 'text-gray-400 dark:text-gray-600'
+							: 'hover:text-black dark:hover:text-white'}"
 						on:click={() => {
 							onUnpin();
 						}}

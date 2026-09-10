@@ -47,6 +47,11 @@
 	export let align = 'end';
 
 	export let showActiveUsers = true;
+	export let myUsage: { year: number; month: number; total_tokens: number } | null = null;
+
+	$: myUsageMonthName = myUsage
+		? new Date(myUsage.year, myUsage.month - 1).toLocaleString('default', { month: 'long' })
+		: '';
 
 	let showUserStatusModal = false;
 	let shiftKey = false;
@@ -119,7 +124,7 @@
 			{#if $user}
 				<div>
 					<button
-						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-xs w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-left"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 text-xs w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-left"
 						type="button"
 						on:click={async () => {
 							show = false;
@@ -167,7 +172,7 @@
 				{#if $user?.status_emoji || $user?.status_message}
 					<div class="user-menu-status">
 						<button
-							class="w-full h-[1.6875rem] gap-2 rounded-xl px-2 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-xs flex items-center text-left"
+							class="w-full {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 rounded-xl px-2 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-xs flex items-center text-left"
 							type="button"
 							on:click={() => {
 								show = false;
@@ -176,7 +181,7 @@
 						>
 							{#if $user?.status_emoji}
 								<div class="self-center shrink-0 size-4.5 flex items-center justify-center">
-									<Emoji className="size-3.5" shortCode={$user?.status_emoji} />
+									<Emoji className={$mobile ? 'size-4.5' : 'size-3.5'} shortCode={$user?.status_emoji} />
 								</div>
 							{/if}
 
@@ -210,7 +215,7 @@
 											}
 										}}
 									>
-										<XMarkIcon className="size-3.5 opacity-50" strokeWidth="1.5" />
+										<XMarkIcon className={$mobile ? 'size-4.5 opacity-50' : 'size-3.5 opacity-50'} strokeWidth="1.5" />
 									</button>
 								</Tooltip>
 							</div>
@@ -219,7 +224,7 @@
 				{:else}
 					<div class="user-menu-status">
 						<button
-							class="w-full h-[1.6875rem] gap-2 rounded-xl px-2 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-xs flex items-center text-left"
+							class="w-full {$mobile ? 'h-11' : 'h-[1.6875rem]'} gap-2 rounded-xl px-2 hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none text-xs flex items-center text-left"
 							type="button"
 							on:click={() => {
 								show = false;
@@ -227,7 +232,7 @@
 							}}
 						>
 							<div class="self-center shrink-0 size-4.5 flex items-center justify-center">
-								<EmojiFaceIcon className="size-3.5" strokeWidth="1.5" />
+								<EmojiFaceIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 							</div>
 							<div class="self-center truncate">{$i18n.t('Update your status')}</div>
 						</button>
@@ -244,7 +249,7 @@
 					<a
 						href="/workspace"
 						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex flex-1 {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						on:click={async (e) => {
 							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 							e.preventDefault();
@@ -257,7 +262,7 @@
 						}}
 					>
 						<div class="self-center">
-							<WorkspaceIcon className="size-3.5" strokeWidth="1.5" />
+							<WorkspaceIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 						<div class="self-center truncate">{$i18n.t('Workspace')}</div>
 					</a>
@@ -273,9 +278,9 @@
 								on:click|preventDefault|stopPropagation={() => togglePin('workspace')}
 							>
 								{#if isPinned('workspace')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+									<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
+									<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{/if}
 							</button>
 						</Tooltip>
@@ -285,7 +290,7 @@
 
 			{#if $config?.features?.enable_billing ?? false}
 				<button
-					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 					type="button"
 					on:click={async () => {
 						show = false;
@@ -297,7 +302,7 @@
 					}}
 				>
 					<div class="self-center">
-						<CreditCard className="size-3.5" strokeWidth="1.5" />
+						<CreditCard className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					</div>
 					<div class="self-center truncate">{$i18n.t('Billing')}</div>
 				</button>
@@ -308,7 +313,7 @@
 					<a
 						href="/notes"
 						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex flex-1 {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						on:click={async (e) => {
 							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 							e.preventDefault();
@@ -321,7 +326,7 @@
 						}}
 					>
 						<div class="self-center">
-							<NotesIcon className="size-3.5" strokeWidth="1.5" />
+							<NotesIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 						<div class="self-center truncate">{$i18n.t('Notes')}</div>
 					</a>
@@ -337,9 +342,9 @@
 								on:click|preventDefault|stopPropagation={() => togglePin('notes')}
 							>
 								{#if isPinned('notes')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+									<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
+									<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{/if}
 							</button>
 						</Tooltip>
@@ -352,7 +357,7 @@
 					<a
 						href="/calendar"
 						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex flex-1 {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						on:click={async (e) => {
 							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 							e.preventDefault();
@@ -365,7 +370,7 @@
 						}}
 					>
 						<div class="self-center">
-							<CalendarIcon className="size-3.5" strokeWidth="1.5" />
+							<CalendarIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 						<div class="self-center truncate">{$i18n.t('Calendar')}</div>
 					</a>
@@ -381,9 +386,9 @@
 								on:click|preventDefault|stopPropagation={() => togglePin('calendar')}
 							>
 								{#if isPinned('calendar')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+									<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
+									<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{/if}
 							</button>
 						</Tooltip>
@@ -396,7 +401,7 @@
 					<a
 						href="/automations"
 						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex flex-1 {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						on:click={async (e) => {
 							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 							e.preventDefault();
@@ -409,7 +414,7 @@
 						}}
 					>
 						<div class="self-center">
-							<ClockIcon className="size-3.5" strokeWidth="1.5" />
+							<ClockIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 						<div class="self-center truncate">{$i18n.t('Automations')}</div>
 					</a>
@@ -425,9 +430,9 @@
 								on:click|preventDefault|stopPropagation={() => togglePin('automations')}
 							>
 								{#if isPinned('automations')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+									<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
+									<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{/if}
 							</button>
 						</Tooltip>
@@ -440,7 +445,7 @@
 					<a
 						href="/playground"
 						draggable="false"
-						class="flex flex-1 h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex flex-1 {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						on:click={async (e) => {
 							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 							e.preventDefault();
@@ -453,7 +458,7 @@
 						}}
 					>
 						<div class="self-center">
-							<CodeIcon className="size-3.5" strokeWidth="1.5" />
+							<CodeIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 						</div>
 						<div class="self-center truncate">{$i18n.t('Playground')}</div>
 					</a>
@@ -469,9 +474,9 @@
 								on:click|preventDefault|stopPropagation={() => togglePin('playground')}
 							>
 								{#if isPinned('playground')}
-									<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
+									<PinSlashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{:else}
-									<PinIcon className="size-3.5" strokeWidth="1.5" />
+									<PinIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 								{/if}
 							</button>
 						</Tooltip>
@@ -481,7 +486,7 @@
 				<a
 					href="/admin/pii-dashboard"
 					draggable="false"
-					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 					on:click={async (e) => {
 						if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
 						e.preventDefault();
@@ -494,7 +499,7 @@
 					}}
 				>
 					<div class="self-center">
-						<UserIcon className="size-3.5" strokeWidth="1.5" />
+						<UserIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					</div>
 					<div class="self-center truncate">{$i18n.t('PII Dashboard')}</div>
 				</a>
@@ -510,14 +515,14 @@
 						href="https://docs.openwebui.com"
 						target="_blank"
 						draggable="false"
-						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						id="chat-share-button"
 						on:click={() => {
 							show = false;
 						}}
 					>
 						<div class="self-center">
-							<HelpCircleIcon className="size-3.5" />
+							<HelpCircleIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 						</div>
 						<div class=" self-center truncate">{$i18n.t('Documentation')}</div>
 					</a>
@@ -527,21 +532,21 @@
 						href="https://github.com/open-webui/open-webui/releases"
 						target="_blank"
 						draggable="false"
-						class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+						class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 						id="chat-share-button"
 						on:click={() => {
 							show = false;
 						}}
 					>
 						<div class="self-center">
-							<MapIcon className="size-3.5" />
+							<MapIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 						</div>
 						<div class=" self-center truncate">{$i18n.t('Releases')}</div>
 					</a>
 				{/if}
 
 				<button
-					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 					type="button"
 					id="chat-share-button"
 					on:click={async () => {
@@ -555,7 +560,7 @@
 					}}
 				>
 					<div class="self-center">
-						<KeyIcon className="size-3.5" />
+						<KeyIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Keyboard')}</div>
 				</button>
@@ -567,7 +572,7 @@
 				<a
 					href="/admin"
 					draggable="false"
-					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 					on:click={async (e) => {
 						if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) {
 							return;
@@ -582,14 +587,14 @@
 					}}
 				>
 					<div class="self-center">
-						<UserIcon className="size-3.5" strokeWidth="1.5" />
+						<UserIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Admin Panel')}</div>
 				</a>
 			{/if}
 
 			<button
-				class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 				type="button"
 				on:click={async () => {
 					show = false;
@@ -603,13 +608,13 @@
 				}}
 			>
 				<div class="self-center">
-					<Settings className="size-3.5" strokeWidth="1.5" />
+					<Settings className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Settings')}</div>
 			</button>
 
 			<button
-				class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[13px] w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
 				type="button"
 				on:click={async () => {
 					const res = await userSignOut();
@@ -621,10 +626,21 @@
 				}}
 			>
 				<div class="self-center">
-					<LogOutIcon className="size-3.5" strokeWidth="1.5" />
+					<LogOutIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 			</button>
+
+			{#if $mobile && myUsage !== null}
+				<hr class="border-gray-100 dark:border-gray-800 my-1 mx-2" />
+
+				<div class="px-2 py-1 text-[15px] text-gray-500 dark:text-gray-400 select-none">
+					<div class="font-semibold text-gray-700 dark:text-gray-300">
+						{myUsageMonthName} {myUsage.year}
+					</div>
+					<div>{$i18n.t('Total tokens')}: {myUsage.total_tokens.toLocaleString()}</div>
+				</div>
+			{/if}
 		</DropdownMenu>
 	</div>
 </Dropdown>

@@ -23,7 +23,8 @@
 		temporaryChatEnabled,
 		settings,
 		config,
-		showSettings
+		showSettings,
+		mobile
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
@@ -182,7 +183,9 @@
 			updatePosition();
 			await tick();
 			updatePosition();
-			window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
+			if (!$mobile) {
+				window.setTimeout(() => document.getElementById('model-search-input')?.focus(), 0);
+			}
 		} else {
 			document.getElementById(`model-selector-${id}-button`)?.blur();
 		}

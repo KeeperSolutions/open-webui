@@ -53,7 +53,6 @@ export function longPress(node: HTMLElement, params: LongPressParams) {
 			firedLongPress = true;
 
 			current.onLongPress();
-			navigator.vibrate?.(10);
 		}, current.duration ?? DEFAULT_DURATION_MS);
 	};
 

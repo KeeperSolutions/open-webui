@@ -2,6 +2,8 @@
 	import { getContext, createEventDispatcher } from 'svelte';
 
 	const i18n = getContext('i18n');
+
+	import { mobile } from '$lib/stores';
 	const dispatch = createEventDispatcher();
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -22,11 +24,11 @@
 	export let onCreateSubFolder = () => {};
 	export let onMarkAllRead = () => {};
 
-	export let show = false;
+	export let showFolderMenu = false;
 </script>
 
 <Dropdown
-	bind:show
+	bind:show={showFolderMenu}
 	{align}
 	onOpenChange={(state) => {
 		if (state === false) {
@@ -34,11 +36,11 @@
 		}
 	}}
 >
-	<Tooltip content={$i18n.t('More')}>
+	<Tooltip content={$i18n.t('More')} touch={false}>
 		<button
 			on:click={(e) => {
 				e.stopPropagation();
-				show = !show;
+				showFolderMenu = !showFolderMenu;
 			}}
 		>
 			<slot />
@@ -48,69 +50,69 @@
 	<div slot="content">
 		<DropdownMenu className="min-w-[170px]">
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
 					onCreateSubFolder();
 				}}
 			>
-				<FolderIcon className="size-3.5" />
+				<FolderIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Create Folder')}</div>
 			</button>
 
 			<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
-					show = false;
+					showFolderMenu = false;
 					onMarkAllRead();
 				}}
 			>
-				<CheckIcon className="size-3.5" />
+				<CheckIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Mark all as read')}</div>
 			</button>
 
 			<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
 					onEdit();
 				}}
 			>
-				<EditPencil className="size-3.5" />
+				<EditPencil className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Edit')}</div>
 			</button>
 
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
 					onExport();
 				}}
 			>
-				<Download className="size-3.5" />
+				<Download className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Export')}</div>
 			</button>
 
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
 					onShare();
 				}}
 			>
-				<ShareIcon className="size-3.5" />
+				<ShareIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Share')}</div>
 			</button>
 
 			<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
 			<button
-				class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+				class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} w-full items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 				on:click={() => {
 					onDelete();
 				}}
 			>
-				<TrashIcon className="size-3.5" />
+				<TrashIcon className={$mobile ? 'size-4.5' : 'size-3.5'} />
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</button>
 		</DropdownMenu>

@@ -1142,7 +1142,9 @@
 		data-state={$showSidebar}
 	>
 		<div
-			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] w-[var(--sidebar-width)] overflow-x-hidden scrollbar-hidden z-50 border-e border-gray-50 dark:border-gray-850/30 {$showSidebar
+			class=" my-auto flex flex-col justify-between h-screen max-h-[100dvh] {$mobile
+				? 'w-[85vw] max-w-[320px]'
+				: 'w-[var(--sidebar-width)]'} overflow-x-hidden scrollbar-hidden z-50 border-e border-gray-50 dark:border-gray-850/30 {$showSidebar
 				? ''
 				: 'invisible'}"
 		>
@@ -1176,7 +1178,7 @@
 					placement="bottom"
 				>
 					<button
-						class="flex size-[30px] justify-center items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition {isWindows
+						class="flex {$mobile ? 'size-9' : 'size-[30px]'} justify-center items-center rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900 transition {isWindows
 							? 'cursor-pointer'
 							: 'cursor-[w-resize]'}"
 						on:click={() => {
@@ -1185,7 +1187,7 @@
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
 						<div class=" self-center">
-							<Sidebar className="size-4" />
+							<Sidebar className={$mobile ? 'size-5' : 'size-4'} />
 						</div>
 					</button>
 				</Tooltip>
@@ -1211,18 +1213,26 @@
 					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<a
 							id="sidebar-new-chat-button"
-							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+							class="group grow flex items-center space-x-2 rounded-xl {$mobile
+								? 'px-3 py-2.5'
+								: 'px-2 py-1.5'} hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
 							href="/"
 							draggable="false"
 							on:click={newChatHandler}
 							aria-label={$i18n.t('New Chat')}
 						>
-							<div class="self-center flex size-4 shrink-0 items-center justify-center">
-								<EditPencilIcon className=" size-4" strokeWidth="1.5" />
+							<div
+								class="self-center flex shrink-0 items-center justify-center {$mobile
+									? 'size-5'
+									: 'size-4'}"
+							>
+								<EditPencilIcon className={$mobile ? ' size-5' : ' size-4'} strokeWidth="1.5" />
 							</div>
 
 							<div class="flex flex-1 self-center translate-y-[0.5px]">
-								<div class=" self-center text-[13px] leading-5">{$i18n.t('New Chat')}</div>
+								<div class="self-center leading-5 {$mobile ? 'text-[15px]' : 'text-[13px]'}">
+									{$i18n.t('New Chat')}
+								</div>
 							</div>
 
 							<HotkeyHint name="newChat" className=" group-hover:visible invisible" />
@@ -1232,19 +1242,27 @@
 					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<button
 							id="sidebar-search-button"
-							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+							class="group grow flex items-center space-x-2 rounded-xl {$mobile
+								? 'px-3 py-2.5'
+								: 'px-2 py-1.5'} hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
 							on:click={() => {
 								showSearch.set(true);
 							}}
 							draggable="false"
 							aria-label={$i18n.t('Search')}
 						>
-							<div class="self-center flex size-4 shrink-0 items-center justify-center">
-								<SearchIcon strokeWidth="1.5" className="size-4" />
+							<div
+								class="self-center flex shrink-0 items-center justify-center {$mobile
+									? 'size-5'
+									: 'size-4'}"
+							>
+								<SearchIcon strokeWidth="1.5" className={$mobile ? 'size-5' : 'size-4'} />
 							</div>
 
 							<div class="flex flex-1 self-center translate-y-[0.5px]">
-								<div class=" self-center text-[13px] leading-5">{$i18n.t('Search')}</div>
+								<div class="self-center leading-5 {$mobile ? 'text-[15px]' : 'text-[13px]'}">
+									{$i18n.t('Search')}
+								</div>
 							</div>
 							<HotkeyHint name="search" className=" group-hover:visible invisible" />
 						</button>
@@ -1260,8 +1278,9 @@
 								>
 									<a
 										id="sidebar-{itemId}-button"
-										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 transition {itemId ===
-										activeMenuItemId
+										class="grow flex items-center space-x-2 rounded-xl {$mobile
+											? 'px-3 py-2.5'
+											: 'px-2 py-1.5'} transition {itemId === activeMenuItemId
 											? ($settings?.highContrastMode ?? false)
 												? 'bg-black/[0.035] dark:bg-white/[0.06]'
 												: 'bg-black/[0.035] dark:bg-white/[0.045]'
@@ -1271,22 +1290,28 @@
 										draggable="false"
 										aria-label={$i18n.t(meta.label)}
 									>
-										<div class="self-center flex size-4 shrink-0 items-center justify-center">
+										<div
+											class="self-center flex shrink-0 items-center justify-center {$mobile
+												? 'size-5'
+												: 'size-4'}"
+										>
 											{#if itemId === 'notes'}
-												<NotesIcon className="size-4" strokeWidth="1.5" />
+												<NotesIcon className={$mobile ? 'size-5' : 'size-4'} strokeWidth="1.5" />
 											{:else if itemId === 'workspace'}
-												<WorkspaceIcon className="size-4" strokeWidth="1.5" />
+												<WorkspaceIcon className={$mobile ? 'size-5' : 'size-4'} strokeWidth="1.5" />
 											{:else if itemId === 'automations'}
-												<ClockIcon className="size-4" strokeWidth="1.5" />
+												<ClockIcon className={$mobile ? 'size-5' : 'size-4'} strokeWidth="1.5" />
 											{:else if itemId === 'calendar'}
-												<CalendarIcon className="size-4" strokeWidth="1.5" />
+												<CalendarIcon className={$mobile ? 'size-5' : 'size-4'} strokeWidth="1.5" />
 											{:else if itemId === 'playground'}
-												<CodeIcon className="size-4" strokeWidth="1.5" />
+												<CodeIcon className={$mobile ? 'size-5' : 'size-4'} strokeWidth="1.5" />
 											{/if}
 										</div>
 
 										<div class="flex self-center translate-y-[0.5px]">
-											<div class=" self-center text-[13px] leading-5">{$i18n.t(meta.label)}</div>
+											<div class="self-center leading-5 {$mobile ? 'text-[15px]' : 'text-[13px]'}">
+												{$i18n.t(meta.label)}
+											</div>
 										</div>
 									</a>
 								</div>
@@ -1299,7 +1324,7 @@
 					<SidebarSection
 						id="sidebar-models"
 						bind:open={showPinnedModels}
-						className="mt-0.5"
+						className={$mobile ? 'mt-3' : 'mt-0.5'}
 						name={$i18n.t('Models')}
 						dragAndDrop={false}
 					>
@@ -1364,7 +1389,7 @@
 					<SidebarSection
 						id="sidebar-folders"
 						bind:open={showFolders}
-						className="mt-0.5"
+						className={$mobile ? 'mt-3' : 'mt-0.5'}
 						name={$i18n.t('Folders')}
 						onAdd={() => {
 							showCreateFolderModal = true;
@@ -1415,7 +1440,7 @@
 
 				<SidebarSection
 					id="sidebar-chats"
-					className="mt-0.5"
+					className={$mobile ? 'mt-3' : 'mt-0.5'}
 					name={$i18n.t('Chats')}
 					on:change={async (e) => {
 						selectedFolder.set(null);
@@ -1487,14 +1512,16 @@
 				>
 					<svelte:fragment slot="action">
 						<Dropdown bind:show={showChatsMenu} align="end">
-							<Tooltip content={$i18n.t('More')}>
+							<Tooltip content={$i18n.t('More')} touch={false}>
 								<button
 									type="button"
-									class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
+									class="flex items-center justify-center rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100 {$mobile
+										? 'w-9 h-9'
+										: 'w-7 h-7'}"
 									aria-label={$i18n.t('More')}
 									on:pointerup|stopPropagation
 								>
-									<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+									<MoreHorizontalIcon className={$mobile ? 'size-4' : 'size-3.5'} strokeWidth="2" />
 								</button>
 							</Tooltip>
 
@@ -1610,10 +1637,13 @@
 								{#each $chats as chat, idx (`chat-${chat?.id ?? idx}`)}
 									{#if idx === 0 || (idx > 0 && chat.time_range !== $chats[idx - 1].time_range)}
 										<div
-											class="w-full pl-2.5 text-xs text-gray-500 dark:text-gray-500 font-normal {idx ===
-											0
-												? ''
-												: 'pt-4'} pb-1"
+											class="w-full pl-2.5 {$mobile
+												? 'text-[15px]'
+												: 'text-xs'} text-gray-500 dark:text-gray-500 font-normal {$mobile
+												? 'py-2'
+												: idx === 0
+													? 'pb-1'
+													: 'pt-4 pb-1'}"
 										>
 											{$i18n.t(chat.time_range)}
 											<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
@@ -1702,6 +1732,7 @@
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
 							className="w-[calc(var(--sidebar-width)-1rem)]"
+							{myUsage}
 						>
 							<button
 								type="button"
@@ -1736,13 +1767,8 @@
 											{$i18n.t('Loading...')}
 										</div>
 									{:else if myUsage !== null}
-										<Tooltip
-											placement="top"
-											interactive={true}
-											content={myUsageTooltip}
-											tippyOptions={{ allowHTML: true }}
-										>
-											<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default">
+										{#if $mobile}
+											<div class="text-xs text-gray-500 dark:text-gray-400 text-left">
 												{#if isInternalUser($billingStatus?.plan_tier)}
 													{$i18n.t('This month')}:
 													<span class="font-medium text-gray-700 dark:text-gray-300"
@@ -1761,7 +1787,34 @@
 													>
 												{/if}
 											</div>
-										</Tooltip>
+										{:else}
+											<Tooltip
+												placement="top"
+												interactive={true}
+												content={myUsageTooltip}
+												tippyOptions={{ allowHTML: true }}
+											>
+												<div class="text-xs text-gray-500 dark:text-gray-400 cursor-default text-left">
+													{#if isInternalUser($billingStatus?.plan_tier)}
+														{$i18n.t('This month')}:
+														<span class="font-medium text-gray-700 dark:text-gray-300"
+															>€{(myUsage.total_cost_eur ?? 0).toFixed(2)}</span
+														>
+													{:else if $billingStatus?.plan_tier === 'team' || $billingStatus?.plan_tier === 'team_member'}
+														{$i18n.t('Your usage')}:
+														<span class="font-medium text-gray-700 dark:text-gray-300"
+															>{(myUsage.credits_used ?? 0).toLocaleString()} {$i18n.t('cr')}</span
+														>
+													{:else}
+														{$i18n.t('This month')}:
+														<span class="font-medium text-gray-700 dark:text-gray-300"
+															>{myUsage.credits_used ?? 0} / {myUsage.credits_balance}
+															{$i18n.t('credits')}</span
+														>
+													{/if}
+												</div>
+											</Tooltip>
+										{/if}
 										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && $billingStatus?.credits_remaining !== undefined}
 											<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
 												{$i18n.t('Left in pool')}: <span class="font-medium text-gray-700 dark:text-gray-300">{($billingStatus.credits_remaining).toLocaleString()} {$i18n.t('cr')}</span>
