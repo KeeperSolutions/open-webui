@@ -57,6 +57,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
+	import DriveDocumentCard from './DriveDocumentCard.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -111,6 +112,12 @@
 			description: string;
 			icon: string;
 			connect_url: string;
+		}[];
+		driveDocuments?: {
+			id: string;
+			name: string;
+			format: string;
+			web_link?: string;
 		}[];
 		info?: {
 			openai?: boolean;
@@ -925,6 +932,10 @@
 
 							{#if message.connectorSuggestions}
 								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
+							{/if}
+
+							{#if message.driveDocuments}
+								<DriveDocumentCard driveDocuments={message.driveDocuments} />
 							{/if}
 						</div>
 					</div>

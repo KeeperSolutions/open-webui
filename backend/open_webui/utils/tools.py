@@ -46,6 +46,7 @@ from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.models.groups import Groups
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
+from open_webui.routers.connectors import GOOGLE_DRIVE_WRITE_SCOPE
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.connector_registry import CONNECTOR_REGISTRY
 from open_webui.tools.builtin import (
@@ -58,6 +59,9 @@ from open_webui.tools.builtin import (
     delete_automation,
     delete_calendar_event,
     delete_memory,
+    drive_copy_file,
+    drive_create_document,
+    drive_create_file,
     drive_read,
     drive_search,
     edit_image,
@@ -686,12 +690,19 @@ async def get_builtin_tools(
 
     # Connectors - functional access once the user has connected the account (not gated by toolIds)
     CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read]}
+    CONNECTOR_WRITE_FUNCTIONS = {'google_drive': [drive_copy_file, drive_create_file, drive_create_document]}
+    CONNECTOR_WRITE_SCOPES = {'google_drive': GOOGLE_DRIVE_WRITE_SCOPE}
     if is_builtin_tool_enabled('connectors'):
         user_id = user.get('id')
         all_connected = True
         for connector in CONNECTOR_REGISTRY:
-            if user_id and await ConnectorConnections.get_by_user_and_connector(user_id, connector['id']):
+            connection = user_id and await ConnectorConnections.get_by_user_and_connector(user_id, connector['id'])
+            if connection:
                 builtin_functions.extend(CONNECTOR_FUNCTIONS.get(connector['id'], []))
+
+                granted_scopes = (connection.scopes or '').split()
+                if CONNECTOR_WRITE_SCOPES.get(connector['id']) in granted_scopes:
+                    builtin_functions.extend(CONNECTOR_WRITE_FUNCTIONS.get(connector['id'], []))
             else:
                 all_connected = False
 

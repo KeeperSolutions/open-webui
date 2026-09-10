@@ -4369,6 +4369,7 @@ async def delete_calendar_event(
 # OAuth-linked external accounts, exposed once the user connects them (see get_builtin_tools).
 
 GOOGLE_DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
+GOOGLE_DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
 GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES = {
     'application/vnd.google-apps.document': 'text/plain',
@@ -4412,6 +4413,141 @@ async def _drive_get(client, url: str, headers: dict, params: dict):
         await asyncio.sleep(_drive_retry_delay_seconds(response))
         response = await client.get(url, headers=headers, params=params)
     return response
+
+
+async def _drive_request(client, method: str, url: str, headers: dict, **kwargs):
+    """Make a Drive API request, retrying once if the first attempt is rate-limited."""
+    response = await client.request(method, url, headers=headers, **kwargs)
+    if _drive_is_rate_limited(response):
+        await asyncio.sleep(_drive_retry_delay_seconds(response))
+        response = await client.request(method, url, headers=headers, **kwargs)
+    return response
+
+
+# Native Google format each document type converts into on upload - PDF has no native equivalent.
+DRIVE_DOCUMENT_NATIVE_MIME_TYPES = {
+    'docx': 'application/vnd.google-apps.document',
+    'xlsx': 'application/vnd.google-apps.spreadsheet',
+    'pptx': 'application/vnd.google-apps.presentation',
+}
+
+DRIVE_DOCUMENT_SOURCE_MIME_TYPES = {
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'pdf': 'application/pdf',
+}
+
+
+async def _drive_upload_multipart(client, headers: dict, name: str, target_mime_type: str, content_bytes: bytes, source_mime_type: str):
+    """Upload in one request via multipart/related, converting to target_mime_type if it differs from source_mime_type."""
+    boundary = 'hubgate_drive_upload_boundary'
+    metadata = json.dumps({'name': name, 'mimeType': target_mime_type})
+    body = (
+        f'--{boundary}\r\n'
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+        f'{metadata}\r\n'
+        f'--{boundary}\r\n'
+        f'Content-Type: {source_mime_type}\r\n\r\n'
+    ).encode('utf-8') + content_bytes + f'\r\n--{boundary}--'.encode('utf-8')
+
+    upload_headers = {**headers, 'Content-Type': f'multipart/related; boundary={boundary}'}
+    return await _drive_request(
+        client,
+        'POST',
+        GOOGLE_DRIVE_UPLOAD_URL,
+        headers=upload_headers,
+        params={'uploadType': 'multipart', 'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+        content=body,
+    )
+
+
+def _build_pdf_document_bytes(title: str, content: str) -> bytes:
+    import site
+    from html import escape
+    from pathlib import Path
+
+    from fpdf import FPDF
+    from markdown import markdown
+
+    from open_webui.env import FONTS_DIR
+
+    fonts_dir = FONTS_DIR
+    if not fonts_dir.exists():
+        fonts_dir = Path(site.getsitepackages()[0]) / 'static/fonts'
+    if not fonts_dir.exists():
+        fonts_dir = Path('.') / 'backend' / 'static' / 'fonts'
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.add_font('NotoSans', '', f'{fonts_dir}/NotoSans-Regular.ttf')
+    pdf.add_font('NotoSans', 'b', f'{fonts_dir}/NotoSans-Bold.ttf')
+    pdf.add_font('NotoSans', 'i', f'{fonts_dir}/NotoSans-Italic.ttf')
+    pdf.set_font('NotoSans', size=12)
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.write_html(f'<h2>{escape(title)}</h2>' + markdown(content))
+    return bytes(pdf.output())
+
+
+def _build_docx_document_bytes(content: str) -> bytes:
+    import os
+    import tempfile
+
+    import pypandoc
+
+    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        pypandoc.convert_text(content, 'docx', format='md', outputfile=tmp_path)
+        with open(tmp_path, 'rb') as f:
+            return f.read()
+    finally:
+        os.unlink(tmp_path)
+
+
+def _build_xlsx_document_bytes(content: str) -> bytes:
+    import csv
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    for row in csv.reader(io.StringIO(content)):
+        ws.append(row)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _build_pptx_document_bytes(content: str) -> bytes:
+    import io
+
+    from pptx import Presentation
+
+    prs = Presentation()
+    layout = prs.slide_layouts[1]  # Title and Content
+
+    for chunk in content.split('---'):
+        lines = [line.strip() for line in chunk.strip().splitlines() if line.strip()]
+        if not lines:
+            continue
+
+        slide = prs.slides.add_slide(layout)
+        slide.shapes.title.text = lines[0].lstrip('#').strip()
+
+        bullets = [line.lstrip('-*').strip() for line in lines[1:]]
+        if bullets:
+            body = slide.placeholders[1].text_frame
+            body.clear()
+            for i, bullet in enumerate(bullets):
+                p = body.paragraphs[0] if i == 0 else body.add_paragraph()
+                p.text = bullet
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
 
 
 def _drive_error_message(response, fallback: str) -> str:
@@ -4577,6 +4713,272 @@ async def drive_read(
         return content
     except Exception as e:
         log.exception(f'drive_read error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_copy_file(
+    file_id: str,
+    name: str = '',
+    __user__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """
+    Copy a Google Drive file (as returned by drive_search), creating a new file with the same content.
+
+    :param file_id: The Google Drive file id to copy
+    :param name: Name for the copy (optional - Google Drive names it "Copy of <original name>" if omitted)
+    :return: JSON with the new file's id, name, mime_type, and web_link
+    """
+    import httpx
+    from urllib.parse import quote
+
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    access_token = await get_valid_access_token(user_id) if user_id else None
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Copy Google Drive file?',
+                'message': f'Create a copy of this file named "{name}" in your Google Drive?'
+                if name
+                else 'Create a copy of this file in your Google Drive?',
+            },
+        }
+    )
+    if confirmed is not True:
+        return json.dumps({'status': 'cancelled', 'message': 'File copy was not confirmed by the user.'})
+
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        body = {'name': name} if name else {}
+
+        async with httpx.AsyncClient() as client:
+            response = await _drive_request(
+                client,
+                'POST',
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}/copy',
+                headers=headers,
+                params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+                json=body,
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive copy failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to copy this file.')})
+
+        f = response.json()
+        return json.dumps(
+            {
+                'status': 'success',
+                'id': f['id'],
+                'name': f['name'],
+                'mime_type': f['mimeType'],
+                'web_link': f.get('webViewLink'),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_copy_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_create_file(
+    name: str,
+    content: str = '',
+    mime_type: str = 'text/plain',
+    __user__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """
+    Create a new file in the current user's Google Drive.
+
+    :param name: Name for the new file
+    :param content: Text content for the file (optional - creates an empty file if omitted)
+    :param mime_type: MIME type of the file content (default: text/plain)
+    :return: JSON with the created file's id, name, mime_type, and web_link
+    """
+    import httpx
+
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    access_token = await get_valid_access_token(user_id) if user_id else None
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Create Google Drive file?',
+                'message': f'Create a new file named "{name}" in your Google Drive?',
+            },
+        }
+    )
+    if confirmed is not True:
+        return json.dumps({'status': 'cancelled', 'message': 'File creation was not confirmed by the user.'})
+
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+
+        async with httpx.AsyncClient() as client:
+            create_response = await _drive_request(
+                client,
+                'POST',
+                GOOGLE_DRIVE_FILES_URL,
+                headers=headers,
+                params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+                json={'name': name, 'mimeType': mime_type},
+            )
+
+            if create_response.status_code != 200:
+                log.error(f'Google Drive file creation failed: {create_response.status_code} {create_response.text}')
+                return json.dumps({'error': _drive_error_message(create_response, 'Failed to create this file.')})
+
+            f = create_response.json()
+
+            if content:
+                upload_response = await _drive_request(
+                    client,
+                    'PATCH',
+                    f'{GOOGLE_DRIVE_UPLOAD_URL}/{f["id"]}',
+                    headers={**headers, 'Content-Type': mime_type},
+                    params={'uploadType': 'media', 'supportsAllDrives': 'true'},
+                    content=content.encode('utf-8'),
+                )
+
+                if upload_response.status_code != 200:
+                    log.error(
+                        f'Google Drive content upload failed: {upload_response.status_code} {upload_response.text}'
+                    )
+                    return json.dumps(
+                        {
+                            'error': _drive_error_message(
+                                upload_response, 'File was created but content upload failed.'
+                            )
+                        }
+                    )
+
+        return json.dumps(
+            {
+                'status': 'success',
+                'id': f['id'],
+                'name': f['name'],
+                'mime_type': f['mimeType'],
+                'web_link': f.get('webViewLink'),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_create_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_create_document(
+    name: str,
+    format: str,
+    content: str,
+    __user__: dict = None,
+    __event_call__: callable = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Create a rich document (PDF, Word, Excel, or PowerPoint) in the current user's Google Drive.
+    Word/Excel/PowerPoint are created as native Google Docs/Sheets/Slides, so the user can open and
+    edit them directly in Drive, or download the same file as .docx/.xlsx/.pptx.
+
+    :param name: Name for the new document (without file extension)
+    :param format: One of "pdf", "docx", "xlsx", "pptx"
+    :param content: For pdf/docx: markdown text. For xlsx: CSV text (rows on new lines, columns comma-separated). For pptx: slides separated by "---", first line of each is the title, remaining lines are bullet points
+    :return: JSON with the created file's id, name, and web_link
+    """
+    format = (format or '').lower()
+    if format not in DRIVE_DOCUMENT_SOURCE_MIME_TYPES:
+        return json.dumps({'error': f'Unsupported format: {format}. Use pdf, docx, xlsx, or pptx.'})
+
+    import httpx
+
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    access_token = await get_valid_access_token(user_id) if user_id else None
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': f'Create {format.upper()} file?',
+                'message': f'Create a new {format.upper()} file named "{name}" in your Google Drive?',
+            },
+        }
+    )
+    if confirmed is not True:
+        return json.dumps({'status': 'cancelled', 'message': 'Document creation was not confirmed by the user.'})
+
+    try:
+        if format == 'pdf':
+            file_bytes = _build_pdf_document_bytes(name, content)
+        elif format == 'docx':
+            file_bytes = _build_docx_document_bytes(content)
+        elif format == 'xlsx':
+            file_bytes = _build_xlsx_document_bytes(content)
+        else:
+            file_bytes = _build_pptx_document_bytes(content)
+    except Exception as e:
+        log.exception(f'drive_create_document build error: {e}')
+        return json.dumps({'error': f'Failed to generate the {format} file: {e}'})
+
+    source_mime_type = DRIVE_DOCUMENT_SOURCE_MIME_TYPES[format]
+    target_mime_type = DRIVE_DOCUMENT_NATIVE_MIME_TYPES.get(format, source_mime_type)
+
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        async with httpx.AsyncClient() as client:
+            response = await _drive_upload_multipart(
+                client, headers, name, target_mime_type, file_bytes, source_mime_type
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive document upload failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to create this document.')})
+
+        f = response.json()
+
+        if __event_emitter__:
+            await __event_emitter__(
+                {
+                    'type': 'chat:message:drive_document_created',
+                    'data': {
+                        'id': f['id'],
+                        'name': f['name'],
+                        'format': format,
+                        'web_link': f.get('webViewLink'),
+                    },
+                }
+            )
+
+        return json.dumps(
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'web_link': f.get('webViewLink')},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_create_document error: {e}')
         return json.dumps({'error': str(e)})
 
 
