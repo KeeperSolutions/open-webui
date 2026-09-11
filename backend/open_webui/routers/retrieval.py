@@ -1858,6 +1858,110 @@ class ProcessFileForm(BaseModel):
     file_id: str
     content: str | None = None
     collection_name: str | None = None
+    pii_masking_enabled: bool | None = None
+
+
+# Lazy-loaded to break the middleware -> retrieval circular import; populated on
+# first call by _store_ingest_pii_detections.
+scan_file_content_for_pii = None
+
+# Mirror of the frontend PII_FILTER_IDS constant (pii.ts).
+_PII_FILTER_IDS = ('pii_filter', 'pii_filter_pipeline')
+
+# Whether to scan an uploaded file for PII at INGEST, to populate the card
+# before the user sends anything. OFF by default.
+#
+# It is a preview, not a security boundary — the fail-closed pass is
+# `mask_sources_for_llm` at send time, and that one covers everything actually
+# reaching the LLM. The preview cost a second full trip through a pipeline that
+# serializes NER (46.5s for the first 50 000 chars of a 167 460-char document,
+# measured on staging) and, because it only ever saw that capped prefix, it
+# reported a number the card then had to correct in front of the user: 26
+# detections after upload, 59 once the send-time pass finished. A wrong number,
+# for twice the load.
+#
+# The path itself is deliberately left intact rather than deleted. Masking AT
+# upload — keeping the masked text instead of discarding it, and mapping a
+# per-file vault into the chat vault — is the fix for the FIRST message still
+# paying full price, and it builds on exactly this machinery.
+ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', '').lower() in (
+    '1',
+    'true',
+    'yes',
+    'on',
+)
+
+
+def _user_pii_masking_enabled(user) -> bool:
+    """Read the user's persisted pii_masking_enabled valve setting (default True).
+    Mirrors getPiiMaskingDefault() on the frontend."""
+    user_settings = getattr(user, 'settings', None) or {}
+    if not isinstance(user_settings, dict):
+        try:
+            user_settings = user_settings.model_dump()
+        except Exception:
+            user_settings = {}
+    valves = user_settings.get('ui', {}).get('pipelines', {}).get('valves', {})
+    for filter_id in _PII_FILTER_IDS:
+        valve_val = (valves.get(filter_id) or {}).get('pii_masking_enabled')
+        if isinstance(valve_val, bool):
+            return valve_val
+    return True
+
+
+async def _store_ingest_pii_detections(request, file_id, text_content, user, pii_masking_enabled=None):
+    """Best-effort: scan the full extracted content for PII and persist span-only
+    detections under file.data['pii_detections']. Swallows everything -- ingest
+    must never fail because of the card.
+
+    Awaited directly from the async `process_file`: the scan is already a
+    coroutine, so it joins the caller's running event loop. (It used to wrap the
+    call in `asyncio.run`, which was correct only while `process_file` was a sync
+    threadpool route; inside a running loop that raises and would silently reduce
+    every scan to "failed".)
+
+    pii_masking_enabled: per-request override (from the chat-input toggle, sent at
+    upload time). Takes priority over the user's persisted valve settings. None
+    means "not specified by caller" -> fall back to the user's persisted setting."""
+    if not ENABLE_INGEST_PII_SCAN:
+        return
+    effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(user)
+    if not effective:
+        return
+    # Idempotence guard. A single upload can reach process_file TWICE: once
+    # standalone and once more when the file is auto-linked into a knowledge
+    # collection (files.py passes collection_name on the second call). The
+    # extracted text is identical both times, so re-scanning only doubles the
+    # load on a remote, cold-start-prone pipeline. 'failed' and an unset status
+    # deliberately fall through so a retry still happens.
+    existing = await Files.get_file_by_id(file_id)
+    if existing and (existing.data or {}).get('pii_scan_status') == 'completed':
+        return
+    await Files.update_file_data_by_id(file_id, {'pii_scan_status': 'running'})
+    try:
+        # Lazy import to avoid circular import at module init time
+        # (middleware -> retrieval chain). The global name is also set here so
+        # that test monkeypatching via setattr(R, "scan_file_content_for_pii", ...)
+        # takes effect: the global lookup below will find the patched value.
+        global scan_file_content_for_pii
+        if scan_file_content_for_pii is None:
+            from open_webui.utils.middleware import scan_file_content_for_pii
+        from open_webui.utils.middleware import ingest_scan_is_truncated
+
+        detections = await scan_file_content_for_pii(request, text_content, file_id=file_id, user=user)
+        # Written on EVERY completed scan, not only when true: a file re-scanned
+        # after shrinking would otherwise keep a stale True and have its card
+        # permanently supplemented from the send-time path.
+        update: dict = {
+            'pii_scan_status': 'completed',
+            'pii_scan_truncated': ingest_scan_is_truncated(text_content),
+        }
+        if detections:
+            update['pii_detections'] = detections
+        await Files.update_file_data_by_id(file_id, update)
+    except Exception as e:
+        log.warning('failed to store ingest PII detections for %s: %s', file_id, e, exc_info=True)
+        await Files.update_file_data_by_id(file_id, {'pii_scan_status': 'failed'})
 
 
 @router.post('/process/file')
@@ -1999,6 +2103,16 @@ async def process_file(
             if config.BYPASS_EMBEDDING_AND_RETRIEVAL:
                 await Files.update_file_data_by_id(file.id, {'status': 'completed'}, db=db)
                 await Files.update_file_hash_by_id(file.id, hash, db=db)
+                # File is now "ready" for the user; run the PII-card scan AFTER so
+                # it never blocks the file becoming usable (it hits a remote,
+                # cold-start-prone pipeline). Best-effort; the card fills in later.
+                await _store_ingest_pii_detections(
+                    request,
+                    file.id,
+                    text_content,
+                    user,
+                    pii_masking_enabled=form_data.pii_masking_enabled,
+                )
                 await publish_event(
                     request,
                     EVENTS.RETRIEVAL_CONTENT_PROCESSED,
@@ -2067,12 +2181,26 @@ async def process_file(
                                 subject_type='file',
                                 data={'collection_name': collection_name, 'filename': file.filename},
                             )
-                            return {
-                                'status': True,
-                                'collection_name': collection_name,
-                                'filename': file.filename,
-                                'content': text_content,
-                            }
+
+                        # File is now "ready"; PII-card scan runs AFTER the session
+                        # above is closed so it never blocks usability (it hits a
+                        # remote, cold-start-prone pipeline) and its own writes to
+                        # the same row don't contend with an open transaction.
+                        # Best-effort; the card fills in later.
+                        await _store_ingest_pii_detections(
+                            request,
+                            file.id,
+                            text_content,
+                            user,
+                            pii_masking_enabled=form_data.pii_masking_enabled,
+                        )
+
+                        return {
+                            'status': True,
+                            'collection_name': collection_name,
+                            'filename': file.filename,
+                            'content': text_content,
+                        }
                     else:
                         raise Exception('Error saving document to vector database')
                 except Exception as e:

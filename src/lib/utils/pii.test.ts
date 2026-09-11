@@ -11,6 +11,9 @@ import {
 	getPiiMaskingDefault,
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
+	scopeCardDetections,
+	ingestCoveredFileIds,
+	piiIngestScanEnabled,
 	piiFilterIds,
 	getStoredPiiMasking,
 	piiMaskingForRequest,
@@ -282,6 +285,41 @@ describe('isPiiPipelineConfigured', () => {
 	});
 });
 
+describe('scopeCardDetections', () => {
+	const msg = { type: 'PERSON', start: 0, end: 3 }; // message PII (no fileId)
+	const fileA = { type: 'EMAIL', start: 0, end: 5, fileId: 'a' };
+	const fileB = { type: 'PHONE', start: 0, end: 5, fileId: 'b' };
+
+	it('always keeps message PII (no fileId)', () => {
+		expect(scopeCardDetections([msg], new Set(), new Set())).toEqual([msg]);
+	});
+
+	it('drops file PII whose ingest scan owns the display (avoids double-count)', () => {
+		// file "a" is ingest-covered -> fileItems is authoritative, so B2 is dropped.
+		expect(scopeCardDetections([fileA], new Set(['a']), new Set(['a']))).toEqual([]);
+	});
+
+	it('keeps file PII (B2 fallback) when ingest did NOT cover the file', () => {
+		// toggle off at upload -> no ingest scan -> B2 is the only source -> keep it.
+		expect(scopeCardDetections([fileA], new Set(), new Set(['a']))).toEqual([fileA]);
+	});
+
+	it('drops file PII for a file not attached to this message (scoping)', () => {
+		// "b" was resent in the turn but is not on THIS user message.
+		expect(scopeCardDetections([fileB], new Set(), new Set(['a']))).toEqual([]);
+	});
+
+	it('handles a mixed batch', () => {
+		const covered = new Set(['a']); // a via ingest, b falls back to B2
+		const onMessage = new Set(['a', 'b']);
+		expect(scopeCardDetections([msg, fileA, fileB], covered, onMessage)).toEqual([msg, fileB]);
+	});
+
+	it('returns [] for nullish input', () => {
+		expect(scopeCardDetections(undefined as never, new Set(), new Set())).toEqual([]);
+	});
+});
+
 describe('piiMaskingForRequest', () => {
 	// The value SENT to the server. Team policy wins over the per-conversation
 	// toggle. The backend enforces the same rule independently; this keeps the
@@ -354,5 +392,65 @@ describe('getStoredPiiMasking', () => {
 		// The two answer different questions and must not converge.
 		expect(getPiiMaskingDefault({})).toBe(true);
 		expect(getStoredPiiMasking({})).toBe('unset');
+	});
+});
+
+describe('ingestCoveredFileIds', () => {
+	it('covers a file whose scan completed', () => {
+		expect(ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'completed' }])).toEqual(
+			new Set(['a'])
+		);
+	});
+
+	it('covers a file still being scanned, so the card waits instead of double-listing', () => {
+		expect(ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'running' }])).toEqual(new Set(['a']));
+	});
+
+	it('does NOT cover a file whose scan was truncated', () => {
+		// The scan reads only the first PII_SCAN_MAX_CHARS. Measured on staging, a
+		// 167 460-char document was scanned to 50 000 and the card showed 28 of the
+		// document's 163 detections — while ALSO suppressing the send-time
+		// detections that hold the other 135, because a completed scan claimed the
+		// file. A partial scan must not claim authority it does not have.
+		expect(
+			ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'completed', pii_scan_truncated: true }])
+		).toEqual(new Set());
+	});
+
+	it('does not cover a file that was never scanned', () => {
+		expect(
+			ingestCoveredFileIds([
+				{ id: 'a', pii_scan_status: null },
+				{ id: 'b', pii_scan_status: 'failed' }
+			])
+		).toEqual(new Set());
+	});
+
+	it('returns an empty set for nullish input', () => {
+		expect(ingestCoveredFileIds(undefined as never)).toEqual(new Set());
+	});
+});
+
+describe('piiIngestScanEnabled', () => {
+	beforeEach(() => config.set(undefined));
+
+	it('is false when the backend does not say (the shipped default is off)', () => {
+		expect(piiIngestScanEnabled()).toBe(false);
+		setConfig({});
+		expect(piiIngestScanEnabled()).toBe(false);
+	});
+
+	it('is true only when the backend says so', () => {
+		setConfig({ pii_ingest_scan: true });
+		expect(piiIngestScanEnabled()).toBe(true);
+		setConfig({ pii_ingest_scan: false });
+		expect(piiIngestScanEnabled()).toBe(false);
+	});
+
+	it('ignores a non-boolean value rather than treating it as on', () => {
+		// Waiting for a scan that will never write costs four extra fetches of the
+		// FULL file content; a malformed field must not switch that back on.
+		setConfig({ pii_ingest_scan: 'yes' });
+		expect(piiIngestScanEnabled()).toBe(false);
 	});
 });

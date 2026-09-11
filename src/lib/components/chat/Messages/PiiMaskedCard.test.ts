@@ -106,4 +106,78 @@ describe('PiiMaskedCard', () => {
 		});
 		expect(container.textContent).toBe('');
 	});
+
+	it('counts a file-sourced detection by reconstructing the value from the citation chunk', () => {
+		// fileId-tagged detection: value is sliced from sources[].document[docIdx],
+		// not the message text (originalText is empty here).
+		renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'f1', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('drops a file-sourced detection when its chunk cannot be located', () => {
+		// no source matches fileId -> empty reconstructed value -> filtered out
+		const { container } = renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'missing', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(container.textContent).toBe('');
+	});
+
+	it('renders ingest-sourced file PII from the fileItems prop', () => {
+		renderCard({
+			detections: [],
+			originalText: '',
+			fileItems: [
+				{
+					key: JSON.stringify(['HR_OIB', '11111111111', 'doc.pdf']),
+					type: 'HR_OIB',
+					value: '11111111111',
+					source: 'doc.pdf'
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('dedupes a fileItem against an identical message detection by (type,value,source)', () => {
+		// fileItem has source=undefined (key ends in null), and the message detection
+		// also has source=undefined (no fileId). Both keys stringify to
+		// ["PERSON","Ivan Horvat",null] so they collapse to ONE item.
+		renderCard({
+			detections: [{ type: 'PERSON', start: 9, end: 20 }],
+			originalText: 'Zovem se Ivan Horvat',
+			fileItems: [
+				{
+					key: JSON.stringify(['PERSON', 'Ivan Horvat', null]),
+					type: 'PERSON',
+					value: 'Ivan Horvat',
+					source: undefined
+				}
+			]
+		});
+		// The two items share the same (type, value, source=null) key and should
+		// be deduped to a single entry in the Map.
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
 });

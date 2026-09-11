@@ -131,6 +131,7 @@ async def process_uploaded_file(
     file_item,
     file_metadata,
     user,
+    pii_masking: Optional[bool] = None,
     db: Optional[AsyncSession] = None,
 ):
     async def _process_handler(db_session):
@@ -159,7 +160,11 @@ async def process_uploaded_file(
                 )
                 await process_file(
                     request,
-                    ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        content=result.get('text', ''),
+                        pii_masking_enabled=pii_masking,
+                    ),
                     user=user,
                     db=db_session,
                 )
@@ -192,7 +197,10 @@ async def process_uploaded_file(
                     log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
                 await process_file(
                     request,
-                    ProcessFileForm(file_id=file_item.id),
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        pii_masking_enabled=pii_masking,
+                    ),
                     user=user,
                     db=db_session,
                 )
@@ -228,7 +236,11 @@ async def process_uploaded_file(
                         await Files.update_file_data_by_id(file_item.id, {'status': 'processing'}, db=db_session)
                         await process_file(
                             request,
-                            ProcessFileForm(file_id=file_item.id, collection_name=knowledge_id),
+                            ProcessFileForm(
+                                file_id=file_item.id,
+                                collection_name=knowledge_id,
+                                pii_masking_enabled=pii_masking,
+                            ),
                             user=user,
                             db=db_session,
                         )
@@ -275,6 +287,7 @@ async def upload_file(
     metadata: Optional[dict | str] = Form(None),
     process: bool = Query(True),
     process_in_background: bool = Query(True),
+    pii_masking: Optional[bool] = Query(None),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -284,6 +297,7 @@ async def upload_file(
         metadata=metadata,
         process=process,
         process_in_background=process_in_background,
+        pii_masking=pii_masking,
         user=user,
         background_tasks=background_tasks,
         db=db,
@@ -317,6 +331,7 @@ async def upload_file_handler(
     metadata: Optional[dict | str] = Form(None),
     process: bool = Query(True),
     process_in_background: bool = Query(True),
+    pii_masking: Optional[bool] = None,
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
@@ -432,6 +447,7 @@ async def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    pii_masking=pii_masking,
                 )
                 return {'status': True, **file_item.model_dump()}
             else:
@@ -442,6 +458,7 @@ async def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    pii_masking=pii_masking,
                     db=db,
                 )
                 return {'status': True, **file_item.model_dump()}
@@ -684,7 +701,15 @@ async def get_file_data_content_by_id(
         )
 
     if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
-        return {'content': file.data.get('content', '')}
+        return {
+            'content': file.data.get('content', ''),
+            'pii_detections': file.data.get('pii_detections', []),
+            'pii_scan_status': file.data.get('pii_scan_status', None),
+            # True when the scan covered only a prefix of the file, so the card
+            # knows its list is partial and must be supplemented from the
+            # send-time (whole-document) masking pass.
+            'pii_scan_truncated': file.data.get('pii_scan_truncated', False),
+        }
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

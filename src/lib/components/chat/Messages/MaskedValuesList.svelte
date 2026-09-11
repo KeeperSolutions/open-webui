@@ -9,7 +9,7 @@
 	const i18n =
 		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
 
-	type MaskedItem = { key: string; type: string; value: string };
+	type MaskedItem = { key: string; type: string; value: string; source?: string };
 
 	export let items: MaskedItem[] = [];
 	// Above this many items the view switches to a grouped + searchable density.
@@ -100,13 +100,22 @@
 								class="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-850"
 							>
 								<span
-									class="shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-50 text-green-800 dark:bg-green-900/40 dark:text-green-300 whitespace-nowrap"
+									class="self-center shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-50 text-green-800 dark:bg-green-900/40 dark:text-green-300 whitespace-nowrap"
 									>{formatType(it.type)}</span
 								>
-								<span
-									class="min-w-0 flex-1 font-mono text-xs text-hg-text-secondary dark:text-gray-300 break-all"
-									title={it.value}>{it.value}</span
-								>
+								<div class="flex flex-col min-w-0 flex-1">
+									<span
+										class="font-mono text-xs text-hg-text-secondary dark:text-gray-300 break-all"
+										title={it.value}>{it.value}</span
+									>
+									{#if it.source}
+										<span
+											class="truncate text-[10px] leading-tight text-hg-text-tertiary dark:text-gray-500"
+											title={it.source}
+											>{$i18n.t('from {{source}}', { source: it.source })}</span
+										>
+									{/if}
+								</div>
 								<button
 									type="button"
 									class="shrink-0 p-1 rounded-md text-hg-text-tertiary dark:text-gray-500 hover:text-hg-text-primary dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition"

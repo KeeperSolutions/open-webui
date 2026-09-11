@@ -122,6 +122,20 @@
 					{/if}
 				</div>
 			</div>
+		{:else if status?.action === 'pii_masking'}
+			<div class="flex flex-col justify-center -space-y-0.5">
+				<div
+					class="{(done || status?.done) === false
+						? 'shimmer'
+						: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
+				>
+					<!-- $i18n.t('Masking sensitive data… {{count}}/{{total}}') -->
+					{$i18n.t('Masking sensitive data… {{count}}/{{total}}', {
+						count: status?.count ?? 0,
+						total: status?.total ?? 0
+					})}
+				</div>
+			</div>
 		{:else}
 			<div class="flex flex-col justify-center -space-y-0.5">
 				<div
