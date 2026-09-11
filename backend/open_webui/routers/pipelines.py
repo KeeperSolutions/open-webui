@@ -39,6 +39,7 @@ from open_webui.utils.pii_chunking import (
     PII_INLET_SKELETON_SAFETY_MARGIN,
     PII_INLET_TOTAL_BUDGET_S,
     estimated_masking_seconds,
+    settings_summary,
     split_text_for_pii,
 )
 from pydantic import BaseModel
@@ -628,12 +629,14 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         raise PiiMaskingUnavailableError() from e
 
     # Log the masking time on its own, so a slow turn can be attributed to
-    # masking, retries or the model.
+    # masking, retries or the model. The settings show which env var overrides
+    # this instance is using.
     log.info(
-        '[pii_chunking] masked %d chunks in %.1fs (%d retries)',
+        '[pii_chunking] masked %d chunks in %.1fs (%d retries; %s)',
         total,
         time.time() - _t0,
         retry_stats['retries'],
+        settings_summary(),
     )
 
     # Fail closed if the skeleton response has no `messages` or a different

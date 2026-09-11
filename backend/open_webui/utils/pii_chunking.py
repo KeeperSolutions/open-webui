@@ -4,40 +4,52 @@ This module imports neither FastAPI nor aiohttp, so both `routers/` and
 `utils/` can import it without a circular import, and the splitter can be
 unit-tested on its own.
 
-The sizing constants are based on the measured throughput of the external PII
-pipeline. Re-measure before changing them.
+The sizing settings are based on the measured throughput of the external PII
+pipeline. The ones that depend on how that service is deployed can be
+overridden with env vars of the same name; each is range-checked, and an
+invalid value is logged and replaced by the default. Re-measure before
+changing them.
 """
 
+import logging
 import os
 
+log = logging.getLogger(__name__)
 
-def _positive_int_env(name, default):
-    """Read `name` from the environment as a positive int.
 
-    Returns `default` when the value is unset, empty, non-numeric, zero or
-    negative. A zero or negative budget would make `max_maskable_chars()`
-    return 0 and refuse every prompt. That is fail-closed, but it looks like
-    an outage and the error message does not explain it, so an invalid value
-    falls back to the default instead.
+def _rejected_env(name, raw, default, reason):
+    log.warning(f'[pii_chunking] ignoring {name}={raw!r} ({reason}); using the default {default}')
+    return default
+
+
+def _positive_int_env(name, default, minimum=1, maximum=None):
+    """Read `name` from the environment as an int in `[minimum, maximum]`.
+
+    Returns `default` when the value is unset or empty. A value that is
+    non-numeric or outside the range is logged as a warning and also replaced
+    by `default`. Out-of-range values would stall or refuse every masked
+    message: a zero budget makes `max_maskable_chars()` return 0, zero
+    concurrency never sends a chunk. That fails closed, but it looks like an
+    outage and the user's error message does not explain it.
     """
-    raw = os.getenv(name, '')
+    raw = os.getenv(name, '').strip()
     if not raw:
         return default
     try:
         value = int(raw)
     except ValueError:
-        return default
-    return value if value > 0 else default
+        return _rejected_env(name, raw, default, 'not an integer')
+    if value < minimum or (maximum is not None and value > maximum):
+        return _rejected_env(name, raw, default, f'outside {minimum}..{maximum}')
+    return value
 
 
-
-def _positive_float_env(name, default):
-    """Like `_positive_int_env`, for a float value.
+def _positive_float_env(name, default, maximum=None):
+    """Like `_positive_int_env`, for a float that must be greater than zero.
 
     Also rejects NaN and infinity. NaN is neither greater nor less than zero
     and breaks the arithmetic in `max_maskable_chars()`; infinity would admit
-    every document, which would then run out of time. Both would still fail
-    closed, but with refusals the user's error message does not explain.
+    every document, which would then run out of time.
     """
     raw = os.getenv(name, '').strip()
     if not raw:
@@ -45,24 +57,28 @@ def _positive_float_env(name, default):
     try:
         value = float(raw)
     except ValueError:
-        return default
+        return _rejected_env(name, raw, default, 'not a number')
     if value != value or value in (float('inf'), float('-inf')):  # NaN / +-inf
-        return default
-    return value if value > 0 else default
+        return _rejected_env(name, raw, default, 'not a finite number')
+    if value <= 0 or (maximum is not None and value > maximum):
+        return _rejected_env(name, raw, default, f'must be greater than 0 and at most {maximum}')
+    return value
 
 
 # Maximum characters per masking request. Chunk size does not change
 # throughput, because the pipeline's rate per character is constant; larger
 # chunks only make each request take longer. At about 240 characters per
-# second, a 1800-character chunk takes about 8 s.
-PII_INLET_CHUNK_CHARS = 1800
+# second, a 1800-character chunk takes about 8 s. Env var range: 200..6000;
+# above that a single chunk risks the 60 s socket-read timeout.
+PII_INLET_CHUNK_CHARS = _positive_int_env('PII_INLET_CHUNK_CHARS', 1800, minimum=200, maximum=6000)
 
-# Number of chunk requests sent to the pipeline at the same time. Measured
-# throughput did not improve between 4 and 16: requests queue behind the
-# pipeline's single NER thread. More requests only lengthen the queue, so the
-# last one can exceed `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (default 60 s), and
-# its retry adds load to the same queue. Re-measure before raising it.
-PII_INLET_CONCURRENCY = 4
+# Number of chunk requests sent to the pipeline at the same time. On a
+# pipeline that does not scale out, throughput did not improve between 4 and
+# 16: requests queue behind its single NER thread, so the last one can exceed
+# `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (default 60 s), and its retry adds load to
+# the same queue. Raise it only after the pipeline is allowed to run more
+# instances, and re-measure. Env var range: 1..16.
+PII_INLET_CONCURRENCY = _positive_int_env('PII_INLET_CONCURRENCY', 4, maximum=16)
 
 # Maximum wall-clock time, in seconds, to mask one request across all of its
 # chunks. When it expires the request is refused (fail-closed) and never
@@ -84,19 +100,22 @@ PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 240)
 # is much cheaper than failing the whole request. Four attempts spread the
 # network-error retries (0.5 s, 1 s, 1.5 s) over 3 s rather than 1.5 s, which
 # matters because the failures seen in practice are Cloud Run instances
-# starting up.
-PII_INLET_CHUNK_RETRIES = 4
+# starting up. Env var range: 1..10.
+PII_INLET_CHUNK_RETRIES = _positive_int_env('PII_INLET_CHUNK_RETRIES', 4, maximum=10)
 
 # First delay, in seconds, before retrying a chunk that received a retryable
 # HTTP status (429 or a transient 5xx). It doubles on each attempt: 2 s, 4 s,
 # 8 s. It is longer than the network-error delay because a 429 from Cloud Run
 # means a new instance is being started, which takes seconds, while a dropped
-# connection usually clears in milliseconds.
-PII_INLET_RETRY_BACKOFF_S = 2.0
+# connection usually clears in milliseconds. Env var range: greater than 0, at
+# most 30.
+PII_INLET_RETRY_BACKOFF_S = _positive_float_env('PII_INLET_RETRY_BACKOFF_S', 2.0, maximum=30)
 
 # Masking throughput of a single request, in characters per second, measured
-# against the pipeline. The time estimates below are calculated from it.
-PII_INLET_CHARS_PER_SECOND = 240
+# against the pipeline. The time estimates below are calculated from it. It
+# changes when the pipeline service is rescaled, so it can be overridden with
+# an env var (any value greater than 0).
+PII_INLET_CHARS_PER_SECOND = _positive_float_env('PII_INLET_CHARS_PER_SECOND', 240)
 
 # Fraction of `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` that the estimated time of the
 # skeleton request may use. The skeleton request is the single call that
@@ -122,6 +141,20 @@ PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 # without a deploy. At 5.0 with a 240 s budget, the paste limit is about
 # 288 000 characters.
 PII_INLET_EFFECTIVE_SPEEDUP = _positive_float_env('PII_INLET_EFFECTIVE_SPEEDUP', 5.0)
+
+
+
+def settings_summary():
+    """The env-overridable settings in effect, as `NAME=value` pairs for logs."""
+    return (
+        f'PII_INLET_CHUNK_CHARS={PII_INLET_CHUNK_CHARS} '
+        f'PII_INLET_CONCURRENCY={PII_INLET_CONCURRENCY} '
+        f'PII_INLET_TOTAL_BUDGET_S={PII_INLET_TOTAL_BUDGET_S} '
+        f'PII_INLET_CHUNK_RETRIES={PII_INLET_CHUNK_RETRIES} '
+        f'PII_INLET_RETRY_BACKOFF_S={PII_INLET_RETRY_BACKOFF_S} '
+        f'PII_INLET_CHARS_PER_SECOND={PII_INLET_CHARS_PER_SECOND} '
+        f'PII_INLET_EFFECTIVE_SPEEDUP={PII_INLET_EFFECTIVE_SPEEDUP}'
+    )
 
 
 def estimated_masking_seconds(skeleton_chars, chunked_chars):

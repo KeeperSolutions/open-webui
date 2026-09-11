@@ -131,6 +131,27 @@ def test_an_oversized_message_is_split_into_bounded_chunks():
     assert all(len(c) <= PII_INLET_CHUNK_CHARS for c in chunks)
 
 
+def test_a_chunked_run_logs_the_settings_it_used(caplog):
+    """The completion log line names the env-overridable settings in effect, so
+    production logs show which values an instance is actually using."""
+    seen = []
+    with (
+        patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)),
+        caplog.at_level('INFO', logger='open_webui.routers.pipelines'),
+    ):
+        _run(_payload(BIG))
+    for name in (
+        'PII_INLET_CHUNK_CHARS',
+        'PII_INLET_CONCURRENCY',
+        'PII_INLET_TOTAL_BUDGET_S',
+        'PII_INLET_CHUNK_RETRIES',
+        'PII_INLET_RETRY_BACKOFF_S',
+        'PII_INLET_CHARS_PER_SECOND',
+        'PII_INLET_EFFECTIVE_SPEEDUP',
+    ):
+        assert f'{name}=' in caplog.text
+
+
 def test_the_masked_message_is_reassembled_in_order_and_losslessly():
     """Chunks finish in arbitrary order, but the reassembled message follows
     document order, or the model would receive a shuffled prompt. The mock
