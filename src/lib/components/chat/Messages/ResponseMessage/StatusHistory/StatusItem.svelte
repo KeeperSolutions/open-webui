@@ -129,7 +129,6 @@
 						? 'shimmer'
 						: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
 				>
-					<!-- $i18n.t('Masking sensitive data… {{count}}/{{total}}') -->
 					{$i18n.t('Masking sensitive data… {{count}}/{{total}}', {
 						count: status?.count ?? 0,
 						total: status?.total ?? 0
