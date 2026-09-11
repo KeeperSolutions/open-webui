@@ -3431,6 +3431,57 @@ async def get_system_oauth_token(request, user):
     return oauth_token
 
 
+async def start_initial_title_generation(
+    request, form_data, user, metadata, message_id, title_task
+):
+    """Schedule the first title generation for a brand-new chat.
+
+    MUST be called only after the chat payload has been through
+    `process_chat_payload`, and with the payload that call returned. Two things
+    the title task depends on only exist from that point on:
+
+      * `request.state.metadata` is set, and it is what carries
+        `features.pii_masking` into a task payload (`routers/tasks.py` builds
+        `payload["metadata"]` from it) — so a user who enabled masking for this
+        chat alone keeps it for the title.
+      * the chat inlet has run, so this turn's PII is in the thread vault and the
+        pipeline's deterministic re-mask can replace it exactly.
+
+    Without the vault the task payload falls back to a fresh NER pass over a
+    prompt that is mostly template, where recall is measurably worse than on the
+    bare sentence — the real title template leaks "Robert Plant" while masking
+    "John Cena". Firing this early is therefore not a latency optimisation with
+    no downside; it is the difference between an exact substitution and a guess.
+
+    Best-effort by design: a title is not worth failing a chat turn over, so the
+    scheduled task swallows its own errors.
+    """
+    # `pii_detections_public` is dropped on purpose. `background_tasks_handler`
+    # replays the PII card bridge (emit + DB upsert) for any ctx that carries it,
+    # and the post-completion handler already does that for this turn — keeping
+    # it would fire the card twice. Nothing the title reads lives under that key.
+    title_metadata = {
+        **{k: v for k, v in metadata.items() if k != 'pii_detections_public'},
+        'message_id': message_id,
+    }
+    title_ctx = {
+        'request': request,
+        'form_data': form_data,
+        'user': user,
+        'metadata': title_metadata,
+        'tasks': {TASKS.TITLE_GENERATION: title_task},
+        'event_emitter': await get_event_emitter(title_metadata, update_db=False),
+    }
+
+    async def _run_initial_title_generation():
+        try:
+            await background_tasks_handler(title_ctx)
+        except Exception as e:
+            log.debug(f'Error generating initial chat title: {e}')
+
+    asyncio.create_task(_run_initial_title_generation())
+
+
 async def background_tasks_handler(ctx):
     request = ctx['request']
     form_data = ctx['form_data']

@@ -585,10 +585,10 @@ from open_webui.utils.embeddings import generate_embeddings
 from open_webui.utils.json_response import apply_orjson_http_json
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
-    background_tasks_handler,
     build_chat_response_context,
     process_chat_payload,
     process_chat_response,
+    start_initial_title_generation,
 )
 from open_webui.utils.model_ids import strip_provider_model_prefix
 from open_webui.utils.models import (
@@ -2000,6 +2000,10 @@ async def chat_completion(
             metadata['chat_id'] = str(uuid4())
 
         initial_title_generation = None
+        # Message id the initial title generation is for. Set once the new chat's
+        # messages exist; consumed in `process_chat` AFTER the payload has been
+        # masked — see start_initial_title_generation for why the wait matters.
+        initial_title_message_id = None
         if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
             initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
 
@@ -2157,27 +2161,11 @@ async def chat_completion(
                             pass
 
                     if initial_title_generation is not None and all_assistant_ids:
-                        title_metadata = {
-                            **metadata,
-                            'message_id': all_assistant_ids[0],
-                        }
-                        event_emitter = await get_event_emitter(title_metadata, update_db=False)
-                        title_ctx = {
-                            'request': request,
-                            'form_data': form_data,
-                            'user': user,
-                            'metadata': title_metadata,
-                            'tasks': {TASKS.TITLE_GENERATION: initial_title_generation},
-                            'event_emitter': event_emitter,
-                        }
-
-                        async def run_initial_title_generation():
-                            try:
-                                await background_tasks_handler(title_ctx)
-                            except Exception as e:
-                                log.debug(f'Error generating initial chat title: {e}')
-
-                        asyncio.create_task(run_initial_title_generation())
+                        # Only remember WHICH message the title is for. Starting the
+                        # task here would run it against the unmasked payload and
+                        # before `request.state.metadata` exists, which is what
+                        # carries the per-chat PII toggle into a task request.
+                        initial_title_message_id = all_assistant_ids[0]
                 else:
                     # Existing chat — verify ownership
                     if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
@@ -2332,9 +2320,27 @@ async def chat_completion(
             detail=str(e),
         )
 
-    async def process_chat(request, form_data, user, metadata, model, tasks=None):
+    async def process_chat(request, form_data, user, metadata, model, tasks=None, run_initial_title=False):
         try:
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
+
+            # New chat: the title task waits for this point on purpose — the
+            # payload above is the masked one, and the vault now holds this
+            # turn's PII so the pipeline can re-mask the title prompt exactly
+            # instead of re-running NER over it.
+            # `run_initial_title` is True for exactly one process_chat per chat —
+            # the first model of a multi-model fan-out. The outer variables are
+            # shared by every model's call, so gating on them alone would start
+            # one title task per selected model.
+            if run_initial_title and initial_title_generation is not None and initial_title_message_id:
+                await start_initial_title_generation(
+                    request,
+                    form_data,
+                    user,
+                    metadata,
+                    initial_title_message_id,
+                    initial_title_generation,
+                )
 
             response = await chat_completion_handler(request, form_data, user)
 
@@ -2531,6 +2537,7 @@ async def chat_completion(
                     k: v for k, v in (tasks or {}).items() if k not in (TASKS.TITLE_GENERATION, TASKS.TAGS_GENERATION)
                 }
                 or None,
+                run_initial_title=idx == 0,
             )
             if is_internal:
                 subagent_results.append(await process)
@@ -2570,7 +2577,7 @@ async def chat_completion(
     else:
         # Legacy/direct: single model, synchronous
         metadata['message_id'] = message_ids[0]['message_id']
-        return await process_chat(request, form_data, user, metadata, model, tasks)
+        return await process_chat(request, form_data, user, metadata, model, tasks, run_initial_title=True)
 
 
 # Alias for chat_completion (Legacy)
