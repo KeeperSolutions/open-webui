@@ -174,11 +174,17 @@ def _token_after(text, index):
     return text[index:j]
 
 
+def _is_identifier_group(token):
+    """Whether ``token`` looks like one group of a grouped identifier: it
+    contains a digit (`1234`, `GB82`) or is all upper case (`WEST`)."""
+    return any(c.isdigit() for c in token) or token.isupper()
+
+
 def _severs_spaced_entity(text, sep_index, split_at):
     """Whether breaking between the token ending at ``sep_index`` and the token
     starting at ``split_at`` would split a PII value that contains spaces.
 
-    Values such as `4111 1111 1111 1111`, `DE89 3704 0044 0532`,
+    Values such as `4111 1111 1111 1111`, `GB82 WEST 1234 5698 7654 32`,
     `+44 20 7946 0958` and `John Doe` are single entities written with
     spaces. If one is split across two chunks, the pipeline recognises neither
     half, and both halves reach the model unmasked (see
@@ -186,8 +192,10 @@ def _severs_spaced_entity(text, sep_index, split_at):
 
     Two checks cover the multi-token entities Presidio detects:
 
-      * both tokens contain a digit: a grouped identifier (card, IBAN, phone,
-        account or reference number) would be split between its groups;
+      * both tokens are identifier groups, meaning each contains a digit or is
+        all upper case: a grouped identifier (card, IBAN, phone, account or
+        reference number) would be split between its groups. All upper case
+        covers letters-only IBAN groups such as the bank code `WEST`;
       * both tokens start with a capital letter: a PERSON, ORGANIZATION or
         LOCATION would be split between its words.
 
@@ -199,7 +207,7 @@ def _severs_spaced_entity(text, sep_index, split_at):
     right = _token_after(text, split_at)
     if not left or not right:
         return False  # whitespace run, never inside an entity
-    if any(c.isdigit() for c in left) and any(c.isdigit() for c in right):
+    if _is_identifier_group(left) and _is_identifier_group(right):
         return True
     if left[0].isupper() and right[0].isupper():
         return True

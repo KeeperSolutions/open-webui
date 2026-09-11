@@ -68,6 +68,8 @@ def test_an_entity_is_never_severed_by_a_break():
     [
         '4111 1111 1111 1111',  # credit card written in groups of four
         'DE89 3704 0044 0532 0130 00',  # IBAN in groups
+        'GB82 WEST 1234 5698 7654 32',  # IBAN with a letters-only bank code group
+        'IE29 AIBK 9311 5212 3456 78',  # IBAN with a letters-only bank code group
         '+44 20 7946 0958',  # phone number
         'John Doe',  # person name: two capitalised words
     ],
