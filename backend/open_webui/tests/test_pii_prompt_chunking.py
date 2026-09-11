@@ -1,10 +1,10 @@
-"""Prompt-path PII chunking.
+"""Tests for PII masking of long prompts on the chat path.
 
-A 50-page paste used to go to the inlet as ONE request, blow the 60 s socket
-read budget and surface as "PII masking is currently unavailable". These tests
-pin the replacement: many bounded, concurrent chunk calls, still fail-closed.
+A message above the chunk threshold is split into bounded pieces, masked by
+concurrent pipeline calls and reassembled in order. If any chunk fails, the
+whole request is refused, so partially masked text never reaches the model.
 
-The external inlet is MOCKED — `aiohttp.ClientSession` is patched in
+The external inlet is mocked by patching `aiohttp.ClientSession` in
 `open_webui.routers.pipelines`.
 """
 
@@ -28,13 +28,11 @@ from open_webui.utils.pii_chunking import (  # noqa: E402
     split_text_for_pii,
 )
 
-# NON-periodic on purpose (~13 500 chars -> many chunks). A literal `* 400`
-# repeat makes every masked piece a rotation of the same repeating unit, so
-# `"".join(sorted(pieces))` can reassemble back to the identical string and
-# the reassembled-in-order test can't tell a shuffle from the real thing (the
-# same failure mode Task 1's own fixture hit). The per-repetition counter
-# breaks the periodicity while keeping the `OIB 12345678903` literal in every
-# unit, so the fail-on-substring test still matches.
+# About 13 500 characters, which splits into many chunks. Each repetition has
+# its own counter so the text is not periodic: with a plain `* 400` repeat every
+# chunk is a rotation of the same unit, and the in-order reassembly test could
+# not tell a shuffled result from the correct one. Every repetition still
+# contains `OIB 12345678903`, which the fail-on-substring test matches.
 BIG = ''.join(f'Ivan Horvat {i}, OIB 12345678903. ' for i in range(400))
 
 
@@ -76,8 +74,8 @@ def _session(seen, fail_on=None, delay=0.0):
     request, and optionally fails when `fail_on` appears in the chunk."""
 
     def _post(url, *, headers, json, ssl):
-        # SYNC on purpose: the caller does `async with session.post(...)`, so
-        # post() must RETURN the context manager, not a coroutine.
+        # Synchronous on purpose: the caller does `async with session.post(...)`,
+        # so post() must return the context manager, not a coroutine.
         body = json['body']
         text = body['messages'][0]['content']
         seen.append(text)
@@ -90,12 +88,11 @@ def _session(seen, fail_on=None, delay=0.0):
         resp.content_type = 'application/json'
 
         async def _enter(_self=None):
-            # _self: unittest.mock wraps a plain function assigned to a magic
-            # dunder (`cm.__aenter__ = _enter`) as `func(self, *args, **kw)`
-            # (see CPython unittest/mock.py `_get_method`), so the mock passes
-            # `cm` itself as a positional arg here. Discarded — unused.
+            # _self: unittest.mock calls a plain function assigned to a magic
+            # method (`cm.__aenter__ = _enter`) with the mock as the first
+            # argument, so `_self` receives `cm`. It is not used.
             if delay:
-                await asyncio.sleep(delay)  # the await must live inside __aenter__
+                await asyncio.sleep(delay)  # post() is synchronous, so the delay goes here
             return resp
 
         cm = MagicMock()
@@ -116,8 +113,8 @@ def _run(payload, **kw):
 
 
 def test_a_short_message_still_takes_exactly_one_call():
-    """The chunked path must not tax normal chats: below the threshold the
-    behaviour and the call count are exactly what they were before."""
+    """A message below the chunk threshold takes a single inlet call, so
+    ordinary chats pay nothing for chunking."""
     seen = []
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
         out = _run(_payload('kratka poruka'))
@@ -135,20 +132,10 @@ def test_an_oversized_message_is_split_into_bounded_chunks():
 
 
 def test_the_masked_message_is_reassembled_in_order_and_losslessly():
-    """Chunks are masked concurrently, so completion order is arbitrary. The
-    reassembled message must still be the pieces in DOCUMENT order, not
-    completion order — otherwise the model reads a shuffled prompt.
-
-    Dispatch order equals document order: jobs are created in piece order and
-    `asyncio.gather` schedules each coroutine's synchronous prefix (up to its
-    first real suspension) in that same order — verified against this mock,
-    where `session.post(...)` runs synchronously before the first `await`
-    inside `__aenter__`. Giving EARLIER-dispatched chunks a LONGER delay
-    therefore makes completion order the exact reverse of document order: an
-    implementation that assembled by completion order (or appended to a plain
-    list as results arrived) instead of indexing by piece_index would produce
-    a visibly scrambled string here, where a `delay=0.0` mock could not tell
-    the difference (dispatch order would trivially equal completion order).
+    """Chunks finish in arbitrary order, but the reassembled message follows
+    document order, or the model would receive a shuffled prompt. The mock
+    delays earlier-dispatched chunks longer, so completion order is the reverse
+    of document order and assembling results as they arrive would fail here.
     """
     seen = []
     dispatched = []  # dispatch order of the real chunk POSTs (skeleton excluded)
@@ -167,8 +154,8 @@ def test_the_masked_message_is_reassembled_in_order_and_losslessly():
         if text:  # not the skeleton call, which always sends ""
             dispatch_index = len(dispatched)
             dispatched.append(dispatch_index)
-            # Earlier dispatch -> longer sleep -> later completion. Floored so
-            # this stays a real (positive) delay even if the chunk count grows.
+            # Earlier dispatch sleeps longer and so completes later. The floor
+            # keeps the delay positive if the chunk count grows past 12.
             delay = max(0.05 * (12 - dispatch_index), 0.01)
 
         async def _enter(_self=None):
@@ -214,7 +201,9 @@ def test_exceeding_the_total_budget_fails_closed_rather_than_hanging():
 
 
 def test_concurrency_is_bounded():
-    """Unbounded fan-out at a scale-to-zero service buys cold starts, not speed."""
+    """Chunk calls run concurrently but never more than `PII_INLET_CONCURRENCY`
+    at once; unbounded fan-out to a scale-to-zero service causes cold starts,
+    not speed-up."""
     inflight, peak = {'n': 0}, {'n': 0}
 
     def _post(url, *, headers, json, ssl):
@@ -250,10 +239,9 @@ def test_concurrency_is_bounded():
         patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=scm),
     ):
         _run(_payload(BIG))
-    # Lower bound matters as much as the upper one: `peak['n'] <= 3` alone
-    # passes for a fully serial implementation (peak stuck at 1), silently
-    # reverting the entire point of this task (a 150k paste is ~625 s serial
-    # against a 120 s budget) while the suite stays green.
+    # Check the lower bound too: `peak['n'] <= 3` alone also passes for a serial
+    # implementation (peak of 1), and a serial run cannot mask a large paste
+    # within the time budget.
     assert 1 < peak['n'] <= 3
 
 
@@ -268,7 +256,8 @@ def test_progress_is_reported_monotonically_and_completes():
 
 
 def test_masking_disabled_skips_the_chunked_path_entirely():
-    """features.pii_masking=False is a valid opt-out; it must not pay for chunking."""
+    """With `features.pii_masking` set to False, even an oversized message takes
+    a single call and skips chunking."""
     seen = []
     payload = _payload(BIG)
     payload['features']['pii_masking'] = False
@@ -278,11 +267,10 @@ def test_masking_disabled_skips_the_chunked_path_entirely():
 
 
 def test_oversized_message_without_chat_id_fails_closed_before_any_post():
-    """Every chunk POST inherits `payload['metadata']`, and the pipeline mints
-    a FRESH ephemeral thread per call when chat_id is missing — each chunk
-    would land in its own PII vault, so distinct people would collapse onto a
-    shared placeholder across the reassembled prompt. Refuse before issuing
-    any POST rather than mint a shared synthetic id."""
+    """An oversized message without a chat_id is refused before any POST.
+    Without a chat_id the pipeline creates a new PII vault for every call, so
+    each chunk would get its own vault and different people could share one
+    placeholder in the reassembled prompt."""
     seen = []
     payload = _payload(BIG)
     payload['metadata'] = {}  # no chat_id, top-level or nested
@@ -293,13 +281,11 @@ def test_oversized_message_without_chat_id_fails_closed_before_any_post():
 
 
 def test_chat_path_emits_a_pii_masking_status_event():
-    """The user waits ~65 s for a 50-page paste. Silence reads as a hang, so the
-    wait must be visible; the final event must mark itself done or the shimmer
-    never stops.
+    """Masking progress is sent as `pii_masking` status events, and the final
+    event is marked done so the loading animation stops.
 
-    Driven inside a running loop on purpose: the emitter schedules with
-    `asyncio.create_task`, which has no loop to attach to outside one — the
-    production caller is always inside `asyncio.gather`."""
+    Runs inside an event loop because the emitter schedules events with
+    `asyncio.create_task`, which needs a running loop."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -323,12 +309,9 @@ def test_chat_path_emits_a_pii_masking_status_event():
 
 
 def test_progress_swallows_a_synchronously_raising_emitter():
-    """If `event_emitter(...)` itself raises before returning a coroutine (a
-    non-async callable, or one that blows up before yielding), `on_progress`
-    must swallow it. The producer calls `on_progress` from inside
-    `_mask_piece`'s retry `try` — a synchronous exception escaping here would
-    be caught there as a transient chunk failure and cause a spurious re-POST
-    of an already-masked chunk."""
+    """`on_progress` swallows an exception raised synchronously by the emitter.
+    It is called inside `_mask_piece`'s retry block, so an escaping exception
+    would count as a chunk failure and re-send an already masked chunk."""
     import open_webui.utils.middleware as M
 
     def emitter(event):
@@ -342,18 +325,10 @@ def test_progress_swallows_a_synchronously_raising_emitter():
 
 
 def test_progress_retrieves_a_raising_coroutines_exception_via_the_done_callback():
-    """The event is scheduled with `asyncio.create_task`, so `event_emitter`'s
-    own body runs later, off the `on_progress` call stack — meaning an
-    exception raised there does NOT propagate to the caller regardless of
-    whether anything retrieves it. A bare "on_progress must not raise"
-    assertion is therefore true even for the bare `asyncio.create_task(...)`
-    call with no stored reference and no done-callback: Python only surfaces
-    an un-retrieved task exception later, through the event loop's default
-    exception handler, when the task is garbage-collected. What the
-    strong-reference set + `_pii_progress_task_done` actually buy is that the
-    exception gets RETRIEVED (`task.exception()`) instead of leaking to that
-    default handler. Assert the handler is never invoked — that is the
-    property this mechanism exists for."""
+    """An exception raised inside the scheduled emitter task is retrieved by
+    the done-callback and never reaches the event loop's exception handler.
+    Checking only that `on_progress` does not raise would pass even without the
+    callback, because the task body runs later, outside that call."""
     import gc
 
     import open_webui.utils.middleware as M
@@ -372,10 +347,10 @@ def test_progress_retrieves_a_raising_coroutines_exception_via_the_done_callback
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
-        # The done-callback should already have discarded the task from the
-        # module-level set by now. Drop whatever reference is left and force
-        # a collection so an un-retrieved exception can't hide behind GC
-        # timing — if the callback didn't run, this is what would surface it.
+        # The done-callback should already have removed the task from the
+        # module-level set. Clear any remaining references and force garbage
+        # collection, so an unretrieved exception reaches the handler now
+        # instead of at some later collection.
         M._pii_progress_tasks.clear()
         gc.collect()
 
@@ -388,17 +363,10 @@ def test_progress_retrieves_a_raising_coroutines_exception_via_the_done_callback
 
 
 def test_progress_swallows_a_malformed_total_raised_by_the_throttle_guard_itself():
-    """`_should_emit_pii_progress` starts with `if done <= 1 or done >=
-    total`: with `done=1` the `or` short-circuits before `total` is ever
-    compared, so `done=1` can't exercise this. `done=2` forces the second
-    operand to actually evaluate `done >= total`, so a non-comparable
-    `total` (e.g. None) raises a `TypeError` from INSIDE the guard call
-    itself — the exact statement whose position (inside vs. outside the
-    `try`) matters: if a future producer change ever passed such a `total`,
-    that must be swallowed like a scheduling failure, not propagate out of
-    `on_progress` and into `_mask_piece`'s retry `try`, where it would look
-    like a transient chunk failure and trigger a spurious re-POST of an
-    already-masked chunk."""
+    """A `TypeError` raised by the throttle check for a non-comparable `total`
+    (such as None) is swallowed, so it cannot trigger a chunk retry. The test
+    uses `done=2` because with `done=1` the check returns before comparing
+    against `total`."""
     import open_webui.utils.middleware as M
 
     async def emitter(event):
@@ -406,22 +374,16 @@ def test_progress_swallows_a_malformed_total_raised_by_the_throttle_guard_itself
 
     async def drive():
         on_progress = M._pii_progress_emitter(emitter)
-        on_progress(2, None)  # must not raise — done=2 skips the done<=1 short-circuit
+        on_progress(2, None)  # must not raise; done=2 gets past the done <= 1 check
 
     asyncio.run(drive())  # must not raise
 
 
 def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal_one():
-    """Every status event triggers a non-atomic whole-chat-row rewrite
-    (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
-    `update_chat_by_id`, no optimistic-concurrency check). Emitting per-chunk
-    on a large paste means dozens of concurrent whole-row rewrites that can
-    clobber each other — so completions must be throttled, and the terminal
-    one (which stops the shimmer) must never be among the dropped ones.
-
-    Twenty, not ten: the largest admissible paste is ~160 chunks, and ten
-    events would leave whole minutes of the wait with a frozen number —
-    indistinguishable from a hung request."""
+    """Progress events are throttled to about twenty per run, and the terminal
+    event, which stops the loading animation, is always emitted. Each event
+    rewrites the whole chat row without a concurrency check, so one event per
+    chunk would let concurrent writes overwrite each other."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -447,16 +409,10 @@ def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal
 
 @pytest.mark.parametrize('total', [20, 25, 39, 40, 41, 59, 60, 99, 100, 150, 160])
 def test_the_throttle_stays_bounded_in_every_band_not_just_multiples_of_twenty(total):
-    """The stride must round UP. `total // 20` rounds it down, and a stride one
-    too small blows the cap wide open: every total from 20 to 39 floors to a
-    stride of 1 and emits EVERY completion — 39 concurrent whole-row rewrites
-    at the top of that band, which is precisely the clobbering the throttle
-    exists to prevent. The overshoot recurs in each band (31 events at 59).
-
-    The pre-existing throttle test only ever used `total=100`, which floors to
-    a stride of 5 and happens to land on 21 events, so it passed throughout.
-    `total=39` is a ~70 000-character paste — well inside what the budget
-    admits — so this was the live case, not a corner one.
+    """The throttle emits at most about twenty events for every `total`, not
+    only for multiples of twenty. This requires rounding the stride up:
+    rounding down gives a stride of 1 for totals 20 to 39, which emits every
+    completion.
     """
     import open_webui.utils.middleware as M
 
@@ -468,33 +424,22 @@ def test_the_throttle_stays_bounded_in_every_band_not_just_multiples_of_twenty(t
 
 
 def test_progress_emissions_are_serialized_so_a_stale_write_cannot_drop_the_terminal_event():
-    """Persisting a status is a non-atomic read-modify-write of the WHOLE chat
-    row: `add_message_status_to_chat_by_id_and_message_id` does
-    `session.get(Chat, id)` -> append to `statusHistory` -> `commit()`, with no
-    row lock and no optimistic-concurrency check. Two of those in flight at
-    once both read the same list, each appends only its own entry, and the
-    later commit wins — one entry is silently LOST. When the lost one is the
-    terminal `done: True` event, the shimmer in `StatusItem.svelte` never
-    stops, for the rest of the session and after a reload.
-
-    Throttling (`_should_emit_pii_progress`) cuts how OFTEN this happens; it
-    establishes no ordering whatsoever, so it cannot fix it. The emitter must
-    chain its emissions instead.
-
-    The fake emitter below reproduces that read-modify-write exactly, with the
-    first emission made the slowest so an unordered implementation is
-    guaranteed to interleave rather than merely being allowed to.
+    """Status emissions run one after another, so the terminal `done: True`
+    event cannot be lost. Saving a status reads the chat row, appends to
+    `statusHistory` and writes the row back without a lock, so two overlapping
+    saves drop one entry; if that entry is the terminal event, the loading
+    animation in `StatusItem.svelte` never stops, even after a reload.
     """
     import open_webui.utils.middleware as M
 
     row = []  # stands in for the chat row's `statusHistory`
 
     async def emitter(event):
-        snapshot = list(row)  # READ
+        snapshot = list(row)  # read
         # Earlier events are slower, so a later one overtakes them unless the
         # emissions are serialized.
         await asyncio.sleep(0.02 * (5 - event['data']['count']))
-        row[:] = snapshot + [event]  # MODIFY-WRITE
+        row[:] = snapshot + [event]  # modify and write back
 
     async def drive():
         on_progress = M._pii_progress_emitter(emitter)
@@ -511,13 +456,10 @@ def test_progress_emissions_are_serialized_so_a_stale_write_cannot_drop_the_term
 
 
 def test_a_failed_request_terminates_the_open_masking_status():
-    """A refusal leaves the last `pii_masking` status at `done: false`, because
-    progress events only ever mark themselves done at `done >= total`.
-    `StatusHistory.svelte` renders its collapsed row from `history.at(-1)` and
-    `StatusItem.svelte` takes the shimmer from `status.done`, so the message
-    goes on advertising masking in progress underneath the error — and the
-    status is persisted in the chat row, so it still shimmers after a reload.
-    The error/cancel events that follow terminate the MESSAGE, not this entry.
+    """When masking fails, `finalize_on_failure` marks the open `pii_masking`
+    status as done. Otherwise the last saved status stays at `done: false`, and
+    the message keeps showing masking in progress under the error, even after a
+    reload.
     """
     import open_webui.utils.middleware as M
 
@@ -538,8 +480,8 @@ def test_a_failed_request_terminates_the_open_masking_status():
 
     assert events[-1]['data']['done'] is True, 'the shimmer must stop on the failure path'
     assert events[-1]['data']['action'] == 'pii_masking'
-    # The honest account of a run that stopped at one of forty — not a jump to
-    # 40/40, which would claim work that never happened.
+    # The final event keeps the real count (1 of 40) rather than reporting
+    # 40/40 for work that was never done.
     assert events[-1]['data']['count'] == 1
     assert events[-1]['data']['total'] == 40
 
@@ -571,10 +513,8 @@ def test_terminating_an_already_finished_masking_status_emits_nothing():
 
 
 def test_terminating_a_run_that_never_reported_progress_emits_nothing():
-    """The ordinary non-chunked path never calls `on_progress` at all. A
-    failure there must not invent a `pii_masking` status for a message that
-    never showed one — that would be a spurious entry on the overwhelming
-    majority of chats."""
+    """If `on_progress` was never called, as on the non-chunked path, a failure
+    adds no `pii_masking` status, because the message never showed one."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -592,9 +532,8 @@ def test_terminating_a_run_that_never_reported_progress_emits_nothing():
 
 
 def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():
-    """`total // 10` is 0 for any `total < 10`; the throttle must guard
-    against a modulo-by-zero there and still guarantee the first and terminal
-    events are reported."""
+    """For a small `total` the throttle does not fail with a modulo-by-zero
+    error and still reports the first and terminal events."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -607,10 +546,9 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
         on_progress(1, 3)
         on_progress(2, 3)
         on_progress(3, 3)
-        # Drained by watching the task set rather than by a fixed number of
-        # loop turns: emissions are chained, so each one needs its own
-        # scheduling round-trip and a hard-coded couple of yields would return
-        # before the terminal event had run.
+        # Wait until the task set is empty rather than for a fixed number of
+        # loop turns: emissions are chained, so each one needs its own turn,
+        # and two yields would return before the terminal event runs.
         while M._pii_progress_tasks:
             await asyncio.sleep(0)
 
@@ -623,8 +561,9 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
 
 
 def test_a_prompt_beyond_the_budget_is_refused_with_a_message_a_user_can_act_on():
-    """Past the budget the honest answer is a refusal, not a five-minute wait.
-    The text must say what to do — the old wording named an internal constant."""
+    """A prompt longer than `max_maskable_chars()` is refused before any
+    pipeline call, with a message telling the user to shorten it rather than
+    naming an internal setting."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     payload = _payload('x' * (max_maskable_chars() + 1))
@@ -639,9 +578,8 @@ def test_a_prompt_beyond_the_budget_is_refused_with_a_message_a_user_can_act_on(
 
 
 def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
-    """The other half of the boundary: a lone paste at exactly
-    `max_maskable_chars()` characters (no other history, so skeleton_chars=0)
-    must NOT be refused — it should proceed and issue POSTs."""
+    """A single message of exactly `max_maskable_chars()` characters, with no
+    other history, is masked rather than refused."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     payload = _payload('x' * max_maskable_chars())
@@ -652,12 +590,10 @@ def test_a_pure_paste_at_exactly_the_budget_boundary_is_allowed_through():
 
 
 def test_title_generation_task_is_exempt_from_chunking_even_when_oversized():
-    """(finding #1) The pipeline skips NER entirely for title/tags/follow-up
-    generation and re-masks via the deterministic vault regex alone --
-    microseconds regardless of payload size -- so these must keep the single
-    whole-payload call the pipeline expects. Chunking them (and applying the
-    chunked path's size guard) would refuse exactly the large chats that
-    chunking is meant to support."""
+    """Title generation takes one whole-payload call and no size check, even
+    when oversized. The pipeline skips NER for title, tag and follow-up
+    generation and only re-masks from the vault by regex, which is fast at any
+    size, so chunking or refusing these requests would only break large chats."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     payload = _payload('x' * (max_maskable_chars() + 1))
@@ -669,9 +605,8 @@ def test_title_generation_task_is_exempt_from_chunking_even_when_oversized():
 
 
 def test_query_generation_task_still_chunks_when_oversized():
-    """(finding #1) query_generation is deliberately NOT exempt: its output
-    goes to an external service (RAG search), so the pipeline keeps full NER
-    for it and chunking genuinely helps it survive that cost."""
+    """Query generation is still chunked when oversized. Its output goes to an
+    external search service, so the pipeline runs full NER on it."""
     payload = _payload(BIG)
     payload['metadata']['task'] = 'query_generation'
     seen = []
@@ -717,10 +652,9 @@ def _detection_session(seen, detections_for):
 
 
 def test_chunked_detections_merge_with_document_relative_offsets():
-    """(finding #5) Each chunk's own `pii_detections_public` must be shifted
-    by that piece's offset into the message and merged into the returned
-    metadata -- otherwise the card shows nothing for a message where the
-    entities were actually found."""
+    """Each chunk's `pii_detections_public` offsets are shifted by the chunk's
+    position in the message and merged into the returned metadata. Without
+    this, the PII card shows nothing for a message whose entities were found."""
     marker = 'OIB 12345678903'
 
     def _detections_for(text):
@@ -746,11 +680,9 @@ def test_chunked_detections_merge_with_document_relative_offsets():
 
 
 def test_malformed_chunk_detections_are_dropped_without_failing_the_request():
-    """(finding #5) A detection entry that is not a dict, or whose start/end
-    are not plain ints (bool included -- a subclass of int but never a valid
-    offset), must be skipped rather than crash an otherwise-successful
-    request -- a malformed entry from an external service must not fail-open
-    the whole masked request."""
+    """Detection entries from the pipeline that are not a dict, or whose
+    start/end are not plain ints (a bool is rejected too), are dropped without
+    failing an otherwise successful request."""
 
     def _detections_for(_text):
         return [
@@ -776,19 +708,15 @@ def test_malformed_chunk_detections_are_dropped_without_failing_the_request():
 
 
 def test_a_refused_request_cancels_its_remaining_chunk_calls():
-    """A bare `asyncio.gather` hands the FIRST exception to its awaiter and
-    leaves every sibling running. After the request has already been refused
-    those orphans keep issuing inlet POSTs — against a bottleneck that is
-    frequently why the first chunk failed at all — keep writing vault rows for
-    a prompt that will never be sent, and keep calling `on_progress`, so a
-    masking bar advances underneath an error the user was already shown.
+    """When one chunk fails and the request is refused, the remaining chunk
+    calls are cancelled. Otherwise they keep sending POSTs to the pipeline,
+    writing vault rows for a prompt that will never be sent, and advancing the
+    progress bar under the error.
 
-    Measured as "no POST is issued after the refusal": the mock records each
-    request synchronously in `post()`, while the wait lives in `__aenter__`, so
-    a chunk still queued behind the concurrency semaphore has not been recorded
-    yet. Driven inside a live loop rather than through `_run`, because
-    `asyncio.run` tears the loop down on return and would destroy exactly the
-    orphans under test.
+    The mock records a request in `post()`, before its delay in `__aenter__`,
+    so the test checks that no POST is recorded after the refusal. It waits
+    inside the running loop instead of using `_run`, because `asyncio.run`
+    cancels leftover tasks on return and would hide them.
     """
     sentinel = 'SENTINEL_ONLY_IN_ONE_CHUNK_c4b'
     content = sentinel + ' ' + BIG
@@ -826,8 +754,8 @@ def test_a_refused_request_cancels_its_remaining_chunk_calls():
     scm.__aexit__ = AsyncMock(return_value=False)
 
     async def drive():
-        # One attempt, so the bad chunk refuses immediately instead of sitting
-        # through the retry backoff.
+        # One attempt, so the bad chunk refuses immediately without waiting for
+        # retry backoff.
         with (
             patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=scm),
             patch('open_webui.routers.pipelines.PII_INLET_CHUNK_RETRIES', 1),
@@ -835,14 +763,14 @@ def test_a_refused_request_cancels_its_remaining_chunk_calls():
             with pytest.raises(PiiMaskingUnavailableError):
                 await process_pipeline_inlet_filter(_request(), _payload(content), _user(), _models())
             at_refusal = len(seen)
-            # Many times the per-chunk delay: ample for every orphan to finish
-            # and for the ones queued behind the semaphore to be admitted.
+            # 20 times the per-chunk delay: enough for any leftover call to
+            # finish and for calls queued behind the semaphore to start.
             await asyncio.sleep(1.0)
             return at_refusal, len(seen)
 
     at_refusal, after_settling = asyncio.run(drive())
 
-    total_jobs = len([t for t in seen if t]) # sanity: work was left undone
+    total_jobs = len([t for t in seen if t]) # for the failure message
     assert at_refusal < len(split_text_for_pii(content)), (
         'the fixture must leave chunks unstarted at the moment of refusal, '
         f'otherwise this test cannot detect orphans (started={at_refusal})'
@@ -854,15 +782,12 @@ def test_a_refused_request_cancels_its_remaining_chunk_calls():
 
 
 def test_one_bad_chunk_fails_the_whole_request_while_other_chunks_still_complete():
-    """(finding #7) The property that actually matters is not "all chunks
-    fail" (already covered by
-    `test_a_chunk_that_never_succeeds_fails_the_whole_request_closed`, whose
-    `fail_on` substring appears in every chunk of `BIG`) but "ONE bad chunk
-    kills the whole request rather than yielding partially-masked text". A
-    `return_exceptions=True` regression would still raise for the all-fail
-    case but silently succeed here, so only THIS test can catch it."""
+    """A single failing chunk refuses the whole request even though the other
+    chunks succeed, so partially masked text is never returned. The
+    all-chunks-fail test cannot catch this: with `return_exceptions=True` it
+    would still raise, while this case would return partially masked text."""
     sentinel = 'SENTINEL_ONLY_IN_ONE_CHUNK_7f3'
-    # Prepended so it sits well inside the very first ~1800-char chunk, far
+    # Prepended so it sits inside the first chunk (about 1 800 characters), far
     # from any split boundary, and appears in the fixture exactly once.
     content = sentinel + ' ' + BIG
     assert content.count(sentinel) == 1
@@ -911,14 +836,12 @@ def test_one_bad_chunk_fails_the_whole_request_while_other_chunks_still_complete
 
 
 def _history_session(calls):
-    """Mock inlet for MULTI-message payloads: echoes back every message
-    uppercased, the way the real pipeline returns the whole conversation, and
-    records each POST's message contents.
+    """Mock inlet for multi-message payloads: returns every message uppercased,
+    as the real pipeline returns the whole conversation, and records each
+    POST's message contents.
 
-    `_session` collapses its response to a single message, which is fine for
-    the one-message payloads above but makes a multi-message skeleton trip the
-    `len(out_messages) != len(messages)` fail-closed check before the assertion
-    under test is ever reached.
+    `_session` always returns a single message, so a multi-message skeleton
+    would fail the message-count check before the assertion under test runs.
     """
 
     def _post(url, *, headers, json, ssl):
@@ -950,10 +873,9 @@ def _history_session(calls):
 
 
 def _chunk_calls(calls):
-    """The chunk POSTs among recorded calls: a chunk carries exactly one
-    non-blank message. The skeleton is either the full conversation (more
-    than one message) or, for a single-message payload, that one message
-    BLANKED -- falsy either way."""
+    """Return the chunk POSTs among the recorded calls. A chunk call carries
+    exactly one non-blank message; the skeleton call carries the whole
+    conversation, or a single blanked message for a one-message payload."""
     return [c for c in calls if len(c) == 1 and c[0]]
 
 
@@ -967,21 +889,12 @@ def _turn(*messages):
 
 
 def test_only_the_message_being_sent_is_chunked_not_the_whole_history():
-    """THE regression this follow-up exists for. Chunking every oversized
-    message in the payload re-splits and re-masks the entire history on every
-    single turn: the observed counter climbed 15 -> 17 -> 19 across three
-    turns (the third being a two-sentence prompt, whose growth came from the
-    ASSISTANT's oversized reply), the work grew quadratically in turn count,
-    and around turn 4 the accumulated estimate crossed
-    `PII_INLET_TOTAL_BUDGET_S` and the chat refused itself PERMANENTLY -- even
-    for a one-word message.
-
-    Only the message being sent this turn can contain PII that has never been
-    through the pipeline; older ones were NER'd and vaulted on the turn they
-    were typed, and `pii_filter_pipeline.py` re-masks them from the vault by
-    regex (microseconds) rather than re-running NER. Chunk count must
-    therefore depend on the CURRENT message alone, not on conversation
-    length."""
+    """Oversized history is not chunked again on later turns, so the chunk
+    count depends on the current message and not on conversation length.
+    Older messages were masked and stored in the vault on the turn they were
+    sent, and the pipeline re-masks them by regex; re-chunking them every turn
+    would grow the work with each turn until the chat exceeds
+    `PII_INLET_TOTAL_BUDGET_S` and refuses even a one-word message."""
     calls = []
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
         _run(_turn(('user', BIG)))
@@ -1012,10 +925,9 @@ def test_only_the_message_being_sent_is_chunked_not_the_whole_history():
 
 
 def test_oversized_history_is_left_whole_for_the_pipelines_own_vault_remask():
-    """The companion property: an oversized message that is NOT the one being
-    sent must reach the pipeline at FULL length in the skeleton, not blanked
-    and reassembled from chunks. Blanking it would hide from the pipeline the
-    history it re-masks from the vault."""
+    """An oversized older message is sent at full length in the skeleton call,
+    not blanked and chunked, because the pipeline needs it to re-mask the
+    history from the vault."""
     calls = []
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
         _run(_turn(('user', BIG), ('assistant', 'Short reply.'), ('user', 'And a short follow-up.')))
@@ -1024,12 +936,10 @@ def test_oversized_history_is_left_whole_for_the_pipelines_own_vault_remask():
 
 
 def test_a_long_conversation_with_an_oversized_paste_is_not_refused_by_history_length():
-    """Ordinary history must not consume the masking budget. The pipeline runs
-    full NER only on the last user and last assistant message
-    (`ner_indices` in `pii_filter_pipeline.py`); every other history entry
-    stops at the deterministic vault re-mask, which is regex and costs
-    microseconds regardless of length. Charging history at the NER rate
-    refused exactly the established chats that chunking is meant to support."""
+    """Older history does not count against the masking time budget. The
+    pipeline runs NER only on the last user and last assistant message (its
+    `ner_indices`) and re-masks the rest with a fast vault regex, so charging
+    history at the NER rate would refuse long chats."""
     history = []
     for _ in range(10):
         history.append(('user', 'a' * 1500))
@@ -1043,12 +953,10 @@ def test_a_long_conversation_with_an_oversized_paste_is_not_refused_by_history_l
 
 
 def test_an_oversized_assistant_reply_is_chunked_rather_than_left_to_blow_the_skeleton_post():
-    """The last ASSISTANT message is NER'd by the pipeline too, so leaving an
-    oversized one whole in the skeleton would pay its full NER cost inside the
-    single sequential skeleton POST and blow that call's 60s socket read --
-    bricking the chat the same way, only triggered by the model instead of the
-    user. It is chunked alongside the message being sent. The set stays
-    bounded at two messages, so this cannot accumulate across turns."""
+    """The last assistant message is chunked along with the message being sent,
+    because the pipeline runs NER on it too; left whole, an oversized reply
+    would exceed the skeleton call's 60-second socket read timeout. Earlier
+    assistant replies are not chunked, so at most two messages are chunked."""
     calls = []
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
         _run(_turn(('user', 'hi'), ('assistant', BIG)))
@@ -1060,8 +968,8 @@ def test_an_oversized_assistant_reply_is_chunked_rather_than_left_to_blow_the_sk
         _run(_turn(('assistant', BIG), ('user', BIG)))
     assert len(_chunk_calls(calls)) == 2 * assistant_only, 'both NER-priced messages are chunked, and only those two'
 
-    # An EARLIER oversized assistant reply is not NER'd by the pipeline and
-    # must stay out of the chunked set.
+    # An earlier oversized assistant reply does not go through NER in the
+    # pipeline, so it is not chunked.
     calls.clear()
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_history_session(calls)):
         _run(_turn(('assistant', BIG), ('user', 'ok'), ('assistant', 'Short reply.'), ('user', BIG)))
@@ -1069,9 +977,9 @@ def test_an_oversized_assistant_reply_is_chunked_rather_than_left_to_blow_the_sk
 
 
 def test_the_two_ner_priced_messages_together_can_still_exceed_the_total_budget():
-    """The budget guard survives the narrowing: a long assistant reply and a
-    long paste are both chunked, both charged, and their sum is still checked
-    against `PII_INLET_TOTAL_BUDGET_S` before any POST goes out."""
+    """A long last assistant reply and a long paste both count against
+    `PII_INLET_TOTAL_BUDGET_S`, and a request whose combined size exceeds it is
+    refused before any POST."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     half = max_maskable_chars() // 2 + 1
@@ -1085,11 +993,10 @@ def test_the_two_ner_priced_messages_together_can_still_exceed_the_total_budget(
 
 
 def test_a_detection_with_an_unhashable_type_is_dropped_rather_than_crashing_the_merge():
-    """`_shifted_pii_detections` validated start/end but passed `type`
-    through untouched, and the de-duplication key `(type, start, end)` goes
-    into a set. A non-hashable `type` from the external pipeline therefore
-    raised TypeError AFTER masking had already succeeded, turning a good
-    response into a spurious "masking unavailable" refusal."""
+    """A detection whose `type` is unhashable is dropped. The merge
+    de-duplicates on `(type, start, end)` in a set, so an unhashable type would
+    raise after masking succeeded and turn a good response into a "masking
+    unavailable" refusal."""
 
     def _detections_for(_text):
         return [
@@ -1113,21 +1020,18 @@ def test_a_detection_with_an_unhashable_type_is_dropped_rather_than_crashing_the
 # ---------------------------------------------------------------------------
 # Platform back-pressure (429 / transient 5xx) is not a refusal
 #
-# `_post_inlet_once` turns EVERY non-2xx response into an HTTPException, and the
-# retry loop re-raised every HTTPException with "the pipeline said no on
-# purpose". True for 400/401/403/422 — false for 429, which is Cloud Run saying
-# it cannot schedule an instance right now and to try again. A single 429 on one
-# of ~94 chunks therefore killed the whole masking run: observed live at 25/94
-# with "Too Many Requests" after two minutes, on a paste that had worked before
-# the service was rescaled.
+# `_post_inlet_once` turns every non-2xx response into an HTTPException. A 400,
+# 401, 403 or 422 is a deliberate refusal by the pipeline and is not retried. A
+# 429 or transient 5xx means the platform has no free instance yet, so it is
+# retried; otherwise one such response on any chunk would fail the whole run.
 # ---------------------------------------------------------------------------
 
 
 def _status_session(seen, *, status, fail_times):
     """Mock inlet that answers `status` for the first `fail_times` POSTs, then
-    succeeds. Mirrors the real client path: `raise_for_status()` raises
+    succeeds. As with a real response, `raise_for_status()` raises
     `aiohttp.ClientResponseError`, which `_post_inlet_once` converts into an
-    HTTPException carrying that status."""
+    HTTPException with that status."""
     calls = {'n': 0}
 
     def _post(url, *, headers, json, ssl):
@@ -1179,8 +1083,8 @@ def _status_session(seen, *, status, fail_times):
 
 
 def test_a_429_from_the_platform_is_retried_rather_than_failing_the_request():
-    """429 means "try again", not "no". Failing the whole prompt on the first
-    one throws away every chunk already masked."""
+    """A 429 response is retried and the request succeeds. Failing on the first
+    429 would discard every chunk that was already masked."""
     seen = []
     with patch(
         'open_webui.routers.pipelines.aiohttp.ClientSession',
@@ -1192,8 +1096,8 @@ def test_a_429_from_the_platform_is_retried_rather_than_failing_the_request():
 
 
 def test_a_transient_5xx_is_retried_too():
-    """Cloud Run answers 503 while it is still bringing an instance up; that is
-    the same back-pressure wearing a different number."""
+    """A 503 response is retried like a 429, because Cloud Run returns 503
+    while it is still starting an instance."""
     seen = []
     with patch(
         'open_webui.routers.pipelines.aiohttp.ClientSession',
@@ -1205,8 +1109,9 @@ def test_a_transient_5xx_is_retried_too():
 
 
 def test_a_deliberate_refusal_is_still_not_retried():
-    """The other half. A 400 is the pipeline rejecting the request on purpose;
-    retrying it just triples the load and delays the same answer."""
+    """A 400 response is not retried and reaches the caller as itself, not as a
+    masking outage. The pipeline rejected the request on purpose, so a retry
+    would only add load and return the same answer."""
     seen = []
     with patch(
         'open_webui.routers.pipelines.aiohttp.ClientSession',
@@ -1221,8 +1126,8 @@ def test_a_deliberate_refusal_is_still_not_retried():
 
 
 def test_a_429_that_never_clears_still_fails_closed():
-    """Retrying is bounded: once the attempts are spent the request is refused,
-    never forwarded unmasked."""
+    """Retries are limited: once the attempts are used up the request is
+    refused, never forwarded unmasked."""
     seen = []
     with patch(
         'open_webui.routers.pipelines.aiohttp.ClientSession',
@@ -1233,14 +1138,10 @@ def test_a_429_that_never_clears_still_fails_closed():
 
 
 def test_the_bar_appears_before_the_first_chunk_finishes():
-    """The first progress event used to be `1/N`, reported when the first CHUNK
-    completed — and the skeleton POST runs to completion before any chunk even
-    starts. On a cold pipeline (made longer still by retrying platform
-    back-pressure) that left the user staring at a bare spinner for a minute
-    after sending, with no sign that masking had begun.
-
-    `total` is known before the first POST goes out, so announce it then: the
-    bar appears at `0/N` immediately and starts moving once chunks land.
+    """The first progress event is `0/N`, sent before the first POST, so the
+    progress bar appears as soon as masking starts. The skeleton POST finishes
+    before any chunk starts, so waiting for the first chunk would show only a
+    spinner for a long time on a cold pipeline.
     """
     seen, progress = [], []
     with patch(

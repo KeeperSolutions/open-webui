@@ -146,10 +146,10 @@ class PiiMaskingUnavailableError(Exception):
 
 def resolve_request_pii_masking(payload) -> Optional[bool]:
     """Effective per-request PII masking flag, read from the payload's `features`
-    (top-level, else `metadata.features`). Returns
-    True/False when explicitly set, or None when unspecified. This is the SAME
-    signal the inlet override (below) uses, so the fail-closed guard and the
-    pipeline agree on whether masking was requested.
+    (top-level, else `metadata.features`). Returns True/False when explicitly
+    set, or None when unspecified. The inlet override below reads the same
+    signal, so the fail-closed guard and the pipeline agree on whether masking
+    was requested.
     """
     features = payload.get('features')
     if not isinstance(features, dict):
@@ -208,11 +208,11 @@ def get_sorted_filters(model_id, models):
 
 
 async def _post_inlet_once(session, url, key, filter_id, request_data):
-    """One inlet POST. Extracted from `process_pipeline_inlet_filter` so the
-    chunked path can issue the same call many times. Behaviour is
-    unchanged: `ClientResponseError` is translated into an HTTPException that
-    preserves the pipeline's own `detail`, everything else propagates so the
-    caller's fail-closed branch decides."""
+    """Send one inlet POST to the pipeline filter and return its JSON body.
+
+    An HTTP error status is raised as `HTTPException`, using the pipeline's own
+    `detail` when the response has one. Any other exception (connection error,
+    timeout) propagates unchanged so the caller decides whether to fail closed."""
     async with session.post(
         f'{url}/{filter_id}/filter/inlet',
         headers={'Authorization': f'Bearer {key}'},
@@ -238,35 +238,27 @@ async def _post_inlet_once(session, url, key, filter_id, request_data):
 async def _post_inlet_with_retry(
     session, url, key, filter_id, request_data, *, semaphore=None, stats=None, fail_closed=True
 ):
-    """One inlet POST, retried on TRANSIENT failure, refused on a deliberate one.
+    """Send one inlet POST, retrying transient failures.
 
-    Two failure families reach us through `_post_inlet_once`, and they must not
-    be treated alike:
+    `_post_inlet_once` raises `HTTPException` for two different kinds of
+    failure, and they are handled differently:
 
-      * a deliberate refusal (400 / 401 / 403 / 422) — the pipeline evaluated
-        the request and said no. Retrying triples the load and returns the same
-        answer, so it propagates untouched and reaches the user as its own
-        status;
-      * platform back-pressure (429, transient 5xx, the Cloudflare 52x) — the
-        service has no free instance yet and is starting one. That is "come
-        back", not "no".
+      * A status in `LLM_RETRY_RETRYABLE_STATUS` (by default 429, transient 5xx
+        and Cloudflare 52x) means the platform has no free instance yet. The
+        request is retried with exponential backoff starting at
+        `PII_INLET_RETRY_BACKOFF_S`.
+      * Any other status (for example 400, 401, 403, 422) is a deliberate
+        refusal by the pipeline. Retrying would return the same answer, so it
+        is re-raised immediately and reaches the user with its own status.
 
-    Both arrived as `HTTPException`, and the chunk loop re-raised every one of
-    them as deliberate. A single 429 therefore killed a whole 94-chunk masking
-    run at 25/94, discarding two minutes of already-masked work. The SKELETON
-    call had no retry at all, which is worse: it runs first, so one 429 there
-    failed every request outright.
+    Connection errors and timeouts are retried on a short linear backoff
+    (0.5 s, 1 s, 1.5 s): a dropped connection usually recovers quickly, while
+    starting a new instance takes several seconds. The retryable statuses come
+    from the shared `LLM_RETRY_RETRYABLE_STATUS` setting, so operators can
+    override them with that env var.
 
-    `LLM_RETRY_RETRYABLE_STATUS` rather than a second hand-kept list — it
-    already enumerates exactly these and is operator-overridable, and the PII
-    pipeline is an upstream HTTP service like any other here.
-
-    The two backoff schedules differ on purpose. A dropped connection clears in
-    milliseconds; a 429 means an instance is booting, which takes seconds, so
-    the linear schedule spent every attempt inside the first 1.5 s and re-failed
-    against the same cold fleet. `semaphore` is held around the POST only, never
-    across a backoff, so a sleeping retry does not hold a slot other chunks
-    could use.
+    `semaphore` is held only around the POST, not during a backoff, so a
+    waiting retry does not block other chunks.
     """
     last_exc = None
     for attempt in range(PII_INLET_CHUNK_RETRIES):
@@ -280,10 +272,8 @@ async def _post_inlet_with_retry(
                 raise  # the pipeline said no on purpose
             last_exc = e
             delay = PII_INLET_RETRY_BACKOFF_S * (2**attempt)
-            # WARNING, not debug: this is the difference between "the pipeline
-            # is fine and something else is slow" and "we are spending the whole
-            # run waiting for instances to boot". Retrying used to be invisible,
-            # so a run that got slower had no evidence either way.
+            # Logged at warning level so slow masking caused by instance
+            # start-up can be told apart from slowness elsewhere.
             if stats is not None:
                 stats['retries'] = stats.get('retries', 0) + 1
             log.warning(
@@ -298,34 +288,30 @@ async def _post_inlet_with_retry(
             delay = 0.5 * (attempt + 1)
         if attempt + 1 < PII_INLET_CHUNK_RETRIES:
             await asyncio.sleep(delay)
-    # What an exhausted retry means depends on WHO is asking, so the caller
-    # says. The chunked masking path has no fallback — a chunk that never
-    # succeeded means the message cannot be masked, which is
-    # `PiiMaskingUnavailableError`. The ordinary single-call path is shared by
-    # EVERY filter, including non-PII ones where a connection error must stay
-    # best-effort passthrough (a telemetry outage must not block chat); it
-    # therefore wants the original exception back so the per-filter fail-closed
-    # logic in `process_pipeline_inlet_filter` keeps making that decision.
+    # All attempts failed. The caller chooses the outcome with `fail_closed`.
+    # The chunked masking path uses True: a chunk that was never masked means
+    # the message cannot be sent, so it raises `PiiMaskingUnavailableError`.
+    # The single-call path uses False because it serves every filter, including
+    # non-PII ones that must pass through on a connection error (a telemetry
+    # outage must not block chat). It gets the original exception back, and
+    # `process_pipeline_inlet_filter` decides per filter whether to fail closed.
     if fail_closed:
         raise PiiMaskingUnavailableError() from last_exc
     raise last_exc
 
-# Background-task types (carried on `metadata.task`) for which the external
-# pipeline skips NER entirely and re-masks via the deterministic vault regex
-# alone — mirrors `_LLM_FACING_SKIP_NER_TASKS` in the pipeline's own
-# `pii_filter_pipeline.py`. That re-mask costs microseconds regardless of
-# payload size, so these three keep the ORIGINAL single whole-payload call:
-# both the chunked path and its size guard exist solely to survive NER's flat
-# ~240 chars/s ceiling, which these payloads never pay. Chunking them anyway
-# would refuse large title/tags/follow-up prompts that succeeded before this
-# branch, and would turn one cheap call into ~20 for smaller ones.
+# Background-task types (from `metadata.task`) that are never chunked. For these
+# tasks the PII pipeline skips NER and only re-masks known values from the vault
+# with a regex, which is fast at any payload size. Chunking exists only because
+# NER is slow (about 240 characters per second), so these tasks always use a
+# single call. Chunking them would apply the size guard and refuse large
+# title/tags/follow-up requests that a single call handles. Keep this set in
+# sync with `_LLM_FACING_SKIP_NER_TASKS` in the pipeline's
+# `pii_filter_pipeline.py`.
 #
-# `query_generation` and `image_prompt_generation` are deliberately NOT
-# exempt: their output goes to an EXTERNAL service (RAG search / image
-# backend), so the pipeline keeps full NER for them, and chunking genuinely
-# helps those large payloads survive it. Every other/unknown task type also
-# keeps chunking — this is an allowlist, not `metadata.task`-generic.
-# Strings are the OpenWebUI `TASKS` enum values (open_webui/constants.py).
+# `query_generation` and `image_prompt_generation` are not exempt: their output
+# goes to an external service (RAG search, image backend), so the pipeline runs
+# full NER on them and large payloads need chunking. Any other or unknown task
+# type is also chunked. Values are the `TASKS` enum in open_webui/constants.py.
 _CHUNKING_EXEMPT_TASKS = frozenset({'title_generation', 'tags_generation', 'follow_up_generation'})
 
 
@@ -339,10 +325,11 @@ def _payload_task_type(payload):
 
 
 def _last_index_by_role(messages, role):
-    """Index of the last message with `role`, or -1 when there is none —
-    mirroring `_find_last_user_index` / `_find_last_assistant_index` in
-    `pii_filter_pipeline.py`, whose answers decide what that service charges
-    us for."""
+    """Index of the last message with `role`, or -1 when there is none.
+
+    Must match `_find_last_user_index` / `_find_last_assistant_index` in
+    `pii_filter_pipeline.py`, which decide which messages the pipeline runs
+    NER on."""
     for i in range(len(messages) - 1, -1, -1):
         m = messages[i]
         if isinstance(m, dict) and m.get('role') == role:
@@ -351,11 +338,13 @@ def _last_index_by_role(messages, role):
 
 
 def _ner_priced_indices(messages):
-    """The indices `pii_filter_pipeline.py` will run full NER on: the last
-    user and the last assistant message (its `ner_indices`). These are the
-    only messages whose length costs `PII_INLET_CHARS_PER_SECOND` — every
-    other history entry stops at the deterministic vault re-mask, a regex
-    costing microseconds regardless of length."""
+    """Indices of the messages the pipeline runs full NER on: the last user
+    message and the last assistant message (`ner_indices` in
+    `pii_filter_pipeline.py`).
+
+    Only these messages are slow to mask, at `PII_INLET_CHARS_PER_SECOND`.
+    Every other message is re-masked from the vault by a regex, which is fast
+    at any length."""
     return sorted(
         i
         for i in {
@@ -367,35 +356,22 @@ def _ner_priced_indices(messages):
 
 
 def _chunkable_message_indices(payload):
-    """The messages this request must split into sub-chunks: the two the
-    pipeline actually runs NER on (`_ner_priced_indices`), and only those of
-    them whose own content exceeds the per-call budget.
+    """Indices of the messages to split into chunks: those returned by
+    `_ner_priced_indices` whose content is longer than `PII_INLET_CHUNK_CHARS`.
 
-    Deliberately NOT "every oversized message in the payload", which is what
-    this returned first and which was wrong in a way that compounded:
+    Older oversized messages are not chunked. The payload carries the
+    conversation's original, unmasked text, so a long paste is sent again on
+    every later turn. Chunking it each time would re-mask the whole history on
+    every turn, and because chunked characters count against
+    `PII_INLET_TOTAL_BUDGET_S`, a long enough history would make every new
+    message in that chat be refused. Older messages are instead sent whole in
+    the skeleton, where the pipeline re-masks them from the vault by regex.
+    Limiting chunking to at most two messages keeps each turn's cost bounded
+    by that turn's text.
 
-      * The payload carries the conversation's ORIGINAL text (masking is
-        undone on the way out), so an oversized paste comes back in full on
-        every subsequent turn. Chunking all of them re-split and re-masked
-        the entire history each turn — the progress counter climbed
-        15 -> 17 -> 19 across three turns, the third of which was a
-        two-sentence prompt whose growth came from the ASSISTANT's oversized
-        reply. Work grew quadratically in turn count.
-      * Worse, `_mask_oversized_via_chunks` charges every chunked character
-        against `PII_INLET_TOTAL_BUDGET_S`. Around turn 4 the accumulated
-        history alone crossed the budget and the chat refused ITSELF —
-        permanently, for any message, including a one-word one.
-
-    Scoping to `_ner_priced_indices` fixes both: the set is at most two
-    messages, so per-turn cost is bounded by THIS turn's text and cannot
-    accumulate across turns. Older oversized messages are sent whole in the
-    skeleton, where the pipeline re-masks them from the vault by regex — see
-    its `ner_indices` / `remask_pattern` seam.
-
-    Both NER'd messages are included, not just the user's: an oversized
-    assistant reply left in the skeleton would pay full NER inside the single
-    sequential skeleton POST and could blow its socket read — bricking the
-    chat exactly as before, only triggered by the model rather than the user.
+    The last assistant message is included as well as the last user message.
+    An oversized assistant reply left in the skeleton would get full NER inside
+    the single skeleton POST and could exceed its socket-read timeout.
     """
     messages = payload.get('messages') or []
     return [
@@ -408,10 +384,8 @@ def _chunkable_message_indices(payload):
 
 
 def _payload_chat_id(payload):
-    """The payload's chat/conversation id, checked at both places it can
-    appear: a top-level `chat_id`, and the far more common `metadata.chat_id`
-    (see `routers/tasks.py`'s outlet-restore helper for the latter). Returns
-    None unless one of them is a non-empty string.
+    """The payload's chat id, from a top-level `chat_id` or, more commonly,
+    `metadata.chat_id`. Returns None unless one of them is a non-empty string.
     """
     metadata = payload.get('metadata')
     for candidate in (
@@ -424,19 +398,18 @@ def _payload_chat_id(payload):
 
 
 def _shifted_pii_detections(response, offset):
-    """Defensively extract `metadata.pii_detections_public` (the PII-free
-    `[{type, start, end}]` mirror the pipeline attaches for the card — see
-    `pii_filter_pipeline.py`) from one inlet response, shifting every span by
-    `offset` characters. Used for both a chunk response (`offset` = that
-    piece's document offset, so spans index the ORIGINAL unsplit message) and
-    the skeleton response (`offset=0`).
+    """Return `metadata.pii_detections_public` from one inlet response, with
+    every span shifted by `offset` characters.
 
-    Never raises: a detection entry that is not a dict, or whose `start`/
-    `end` are not plain ints, is skipped rather than crashing the request — a
-    security-facing card being wrong in one entry is bad, but a malformed
-    entry from an external service must never be able to fail-open the whole
-    masked request. `bool` is excluded explicitly because it is a subclass of
-    `int` in Python and is never a valid character offset.
+    `pii_detections_public` is the `[{type, start, end}]` list the pipeline
+    attaches for the PII card; it contains no PII values. For a chunk response,
+    `offset` is the chunk's position in the original message, so the spans
+    index the unsplit message. For the skeleton response, `offset` is 0.
+
+    Never raises. An entry that is not a dict, or whose `start`/`end` is not an
+    int, is skipped, so a malformed response from the pipeline cannot fail a
+    request whose masking already succeeded. `bool` is rejected explicitly
+    because it is a subclass of `int`.
     """
     metadata = response.get('metadata') if isinstance(response, dict) else None
     detections = metadata.get('pii_detections_public') if isinstance(metadata, dict) else None
@@ -451,12 +424,10 @@ def _shifted_pii_detections(response, offset):
             continue
         if not isinstance(end, int) or isinstance(end, bool):
             continue
-        # `type` is validated for the same reason, plus one of its own: the
-        # de-duplication key in `_mask_oversized_via_chunks` is
-        # `(type, start, end)` and goes into a set, so a non-hashable `type`
-        # (a list, a dict) from the external service would raise TypeError
-        # AFTER masking had already succeeded — turning a good response into
-        # a spurious "masking unavailable" refusal.
+        # `type` must be a string because `_mask_oversized_via_chunks` puts
+        # `(type, start, end)` in a set to de-duplicate. A non-hashable `type`
+        # (a list or dict) would raise TypeError after masking succeeded and
+        # turn the request into a "masking unavailable" refusal.
         if not isinstance(d.get('type'), str):
             continue
         shifted.append({'type': d['type'], 'start': start + offset, 'end': end + offset})
@@ -464,71 +435,55 @@ def _shifted_pii_detections(response, offset):
 
 
 async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user_with_valves, on_progress):
-    """Mask a payload whose message(s) exceed the per-call budget.
+    """Mask a payload in which a message is too long for a single inlet call.
 
-    One skeleton call carries the conversation with the oversized content
-    BLANKED (not removed — see Key Decision 5: deleting a message shifts the
-    pipeline's last-user / last-assistant indices and silently changes which
-    history entries get NER). That content is then masked as independent
-    sub-chunks, concurrently, and spliced back in document order. Only the
-    message being sent this turn is ever chunked — see
-    `_chunkable_message_indices` for why chunking history compounded into a
-    chat that permanently refused itself.
+    The messages from `_chunkable_message_indices` are split into chunks. First
+    a "skeleton" call sends the whole conversation with those messages' content
+    replaced by an empty string. They are blanked, not removed: removing a
+    message would change the last-user and last-assistant indices the pipeline
+    uses to pick which messages get NER. The chunks are then masked
+    concurrently and joined back in their original order.
 
-    Concurrency is safe: `ThreadVault.get_placeholder` is atomic get-or-mint and
-    idempotent under concurrency, so racing chunks that contain the same value
-    receive the same placeholder. Only the assigned number may differ from
-    sequential order, which nothing depends on.
+    Concurrent chunks are safe: `ThreadVault.get_placeholder` in the pipeline
+    is an atomic get-or-create, so the same value in two chunks gets the same
+    placeholder. Only the placeholder numbering may differ from a sequential
+    run, and nothing depends on it.
 
-    FAIL-CLOSED: any chunk still failing after `PII_INLET_CHUNK_RETRIES`, and any
-    overrun of `PII_INLET_TOTAL_BUDGET_S`, raises `PiiMaskingUnavailableError`.
+    Fails closed. `PiiMaskingUnavailableError` is raised when a chunk still
+    fails after `PII_INLET_CHUNK_RETRIES` attempts, when masking takes longer
+    than `PII_INLET_TOTAL_BUDGET_S`, or when the skeleton response cannot be
+    matched to the request. A deliberate refusal from the pipeline propagates
+    as its own `HTTPException`. The unmasked payload is never returned.
 
-    Refuses outright, before issuing any POST, when `estimated_masking_seconds`
-    exceeds `PII_INLET_TOTAL_BUDGET_S`. The estimate is split in two: the
-    skeleton POST runs once, sequentially (charged at 1x — no speedup applies
-    to it), while the chunk POSTs benefit from concurrency (charged at the
-    measured speedup). Applying the speedup to the whole payload would let a
-    borderline request slip past the guard and straight into the
-    `PII_INLET_TOTAL_BUDGET_S` timeout below — paying the wall-clock cost
-    first and refusing anyway. Refusing up front is the honest answer.
+    Before any POST, the request is refused in three cases:
 
-    The skeleton's share is NOT its total character count. Measured cost
-    (~`PII_INLET_CHARS_PER_SECOND`) is the cost of NER, and
-    `pii_filter_pipeline.py` runs NER on exactly two messages: the last user
-    and the last assistant one (`ner_indices`, mirrored here by
-    `_ner_priced_indices`). Every other history entry stops at the
-    deterministic vault re-mask — a regex, microseconds, independent of
-    length. Charging the whole history at the NER rate is what refused an
-    established chat with a modest paste (~12k of history plus 5k pasted)
-    that in reality completes in about 21s.
+      * `estimated_masking_seconds` exceeds `PII_INLET_TOTAL_BUDGET_S`. The
+        skeleton POST runs once, so its NER work is charged at the base rate.
+        The chunk POSTs run concurrently and are charged at the speedup rate.
+        Refusing up front avoids making the user wait for the deadline only to
+        be refused.
+      * The skeleton's NER work alone would not finish within
+        `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (times
+        `PII_INLET_SKELETON_SAFETY_MARGIN`). The skeleton is one POST and is
+        limited by the socket-read timeout, which is shorter than the total
+        budget.
+      * The payload has no chat id (see `_payload_chat_id`). Without one, the
+        pipeline creates a new temporary vault for each call, so every chunk
+        would number placeholders from 1, different people would share
+        `[PERSON_1]` in the joined prompt, and the outlet could not restore
+        them. A shared synthetic id is not used instead because its vault rows
+        would never be deleted with a chat. Single-call masking is not
+        affected, since one call has only one vault.
 
-    A second, narrower guard refuses when the skeleton's own NER share cannot
-    fit inside one POST: the total-budget check bounds skeleton + chunked cost
-    against `PII_INLET_TOTAL_BUDGET_S` (120s), but the skeleton is a single
-    sequential call bound by `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ` (60s) — a much
-    tighter ceiling. Without it such a request would pass the guard, run the
-    skeleton POST, and die on ITS OWN socket read after 60s — the
-    wait-then-refuse this branch exists to remove.
-
-    ACCEPTED residual: the `ner_indices` narrowing is gated in the pipeline on
-    `remask_pattern is not None`, i.e. on a non-empty vault for this thread.
-    A chat whose vault is empty (PII masking switched on mid-conversation) has
-    its whole history NER'd, and this estimate under-predicts. That case is
-    not made worse by chunking — a payload with no oversized message never
-    reaches this branch and hits the identical 60s socket read on its single
-    POST — and it still fails CLOSED. Modelling it here instead would restore
-    the over-charging above and refuse the common case to protect the rare one.
-
-    Requires a stable chat_id (see `_payload_chat_id`). Every chunk POST
-    inherits `payload['metadata']`, and the pipeline's own chat-id resolver
-    mints a FRESH ephemeral thread per call whenever chat_id is missing —
-    each chunk would then land in its own PII vault, placeholder numbering
-    would restart per chunk, distinct people would collapse onto a shared
-    `[PERSON_1]` across the reassembled prompt, and the outlet could never
-    resolve them back. Refuse rather than mint a shared synthetic id: that
-    would write vault rows no chat deletion could ever reclaim. The
-    non-chunked path is unaffected — it is not exposed to this failure mode
-    since a single call inherits the real chat_id like it always has.
+    The skeleton is charged only for the NER-priced messages it still carries
+    (see `_ner_priced_indices`), not for its full length, because the pipeline
+    re-masks all other messages by regex. Known limitation: the pipeline
+    applies that shortcut only when the chat's vault is not empty. If masking
+    is switched on mid-conversation, the pipeline runs NER on the whole history
+    and this estimate is too low. This is accepted: the request still fails
+    closed, a payload without oversized messages has the same socket-read
+    limit, and charging the whole history in every case would refuse ordinary
+    requests in chats with a long history.
     """
     messages = payload.get('messages') or []
     indices = _chunkable_message_indices(payload)
@@ -536,16 +491,13 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     chunked_chars = sum(
         len(m['content']) for i, m in enumerate(messages) if i in oversized and isinstance(m.get('content'), str)
     )
-    # The skeleton's NER-priced share: whichever of the two NER'd messages is
-    # small enough to have been left in it. See the docstring — everything
-    # else in the skeleton is vault-re-masked by regex, not detected. With
-    # today's constants it cannot exceed 2 * `PII_INLET_CHUNK_CHARS` (3 600
-    # chars, ~15s — anything larger is chunked instead), so the socket-read
-    # guard below cannot currently fire. It stays because it is the correct
-    # invariant, not because it is live today: raising
-    # `PII_INLET_CHUNK_CHARS` past `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ *
-    # PII_INLET_SKELETON_SAFETY_MARGIN * PII_INLET_CHARS_PER_SECOND` makes it
-    # load-bearing again, and silently losing it there is a 60s hang.
+    # Characters in the skeleton that get NER: the NER-priced messages that
+    # were short enough not to be chunked. This is at most
+    # 2 * `PII_INLET_CHUNK_CHARS`, so with the default settings the socket-read
+    # guard below never fires. Keep it anyway: it becomes necessary when
+    # 2 * `PII_INLET_CHUNK_CHARS` exceeds `AIOHTTP_CLIENT_TIMEOUT_SOCK_READ *
+    # PII_INLET_SKELETON_SAFETY_MARGIN * PII_INLET_CHARS_PER_SECOND`, for example
+    # after raising the chunk size or lowering the socket-read timeout.
     skeleton_chars = sum(
         len(messages[i]['content'])
         for i in _ner_priced_indices(messages)
@@ -587,15 +539,12 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
     _t0 = time.time()
     retry_stats: dict = {'retries': 0}
 
-    # Announce the size BEFORE the first POST. Progress used to start at `1/N`,
-    # reported when the first chunk completed — but the skeleton call below runs
-    # to completion before any chunk starts, so on a cold pipeline (longer still
-    # once platform back-pressure is retried rather than fatal) the user watched
-    # a bare spinner for a minute with no sign that masking had begun. `total` is
-    # already known here, so there is nothing to wait for.
+    # Report 0 of `total` before the first POST. The skeleton call runs to
+    # completion before any chunk starts and can take a long time on a cold
+    # pipeline, so without this the user sees no progress until the first chunk
+    # finishes.
     #
-    # Guarded like every other call into this callback: progress is diagnostics
-    # and must never be able to fail the masking path.
+    # Exceptions are caught: progress is informational and must not fail masking.
     if on_progress is not None:
         try:
             on_progress(0, total)
@@ -603,9 +552,9 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             log.debug(f'[pii_chunking] could not emit the opening progress event: {e}')
     semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
     results: dict[tuple[int, int], str] = {}
-    # Each chunk's `metadata.pii_detections_public` (finding #5), keyed the
-    # same way as `results`, already shifted to index the ORIGINAL (unsplit)
-    # message rather than the piece — see `_shifted_pii_detections`.
+    # Each chunk's `metadata.pii_detections_public`, keyed like `results`, with
+    # spans already shifted to index the original unsplit message (see
+    # `_shifted_pii_detections`).
     piece_detections: dict[tuple[int, int], list] = {}
 
     async def _mask_piece(msg_index, piece_index, piece_offset, piece):
@@ -626,10 +575,10 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         results[(msg_index, piece_index)] = out['messages'][0]['content']
         piece_detections[(msg_index, piece_index)] = _shifted_pii_detections(out, piece_offset)
 
-        # Finding #9: progress reporting lives OUTSIDE the retry, after the
-        # result is already recorded. A callback that raises must never be
-        # mistaken for a transient chunk failure — that would re-POST a chunk
-        # that already succeeded, pushing `done` past `total`.
+        # Progress is reported after the retry loop has returned and the result
+        # is stored. An exception from the callback is therefore never treated
+        # as a chunk failure, which would re-send an already-masked chunk and
+        # push `done` past `total`.
         done += 1
         if on_progress is not None:
             on_progress(done, total)
@@ -643,26 +592,21 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
             {'user': user_with_valves, 'body': skeleton},
             stats=retry_stats,
         )
-        # Structured, not bare `gather`: `asyncio.gather` propagates the FIRST
-        # exception to its awaiter while leaving every sibling running. Once a
-        # deliberate pipeline refusal or an exhausted retry has already failed
-        # this request closed, those orphans go on issuing inlet POSTs against
-        # a bottleneck that is often the very reason the first one failed,
-        # writing vault rows for a prompt that will never be sent, and calling
-        # `on_progress` — so a masking bar keeps advancing underneath an error
-        # the user has already been shown. Cancel them on the first failure and
-        # AWAIT the cancellation, so the in-flight aiohttp requests are actually
-        # torn down before this returns rather than merely marked for it.
+        # `asyncio.gather` raises the first exception but leaves the other tasks
+        # running. After the request has failed, those tasks would keep sending
+        # POSTs to the pipeline, writing vault rows for a prompt that is never
+        # sent, and calling `on_progress` after the user has seen the error.
+        # So on the first failure every task is cancelled, and the cancellation
+        # is awaited so in-flight aiohttp requests are closed before this
+        # returns.
         #
-        # `BaseException` covers the deadline too: `wait_for` cancels this
-        # coroutine, and `gather` alone would then request its children's
-        # cancellation without waiting for it to take effect.
+        # `BaseException` also catches the `CancelledError` raised when the
+        # `wait_for` deadline cancels this coroutine; the same cleanup runs.
         #
-        # Explicit tasks rather than `asyncio.TaskGroup`: a TaskGroup re-raises
-        # as an `ExceptionGroup`, which would break the `except HTTPException`
-        # contract at the call site (a pipeline saying no ON PURPOSE must reach
-        # the user as its own status, not as a generic masking outage). Re-
-        # raising here preserves the original exception type exactly.
+        # Explicit tasks are used instead of `asyncio.TaskGroup` because a
+        # TaskGroup wraps errors in an `ExceptionGroup`. The call site relies on
+        # `except HTTPException` so a deliberate pipeline refusal reaches the
+        # user with its own status. Re-raising here keeps the original type.
         tasks = [asyncio.create_task(_mask_piece(*job)) for job in jobs]
         try:
             await asyncio.gather(*tasks)
@@ -683,9 +627,8 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         )
         raise PiiMaskingUnavailableError() from e
 
-    # What the masking itself cost, separate from everything around it. Without
-    # this a slower turn is unattributable: chunk time, retry backoff and the
-    # model's own latency all land in the one number the user perceives.
+    # Log the masking time on its own, so a slow turn can be attributed to
+    # masking, retries or the model.
     log.info(
         '[pii_chunking] masked %d chunks in %.1fs (%d retries)',
         total,
@@ -693,37 +636,29 @@ async def _mask_oversized_via_chunks(session, url, key, filter_id, payload, user
         retry_stats['retries'],
     )
 
-    # FAIL-CLOSED (finding #1): a missing/empty `messages` in the skeleton
-    # response must never fall back to the caller's ORIGINAL, unmasked
-    # content, and a different-length response would either misalign a
-    # masked chunk onto the wrong history entry (via `out_messages[i]`) or
-    # raise a confusing IndexError. Refuse instead of guessing.
+    # Fail closed if the skeleton response has no `messages` or a different
+    # number of messages than the request. Falling back would send the
+    # original unmasked content, and a length mismatch would put a masked chunk
+    # into the wrong message via `out_messages[i]`.
     out_messages = out.get('messages')
     if not out_messages or len(out_messages) != len(messages):
         raise PiiMaskingUnavailableError()
     out_messages = list(out_messages)
     for i in indices:
-        # Finding #2: the expected piece count comes from the known `jobs`,
-        # not from however many keys happen to be in `results` — deriving it
-        # from `results` would silently TRUNCATE the message to its first k
-        # pieces if a future change tolerates partial `gather` failures
-        # (e.g. `return_exceptions=True`). `results[(i, p)]` raises KeyError
-        # for a missing piece, which the call site's generic exception
-        # handler turns into `PiiMaskingUnavailableError` for PII filters.
+        # The piece count comes from `jobs`, not from the keys in `results`.
+        # If a future change tolerated partial failures, counting `results`
+        # would silently drop the missing pieces from the message. Instead
+        # `results[(i, p)]` raises KeyError for a missing piece, and the call
+        # site turns that into `PiiMaskingUnavailableError`.
         pieces = [results[(i, p)] for p in range(sum(1 for j in jobs if j[0] == i))]
         out_messages[i] = {**out_messages[i], 'content': ''.join(pieces)}
 
-    # Finding #5: the skeleton response's own `pii_detections_public` is
-    # correct ONLY for whichever message the skeleton call itself treated as
-    # the last user message — right when that message was not oversized (it
-    # then survived the skeleton at full length, unchanged). When the ACTUAL
-    # last message of the conversation is itself oversized, the skeleton sent
-    # it blanked (''), so the skeleton alone always reports zero detections
-    # for it — exactly the false negative this fixes. Merge in the reassembled
-    # chunks' detections ONLY when the last message is oversized: that mirrors
-    # the pipeline's own single-call rule that `pii_detections_public` only
-    # ever covers the conversation's last user message, so an earlier
-    # (non-last) oversized message's detections are correctly never surfaced.
+    # The pipeline's `pii_detections_public` covers only the last user message.
+    # When the conversation's final message was not chunked, the skeleton
+    # response already has the right detections. When it was chunked, the
+    # skeleton sent it empty and reports none for it, so that message's chunk
+    # detections are merged in. Detections from other chunked messages are not
+    # added, matching what a single call reports.
     merged_detections = []
     seen_keys = set()
 
@@ -881,10 +816,10 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                     and _payload_task_type(payload) not in _CHUNKING_EXEMPT_TASKS
                     and _chunkable_message_indices(payload)
                 ):
-                    # One call cannot carry this much text. The inlet
-                    # runs at a flat ~240 chars/s, so a 150k paste is ~625 s
-                    # serially and would blow the 60 s socket read long before
-                    # that. Split it and run the pieces concurrently.
+                    # Too much text for one call. NER processes about 240
+                    # characters per second, so a single POST with a long
+                    # message would exceed the socket-read timeout. Mask the
+                    # long messages in concurrent chunks instead.
                     payload = await _mask_oversized_via_chunks(
                         session,
                         url,
@@ -895,14 +830,14 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                         on_progress,
                     )
                 else:
-                    # The ORDINARY single-call path — every non-oversized chat
-                    # turn and every task generator (title / tags / follow-ups).
-                    # It had no retry at all, so one socket-read timeout or one
-                    # 429 failed it outright; observed live as a title
-                    # generation dying on `SocketTimeoutError` while the chunked
-                    # masking of the same turn was still saturating the pipeline.
-                    # Retrying the chunked path but not this one left the most
-                    # frequently taken path the most fragile.
+                    # Single-call path: non-PII filters, masking switched off,
+                    # requests without an oversized message, and the tasks in
+                    # `_CHUNKING_EXEMPT_TASKS`. It is retried too, so one
+                    # socket-read timeout or 429 does not fail the request, for
+                    # example while chunked masking of the same turn is keeping
+                    # the pipeline busy. With `fail_closed=False` the last
+                    # exception is re-raised unchanged, so the handlers below
+                    # still decide per filter.
                     payload = await _post_inlet_with_retry(
                         session, url, key, filter['id'], request_data, fail_closed=False
                     )

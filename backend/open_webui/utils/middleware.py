@@ -2443,22 +2443,18 @@ async def connect_mcp_server(
     return client, tool_specs
 
 
-# Strong references to in-flight progress-event tasks. `asyncio.create_task`
-# only holds a WEAK reference to the task it schedules — with nothing else
-# referencing it, the task can be garbage-collected before it runs (ruff
-# RUF006). This set is that reference; `_pii_progress_task_done` below
-# removes each task once it finishes.
+# Holds a reference to each in-flight progress-event task. The event loop keeps
+# only a weak reference to tasks from `asyncio.create_task`, so without this set
+# a task can be garbage-collected before it runs (ruff RUF006).
+# `_pii_progress_task_done` removes each task when it finishes.
 _pii_progress_tasks: set = set()
 
-# How long one progress emission waits for its predecessor before giving up on
-# ordering and emitting anyway (see `_pii_progress_emitter`). Chaining exists to
-# stop a stale write from dropping the terminal `done` event; a chain with no
-# escape hatch would introduce a second way to lose it — one stalled commit and
-# every later event, terminal included, waits forever, leaving exactly the
-# permanent shimmer the chain is there to prevent. Ten seconds is far beyond a
-# healthy status write (milliseconds), so in practice this only ever fires when
-# the emission path is already degraded, and it degrades to the old concurrent
-# behaviour rather than to silence.
+# Seconds a progress emission waits for the previous emission to finish before
+# it emits anyway (see `_pii_progress_emitter`). Without a limit, one stalled
+# database write would block every later event, including the final `done`
+# event, and the status would stay "in progress". A healthy status write takes
+# milliseconds, so this only triggers when writes are already failing; the
+# events are then emitted unordered instead of not at all.
 _PII_PROGRESS_CHAIN_WAIT_S = 10.0
 
 
@@ -2467,45 +2463,26 @@ def _pii_progress_task_done(task):
     if task.cancelled():
         return
     exc = task.exception()
-    # A raised exception here must never surface as an unretrieved-task-
-    # exception warning — a progress event is diagnostics, not the masking
-    # path it reports on.
+    # Retrieve and log the exception so asyncio does not warn about an
+    # unretrieved task exception. A failed progress event does not affect
+    # masking.
     if exc is not None:
         log.debug(f'[pii_chunking] progress event task failed: {exc}')
 
 
 def _should_emit_pii_progress(done, total):
-    """Whether a PII-masking progress update is worth persisting.
+    """Return whether a PII-masking progress update should be emitted.
 
-    Each status event drives a non-atomic read-modify-write of the WHOLE chat
-    row (`Chats.add_message_status_to_chat_by_id_and_message_id` ->
-    `update_chat_by_id`, no optimistic-concurrency check): fetch the chat,
-    append to `statusHistory`, write the entire document back. Emitting once
-    per chunk on a large paste (dozens to ~100 chunks, up to
-    `PII_INLET_CONCURRENCY` of those in flight concurrently) turns into that
-    many concurrent whole-row rewrites, which can clobber each other's
-    appended entries. Throttle to roughly twenty events total instead: always
-    the first completion and the terminal one (so the bar always starts and
-    always reaches 100%), otherwise only every ~5% of the work.
+    Every status event rewrites the whole chat row
+    (`Chats.add_message_status_to_chat_by_id_and_message_id`: read the chat,
+    append to `statusHistory`, write it back), so one event per chunk on a
+    large paste means many rewrites of the same row. This limits a run to about
+    twenty events: the opening events (`done` 0 and 1), the final one, and one
+    every ~5% of the chunks in between. The progress bar therefore always
+    starts and always reaches 100%.
 
-    Twenty rather than ten because raising `PII_INLET_TOTAL_BUDGET_S`
-    multiplied the largest admissible chunk count by about five. At ten events
-    a ~190 000-character paste would update once every ~80s of an eight-minute
-    wait — indistinguishable from a hung request. Not raised further because
-    the cost here is concurrent whole-row rewrites, not websocket traffic, and
-    the shimmer in `StatusItem.svelte` already carries liveness between
-    updates; the number does not have to.
-
-    The step is a CEILING divide, not a floor one. `total // 20` rounds the
-    stride DOWN, and a stride that is one too small emits far more than twenty
-    events: every total from 20 to 39 floors to a stride of 1 and therefore
-    emits every single completion (39 concurrent whole-row rewrites at the top
-    of that band — exactly the clobbering this exists to prevent), and the
-    overshoot recurs in every band, e.g. 31 events at `total` 59. `total` 39 is
-    a ~70 000-character paste, well inside what the budget admits, so this was
-    the live case rather than a corner one. Ceiling rounds the stride UP and
-    holds the count at ~21 (twenty periodic plus the terminal one) for every
-    total.
+    The step uses ceiling division. With floor division, any `total` from 20
+    to 39 gives a step of 1 and emits an event for every chunk.
     """
     if done <= 1 or done >= total:
         return True
@@ -2514,13 +2491,12 @@ def _should_emit_pii_progress(done, total):
 
 
 async def _emit_pii_status_after(event_emitter, event, previous_task):
-    """Emit one `pii_masking` status, ordered behind `previous_task`.
+    """Emit one `pii_masking` status after `previous_task` has finished.
 
-    `asyncio.wait` rather than `await previous_task`: a predecessor that raised
-    or was cancelled must not take this emission down with it — dropping the
-    terminal event because an earlier one failed is the exact outcome the
-    chain exists to prevent. It also leaves the exception unretrieved for
-    `_pii_progress_task_done`, which is what logs it.
+    Uses `asyncio.wait` instead of `await previous_task`, so an earlier
+    emission that raised or was cancelled does not also fail this one (which
+    could be the final `done` event). It also does not retrieve the earlier
+    exception; `_pii_progress_task_done` logs it.
     """
     if previous_task is not None:
         await asyncio.wait({previous_task}, timeout=_PII_PROGRESS_CHAIN_WAIT_S)
@@ -2528,54 +2504,39 @@ async def _emit_pii_status_after(event_emitter, event, previous_task):
 
 
 def _pii_progress_emitter(event_emitter):
-    """Adapt the inlet's synchronous `on_progress(done, total)` callback to the
-    async status-event channel.
+    """Turn the inlet's synchronous `on_progress(done, total)` callback into
+    async status events.
 
-    The callback fires from inside `asyncio.gather`, so it cannot await; the
-    event is scheduled instead. Best-effort by construction — a progress event
-    that fails to emit must never affect masking, which is a security path:
-    the producer calls `on_progress` from inside `_mask_piece`'s retry `try`,
-    so a synchronous exception escaping here would be caught as a transient
-    chunk failure and cause a spurious re-POST of an already-masked chunk.
+    The callback is called from the chunk-masking tasks and cannot await, so
+    each event is scheduled as a task. The callback never raises: an exception
+    raised inside a chunk task would fail the whole masking request.
 
-    Emissions are CHAINED, not merely throttled. Persisting a status event is a
-    non-atomic read-modify-write of the whole chat row
-    (`Chats.add_message_status_to_chat_by_id_and_message_id`: `session.get` ->
-    append to `statusHistory` -> `commit`, no row lock, no optimistic-
-    concurrency check), so two emissions in flight at once both read the same
-    list, each appends only its own entry, and the later commit wins — one
-    entry is silently lost. Chunk completions arrive from `asyncio.gather`
-    while a previous emission is still awaiting its commit, so this is the
-    normal case, not a rare interleaving. Losing the TERMINAL event is the
-    damaging one: `StatusItem.svelte` drives its shimmer from `status.done`, so
-    the masking status then shimmers forever, including after a reload.
+    Each emission waits for the previous one to finish. Saving a status event
+    reads the chat row, appends to `statusHistory` and commits, with no row
+    lock (`Chats.add_message_status_to_chat_by_id_and_message_id`). If two
+    emissions overlap, both read the same list and the later commit drops the
+    other's entry. Chunks often finish while an earlier emission is still
+    committing, so overlap is common. If the final `done` event is dropped, the
+    status stays "in progress" in the UI, also after a reload, because
+    `StatusItem.svelte` reads `status.done`.
 
-    `_should_emit_pii_progress` cannot fix this — it reduces how OFTEN
-    emissions happen and establishes no ordering at all. Each emission
-    therefore waits for its predecessor before touching the row. The chain is
-    per-request (this closure is built per call in `process_chat_payload`) and
-    at most ~21 links long thanks to the throttle, so it cannot grow without
-    bound; a stalled emitter delays later progress events, which are
-    diagnostics, and never the masking path itself.
+    Throttling in `_should_emit_pii_progress` reduces the number of events but
+    does not order them. The chain is created per request in
+    `process_chat_payload` and has about twenty links at most. A stalled
+    emission delays later progress events but never the masking itself.
     """
 
-    # Tail of this request's emission chain — the task each new emission waits
-    # for before it runs.
+    # The most recently scheduled emission; the next one waits for it.
     previous_task = None
-    # The data of the most recent event actually scheduled, so a failure can
-    # terminate it — see `finalize_on_failure`.
+    # Data of the most recently scheduled event, used by `finalize_on_failure`.
     last_data = None
 
     def on_progress(done, total):
         nonlocal previous_task, last_data
         try:
-            # Inside the try on purpose: `done >= total` here and inside the
-            # throttle helper is a comparison on whatever the producer hands
-            # us. If a future change ever passes a non-comparable `total`
-            # (e.g. None), that must be swallowed too — not just the
-            # scheduling below it — or the propagating TypeError lands in
-            # `_mask_piece`'s retry `try` and triggers a spurious re-POST of
-            # an already-masked chunk.
+            # The throttle check is inside the try as well: comparing a
+            # non-comparable `total` (e.g. None) raises TypeError, which must
+            # not reach the chunk-masking task.
             if not _should_emit_pii_progress(done, total):
                 return
             event = {
@@ -2597,38 +2558,29 @@ def _pii_progress_emitter(event_emitter):
             log.debug(f'[pii_chunking] could not emit progress: {e}')
 
     async def finalize_on_failure():
-        """Close an open masking status after the request has failed.
+        """Mark the masking status as done after the request has failed.
 
-        Progress events are only ever marked `done` when `done >= total`, so a
-        refusal — the deadline, an exhausted chunk retry, a deliberate pipeline
-        rejection — leaves the LAST persisted `pii_masking` status sitting at
-        `done: false`. That is not cosmetic: `StatusHistory.svelte` renders its
-        collapsed row from `history.at(-1)` and `StatusItem.svelte` drives the
-        shimmer off `status.done`, so the message keeps advertising masking in
-        progress under the error the user was already shown — and because the
-        status is persisted in the chat row, it still shimmers after a reload,
-        forever. The error/cancel events that follow terminate the MESSAGE;
-        they do not touch this status entry.
+        A progress event has `done: true` only when `done >= total`. If masking
+        fails (deadline, exhausted chunk retries, pipeline rejection), the last
+        saved `pii_masking` status still has `done: false`. The UI shows the
+        last status (`history.at(-1)` in `StatusHistory.svelte`) as in progress
+        under the error, also after a reload. The error and cancel events sent
+        afterwards end the message but do not change this status.
 
-        Emits nothing when this request never reported progress (the ordinary
-        non-chunked path, which is the overwhelming majority) or when the
-        terminal event already went out — a duplicate or spurious status entry
-        would be its own bug. The count is left at whatever the UI last saw:
-        `Masking sensitive data… 12/40` frozen and still is the honest account
-        of a run that stopped at twelve.
+        Emits nothing if the request reported no progress (the non-chunked
+        path) or if the final event was already sent. The count stays at the
+        last reported value, e.g. 12/40.
 
-        Bounded and best-effort like every other emission here: this runs on a
-        path that is already failing, and must not turn a clean refusal into a
-        hung one.
+        Limited to `_PII_PROGRESS_CHAIN_WAIT_S` and never raises, so it cannot
+        hang or replace the original failure.
         """
         try:
             if last_data is None or last_data.get('done'):
                 return
             terminal = {'type': 'status', 'data': {**last_data, 'done': True}}
-            # Ordered behind the chain's tail, which itself completes only
-            # after every link before it, so this lands last in the persisted
-            # history. `wait_for` bounds the whole thing — including the emit
-            # itself, which the per-link timeout does not cover.
+            # Waits for the last scheduled emission, so this is normally saved
+            # last. `wait_for` also limits the emit call itself, which the
+            # wait inside `_emit_pii_status_after` does not.
             await asyncio.wait_for(
                 _emit_pii_status_after(event_emitter, terminal, previous_task),
                 timeout=_PII_PROGRESS_CHAIN_WAIT_S,
@@ -2913,10 +2865,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             on_progress=pii_progress,
         )
     except Exception as e:
-        # Every masking failure path funnels through here — deadline, exhausted
-        # chunk retry, deliberate pipeline rejection — so terminating the open
-        # status once, here, covers all of them without the router having to
-        # grow a second callback for it.
+        # All masking failures (deadline, exhausted chunk retries, pipeline
+        # rejection) raise through here, so the open status is closed in this
+        # one place.
         await pii_progress.finalize_on_failure()
         raise e
 

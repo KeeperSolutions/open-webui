@@ -17,15 +17,12 @@ describe('isEventForLoadedChat', () => {
 	});
 
 	it('accepts an event that arrives before a new chat id is known', () => {
-		// THE regression. A brand-new chat has no id client-side: the backend
-		// generates it on the first request and Chat.svelte only learns it when
-		// that request's HTTP response returns. Chat processing runs as a
-		// background task and can emit well before then — a turn refused fast
-		// (an oversized prompt rejected by the PII masking budget guard) emits
-		// `chat:message:error` and `chat:tasks:cancel` within milliseconds.
-		// Matching on chat_id alone discards both, so the error never renders
-		// and the spinner never stops; the error reaches the user only after a
-		// page reload, from the database.
+		// A new chat has no id on the client yet: the backend creates it on the
+		// first request, and Chat.svelte receives it only when that request's
+		// HTTP response returns. Events emitted before then, such as
+		// `chat:message:error` for a prompt refused by the PII masking size
+		// check, must still be accepted. Otherwise the error is not shown and
+		// the spinner keeps running.
 		expect(
 			isEventForLoadedChat({ chat_id: 'brand-new', message_id: 'msg-abc' }, '', messages)
 		).toBe(true);
@@ -44,8 +41,8 @@ describe('isEventForLoadedChat', () => {
 	});
 
 	it('does not treat an inherited object property as a known message', () => {
-		// `history.messages` is a plain object; a message id like "constructor"
-		// must not match Object.prototype.
+		// `history.messages` is a plain object; a message id such as
+		// "constructor" must not match a property of Object.prototype.
 		expect(
 			isEventForLoadedChat({ chat_id: 'brand-new', message_id: 'constructor' }, 'c1', messages)
 		).toBe(false);

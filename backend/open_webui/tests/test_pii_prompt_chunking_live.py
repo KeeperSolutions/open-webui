@@ -1,17 +1,15 @@
-"""Live end-to-end check for prompt-path PII chunking.
+"""Live end-to-end tests for PII chunking on the prompt path.
 
-Every other PII chunking test mocks the external PII pipeline. This one
-does not: it sends a genuinely oversized prompt through
-`process_pipeline_inlet_filter` against the REAL staging pipeline and asserts
-the PII comes back masked. Without chunking, such a prompt raised
-`PiiMaskingUnavailableError` because one request could not finish inside the
-60 s socket-read timeout.
+The other PII chunking tests mock the external PII pipeline. These tests send
+oversized prompts through `process_pipeline_inlet_filter` to the real staging
+pipeline and check that the PII comes back masked. Without chunking, such a
+prompt raises `PiiMaskingUnavailableError`, because a single request cannot
+finish within the 60-second socket-read timeout.
 
-Opt-in ONLY: skipped unless `KEEPER_PII_LIVE=1` is set, so the default suite
-and CI never reach the network. The connection (URL + key) is read from the
-local `backend/data/webui.db` at runtime — never hardcoded, never committed.
-If no matching staging-pipeline connection exists in that database, the test
-skips rather than failing.
+The tests run only when `KEEPER_PII_LIVE=1` is set, so the default suite and
+CI never use the network. The pipeline URL and key are read at runtime from
+the local `backend/data/webui.db` and are never stored in the repository. If
+that database has no staging pipeline connection, the tests are skipped.
 """
 
 import asyncio
@@ -40,10 +38,9 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'webui.db'
 def _connection():
     db_path = os.path.abspath(DB_PATH)
     try:
-        # Read-only, URI-mode connect: a missing file raises instead of being
-        # silently CREATED (the default `sqlite3.connect` rwc mode would
-        # otherwise leave a stray, table-less .db file behind on a machine
-        # that has never run the app).
+        # Open read-only in URI mode so a missing file raises an error. The
+        # default `sqlite3.connect` mode creates the file, which would leave an
+        # empty .db file behind on a machine that has never run the app.
         conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True)
         row = conn.execute('SELECT data FROM config ORDER BY id DESC LIMIT 1').fetchone()
     except sqlite3.Error:
@@ -96,8 +93,8 @@ def _payload(content, chat_id):
 
 
 def test_live_oversized_prompt_is_masked_end_to_end():
-    """A prompt far past the single-call
-    budget must come back masked instead of raising PiiMaskingUnavailableError.
+    """A prompt too large for one masking request comes back masked instead of
+    raising `PiiMaskingUnavailableError`.
     """
     content = (
         'Ivan Horvat, OIB 12345678903, IBAN HR1210010051863000160. Ugovor o poslovnoj suradnji i uvjetima isporuke. '
@@ -115,14 +112,16 @@ def test_live_oversized_prompt_is_masked_end_to_end():
 
 
 def test_live_prompt_at_the_reported_size_is_masked_inside_the_raised_budget():
-    """The size the user actually hit: ~150 000 characters, which the old
-    120 s budget refused outright. Asserts it now completes, and reports the
-    real wall-clock so `PII_INLET_CHARS_PER_SECOND` /
-    `PII_INLET_EFFECTIVE_SPEEDUP` can be re-derived at this size rather than
-    extrapolated from the ~33 000-character case above.
+    """A prompt of about 150 000 characters is masked within
+    `PII_INLET_TOTAL_BUDGET_S`.
 
-    The per-repetition counter keeps the text non-periodic, so chunk
-    boundaries fall in different places than they would in a pure repeat.
+    The test prints the elapsed time and the effective characters per second,
+    so `PII_INLET_CHARS_PER_SECOND` and `PII_INLET_EFFECTIVE_SPEEDUP` can be
+    checked at this size instead of extrapolated from the ~33 000-character
+    prompt in the previous test.
+
+    Each sentence contains a counter, so the text does not repeat exactly and
+    chunk boundaries do not all fall at the same place in the sentence.
     """
     import time
 
