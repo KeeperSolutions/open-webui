@@ -28,12 +28,12 @@ from open_webui.utils.pii_chunking import (  # noqa: E402
     split_text_for_pii,
 )
 
-# About 13 500 characters, which splits into many chunks. Each repetition has
+# About 12 300 characters, which splits into many chunks. Each repetition has
 # its own counter so the text is not periodic: with a plain `* 400` repeat every
 # chunk is a rotation of the same unit, and the in-order reassembly test could
 # not tell a shuffled result from the correct one. Every repetition still
-# contains `OIB 12345678903`, which the fail-on-substring test matches.
-BIG = ''.join(f'Ivan Horvat {i}, OIB 12345678903. ' for i in range(400))
+# contains `SSN 123-45-6789`, which the fail-on-substring test matches.
+BIG = ''.join(f'John Doe {i}, SSN 123-45-6789. ' for i in range(400))
 
 
 def _models():
@@ -184,7 +184,7 @@ def test_a_chunk_that_never_succeeds_fails_the_whole_request_closed():
     """Fail-closed: a partially masked prompt must never reach the LLM."""
     seen = []
     with patch(
-        'open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen, fail_on='OIB 12345678903')
+        'open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen, fail_on='SSN 123-45-6789')
     ):
         with pytest.raises(PiiMaskingUnavailableError):
             _run(_payload(BIG))
@@ -655,11 +655,11 @@ def test_chunked_detections_merge_with_document_relative_offsets():
     """Each chunk's `pii_detections_public` offsets are shifted by the chunk's
     position in the message and merged into the returned metadata. Without
     this, the PII card shows nothing for a message whose entities were found."""
-    marker = 'OIB 12345678903'
+    marker = 'SSN 123-45-6789'
 
     def _detections_for(text):
         idx = text.find(marker)
-        return [{'type': 'HR_OIB', 'start': idx, 'end': idx + len(marker)}] if idx != -1 else []
+        return [{'type': 'US_SSN', 'start': idx, 'end': idx + len(marker)}] if idx != -1 else []
 
     seen = []
     with patch(
@@ -687,9 +687,9 @@ def test_malformed_chunk_detections_are_dropped_without_failing_the_request():
     def _detections_for(_text):
         return [
             'not-a-dict',
-            {'type': 'HR_OIB', 'start': True, 'end': 5},  # bool start
-            {'type': 'HR_OIB', 'start': 0, 'end': 'nope'},  # non-int end
-            {'type': 'HR_OIB', 'start': 0, 'end': 4},  # well-formed
+            {'type': 'US_SSN', 'start': True, 'end': 5},  # bool start
+            {'type': 'US_SSN', 'start': 0, 'end': 'nope'},  # non-int end
+            {'type': 'US_SSN', 'start': 0, 'end': 4},  # well-formed
         ]
 
     seen = []
@@ -1000,8 +1000,8 @@ def test_a_detection_with_an_unhashable_type_is_dropped_rather_than_crashing_the
 
     def _detections_for(_text):
         return [
-            {'type': ['HR_OIB'], 'start': 0, 'end': 4},  # unhashable -> must be dropped
-            {'type': 'HR_OIB', 'start': 0, 'end': 4},  # well-formed
+            {'type': ['US_SSN'], 'start': 0, 'end': 4},  # unhashable -> must be dropped
+            {'type': 'US_SSN', 'start': 0, 'end': 4},  # well-formed
         ]
 
     seen = []

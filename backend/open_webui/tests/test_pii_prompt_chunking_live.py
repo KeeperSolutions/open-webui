@@ -97,7 +97,7 @@ def test_live_oversized_prompt_is_masked_end_to_end():
     raising `PiiMaskingUnavailableError`.
     """
     content = (
-        'Ivan Horvat, OIB 12345678903, IBAN HR1210010051863000160. Ugovor o poslovnoj suradnji i uvjetima isporuke. '
+        'John Doe, SSN 123-45-6789, IBAN GB82WEST12345698765432. Service agreement and delivery terms. '
     ) * 300
     assert len(content) > 25_000
 
@@ -106,9 +106,9 @@ def test_live_oversized_prompt_is_masked_end_to_end():
 
     out = asyncio.run(process_pipeline_inlet_filter(request, _payload(content, chat_id), _user(), models))
     masked = out['messages'][0]['content']
-    assert '12345678903' not in masked, 'OIB survived masking — LEAK'
-    assert 'HR1210010051863000160' not in masked, 'IBAN survived masking — LEAK'
-    assert '[OIB_' in masked or '[HR_OIB_' in masked, 'no OIB placeholder in masked output — masking did not run'
+    assert '123-45-6789' not in masked, 'SSN survived masking — LEAK'
+    assert 'GB82WEST12345698765432' not in masked, 'IBAN survived masking — LEAK'
+    assert '[US_SSN_' in masked, 'no SSN placeholder in masked output — masking did not run'
 
 
 def test_live_prompt_at_the_reported_size_is_masked_inside_the_raised_budget():
@@ -132,7 +132,7 @@ def test_live_prompt_at_the_reported_size_is_masked_inside_the_raised_budget():
     )
 
     content = ''.join(
-        f'Ivan Horvat {i}, OIB 12345678903, IBAN HR1210010051863000160. Ugovor broj {i} o poslovnoj suradnji. '
+        f'John Doe {i}, SSN 123-45-6789, IBAN GB82WEST12345698765432. Contract {i} for business cooperation. '
         for i in range(1600)
     )
     assert len(content) > 150_000, len(content)
@@ -154,7 +154,7 @@ def test_live_prompt_at_the_reported_size_is_masked_inside_the_raised_budget():
         f'-> {len(content) / elapsed:.0f} chars/s effective'
     )
 
-    assert '12345678903' not in masked, 'OIB survived masking — LEAK'
-    assert 'HR1210010051863000160' not in masked, 'IBAN survived masking — LEAK'
-    assert '[OIB_' in masked or '[HR_OIB_' in masked, 'no OIB placeholder in masked output — masking did not run'
+    assert '123-45-6789' not in masked, 'SSN survived masking — LEAK'
+    assert 'GB82WEST12345698765432' not in masked, 'IBAN survived masking — LEAK'
+    assert '[US_SSN_' in masked, 'no SSN placeholder in masked output — masking did not run'
     assert elapsed < PII_INLET_TOTAL_BUDGET_S, 'completed, but only by exceeding the budget it was allowed'

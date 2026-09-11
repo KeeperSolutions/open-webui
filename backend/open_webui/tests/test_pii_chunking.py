@@ -9,7 +9,7 @@ from open_webui.utils.pii_chunking import (
 
 
 def test_short_text_is_a_single_piece_at_offset_zero():
-    assert split_text_for_pii('kratko') == [(0, 'kratko')]
+    assert split_text_for_pii('short') == [(0, 'short')]
 
 
 def test_non_string_input_is_passed_through_untouched():
@@ -23,7 +23,7 @@ def test_partition_is_lossless_and_offsets_are_exact():
     wrong text."""
     # Each line starts with a unique counter so the text does not repeat. In
     # repeating text a wrong offset can still point at identical characters.
-    text = ''.join(f'{i}: Ugovorna strana Ivan Horvat, OIB 12345678903.\n\n' for i in range(400))
+    text = ''.join(f'{i}: Contracting party John Doe, SSN 123-45-6789.\n\n' for i in range(400))
     pieces = split_text_for_pii(text, max_chars=1800)
     assert ''.join(p for _, p in pieces) == text
     for start, piece in pieces:
@@ -31,7 +31,7 @@ def test_partition_is_lossless_and_offsets_are_exact():
 
 
 def test_no_piece_exceeds_the_limit():
-    text = 'riječ ' * 5000
+    text = 'word ' * 5000
     assert all(len(p) <= 1800 for _, p in split_text_for_pii(text, max_chars=1800))
 
 
@@ -57,7 +57,7 @@ def test_an_entity_is_never_severed_by_a_break():
     were split across two pieces, neither half would be detected and the value
     would reach the LLM unmasked. The padding places the IBAN across the edge
     of the 1800-character window."""
-    iban = 'HR1210010051863000160'
+    iban = 'GB82WEST12345698765432'
     text = 'a' * 1795 + ' ' + iban + ' rest'
     pieces = [p for _, p in split_text_for_pii(text, max_chars=1800)]
     assert any(iban in p for p in pieces)
@@ -67,9 +67,9 @@ def test_an_entity_is_never_severed_by_a_break():
     'value',
     [
         '4111 1111 1111 1111',  # credit card written in groups of four
-        'HR12 3456 7890 1234 567',  # IBAN in groups
-        '+385 91 234 5678',  # phone number
-        'Ivan Horvat',  # person name: two capitalised words
+        'DE89 3704 0044 0532 0130 00',  # IBAN in groups
+        '+44 20 7946 0958',  # phone number
+        'John Doe',  # person name: two capitalised words
     ],
 )
 def test_a_spaced_identifier_straddling_the_limit_is_not_severed(value):
@@ -82,7 +82,7 @@ def test_a_spaced_identifier_straddling_the_limit_is_not_severed(value):
     spaces exactly at the limit.
     """
     for pad in range(1780, 1800):
-        text = 'a' * pad + ' ' + value + ' ostatak recenice koji ide dalje'
+        text = 'a' * pad + ' ' + value + ' rest of the sentence that continues'
         pieces = split_text_for_pii(text, max_chars=1800)
         assert ''.join(p for _, p in pieces) == text  # still lossless
         assert any(value in p for _, p in pieces), f'severed at pad={pad}'
@@ -91,7 +91,7 @@ def test_a_spaced_identifier_straddling_the_limit_is_not_severed(value):
 def test_an_all_unsafe_window_still_breaks_at_a_space():
     """If every space in the window would split an entity, the splitter still
     breaks at a space instead of cutting a word in half."""
-    text = 'Ivan Horvat ' * 400
+    text = 'John Doe ' * 400
     pieces = [p for _, p in split_text_for_pii(text, max_chars=1800)]
     assert ''.join(pieces) == text
     assert all(p.endswith(' ') for p in pieces[:-1])

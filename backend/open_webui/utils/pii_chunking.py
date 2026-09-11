@@ -178,8 +178,8 @@ def _severs_spaced_entity(text, sep_index, split_at):
     """Whether breaking between the token ending at ``sep_index`` and the token
     starting at ``split_at`` would split a PII value that contains spaces.
 
-    Values such as `4111 1111 1111 1111`, `HR12 3456 7890 1234`,
-    `+385 91 234 5678` and `Ivan Horvat` are single entities written with
+    Values such as `4111 1111 1111 1111`, `DE89 3704 0044 0532`,
+    `+44 20 7946 0958` and `John Doe` are single entities written with
     spaces. If one is split across two chunks, the pipeline recognises neither
     half, and both halves reach the model unmasked (see
     `test_a_spaced_identifier_straddling_the_limit_is_not_severed`).
