@@ -306,14 +306,18 @@
 		savingModelOrder = true;
 
 		// setModelsConfig (POST /configs/models) writes the whole config form in
-		// one call. FEATURED_MODELS isn't edited from this action, but it still
-		// has to be carried through here — an omitted field is treated as "clear
-		// it", so leaving it out would silently empty the featured list.
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload.
+		// This page's `modelsConfig` is a snapshot loaded on mount; the Featured
+		// Models modal saves through its own dedicated endpoint and doesn't
+		// refresh it, so sending modelsConfig?.FEATURED_MODELS here could
+		// overwrite a featured-list save that happened after this page loaded
+		// with stale data. Omitting the field is safe: the backend
+		// (set_models_config) treats a missing FEATURED_MODELS as "leave it
+		// alone", not "clear it" — see ModelsConfigForm's own comment.
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: defaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: defaultPinnedModelIds.join(','),
 			MODEL_ORDER_LIST: orderedModelIds,
-			FEATURED_MODELS: modelsConfig?.FEATURED_MODELS ?? [],
 			DEFAULT_MODEL_METADATA: modelsConfig?.DEFAULT_MODEL_METADATA ?? null,
 			DEFAULT_MODEL_PARAMS: modelsConfig?.DEFAULT_MODEL_PARAMS ?? null
 		}).catch((error) => {
@@ -362,14 +366,15 @@
 		defaultPinnedModelIds = nextDefaultPinnedModelIds;
 
 		// setModelsConfig (POST /configs/models) writes the whole config form in
-		// one call. FEATURED_MODELS isn't edited from this action, but it still
-		// has to be carried through here — an omitted field is treated as "clear
-		// it", so leaving it out would silently empty the featured list.
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload
+		// — see saveModelOrder()'s comment above for why sending the stale
+		// modelsConfig snapshot here would risk overwriting a featured-list save
+		// made after this page loaded. Omitting it is safe: the backend treats a
+		// missing FEATURED_MODELS as "leave it alone", not "clear it".
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: nextDefaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: nextDefaultPinnedModelIds.join(','),
 			MODEL_ORDER_LIST: modelsConfig?.MODEL_ORDER_LIST ?? [],
-			FEATURED_MODELS: modelsConfig?.FEATURED_MODELS ?? [],
 			DEFAULT_MODEL_METADATA: modelsConfig?.DEFAULT_MODEL_METADATA ?? null,
 			DEFAULT_MODEL_PARAMS: modelsConfig?.DEFAULT_MODEL_PARAMS ?? null
 		}).catch((error) => {

@@ -470,11 +470,20 @@
 	const setDefaultHandler = async (modelId: string) => {
 		const result = toggleDefaultModel($settings, modelId);
 		if (!result) return;
-		settings.set(result.nextSettings);
-		await updateUserSettings(localStorage.token, { ui: result.nextSettings });
-		toast.success(
-			result.cleared ? $i18n.t('Default model unset') : $i18n.t('Default model updated')
-		);
+		// Persist first — updateUserSettings throws on failure (network error or
+		// a non-ok response). Only update the local store and report success
+		// once the save is actually confirmed; otherwise the UI would mark this
+		// model as the default (used for every new chat) even though it was
+		// never saved, silently reverting on the next reload.
+		try {
+			await updateUserSettings(localStorage.token, { ui: result.nextSettings });
+			settings.set(result.nextSettings);
+			toast.success(
+				result.cleared ? $i18n.t('Default model unset') : $i18n.t('Default model updated')
+			);
+		} catch (error) {
+			toast.error($i18n.t('Failed to update settings'));
+		}
 	};
 
 	const pullModelHandler = async () => {
@@ -946,7 +955,7 @@
 									</button>
 								{/if}
 
-								{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.direct) || tags.length > 0}
+								{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.direct) || tags.length > 0 || featuredModels.length > 0}
 									<button
 										type="button"
 										class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag ===

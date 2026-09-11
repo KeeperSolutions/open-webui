@@ -32,11 +32,36 @@
 		init();
 	}
 
+	// The backend validator (routers/configs.py) rejects malformed entries on
+	// save, but this reads whatever is already stored — from before that
+	// validation existed, or a direct API/DB write it missed. FeaturedModels.svelte
+	// binds tags by index (featuredModels[idx].tags[tagIdx]), so a non-object
+	// entry or a short/missing tags array would throw there rather than just
+	// showing a blank row. Coerce every loaded entry into a well-formed shape
+	// (rather than dropping it, unlike the read-only chat-selector path in
+	// featuredModels.ts) so the admin can see and fix whatever is wrong with it.
+	const normalizeEntry = (entry: unknown, order: number) => {
+		const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+		const rawTags = Array.isArray(e.tags) ? e.tags : [];
+		const tags: [string, string, string] = [
+			typeof rawTags[0] === 'string' ? rawTags[0] : '',
+			typeof rawTags[1] === 'string' ? rawTags[1] : '',
+			typeof rawTags[2] === 'string' ? rawTags[2] : ''
+		];
+		return {
+			model_id: typeof e.model_id === 'string' ? e.model_id : '',
+			provider_name: typeof e.provider_name === 'string' ? e.provider_name : '',
+			featured_name: typeof e.featured_name === 'string' ? e.featured_name : '',
+			tags,
+			order: typeof e.order === 'number' ? e.order : order
+		};
+	};
+
 	const init = async () => {
 		try {
 			const config = await getFeaturedModels(localStorage.token);
 			const raw = config?.FEATURED_MODELS;
-			featuredModels = Array.isArray(raw) ? [...raw] : [];
+			featuredModels = Array.isArray(raw) ? raw.map(normalizeEntry) : [];
 		} catch (error: unknown) {
 			toast.error($i18n.t('Failed to load configuration'));
 			featuredModels = [];

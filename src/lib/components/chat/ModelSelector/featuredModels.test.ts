@@ -73,6 +73,32 @@ describe('buildFeaturedModels()', () => {
 		const items = [item('a', 'A'), item('secret', 'Secret', { hidden: true })];
 		expect(buildFeaturedModels(config, items, true).map((e) => e.model_id)).toEqual(['a', 'secret']);
 	});
+
+	// The backend validator (routers/configs.py) rejects these on save, but
+	// this must stay defensive for whatever is already stored from before that
+	// validation existed — a bad row here must never crash the selector for
+	// every user (Copilot review finding on the original PR).
+	it('drops null/non-object entries instead of throwing', () => {
+		const config = [
+			featured('a'),
+			null,
+			'not-an-object',
+			42
+		] as unknown as FeaturedModelConfig[];
+		const items = [item('a', 'A')];
+		expect(() => buildFeaturedModels(config, items)).not.toThrow();
+		expect(buildFeaturedModels(config, items).map((e) => e.model_id)).toEqual(['a']);
+	});
+
+	it('drops entries with a missing or non-string model_id', () => {
+		const config = [
+			featured('a'),
+			{ provider_name: 'X', featured_name: '', tags: ['', '', ''], order: 1 },
+			{ ...featured('b'), model_id: 42 }
+		] as unknown as FeaturedModelConfig[];
+		const items = [item('a', 'A'), item('b', 'B')];
+		expect(buildFeaturedModels(config, items).map((e) => e.model_id)).toEqual(['a']);
+	});
 });
 
 describe('featuredToItem()', () => {
@@ -113,5 +139,11 @@ describe('featuredToItem()', () => {
 		expect(result.label).toBe('Orphan');
 		expect(result.model.id).toBe('missing');
 		expect(result.model.tags).toEqual([]);
+	});
+
+	it('falls back to backing model tags when tags is not an array', () => {
+		const entry = { ...featured('gpt-x'), tags: 'not-an-array' } as unknown as FeaturedModelConfig;
+		expect(() => featuredToItem(entry, items)).not.toThrow();
+		expect(featuredToItem(entry, items).model.tags).toEqual([{ name: 'backing-tag' }]);
 	});
 });

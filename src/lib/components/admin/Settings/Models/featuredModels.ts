@@ -24,6 +24,14 @@ export const isProviderNameValid = (name: string): boolean => {
 /** First blocking problem across all entries, or null when the list is saveable. */
 export const validateFeaturedModels = (entries: FeaturedModelEntry[]): string | null => {
 	for (const entry of entries) {
+		if (!(entry.model_id ?? '').trim()) {
+			// Reachable via normalizeEntry() coercing a malformed stored row
+			// (see FeaturedModelsModal.svelte) — there's no picker UI path that
+			// produces a blank model_id, but a bad row must still block Save
+			// rather than being re-persisted, mirroring the backend's own
+			// required check on this field.
+			return 'Each featured model must have a model selected.';
+		}
 		const name = (entry.provider_name ?? '').trim();
 		if (!name) {
 			return 'Provider name is required for every featured model.';

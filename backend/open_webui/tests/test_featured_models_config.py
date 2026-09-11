@@ -165,17 +165,46 @@ def test_provider_name_trimmed_before_length_check():
     _form([_entry(provider_name='  abc  ')])
 
 
-def test_non_dict_entries_are_ignored():
-    # The validator skips anything that isn't a dict rather than raising.
-    form = _form([_entry(), 'not-a-dict', 42, None])
-    assert form.FEATURED_MODELS[1] == 'not-a-dict'
-
-
 def test_entry_without_tags_key_accepted():
     _form([{'model_id': 'm', 'provider_name': 'OpenAI', 'order': 0}])
 
 
 # ---------- invalid entries ----------
+
+
+def test_string_entry_rejected():
+    # A non-object entry has no model_id/provider_name/tags to validate — it
+    # must be rejected outright, not silently passed through. A `null` here
+    # used to reach buildFeaturedModels() (chat/ModelSelector/featuredModels.ts)
+    # unguarded, throwing on `entry.model_id` and breaking the model selector
+    # for every user, not just whoever saved it.
+    with pytest.raises(ValidationError, match='must be an object'):
+        _form([_entry(), 'not-a-dict'])
+
+
+def test_null_entry_rejected():
+    with pytest.raises(ValidationError, match='must be an object'):
+        _form([_entry(), None])
+
+
+def test_number_entry_rejected():
+    with pytest.raises(ValidationError, match='must be an object'):
+        _form([_entry(), 42])
+
+
+def test_blank_model_id_rejected():
+    with pytest.raises(ValidationError, match='model_id is required'):
+        _form([_entry(model_id='')])
+
+
+def test_missing_model_id_rejected():
+    with pytest.raises(ValidationError, match='model_id is required'):
+        _form([{'provider_name': 'OpenAI', 'order': 0}])
+
+
+def test_non_list_tags_rejected():
+    with pytest.raises(ValidationError, match='tags .* must be a list'):
+        _form([_entry(tags='not-a-list')])
 
 
 def test_blank_provider_name_rejected():

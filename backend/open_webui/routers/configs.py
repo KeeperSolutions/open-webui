@@ -742,8 +742,20 @@ def _validate_featured_models_list(value: list) -> list:
     #   tags          — up to 3, each at most 10 chars
     for entry in value:
         if not isinstance(entry, dict):
-            continue
-        model_id = entry.get('model_id', '?')
+            # A non-object entry (null, a string, ...) can't carry model_id/
+            # provider_name/tags, so there is nothing to validate — but
+            # letting it through unchanged would persist it as-is. The
+            # frontend (buildFeaturedModels in featuredModels.ts) reads
+            # entry.model_id on every entry in the list with no null guard,
+            # so a bad row here breaks the model selector for every user,
+            # not just whoever saved it. Reject rather than skip.
+            raise ValueError(
+                f'each featured model entry must be an object, got {entry!r}'
+            )
+
+        model_id = entry.get('model_id')
+        if not str(model_id or '').strip():
+            raise ValueError('model_id is required for every featured model')
 
         provider = str(entry.get('provider_name') or '').strip()
         if not provider:
@@ -757,6 +769,8 @@ def _validate_featured_models_list(value: list) -> list:
             )
 
         tags = entry.get('tags') or []
+        if not isinstance(tags, list):
+            raise ValueError(f"tags for featured model '{model_id}' must be a list")
         if len(tags) > 3:
             raise ValueError(
                 f"featured model '{model_id}' has {len(tags)} tags; at most "

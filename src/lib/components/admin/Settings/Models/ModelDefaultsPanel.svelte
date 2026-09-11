@@ -91,14 +91,17 @@
 		};
 
 		// setModelsConfig (POST /configs/models) writes the whole config form in
-		// one call. FEATURED_MODELS isn't edited on this panel, but it still has
-		// to be carried through here — an omitted field is treated as "clear it",
-		// so leaving it out would silently empty the featured list on every save.
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload.
+		// `config` here is a snapshot loaded on mount; the Featured Models modal
+		// saves through its own dedicated endpoint and doesn't refresh it, so
+		// sending config?.FEATURED_MODELS could overwrite a featured-list save
+		// that happened after this panel loaded with stale data. Omitting the
+		// field is safe — the backend (set_models_config) treats a missing
+		// FEATURED_MODELS as "leave it alone", not "clear it".
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: config?.DEFAULT_MODELS ?? null,
 			DEFAULT_PINNED_MODELS: config?.DEFAULT_PINNED_MODELS ?? null,
 			MODEL_ORDER_LIST: modelIds,
-			FEATURED_MODELS: config?.FEATURED_MODELS ?? [],
 			DEFAULT_MODEL_METADATA: metadata,
 			DEFAULT_MODEL_PARAMS: Object.fromEntries(configuredParams)
 		}).catch((error) => {

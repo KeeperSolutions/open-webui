@@ -103,6 +103,28 @@ describe('FeaturedModelsModal — load on show', () => {
 		await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to load configuration'));
 		expect(screen.getByText('No featured models added yet.')).toBeInTheDocument();
 	});
+
+	it('normalizes a malformed stored row instead of throwing', async () => {
+		// A row from before backend validation existed, or a direct DB/API
+		// write it missed — no tags array, a non-string provider_name.
+		// FeaturedModels.svelte binds tags by index
+		// (featuredModels[idx].tags[tagIdx]); without normalization this
+		// throws instead of rendering an editable (if empty) row.
+		getFeaturedModels.mockResolvedValue({
+			FEATURED_MODELS: [{ model_id: 'gpt-x', provider_name: null, order: 0 }]
+		});
+
+		expect(() => renderModal()).not.toThrow();
+
+		await waitFor(() => expect(getFeaturedModels).toHaveBeenCalled());
+		await waitFor(() => {
+			const provider = document.querySelector(
+				'input[id^="featured-model-provider-"]'
+			) as HTMLInputElement | null;
+			expect(provider).not.toBeNull();
+			expect(provider?.value).toBe('');
+		});
+	});
 });
 
 describe('FeaturedModelsModal — save gate', () => {

@@ -240,6 +240,26 @@ wait_for "backend"  "$BACKEND_URL/health"  "$BACKEND_PID"  90
 # transformed modules, so a successful fetch here means real navigation is safe.
 wait_for "frontend" "$FRONTEND_URL/@vite/client" "$FRONTEND_PID" 120
 
+# /@vite/client being servable doesn't mean every route's own module graph is
+# resolved yet — Vite resolves per-route, lazily, on first request. Spec 01's
+# very first test signs up and lands on /chat, whose route eagerly imports
+# ChatControls -> PyodideFileNav -> pyodideSandboxHost, which references the
+# (large, numerous) static/pyodide/* asset tree. That first-ever request for
+# those assets has been observed landing a few seconds into Cypress's first
+# visit and tearing the half-loaded page out from under it (`[vite] page
+# reload static/pyodide/*`, then `TypeError: Cannot read properties of
+# undefined` on whatever global the app touched next). Warm both routes
+# synchronously, before handing off to Cypress, so that resolution happens
+# here instead of during the first real test.
+for route in /auth /chat; do
+	echo -n "==> warming $route route"
+	if curl -sf -o /dev/null "$FRONTEND_URL$route"; then
+		echo " — done"
+	else
+		echo " — non-fatal, continuing (warm-up is best-effort)"
+	fi
+done
+
 echo "==> running cypress"
 CYPRESS_BASE_URL="$FRONTEND_URL" npx cypress run "$@"
 # cleanup() runs on EXIT

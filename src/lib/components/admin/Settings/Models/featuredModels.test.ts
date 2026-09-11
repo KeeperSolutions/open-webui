@@ -24,6 +24,7 @@ const REQUIRED_MSG = 'Provider name is required for every featured model.';
 const LENGTH_MSG = 'Provider name must be between 3 and 24 characters.';
 const TAG_MSG = 'Each tag must be 10 characters or fewer.';
 const TAG_COUNT_MSG = 'At most 3 tags are allowed per featured model.';
+const MODEL_ID_MSG = 'Each featured model must have a model selected.';
 
 describe('field-limit constants', () => {
 	it('match the backend validator (configs.py _validate_featured_models)', () => {
@@ -85,6 +86,20 @@ describe('validateFeaturedModels()', () => {
 		expect(
 			validateFeaturedModels([entry(), entry({ model_id: 'b', provider_name: 'Anthropic' })])
 		).toBeNull();
+	});
+
+	it('returns the model_id message for a blank model_id', () => {
+		expect(validateFeaturedModels([entry({ model_id: '' })])).toBe(MODEL_ID_MSG);
+	});
+
+	it('returns the model_id message for a whitespace-only model_id', () => {
+		expect(validateFeaturedModels([entry({ model_id: '   ' })])).toBe(MODEL_ID_MSG);
+	});
+
+	it('model_id check runs before provider checks on the same entry', () => {
+		expect(
+			validateFeaturedModels([entry({ model_id: '', provider_name: '' })])
+		).toBe(MODEL_ID_MSG);
 	});
 
 	it('returns the "required" message for a blank provider name', () => {

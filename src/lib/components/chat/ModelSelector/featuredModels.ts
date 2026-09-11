@@ -38,9 +38,21 @@ export const buildFeaturedModels = (
 			.map((item) => item.value)
 	);
 
-	return [...config]
-		.filter((entry) => availableIds.has(entry.model_id))
-		.sort((a, b) => a.order - b.order);
+	return (
+		config
+			// The backend validator (routers/configs.py) rejects malformed entries
+			// on save, but this also reads whatever is already stored, from before
+			// that validation existed or from a direct API/DB write it missed — a
+			// non-object entry, or one with no model_id, must not crash the model
+			// selector for every user. Drop it rather than let it reach .order or
+			// featuredToItem() below.
+			.filter(
+				(entry): entry is FeaturedModelConfig =>
+					!!entry && typeof entry === 'object' && typeof entry.model_id === 'string'
+			)
+			.filter((entry) => availableIds.has(entry.model_id))
+			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+	);
 };
 
 /**
@@ -51,7 +63,9 @@ export const buildFeaturedModels = (
  */
 export const featuredToItem = (entry: FeaturedModelConfig, items: SelectorItem[]) => {
 	const backing = items.find((item) => item.value === entry.model_id);
-	const curatedTags = (entry.tags ?? []).filter(Boolean).map((name) => ({ name }));
+	const curatedTags = (Array.isArray(entry.tags) ? entry.tags : [])
+		.filter(Boolean)
+		.map((name) => ({ name }));
 
 	return {
 		...backing,
