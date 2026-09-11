@@ -1,4 +1,4 @@
-"""Prompt-path PII chunking (TRAU-543).
+"""Prompt-path PII chunking.
 
 A 50-page paste used to go to the inlet as ONE request, blow the 60 s socket
 read budget and surface as "PII masking is currently unavailable". These tests
@@ -656,8 +656,8 @@ def test_title_generation_task_is_exempt_from_chunking_even_when_oversized():
     generation and re-masks via the deterministic vault regex alone --
     microseconds regardless of payload size -- so these must keep the single
     whole-payload call the pipeline expects. Chunking them (and applying the
-    chunked path's size guard) would refuse exactly the large chats this
-    ticket targets."""
+    chunked path's size guard) would refuse exactly the large chats that
+    chunking is meant to support."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     payload = _payload('x' * (max_maskable_chars() + 1))
@@ -1029,7 +1029,7 @@ def test_a_long_conversation_with_an_oversized_paste_is_not_refused_by_history_l
     (`ner_indices` in `pii_filter_pipeline.py`); every other history entry
     stops at the deterministic vault re-mask, which is regex and costs
     microseconds regardless of length. Charging history at the NER rate
-    refused exactly the established chats this ticket set out to unblock."""
+    refused exactly the established chats that chunking is meant to support."""
     history = []
     for _ in range(10):
         history.append(('user', 'a' * 1500))

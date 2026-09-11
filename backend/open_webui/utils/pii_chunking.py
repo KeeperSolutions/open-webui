@@ -1,11 +1,10 @@
-"""Shared sizing and splitting for PII masking calls (TRAU-543).
+"""Shared sizing and splitting for PII masking calls.
 
 Deliberately dependency-free (no FastAPI, no aiohttp) so both `routers/` and
 `utils/` can import it without a cycle, and so the splitter is unit-testable on
 its own.
 
-Every constant here is derived from ONE measurement (see
-`pii_scripts/TRAU-543-PROMPT-PII-CHUNKING-PLAN.md`, Appendix A): the external
+Every constant here is derived from ONE measurement: the external
 inlet processes text at a flat ~240 characters/second, independent of how much
 you send it. Do not tune these by intuition — re-measure.
 """
@@ -113,7 +112,7 @@ PII_INLET_CONCURRENCY = 4
 # WARNING: this budget is only real if the transport survives it. The chat
 # request stays open for the entire masking run, so a platform request timeout
 # shorter than this turns a clean, actionable refusal into a dropped connection
-# — strictly worse than the behaviour this ticket replaced. Cloud Run's default
+# — strictly worse than refusing. Cloud Run's default
 # is 300s, which 240s fits inside with margin; 600s did not. Set the env var
 # per environment instead of assuming the default fits.
 PII_INLET_TOTAL_BUDGET_S = _positive_int_env('PII_INLET_TOTAL_BUDGET_S', 240)
@@ -135,7 +134,7 @@ PII_INLET_CHUNK_RETRIES = 4
 # fleet and burns an attempt.
 PII_INLET_RETRY_BACKOFF_S = 2.0
 
-# Measured inlet throughput, characters per second (Appendix A). Everything
+# Measured inlet throughput, characters per second. Everything
 # below is arithmetic on this number; re-measure before changing it.
 PII_INLET_CHARS_PER_SECOND = 240
 
@@ -174,8 +173,8 @@ PII_INLET_SKELETON_SAFETY_MARGIN = 0.8
 # otherwise IDLE pipeline. It is a single instance serialized on one NER thread
 # (`autoscaling.knative.dev/maxScale: 1`), so a second user masking at the same
 # time comes straight off this number. The margin is deliberate — an optimistic
-# value here admits a prompt that then dies on `PII_INLET_TOTAL_BUDGET_S`, which
-# is the wait-then-refuse this ticket exists to remove. Being wrong low only
+# value here admits a prompt that then dies on `PII_INLET_TOTAL_BUDGET_S`, so
+# the user waits the full budget and is refused anyway. Being wrong low only
 # costs cap headroom; being wrong high costs the user ten minutes and a refusal.
 #
 # RECALIBRATED 2026-09-08. The paragraph above ends "When the pipeline is allowed
@@ -237,7 +236,7 @@ def max_maskable_chars():
     Expressed as a computation rather than a magic constant so that changing
     the budget, the measured rate, or the speedup moves the limit
     automatically instead of leaving a stale number behind — which is exactly
-    how TRAU-513 ended up with a 50 000-char cap that meant 209 s on a
+    how an earlier 50 000-char cap came to mean 209 s on a
     sequential path.
     """
     return int(PII_INLET_TOTAL_BUDGET_S / estimated_masking_seconds(0, 1))

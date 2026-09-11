@@ -146,7 +146,7 @@ class PiiMaskingUnavailableError(Exception):
 
 def resolve_request_pii_masking(payload) -> Optional[bool]:
     """Effective per-request PII masking flag, read from the payload's `features`
-    (top-level, else `metadata.features` — the TRAU-522 Layer-1 coupling). Returns
+    (top-level, else `metadata.features`). Returns
     True/False when explicitly set, or None when unspecified. This is the SAME
     signal the inlet override (below) uses, so the fail-closed guard and the
     pipeline agree on whether masking was requested.
@@ -209,7 +209,7 @@ def get_sorted_filters(model_id, models):
 
 async def _post_inlet_once(session, url, key, filter_id, request_data):
     """One inlet POST. Extracted from `process_pipeline_inlet_filter` so the
-    chunked path (TRAU-543) can issue the same call many times. Behaviour is
+    chunked path can issue the same call many times. Behaviour is
     unchanged: `ClientResponseError` is translated into an HTTPException that
     preserves the pipeline's own `detail`, everything else propagates so the
     caller's fail-closed branch decides."""
@@ -791,7 +791,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
         all_filter_valves = {}
 
     # user dict from openai.py is intentionally rebuilt here to inject
-    # per-user, per-filter valves. See TASK-3.7a-SPEC.md §3.2.
+    # per-user, per-filter valves.
     base_user_dict = {
         'id': user.id,
         'email': user.email,
@@ -842,7 +842,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
             if not key:
                 continue
 
-            # Per-filter valves injection (TASK-3.7a). Each filter gets its own
+            # Per-filter valves injection. Each filter gets its own
             # valves dict from user.settings["ui"]["pipelines"]["valves"][filter_id].
             filter_id = filter.get('id')
             per_filter_valves = all_filter_valves.get(filter_id, {})
@@ -881,7 +881,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                     and _payload_task_type(payload) not in _CHUNKING_EXEMPT_TASKS
                     and _chunkable_message_indices(payload)
                 ):
-                    # TRAU-543: one call cannot carry this much text. The inlet
+                    # One call cannot carry this much text. The inlet
                     # runs at a flat ~240 chars/s, so a 150k paste is ~625 s
                     # serially and would blow the 60 s socket read long before
                     # that. Split it and run the pieces concurrently.

@@ -1,4 +1,4 @@
-"""Unit tests for the shared PII chunk splitter (TRAU-543)."""
+"""Unit tests for the shared PII chunk splitter."""
 
 import pytest
 
@@ -106,7 +106,7 @@ def test_a_non_positive_chunk_limit_is_rejected_instead_of_looping_forever(bad):
 
 
 def test_budgets_are_consistent_with_the_measured_throughput():
-    """Guards the numbers in Appendix A: at the measured rate a chunk must
+    """Guards the measured sizing numbers: at the measured rate a chunk must
     finish well inside the 60 s socket-read budget."""
     from open_webui.utils.pii_chunking import (
         PII_INLET_CHARS_PER_SECOND,

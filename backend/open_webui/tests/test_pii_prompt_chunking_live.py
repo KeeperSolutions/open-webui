@@ -1,11 +1,11 @@
-"""Live end-to-end check for prompt-path PII chunking (TRAU-543).
+"""Live end-to-end check for prompt-path PII chunking.
 
-Every other test in this ticket mocks the external PII pipeline. This one
+Every other PII chunking test mocks the external PII pipeline. This one
 does not: it sends a genuinely oversized prompt through
 `process_pipeline_inlet_filter` against the REAL staging pipeline and asserts
-the PII comes back masked. That is the regression this ticket exists for —
-before this branch, such a prompt raised `PiiMaskingUnavailableError` because
-one request could not finish inside the 60 s socket-read timeout.
+the PII comes back masked. Without chunking, such a prompt raised
+`PiiMaskingUnavailableError` because one request could not finish inside the
+60 s socket-read timeout.
 
 Opt-in ONLY: skipped unless `KEEPER_PII_LIVE=1` is set, so the default suite
 and CI never reach the network. The connection (URL + key) is read from the
@@ -96,7 +96,7 @@ def _payload(content, chat_id):
 
 
 def test_live_oversized_prompt_is_masked_end_to_end():
-    """The regression this ticket exists for: a prompt far past the single-call
+    """A prompt far past the single-call
     budget must come back masked instead of raising PiiMaskingUnavailableError.
     """
     content = (

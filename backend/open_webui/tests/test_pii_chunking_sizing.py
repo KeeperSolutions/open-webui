@@ -1,4 +1,4 @@
-"""Sizing arithmetic for PII masking (TRAU-543 / TRAU-513).
+"""Sizing arithmetic for PII masking.
 
 Every number in `pii_chunking` is a claim about a REMOTE service's throughput,
 so it goes stale the moment that service is rescaled — which is exactly what
@@ -39,7 +39,7 @@ def test_a_usable_float_env_is_honoured(monkeypatch):
 
 
 def test_the_cap_is_arithmetic_on_the_budget_not_a_magic_constant():
-    """TRAU-513 shipped a hand-written 50 000-char cap that meant 209s once the
+    """An earlier hand-written 50 000-char cap meant 209s once the
     path became sequential — a number that stopped tracking what it described.
     The cap has to move when the budget does."""
     one_char = C.estimated_masking_seconds(0, 1)
