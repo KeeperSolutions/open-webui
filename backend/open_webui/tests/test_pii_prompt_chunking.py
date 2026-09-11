@@ -117,9 +117,9 @@ def test_a_short_message_still_takes_exactly_one_call():
     ordinary chats pay nothing for chunking."""
     seen = []
     with patch('open_webui.routers.pipelines.aiohttp.ClientSession', return_value=_session(seen)):
-        out = _run(_payload('kratka poruka'))
+        out = _run(_payload('short message'))
     assert len(seen) == 1
-    assert out['messages'][0]['content'] == 'KRATKA PORUKA'
+    assert out['messages'][0]['content'] == 'SHORT MESSAGE'
 
 
 def test_an_oversized_message_is_split_into_bounded_chunks():
