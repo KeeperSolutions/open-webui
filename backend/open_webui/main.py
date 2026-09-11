@@ -2320,7 +2320,7 @@ async def chat_completion(
             detail=str(e),
         )
 
-    async def process_chat(request, form_data, user, metadata, model, tasks=None):
+    async def process_chat(request, form_data, user, metadata, model, tasks=None, run_initial_title=False):
         try:
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
@@ -2328,7 +2328,11 @@ async def chat_completion(
             # payload above is the masked one, and the vault now holds this
             # turn's PII so the pipeline can re-mask the title prompt exactly
             # instead of re-running NER over it.
-            if initial_title_generation is not None and initial_title_message_id:
+            # `run_initial_title` is True for exactly one process_chat per chat —
+            # the first model of a multi-model fan-out. The outer variables are
+            # shared by every model's call, so gating on them alone would start
+            # one title task per selected model.
+            if run_initial_title and initial_title_generation is not None and initial_title_message_id:
                 await start_initial_title_generation(
                     request,
                     form_data,
@@ -2533,6 +2537,7 @@ async def chat_completion(
                     k: v for k, v in (tasks or {}).items() if k not in (TASKS.TITLE_GENERATION, TASKS.TAGS_GENERATION)
                 }
                 or None,
+                run_initial_title=idx == 0,
             )
             if is_internal:
                 subagent_results.append(await process)
@@ -2572,7 +2577,7 @@ async def chat_completion(
     else:
         # Legacy/direct: single model, synchronous
         metadata['message_id'] = message_ids[0]['message_id']
-        return await process_chat(request, form_data, user, metadata, model, tasks)
+        return await process_chat(request, form_data, user, metadata, model, tasks, run_initial_title=True)
 
 
 # Alias for chat_completion (Legacy)

@@ -3456,7 +3456,14 @@ async def start_initial_title_generation(
     Best-effort by design: a title is not worth failing a chat turn over, so the
     scheduled task swallows its own errors.
     """
-    title_metadata = {**metadata, 'message_id': message_id}
+    # `pii_detections_public` is dropped on purpose. `background_tasks_handler`
+    # replays the PII card bridge (emit + DB upsert) for any ctx that carries it,
+    # and the post-completion handler already does that for this turn — keeping
+    # it would fire the card twice. Nothing the title reads lives under that key.
+    title_metadata = {
+        **{k: v for k, v in metadata.items() if k != 'pii_detections_public'},
+        'message_id': message_id,
+    }
     title_ctx = {
         'request': request,
         'form_data': form_data,
