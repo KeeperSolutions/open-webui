@@ -2443,6 +2443,155 @@ async def connect_mcp_server(
     return client, tool_specs
 
 
+# Holds a reference to each in-flight progress-event task. The event loop keeps
+# only a weak reference to tasks from `asyncio.create_task`, so without this set
+# a task can be garbage-collected before it runs (ruff RUF006).
+# `_pii_progress_task_done` removes each task when it finishes.
+_pii_progress_tasks: set = set()
+
+# Seconds a progress emission waits for the previous emission to finish before
+# it emits anyway (see `_pii_progress_emitter`). Without a limit, one stalled
+# database write would block every later event, including the final `done`
+# event, and the status would stay "in progress". A healthy status write takes
+# milliseconds, so this only triggers when writes are already failing; the
+# events are then emitted unordered instead of not at all.
+_PII_PROGRESS_CHAIN_WAIT_S = 10.0
+
+
+def _pii_progress_task_done(task):
+    _pii_progress_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    # Retrieve and log the exception so asyncio does not warn about an
+    # unretrieved task exception. A failed progress event does not affect
+    # masking.
+    if exc is not None:
+        log.debug(f'[pii_chunking] progress event task failed: {exc}')
+
+
+def _should_emit_pii_progress(done, total):
+    """Return whether a PII-masking progress update should be emitted.
+
+    Every status event rewrites the whole chat row
+    (`Chats.add_message_status_to_chat_by_id_and_message_id`: read the chat,
+    append to `statusHistory`, write it back), so one event per chunk on a
+    large paste means many rewrites of the same row. This limits a run to about
+    twenty events: the opening events (`done` 0 and 1), the final one, and one
+    every ~5% of the chunks in between. The progress bar therefore always
+    starts and always reaches 100%.
+
+    The step uses ceiling division. With floor division, any `total` from 20
+    to 39 gives a step of 1 and emits an event for every chunk.
+    """
+    if done <= 1 or done >= total:
+        return True
+    step = max(1, -(-total // 20))  # ceil(total / 20)
+    return done % step == 0
+
+
+async def _emit_pii_status_after(event_emitter, event, previous_task):
+    """Emit one `pii_masking` status after `previous_task` has finished.
+
+    Uses `asyncio.wait` instead of `await previous_task`, so an earlier
+    emission that raised or was cancelled does not also fail this one (which
+    could be the final `done` event). It also does not retrieve the earlier
+    exception; `_pii_progress_task_done` logs it.
+    """
+    if previous_task is not None:
+        await asyncio.wait({previous_task}, timeout=_PII_PROGRESS_CHAIN_WAIT_S)
+    await event_emitter(event)
+
+
+def _pii_progress_emitter(event_emitter):
+    """Turn the inlet's synchronous `on_progress(done, total)` callback into
+    async status events.
+
+    The callback is called from the chunk-masking tasks and cannot await, so
+    each event is scheduled as a task. The callback never raises: an exception
+    raised inside a chunk task would fail the whole masking request.
+
+    Each emission waits for the previous one to finish. Saving a status event
+    reads the chat row, appends to `statusHistory` and commits, with no row
+    lock (`Chats.add_message_status_to_chat_by_id_and_message_id`). If two
+    emissions overlap, both read the same list and the later commit drops the
+    other's entry. Chunks often finish while an earlier emission is still
+    committing, so overlap is common. If the final `done` event is dropped, the
+    status stays "in progress" in the UI, also after a reload, because
+    `StatusItem.svelte` reads `status.done`.
+
+    Throttling in `_should_emit_pii_progress` reduces the number of events but
+    does not order them. The chain is created per request in
+    `process_chat_payload` and has about twenty links at most. A stalled
+    emission delays later progress events but never the masking itself.
+    """
+
+    # The most recently scheduled emission; the next one waits for it.
+    previous_task = None
+    # Data of the most recently scheduled event, used by `finalize_on_failure`.
+    last_data = None
+
+    def on_progress(done, total):
+        nonlocal previous_task, last_data
+        try:
+            # The throttle check is inside the try as well: comparing a
+            # non-comparable `total` (e.g. None) raises TypeError, which must
+            # not reach the chunk-masking task.
+            if not _should_emit_pii_progress(done, total):
+                return
+            event = {
+                'type': 'status',
+                'data': {
+                    'action': 'pii_masking',
+                    'description': 'Masking sensitive data',
+                    'count': done,
+                    'total': total,
+                    'done': done >= total,
+                },
+            }
+            last_data = event['data']
+            task = asyncio.create_task(_emit_pii_status_after(event_emitter, event, previous_task))
+            previous_task = task
+            _pii_progress_tasks.add(task)
+            task.add_done_callback(_pii_progress_task_done)
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] could not emit progress: {e}')
+
+    async def finalize_on_failure():
+        """Mark the masking status as done after the request has failed.
+
+        A progress event has `done: true` only when `done >= total`. If masking
+        fails (deadline, exhausted chunk retries, pipeline rejection), the last
+        saved `pii_masking` status still has `done: false`. The UI shows the
+        last status (`history.at(-1)` in `StatusHistory.svelte`) as in progress
+        under the error, also after a reload. The error and cancel events sent
+        afterwards end the message but do not change this status.
+
+        Emits nothing if the request reported no progress (the non-chunked
+        path) or if the final event was already sent. The count stays at the
+        last reported value, e.g. 12/40.
+
+        Limited to `_PII_PROGRESS_CHAIN_WAIT_S` and never raises, so it cannot
+        hang or replace the original failure.
+        """
+        try:
+            if last_data is None or last_data.get('done'):
+                return
+            terminal = {'type': 'status', 'data': {**last_data, 'done': True}}
+            # Waits for the last scheduled emission, so this is normally saved
+            # last. `wait_for` also limits the emit call itself, which the
+            # wait inside `_emit_pii_status_after` does not.
+            await asyncio.wait_for(
+                _emit_pii_status_after(event_emitter, terminal, previous_task),
+                timeout=_PII_PROGRESS_CHAIN_WAIT_S,
+            )
+        except Exception as e:  # noqa: BLE001 — must not mask the real failure
+            log.debug(f'[pii_chunking] could not terminate the masking status: {e}')
+
+    on_progress.finalize_on_failure = finalize_on_failure
+    return on_progress
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
     # Ensure chat_id is always a string — external API clients may omit it.
     if not isinstance(metadata.get('chat_id'), str):
@@ -2706,9 +2855,20 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # (refuse when masking is requested but no PII filter can be applied) lives
     # INSIDE process_pipeline_inlet_filter so it covers every inlet caller —
     # this main-chat path AND all task generators — from a single chokepoint.
+    pii_progress = _pii_progress_emitter(event_emitter)
     try:
-        form_data = await process_pipeline_inlet_filter(request, form_data, user, models)
+        form_data = await process_pipeline_inlet_filter(
+            request,
+            form_data,
+            user,
+            models,
+            on_progress=pii_progress,
+        )
     except Exception as e:
+        # All masking failures (deadline, exhausted chunk retries, pipeline
+        # rejection) raise through here, so the open status is closed in this
+        # one place.
+        await pii_progress.finalize_on_failure()
         raise e
 
     if ENABLE_PLUGINS:

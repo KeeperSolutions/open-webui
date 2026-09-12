@@ -65,6 +65,7 @@
 		isYoutubeUrl,
 		displayFileHandler
 	} from '$lib/utils';
+	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { getOutputText } from './Messages/structuredOutput';
@@ -976,7 +977,7 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		if (event.chat_id === $chatId) {
+		if (isEventForLoadedChat(event, $chatId, history?.messages)) {
 			await tick();
 			const type = event?.data?.type ?? null;
 			if (type === 'chat:reload') {
