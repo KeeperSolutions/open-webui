@@ -1,23 +1,19 @@
 from __future__ import annotations
 
-import copy
 import logging
-from typing import Optional
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from mcp.shared.auth import OAuthMetadata
-from open_webui.config import BannerModel, async_save_config, get_config, save_config
+from open_webui.config import BannerModel, async_save_config, get_config
 from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.events import EVENTS, publish_event
-from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import get_custom_headers
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.oauth import (
     OAuthClientInformationFull,
     apply_connection_oauth_options,
-    decrypt_data,
     encrypt_data,
     get_discovery_urls,
     get_oauth_client_info_with_dynamic_client_registration,
@@ -32,7 +28,7 @@ from open_webui.utils.tools import (
     set_terminal_servers,
     set_tool_servers,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 router = APIRouter()
 
@@ -63,6 +59,7 @@ MODELS_CONFIG_KEYS = {
     'DEFAULT_MODELS': 'ui.default_models',
     'DEFAULT_PINNED_MODELS': 'ui.default_pinned_models',
     'MODEL_ORDER_LIST': 'ui.model_order_list',
+    'FEATURED_MODELS': 'ui.featured_models',
     'DEFAULT_MODEL_METADATA': 'models.default_metadata',
     'DEFAULT_MODEL_PARAMS': 'models.default_params',
 }
@@ -619,7 +616,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
 
                                 if oauth_token:
                                     token = oauth_token.get('access_token', '')
-                        except Exception as e:
+                        except Exception:
                             pass
                     if token:
                         headers = {'Authorization': f'Bearer {token}'}
@@ -640,7 +637,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
                     log.debug(f'Failed to create MCP client: {e}')
                     raise HTTPException(
                         status_code=400,
-                        detail=f'Failed to create MCP client',
+                        detail='Failed to create MCP client',
                     )
                 finally:
                     if client:
@@ -663,7 +660,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
                         if oauth_token:
                             token = oauth_token.get('access_token', '')
 
-                except Exception as e:
+                except Exception:
                     pass
 
             if token:
@@ -683,7 +680,7 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
         log.debug(f'Failed to connect to the tool server: {e}')
         raise HTTPException(
             status_code=400,
-            detail=f'Failed to connect to the tool server',
+            detail='Failed to connect to the tool server',
         )
 
 
@@ -738,17 +735,113 @@ async def set_code_execution_config(
 ############################
 # SetDefaultModels
 ############################
+def _validate_featured_models_list(value: list) -> list:
+    # Mirror the field limits enforced in FeaturedModelsModal.svelte so API
+    # clients and config imports can't bypass them:
+    #   provider_name — required, 3–24 chars (drives the model-selector label)
+    #   tags          — up to 3, each at most 10 chars
+    for entry in value:
+        if not isinstance(entry, dict):
+            # A non-object entry (null, a string, ...) can't carry model_id/
+            # provider_name/tags, so there is nothing to validate — but
+            # letting it through unchanged would persist it as-is. The
+            # frontend (buildFeaturedModels in featuredModels.ts) reads
+            # entry.model_id on every entry in the list with no null guard,
+            # so a bad row here breaks the model selector for every user,
+            # not just whoever saved it. Reject rather than skip.
+            raise ValueError(
+                f'each featured model entry must be an object, got {entry!r}'
+            )
+
+        model_id = entry.get('model_id')
+        if not str(model_id or '').strip():
+            raise ValueError('model_id is required for every featured model')
+
+        provider = str(entry.get('provider_name') or '').strip()
+        if not provider:
+            raise ValueError(
+                f"provider_name is required for featured model '{model_id}'"
+            )
+        if not (3 <= len(provider) <= 24):
+            raise ValueError(
+                f"provider_name for featured model '{model_id}' must be "
+                f"3–24 characters"
+            )
+
+        tags = entry.get('tags') or []
+        if not isinstance(tags, list):
+            raise ValueError(f"tags for featured model '{model_id}' must be a list")
+        if len(tags) > 3:
+            raise ValueError(
+                f"featured model '{model_id}' has {len(tags)} tags; at most "
+                f"3 are allowed"
+            )
+        for tag in tags:
+            if len(str(tag)) > 10:
+                raise ValueError(
+                    f"tag '{tag}' for featured model '{model_id}' exceeds "
+                    f"10 characters"
+                )
+    return value
+
+
 class ModelsConfigForm(BaseModel):
     DEFAULT_MODELS: str | None
     DEFAULT_PINNED_MODELS: str | None
     MODEL_ORDER_LIST: list[str | None]
-    FEATURED_MODELS: list = Field(default_factory=list)
+    # Optional and defaulting to None, not []: this form is a general-purpose
+    # "save models config" endpoint used by several admin panels that don't
+    # edit the featured list (model order, defaults, ...). None means "this
+    # request didn't touch FEATURED_MODELS" — set_models_config below leaves
+    # the existing value alone in that case. An explicit [] still clears it.
+    FEATURED_MODELS: list | None = None
     DEFAULT_MODEL_METADATA: dict | None = None
     DEFAULT_MODEL_PARAMS: dict | None = None
+
+    @field_validator('FEATURED_MODELS')
+    @classmethod
+    def _validate_featured_models(cls, value: list | None) -> list | None:
+        if value is None:
+            return value
+        return _validate_featured_models_list(value)
+
+
+class FeaturedModelsForm(BaseModel):
+    FEATURED_MODELS: list = Field(default_factory=list)
+
+    @field_validator('FEATURED_MODELS')
+    @classmethod
+    def _validate_featured_models(cls, value: list) -> list:
+        return _validate_featured_models_list(value)
 
 
 @router.get('/models/featured')
 async def get_featured_models(request: Request, user=Depends(get_verified_user)):
+    return {'FEATURED_MODELS': request.app.state.config.FEATURED_MODELS}
+
+
+@router.post('/models/featured', response_model=FeaturedModelsForm)
+async def set_featured_models(
+    request: Request, form_data: FeaturedModelsForm, user=Depends(get_admin_user)
+):
+    # Updates only ui.featured_models, leaving DEFAULT_MODELS / MODEL_ORDER_LIST
+    # / etc. untouched. `POST /models` (set_models_config below) writes the
+    # entire ModelsConfigForm on every call, so FeaturedModelsModal.svelte used
+    # to save by sending back the full config it had fetched when the modal
+    # opened. If another admin, or another tab, changed any of those fields in
+    # the meantime, that change was lost when this modal saved — reported as
+    # featured entries randomly disappearing or being overwritten. This
+    # endpoint reads and writes only the one field, so saving the featured
+    # list can no longer affect, or be affected by, unrelated config changes.
+    request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS or []
+    await publish_event(
+        request,
+        EVENTS.CONFIG_MODELS_UPDATED,
+        actor=user,
+        subject_id='models',
+        subject_type='config',
+        data={'featured_models_count': len(request.app.state.config.FEATURED_MODELS)},
+    )
     return {'FEATURED_MODELS': request.app.state.config.FEATURED_MODELS}
 
 
@@ -773,7 +866,12 @@ async def set_models_config(request: Request, form_data: ModelsConfigForm, user=
     request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
     request.app.state.config.DEFAULT_PINNED_MODELS = form_data.DEFAULT_PINNED_MODELS
     request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
-    request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS or []
+    # A request that doesn't touch the featured list (most callers of this
+    # endpoint don't) omits FEATURED_MODELS entirely, which lands here as
+    # None — leave the existing value alone in that case rather than clearing
+    # it. An explicit [] still clears it. See the field's own comment.
+    if form_data.FEATURED_MODELS is not None:
+        request.app.state.config.FEATURED_MODELS = form_data.FEATURED_MODELS
     request.app.state.config.DEFAULT_MODEL_METADATA = form_data.DEFAULT_MODEL_METADATA
     request.app.state.config.DEFAULT_MODEL_PARAMS = form_data.DEFAULT_MODEL_PARAMS
     await publish_event(

@@ -49,6 +49,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
+	import Star from '$lib/components/icons/Star.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
@@ -304,6 +305,15 @@
 	const saveModelOrder = async (orderedModelIds: string[]) => {
 		savingModelOrder = true;
 
+		// setModelsConfig (POST /configs/models) writes the whole config form in
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload.
+		// This page's `modelsConfig` is a snapshot loaded on mount; the Featured
+		// Models modal saves through its own dedicated endpoint and doesn't
+		// refresh it, so sending modelsConfig?.FEATURED_MODELS here could
+		// overwrite a featured-list save that happened after this page loaded
+		// with stale data. Omitting the field is safe: the backend
+		// (set_models_config) treats a missing FEATURED_MODELS as "leave it
+		// alone", not "clear it" — see ModelsConfigForm's own comment.
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: defaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: defaultPinnedModelIds.join(','),
@@ -355,6 +365,12 @@
 		defaultModelIds = nextDefaultModelIds;
 		defaultPinnedModelIds = nextDefaultPinnedModelIds;
 
+		// setModelsConfig (POST /configs/models) writes the whole config form in
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload
+		// — see saveModelOrder()'s comment above for why sending the stale
+		// modelsConfig snapshot here would risk overwriting a featured-list save
+		// made after this page loaded. Omitting it is safe: the backend treats a
+		// missing FEATURED_MODELS as "leave it alone", not "clear it".
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: nextDefaultModelIds.join(','),
 			DEFAULT_PINNED_MODELS: nextDefaultPinnedModelIds.join(','),
@@ -766,6 +782,19 @@
 							}
 						}}
 					>
+						{#if $user?.role === 'admin'}
+							<button
+								class="flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-[13px] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
+								type="button"
+								on:click={() => {
+									showFeaturedModelsModal = true;
+								}}
+							>
+								<Star className="size-3.5" strokeWidth="2" />
+								<span>{$i18n.t('Featured models')}</span>
+							</button>
+						{/if}
+
 						<div
 							class="flex w-fit gap-0.5 text-center text-sm rounded-full bg-transparent whitespace-nowrap"
 						>
@@ -833,19 +862,6 @@
 										<Wrench className="size-3.5" />
 										<div class="flex items-center">{$i18n.t('Manage')}</div>
 									</button>
-
-									{#if $user?.role === 'admin'}
-										<button
-											class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"
-											type="button"
-											on:click={() => {
-												showFeaturedModelsModal = true;
-											}}
-										>
-											<Wrench className="size-3.5" />
-											<div class="flex items-center">{$i18n.t('Featured Models')}</div>
-										</button>
-									{/if}
 
 									<button
 										class="flex h-[1.6875rem] w-full cursor-pointer select-none items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] hover:text-gray-900 dark:hover:text-gray-100"

@@ -37,6 +37,20 @@ from open_webui.routers.pipelines import (
 )
 
 
+# These tests exercise fail-closed enforcement, which is only active when
+# PII_FILTER_IDS is non-empty. The module-level value is read from the
+# environment at import time, so a dev/CI shell with `PII_FILTER_IDS=` set
+# (common for local dev without a pipeline running) would otherwise silently
+# turn every assertion here into a no-op. Pin it to the shipped default.
+_PII_FILTER_IDS = {"pii_filter", "pii_filter_pipeline"}
+
+
+@pytest.fixture(autouse=True)
+def _pin_pii_filter_ids():
+    with patch("open_webui.routers.pipelines.PII_FILTER_IDS", set(_PII_FILTER_IDS)):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

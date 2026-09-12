@@ -46,6 +46,30 @@ def _truncate_note_data(data: Optional[dict], max_length: int = 1000) -> Optiona
     return {'content': {'md': md[:max_length]}}
 
 
+def _note_chat_system_prompt(note_id: str) -> str:
+    # Local/small models were observed each failing this instruction a
+    # different way on the same request ("add a pizza recipe to my note"):
+    #   - search_notes: treats an already-known note id as something to look up
+    #   - write_note: creates a brand-new note instead of editing this one
+    #   - no tool call at all: narrates the edit as done without calling anything
+    # The wording below addresses each of those three failure modes explicitly
+    # rather than relying on the model to infer them from a shorter prompt.
+    return (
+        f'CONTEXT:\nCurrent note id: {note_id}\n'
+        'This chat is attached to an EXISTING note — the one with the id above. '
+        'It already exists; do not search for it or ask the user for its id.\n'
+        'For ANY request to add, write, append, rewrite, enhance, shorten, or update '
+        'content (e.g. "add a pizza recipe to my note"): you MUST call view_note '
+        f'with note_id={note_id}, then call replace_note_content with that same '
+        'note_id to make the change. Do not respond with the new content as plain '
+        'text instead of calling these tools.\n'
+        f'NEVER call write_note for this note — write_note creates a DIFFERENT, '
+        f'new note and would not modify note id {note_id}.\n'
+        'Do not say an edit is done, or show the user the new content, unless '
+        'replace_note_content actually returned success.'
+    )
+
+
 ############################
 # GetNotes
 ############################
@@ -346,12 +370,7 @@ async def get_note_chat_by_id(
         if params.pop('note_id', None) is not None:
             changed = True
 
-        system = (
-            f'CONTEXT:\nCurrent note id: {note.id}\n'
-            'This chat is attached to the current note.\n'
-            'For edit requests like make this concise, rewrite, enhance, shorten, or update: call view_note then replace_note_content.\n'
-            'Do not say an edit is done unless replace_note_content succeeds.'
-        )
+        system = _note_chat_system_prompt(note.id)
         if params.get('system') != system:
             params['system'] = system
             changed = True
@@ -377,12 +396,7 @@ async def get_note_chat_by_id(
                 'title': 'Chat',
                 'models': [''],
                 'params': {
-                    'system': (
-                        f'CONTEXT:\nCurrent note id: {note.id}\n'
-                        'This chat is attached to the current note.\n'
-                        'For edit requests like make this concise, rewrite, enhance, shorten, or update: call view_note then replace_note_content.\n'
-                        'Do not say an edit is done unless replace_note_content succeeds.'
-                    )
+                    'system': _note_chat_system_prompt(note.id)
                 },
                 'history': {'messages': {}, 'currentId': None},
                 'messages': [],
@@ -441,12 +455,7 @@ async def get_note_chats_by_id(
         if params.pop('note_id', None) is not None:
             changed = True
 
-        system = (
-            f'CONTEXT:\nCurrent note id: {note.id}\n'
-            'This chat is attached to the current note.\n'
-            'For edit requests like make this concise, rewrite, enhance, shorten, or update: call view_note then replace_note_content.\n'
-            'Do not say an edit is done unless replace_note_content succeeds.'
-        )
+        system = _note_chat_system_prompt(note.id)
         if params.get('system') != system:
             params['system'] = system
             changed = True
@@ -504,12 +513,7 @@ async def create_note_chat_by_id(
                 'title': 'Chat',
                 'models': [''],
                 'params': {
-                    'system': (
-                        f'CONTEXT:\nCurrent note id: {note.id}\n'
-                        'This chat is attached to the current note.\n'
-                        'For edit requests like make this concise, rewrite, enhance, shorten, or update: call view_note then replace_note_content.\n'
-                        'Do not say an edit is done unless replace_note_content succeeds.'
-                    )
+                    'system': _note_chat_system_prompt(note.id)
                 },
                 'history': {'messages': {}, 'currentId': None},
                 'messages': [],

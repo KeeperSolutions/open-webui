@@ -959,7 +959,7 @@
 		aria-label={$i18n.t('Chat history')}
 	>
 		<button
-			class="flex flex-col flex-1 {isWindows ? 'cursor-pointer' : 'cursor-[e-resize]'}"
+			class="flex flex-col flex-1 {isWindows ? 'cursor-pointer' : 'cursor-e-resize'}"
 			on:click={async () => {
 				showSidebar.set(!$showSidebar);
 			}}
@@ -972,7 +972,7 @@
 					<button
 						class="flex size-8.5 items-center justify-center transition group {isWindows
 							? 'cursor-pointer'
-							: 'cursor-[e-resize]'}"
+							: 'cursor-e-resize'}"
 						aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 					>
 						<div
@@ -1817,7 +1817,10 @@
 										{/if}
 										{#if ($billingStatus?.plan_tier === 'team_member' || $billingStatus?.plan_tier === 'team') && $billingStatus?.credits_remaining !== undefined}
 											<div class="text-xs text-gray-400 dark:text-gray-500 text-left">
-												{$i18n.t('Left in pool')}: <span class="font-medium text-gray-700 dark:text-gray-300">{($billingStatus.credits_remaining).toLocaleString()} {$i18n.t('cr')}</span>
+												{$i18n.t('Left in pool')}:
+												<span class="font-medium text-gray-700 dark:text-gray-300"
+													>{$billingStatus.credits_remaining.toLocaleString()} {$i18n.t('cr')}</span
+												>
 											</div>
 										{/if}
 									{:else}

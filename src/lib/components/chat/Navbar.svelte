@@ -19,6 +19,7 @@
 	import { goto } from '$app/navigation';
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
+	import ModelSelector from '../chat/ModelSelector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
@@ -47,6 +48,8 @@
 	export let chat;
 	export let history;
 	export let title = '';
+	export let selectedModels = [''];
+	export let showModelSelector = true;
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
 	export let deleteChatHandler: (id: string) => void;
@@ -114,8 +117,14 @@
 				<div
 					class="flex-1 overflow-hidden max-w-full mt-0.5 py-0.5 pl-1 {$showSidebar ? 'ml-1' : ''}"
 				>
-					{#if chat?.id}
-						<div class="flex max-w-full min-w-0 items-center gap-2 mr-2">
+					<div class="flex max-w-full min-w-0 items-center gap-4 mr-4">
+						{#if showModelSelector}
+							<div class="flex min-w-0 max-w-[13rem] shrink items-center sm:max-w-[16rem]">
+								<ModelSelector bind:selectedModels />
+							</div>
+						{/if}
+
+						{#if chat?.id}
 							<div
 								class="min-w-0 truncate py-1 text-left text-[15px] font-normal text-gray-700 dark:text-gray-300"
 							>
@@ -153,16 +162,8 @@
 									</button>
 								</Menu>
 							{/if}
-						</div>
-					{:else}
-						<div class="pointer-events-none invisible flex max-w-full min-w-0 items-center gap-2">
-							<div
-								class="min-w-0 truncate py-1 text-left text-[15px] font-normal text-gray-700 dark:text-gray-300"
-							>
-								{$i18n.t('New Chat')}
-							</div>
-						</div>
-					{/if}
+						{/if}
+					</div>
 				</div>
 
 				<div class="mr-1 flex flex-none items-center gap-2 self-center">

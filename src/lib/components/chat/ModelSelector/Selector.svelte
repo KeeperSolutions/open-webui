@@ -15,6 +15,8 @@
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
 	import { deleteModelById } from '$lib/apis/models';
 	import { unloadModel } from '$lib/apis';
+	import { getFeaturedModels } from '$lib/apis/configs';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import {
 		user,
@@ -24,22 +26,26 @@
 		settings,
 		config,
 		showSettings,
-		mobile
+		mobile,
+		theme
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+	import { resolveTheme } from '$lib/utils/theme';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { getModels } from '$lib/apis';
 
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import HgIconChevronRight from '$lib/components/icons/HgIconChevronRight.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import Keyframes from '$lib/components/icons/Keyframes.svelte';
-	import TagSelector from '$lib/components/workspace/common/TagSelector.svelte';
 
 	import ModelItem from './ModelItem.svelte';
+	import { buildFeaturedModels, featuredToItem } from './featuredModels';
+	import { isDefaultModel as isDefaultModelId, toggleDefaultModel } from './defaultModel';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -64,12 +70,10 @@
 		[key: string]: any;
 	}[] = [];
 
-	export let className = 'w-[20rem]';
+	export let className = 'w-[400px]';
 	export let triggerClassName = 'text-lg';
 	export let placement: 'top' | 'bottom' | 'auto' = 'bottom';
 	export let align: 'start' | 'end' = 'start';
-	export let showSetDefault = false;
-	export let onSetDefault: () => Promise<void> | void = () => {};
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
 
@@ -179,6 +183,16 @@
 		if (show) {
 			searchValue = '';
 			listScrollTop = 0;
+			// Re-fetch on every open because fetch goes stale the moment an
+			// admin edits the featured list elsewhere (e.g. the Featured Models
+			// modal, which saves through its own endpoint and has no way to notify
+			// this component).
+			loadFeaturedModels();
+			// Open on the Featured pill whenever there are featured models to show,
+			// regardless of whether the current/default model is one of them. The
+			// reactive block above re-applies this if the fetch resolves later.
+			connectionTypeTouched = false;
+			selectedConnectionType = featuredModels.length > 0 ? 'featured' : '';
 			resetView();
 			updatePosition();
 			await tick();
@@ -227,12 +241,59 @@
 			: selectedModel.label
 		: placeholder;
 
+	// Split the selected model's label at its first space so the trigger can render
+	// "Head – tail" (e.g. "GPT-5.2 – chat-latest"). Compare mode keeps the flat label.
+	$: showSplitLabel = !!selectedModel && !(compareEnabled && selectedCount > 1);
+	$: selectedNameHead = (() => {
+		if (!showSplitLabel) return '';
+		const label = (selectedModel.label ?? '').trim();
+		const spaceIdx = label.indexOf(' ');
+		return spaceIdx === -1 ? label : label.slice(0, spaceIdx);
+	})();
+	$: selectedNameTail = (() => {
+		if (!showSplitLabel) return '';
+		const label = (selectedModel.label ?? '').trim();
+		const spaceIdx = label.indexOf(' ');
+		return spaceIdx === -1 ? '' : label.slice(spaceIdx + 1).trim();
+	})();
+
+	$: resolvedTheme = resolveTheme($theme);
+
 	let searchValue = '';
 
 	let selectedTag = '';
 	let selectedConnectionType = '';
-	let selectedFilter = '';
-	let modelFilterItems = [];
+	// Set once the user picks a pill by hand while the dropdown is open, so a
+	// late-arriving featured-models fetch doesn't yank them off their choice.
+	let connectionTypeTouched = false;
+
+	// Featured Models (TRAU-469): admin-curated list, shown first under a "Featured" pill.
+	let featuredModelsConfig: import('./featuredModels').FeaturedModelConfig[] = [];
+	$: featuredModels = buildFeaturedModels(featuredModelsConfig, items, includeHidden);
+
+	// Featured models load async (see loadFeaturedModels), often after the dropdown
+	// has already opened. Once they arrive, snap to the Featured pill — unless the
+	// user has already chosen a different pill this time it was opened.
+	$: if (show && !connectionTypeTouched && featuredModels.length > 0 && !searchValue) {
+		selectedConnectionType = 'featured';
+	}
+
+	const loadFeaturedModels = async () => {
+		if (!localStorage.token) return;
+		try {
+			const config = await getFeaturedModels(localStorage.token);
+			const entries = config?.FEATURED_MODELS;
+			// Assign on any array response, including []: an admin removing the
+			// last featured entry is a valid, real update, not a fetch failure —
+			// the old `entries.length > 0` guard here left a removed-to-empty
+			// list stuck showing its last non-empty snapshot until page reload.
+			if (Array.isArray(entries)) {
+				featuredModelsConfig = entries;
+			}
+		} catch {
+			// non-blocking — featured models are best-effort
+		}
+	};
 
 	let ollamaVersion = null;
 	let selectedModelIdx = 0;
@@ -298,6 +359,10 @@
 							return item.model?.connection_type === 'external';
 						} else if (selectedConnectionType === 'direct') {
 							return item.model?.direct;
+						} else if (selectedConnectionType === 'featured') {
+							// The Featured pill renders the curated `featuredModels` list in its
+							// own template block — the normal list must be empty in that mode.
+							return false;
 						}
 					})
 			: items
@@ -318,9 +383,18 @@
 							return item.model?.connection_type === 'external';
 						} else if (selectedConnectionType === 'direct') {
 							return item.model?.direct;
+						} else if (selectedConnectionType === 'featured') {
+							// The Featured pill renders the curated `featuredModels` list in its
+							// own template block — the normal list must be empty in that mode.
+							return false;
 						}
 					})
 	).filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false));
+
+	// Typing a search leaves the Featured pill (search results come from filteredItems).
+	$: if (searchValue && selectedConnectionType === 'featured') {
+		selectedConnectionType = '';
+	}
 
 	$: if (
 		selectedTag !== undefined ||
@@ -330,48 +404,19 @@
 		resetView();
 	}
 
-	$: modelFilterItems = [
-		...(items.find((item) => item.model?.connection_type === 'local')
-			? [{ value: 'connection:local', label: $i18n.t('Local') }]
-			: []),
-		...(items.find((item) => item.model?.connection_type === 'external')
-			? [{ value: 'connection:external', label: $i18n.t('External') }]
-			: []),
-		...(items.find((item) => item.model?.direct)
-			? [{ value: 'connection:direct', label: $i18n.t('Direct') }]
-			: []),
-		...tags.map((tag) => ({ value: `tag:${tag}`, label: tag }))
-	];
-
-	$: selectedFilter = selectedConnectionType
-		? `connection:${selectedConnectionType}`
-		: selectedTag
-			? `tag:${selectedTag}`
-			: '';
-
-	const setModelFilter = (filterValue: string) => {
-		if (!filterValue) {
-			selectedConnectionType = '';
-			selectedTag = '';
-		} else if (filterValue.startsWith('connection:')) {
-			selectedConnectionType = filterValue.replace('connection:', '');
-			selectedTag = '';
-		} else if (filterValue.startsWith('tag:')) {
-			selectedConnectionType = '';
-			selectedTag = filterValue.replace('tag:', '');
-		}
-	};
-
 	const resetView = async () => {
 		await tick();
 
-		const selectedInFiltered = filteredItems.findIndex((item) => item.value === primaryValue);
+		const onFeatured = selectedConnectionType === 'featured';
+		const selectedInList = onFeatured
+			? featuredModels.findIndex((entry) => entry.model_id === primaryValue)
+			: filteredItems.findIndex((item) => item.value === primaryValue);
 
-		if (selectedInFiltered >= 0) {
+		if (selectedInList >= 0) {
 			// The selected model is visible in the current filter
-			selectedModelIdx = selectedInFiltered;
+			selectedModelIdx = selectedInList;
 		} else {
-			// The selected model is not visible, default to first item in filtered list
+			// The selected model is not visible, default to first item in the list
 			selectedModelIdx = 0;
 		}
 
@@ -426,8 +471,28 @@
 		show = false;
 	};
 
-	const setDefaultHandler = async () => {
-		await onSetDefault();
+	$: isDefaultModel = (modelId: string) => isDefaultModelId($settings, modelId);
+
+	// Per-model "Set as default" from the row menu. Toggling off clears the saved
+	// default entirely — the next new chat then falls back to the admin server
+	// default (DEFAULT_MODELS), or the first available model if none is configured.
+	const setDefaultHandler = async (modelId: string) => {
+		const result = toggleDefaultModel($settings, modelId);
+		if (!result) return;
+		// Persist first — updateUserSettings throws on failure (network error or
+		// a non-ok response). Only update the local store and report success
+		// once the save is actually confirmed; otherwise the UI would mark this
+		// model as the default (used for every new chat) even though it was
+		// never saved, silently reverting on the next reload.
+		try {
+			await updateUserSettings(localStorage.token, { ui: result.nextSettings });
+			settings.set(result.nextSettings);
+			toast.success(
+				result.cleared ? $i18n.t('Default model unset') : $i18n.t('Default model updated')
+			);
+		} catch (error) {
+			toast.error($i18n.t('Failed to update settings'));
+		}
 	};
 
 	const pullModelHandler = async () => {
@@ -571,6 +636,8 @@
 			// Remove duplicates and sort
 			tags = Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
 		}
+
+		loadFeaturedModels();
 
 		window.addEventListener('scroll', handleScroll, true);
 		window.visualViewport?.addEventListener('resize', scheduleSettledPositionUpdates);
@@ -741,7 +808,7 @@
 		on:click={toggleOpen}
 	>
 		<div
-			class="flex w-full min-w-0 text-left px-0.5 bg-transparent {triggerClassName} justify-between {($settings?.highContrastMode ??
+			class="flex w-full min-w-0 items-center justify-between gap-2 text-left px-0.5 bg-transparent {triggerClassName} {($settings?.highContrastMode ??
 			false)
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"
@@ -754,8 +821,31 @@
 				);
 			}}
 		>
-			<span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
-			<ChevronDown className="ml-1 size-2.5 shrink-0 self-center" strokeWidth="2.5" />
+			<div class="flex min-w-0 items-center gap-2">
+				{#if selectedModel}
+					<img
+						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${encodeURIComponent(
+							selectedModel.value
+						)}&theme=${resolvedTheme}&lang=${$i18n.language}`}
+						alt=""
+						class="size-5 rounded-full shrink-0"
+						loading="lazy"
+					/>
+					{#if showSplitLabel}
+						<span class="truncate">
+							<span class="text-hg-text-primary dark:text-gray-100">{selectedNameHead}</span
+							>{#if selectedNameTail}<span class="text-hg-text-tertiary dark:text-gray-500">
+									{' '}– {selectedNameTail}</span
+								>{/if}
+						</span>
+					{:else}
+						<span class="min-w-0 truncate">{triggerLabel}</span>
+					{/if}
+				{:else}
+					<span class="text-hg-text-tertiary dark:text-gray-400 truncate">{placeholder}</span>
+				{/if}
+			</div>
+			<HgIconChevronRight class="shrink-0 size-5 text-hg-orange dark:text-gray-400 rotate-90" />
 		</div>
 	</button>
 
@@ -768,85 +858,242 @@
 			<div
 				bind:this={panelElement}
 				class="z-40 {className ??
-					'w-[20rem]'} max-w-[calc(100vw-1rem)] justify-start rounded-xl border border-gray-100 bg-white p-0.5 shadow-lg outline-hidden dark:border-gray-800 dark:bg-gray-850 dark:text-white flex flex-col overflow-hidden"
+					'w-[400px]'} max-w-[calc(100vw-1rem)] justify-start rounded-2xl border border-hg-border-subtle bg-white shadow-lg outline-hidden dark:border-gray-800 dark:bg-gray-850 dark:text-white flex flex-col overflow-hidden"
 				style={dropdownPosition.maxHeight ? `max-height: ${dropdownPosition.maxHeight}px;` : ''}
 				transition:flyAndScale
 			>
 				<slot>
 					{#if searchEnabled}
-						<div class="my-0.5 flex ml-2 mr-0.5 h-[1.6875rem] shrink-0 items-center gap-2">
-							<Search className=" size-3.5 shrink-0" strokeWidth="2" />
+						<div class="p-3 border-b border-hg-border-subtle dark:border-gray-800">
+							<div
+								class="flex items-center gap-2 h-[44px] px-2 rounded-hg-md border border-hg-border dark:border-gray-700 bg-hg-bg-surface dark:bg-gray-900"
+							>
+								<Search
+									className="size-5 shrink-0 text-hg-text-tertiary dark:text-gray-500"
+									strokeWidth="2"
+								/>
 
-							<input
-								id="model-search-input"
-								bind:value={searchValue}
-								class="w-full bg-transparent text-[13px] font-normal outline-hidden placeholder:text-gray-400 dark:placeholder:text-gray-500"
-								placeholder={searchPlaceholder}
-								autocomplete="off"
-								aria-label={$i18n.t('Search In Models')}
-								on:keydown={(e) => {
-									if (e.code === 'Enter' && filteredItems.length > 0) {
-										selectItem(filteredItems[selectedModelIdx], selectedModelIdx);
-										return; // dont need to scroll on selection
-									} else if (e.code === 'ArrowDown') {
-										e.stopPropagation();
-										selectedModelIdx = Math.min(selectedModelIdx + 1, filteredItems.length - 1);
-									} else if (e.code === 'ArrowUp') {
-										e.stopPropagation();
-										selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
-									} else {
-										// if the user types something, reset to the top selection.
-										selectedModelIdx = 0;
-									}
+								<input
+									id="model-search-input"
+									bind:value={searchValue}
+									class="flex-1 min-w-0 text-sm bg-transparent outline-hidden text-hg-text-primary dark:text-gray-100 placeholder:text-hg-text-tertiary dark:placeholder:text-gray-500"
+									placeholder={searchPlaceholder}
+									autocomplete="off"
+									aria-label={$i18n.t('Search In Models')}
+									on:keydown={(e) => {
+										const onFeatured = selectedConnectionType === 'featured';
+										const activeList = onFeatured ? featuredModels : filteredItems;
+										if (e.code === 'Enter' && activeList.length > 0) {
+											const chosen = onFeatured
+												? featuredToItem(featuredModels[selectedModelIdx], items)
+												: filteredItems[selectedModelIdx];
+											selectItem(chosen, selectedModelIdx);
+											return; // dont need to scroll on selection
+										} else if (e.code === 'ArrowDown') {
+											e.stopPropagation();
+											selectedModelIdx = Math.min(selectedModelIdx + 1, activeList.length - 1);
+										} else if (e.code === 'ArrowUp') {
+											e.stopPropagation();
+											selectedModelIdx = Math.max(selectedModelIdx - 1, 0);
+										} else {
+											// if the user types something, reset to the top selection.
+											selectedModelIdx = 0;
+										}
 
-									const item = document.querySelector(`[data-arrow-selected="true"]`);
-									item?.scrollIntoView({
-										block: 'center',
-										inline: 'nearest',
-										behavior: 'instant'
-									});
-								}}
-							/>
+										const item = document.querySelector(`[data-arrow-selected="true"]`);
+										item?.scrollIntoView({
+											block: 'center',
+											inline: 'nearest',
+											behavior: 'instant'
+										});
+									}}
+								/>
 
-							{#if modelFilterItems.length > 0 || (multipleEnabled && items.length > 0)}
-								<div class="flex min-w-0 shrink-0 items-center gap-0.5">
-									{#if multipleEnabled && items.length > 0}
-										<Tooltip content={$i18n.t('Compare')}>
-											<button
-												type="button"
-												class="flex size-[1.375rem] shrink-0 items-center justify-center rounded-lg transition-colors duration-100 {compareEnabled
-													? 'bg-gray-50 text-gray-700 hover:bg-gray-50 dark:bg-gray-800/60 dark:text-gray-200 dark:hover:bg-gray-800/60'
-													: 'text-gray-500 hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200'}"
-												aria-label={$i18n.t('Compare')}
-												aria-pressed={compareEnabled}
-												on:click={() => {
-													setCompareEnabled(!compareEnabled);
-												}}
-											>
-												<Keyframes className="size-3" strokeWidth="2" />
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#if modelFilterItems.length > 0}
-										<TagSelector
-											bind:value={selectedFilter}
-											placeholder={$i18n.t('All')}
-											align="end"
-											items={modelFilterItems}
-											triggerClass="relative flex h-[1.375rem] max-w-32 items-center gap-0.5 rounded-xl bg-transparent px-1.5 text-[11px] font-normal text-gray-400 transition-colors duration-100 hover:bg-gray-50/40 hover:text-gray-600 dark:text-gray-500 dark:hover:bg-gray-800/40 dark:hover:text-gray-300"
-											itemClass="flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[13px] capitalize hover:bg-gray-50/40 hover:text-gray-900 dark:hover:bg-gray-800/40 dark:hover:text-gray-100"
-											contentClass="min-w-36 model-selector-child-menu"
-											onChange={setModelFilter}
-										/>
-									{/if}
-								</div>
-							{/if}
+								{#if multipleEnabled && items.length > 0}
+									<Tooltip content={$i18n.t('Compare')}>
+										<button
+											type="button"
+											class="flex size-[1.375rem] shrink-0 items-center justify-center rounded-lg transition-colors duration-100 {compareEnabled
+												? 'bg-gray-100 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200'
+												: 'text-hg-text-tertiary hover:text-hg-text-primary dark:text-gray-400 dark:hover:text-gray-200'}"
+											aria-label={$i18n.t('Compare')}
+											aria-pressed={compareEnabled}
+											on:click={() => {
+												setCompareEnabled(!compareEnabled);
+											}}
+										>
+											<Keyframes className="size-3" strokeWidth="2" />
+										</button>
+									</Tooltip>
+								{/if}
+							</div>
 						</div>
 					{/if}
 
+					{#if items.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false)).length > 0}
+						<div
+							class="flex gap-1 p-3 border-b border-hg-border-subtle dark:border-gray-800 overflow-x-auto scrollbar-none"
+							on:wheel={(e) => {
+								if (e.deltaY !== 0) {
+									e.preventDefault();
+									e.currentTarget.scrollLeft += e.deltaY;
+								}
+							}}
+						>
+							<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+							<div
+								class="flex gap-1 w-fit whitespace-nowrap"
+								on:click={() => {
+									connectionTypeTouched = true;
+								}}
+							>
+								{#if featuredModels.length > 0 && !searchValue}
+									<button
+										type="button"
+										class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+										'featured'
+											? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+											: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+										aria-pressed={selectedConnectionType === 'featured'}
+										on:click={() => {
+											selectedTag = '';
+											selectedConnectionType = 'featured';
+										}}
+									>
+										{$i18n.t('Featured')}
+									</button>
+								{/if}
+
+								{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.direct) || tags.length > 0 || featuredModels.length > 0}
+									<button
+										type="button"
+										class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag ===
+											'' && selectedConnectionType === ''
+											? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+											: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+										aria-pressed={selectedTag === '' && selectedConnectionType === ''}
+										on:click={() => {
+											selectedConnectionType = '';
+											selectedTag = '';
+										}}
+									>
+										{$i18n.t('All')}
+									</button>
+								{/if}
+
+								{#if items.find((item) => item.model?.connection_type === 'local')}
+									<button
+										type="button"
+										class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+										'local'
+											? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+											: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+										aria-pressed={selectedConnectionType === 'local'}
+										on:click={() => {
+											selectedTag = '';
+											selectedConnectionType = 'local';
+										}}
+									>
+										{$i18n.t('Local')}
+									</button>
+								{/if}
+
+								<!--
+									External pill hidden intentionally — every OpenAI-compatible model is
+									"external" by default, so the pill is redundant noise. Kept for reference;
+									restore by uncommenting and adding `external` back to the filter switch.
+
+									{#if items.find((item) => item.model?.connection_type === 'external')}
+										<button
+											type="button"
+											class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType === 'external'
+												? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+												: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+											aria-pressed={selectedConnectionType === 'external'}
+											on:click={() => { selectedTag = ''; selectedConnectionType = 'external'; }}
+										>
+											{$i18n.t('External')}
+										</button>
+									{/if}
+								-->
+
+								{#if items.find((item) => item.model?.direct)}
+									<button
+										type="button"
+										class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedConnectionType ===
+										'direct'
+											? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+											: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+										aria-pressed={selectedConnectionType === 'direct'}
+										on:click={() => {
+											selectedTag = '';
+											selectedConnectionType = 'direct';
+										}}
+									>
+										{$i18n.t('Direct')}
+									</button>
+								{/if}
+
+								{#each tags as tag}
+									<Tooltip content={tag}>
+										<button
+											type="button"
+											class="shrink-0 h-8 px-3 rounded-full text-xs font-hg-body outline-none transition capitalize {selectedTag ===
+											tag
+												? 'bg-hg-text-primary dark:bg-gray-100 text-white dark:text-gray-900'
+												: 'bg-hg-bg-muted dark:bg-gray-800 border border-hg-border dark:border-gray-700 text-hg-text-tertiary dark:text-gray-400 hover:text-hg-text-primary dark:hover:text-gray-100'}"
+											aria-pressed={selectedTag === tag}
+											on:click={() => {
+												selectedConnectionType = '';
+												selectedTag = tag;
+											}}
+										>
+											{tag.length > 16 ? `${tag.slice(0, 16)}...` : tag}
+										</button>
+									</Tooltip>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<div class="px-3 pt-3 pb-2">
+						<p class="text-sm text-hg-text-tertiary dark:text-gray-500">{$i18n.t('AI Models')}</p>
+					</div>
+
 					<div class="group relative flex min-h-0 flex-1 flex-col">
-						{#if filteredItems.length === 0}
+						{#if selectedConnectionType === 'featured'}
+							<div
+								class="min-h-0 flex-1 overflow-y-auto"
+								style="max-height: 288px;"
+								role="listbox"
+								aria-label={$i18n.t('Featured models')}
+							>
+								{#each featuredModels as entry, index (entry.model_id)}
+									<ModelItem
+										featured
+										{selectedModelIdx}
+										item={featuredToItem(entry, items)}
+										{index}
+										value={primaryValue}
+										{pinModelHandler}
+										{unloadModelHandler}
+										{deleteModelHandler}
+										{selectionOnly}
+										{compareEnabled}
+										{selectedValues}
+										{setDefaultHandler}
+										isDefault={isDefaultModel(entry.model_id)}
+										onClick={() => {
+											selectItem(featuredToItem(entry, items), index);
+										}}
+									/>
+								{:else}
+									<div class="block px-3 py-2 text-[13px] text-gray-700 dark:text-gray-100">
+										{$i18n.t('No featured models available')}
+									</div>
+								{/each}
+							</div>
+						{:else if filteredItems.length === 0}
 							{#if items.length === 0 && $user?.role === 'admin'}
 								<div
 									class="my-2 flex w-full flex-col items-start justify-center px-4 py-3 text-start"
@@ -904,6 +1151,8 @@
 										{selectionOnly}
 										{compareEnabled}
 										{selectedValues}
+										{setDefaultHandler}
+										isDefault={isDefaultModel(item.value)}
 										onClick={() => {
 											selectItem(item, index);
 										}}
@@ -998,25 +1247,15 @@
 						{/each}
 					</div>
 
-					{#if showSetDefault}
-						<div class="flex shrink-0 items-center justify-end px-2 py-1 leading-none">
-							<button
-								type="button"
-								class="text-[0.65rem] font-normal leading-none text-gray-500 underline-offset-2 transition-colors duration-100 hover:text-gray-700 hover:underline dark:text-gray-500 dark:hover:text-gray-300"
-								on:click|stopPropagation={setDefaultHandler}
-							>
-								{$i18n.t('Set as default')}
-							</button>
-						</div>
-					{:else}
-						<div class="shrink-0 pb-1"></div>
-					{/if}
+					<div class="shrink-0 pb-1"></div>
 
-					<div class="hidden w-[42rem]" />
-					<div class="hidden w-[28rem]" />
-					<div class="hidden w-[24rem]" />
-					<div class="hidden w-[22rem]" />
-					<div class="hidden w-[20rem]" />
+					<!-- Tailwind JIT hints: `className` is a dynamic prop, keep the widths it may take. -->
+					<div class="hidden w-[400px]"></div>
+					<div class="hidden w-[42rem]"></div>
+					<div class="hidden w-[28rem]"></div>
+					<div class="hidden w-[24rem]"></div>
+					<div class="hidden w-[22rem]"></div>
+					<div class="hidden w-[20rem]"></div>
 				</slot>
 			</div>
 		</div>

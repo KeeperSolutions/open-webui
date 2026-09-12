@@ -660,6 +660,41 @@ export const getFeaturedModels = async (token: string) => {
 	return res;
 };
 
+// Saves only FEATURED_MODELS. setModelsConfig (POST /configs/models) writes
+// the entire ModelsConfigForm — defaults, model order, and featured models —
+// in one call, so FeaturedModelsModal previously had to send back a full
+// snapshot fetched when the modal opened. If another admin (or another tab)
+// changed any of those fields in the meantime, that change was lost when this
+// modal saved. This endpoint updates the featured list in isolation, so
+// saving it can no longer affect or be affected by unrelated config changes.
+export const setFeaturedModels = async (token: string, featuredModels: unknown[]) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/models/featured`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ FEATURED_MODELS: featuredModels })
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getModelsDefaults = async (token: string) => {
 	let error = null;
 
