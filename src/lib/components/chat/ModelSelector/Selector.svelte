@@ -183,6 +183,11 @@
 		if (show) {
 			searchValue = '';
 			listScrollTop = 0;
+			// Re-fetch on every open because fetch goes stale the moment an
+			// admin edits the featured list elsewhere (e.g. the Featured Models
+			// modal, which saves through its own endpoint and has no way to notify
+			// this component).
+			loadFeaturedModels();
 			// Open on the Featured pill whenever there are featured models to show,
 			// regardless of whether the current/default model is one of them. The
 			// reactive block above re-applies this if the fetch resolves later.
@@ -278,7 +283,11 @@
 		try {
 			const config = await getFeaturedModels(localStorage.token);
 			const entries = config?.FEATURED_MODELS;
-			if (Array.isArray(entries) && entries.length > 0) {
+			// Assign on any array response, including []: an admin removing the
+			// last featured entry is a valid, real update, not a fetch failure —
+			// the old `entries.length > 0` guard here left a removed-to-empty
+			// list stuck showing its last non-empty snapshot until page reload.
+			if (Array.isArray(entries)) {
 				featuredModelsConfig = entries;
 			}
 		} catch {

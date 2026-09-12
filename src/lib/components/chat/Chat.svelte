@@ -105,6 +105,7 @@
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
+	import ModelSelector from '$lib/components/chat/ModelSelector.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -3867,6 +3868,9 @@
 									onSelectChat={onSelectEmbeddedChat}
 									onDeleteChat={onDeleteEmbeddedChat}
 								/>
+							</div>
+							<div class="flex min-w-0 shrink items-center gap-1">
+								<ModelSelector bind:selectedModels triggerClassName="text-sm" align="end" />
 							</div>
 							<Tooltip content={$i18n.t('Close')} placement="bottom">
 								<button
