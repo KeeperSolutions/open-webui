@@ -358,7 +358,16 @@ export const updateUserSettings = async (token: string, settings: object) => {
 		})
 		.catch((err) => {
 			console.error(err);
-			error = err.detail;
+			// A non-ok HTTP response lands here with a real `.detail` from the
+			// server. A network-level failure (offline, DNS, connection refused
+			// — fetch() itself rejecting) lands here too, but as a bare
+			// TypeError with no `.detail`, so `err.detail` is undefined —
+			// falsy, so the `if (error)` check below used to skip the throw
+			// entirely and this call site would return null having actually
+			// failed. Callers (e.g. Selector.svelte's setDefaultHandler) rely
+			// on this throwing on ANY failure to avoid reporting success
+			// (and updating local state) when the save never reached the server.
+			error = err?.detail ?? err?.message ?? 'Network error';
 			return null;
 		});
 
