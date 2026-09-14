@@ -2398,7 +2398,13 @@ async def chat_completion(
                         )
 
                 except Exception:
-                    pass
+                    # The two events above are how the client learns the turn
+                    # has ended: `chat:message:error` shows the error and
+                    # `chat:tasks:cancel` stops the spinner. If they are not
+                    # delivered, the spinner keeps running and the error only
+                    # appears after a page reload, so log the failure instead
+                    # of ignoring it.
+                    log.exception('Failed to deliver the chat error to the client')
             else:
                 # No chat_id/message_id → legacy/direct API path with no
                 # WebSocket error channel.  We must surface the error as
