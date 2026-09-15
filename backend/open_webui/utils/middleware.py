@@ -1043,16 +1043,6 @@ class PiiMaskingBlockedError(Exception):
     """
 
 
-# DoS guard: max accumulated source text (sum of chunk lengths) per source that
-# we will route through the Presidio inlet. Over this -> fail-closed (block).
-# Superseded by the shared wall-clock budget (`PII_INLET_TOTAL_BUDGET_S` /
-# `max_maskable_chars`). A fixed character wall was the wrong shape for the
-# problem: 50 000 characters is ~15 pages, so the identical document was
-# refused as an attachment and accepted as a prompt, where the budget allowed
-# five times as much. Kept as a name only because a stale import elsewhere
-# should fail loudly rather than silently re-introduce the wall.
-MAX_SOURCE_TEXT_CHARS = None
-
 # TRAU-513: a single external-pipeline masking call silently truncates its input
 # at the pipeline's tokenizer cap (~512 tokens). A source document longer than
 # that would lose its tail — PII past the cutoff never reaches analyze(). The
@@ -1067,14 +1057,10 @@ MAX_SOURCE_TEXT_CHARS = None
 # 1800s that must stay equal is a bug waiting for someone to change one.
 PII_MASK_CHUNK_CHARS = PII_INLET_CHUNK_CHARS
 
-# Ingest scan ONLY: how many sub-chunk masking POSTs to run concurrently against
-# the external pipeline. The scan discards masked text and uses only detection
-# spans, so vault races on the synthetic per-file key are harmless and order does
-# not matter — concurrency is safe here. It is deliberately NOT applied to the
-# chat-time masking path (which must stay sequential to keep masked-text order and
-# thread-vault placeholder numbering correct).
-# Kept modest: the external pipeline is a scale-to-zero Cloud Run service, so a
-# big fan-out triggers many cold-start instances and hurts more than it helps.
+# Concurrent masking requests per file for the ingest scan. The scan keeps only
+# detection spans, so the order in which chunks finish does not matter.
+# Send-time masking has its own limit, `PII_INLET_CONCURRENCY`. Kept low because
+# a large fan-out makes the pipeline start many instances at once.
 PII_SCAN_CONCURRENCY = 3
 
 # Ingest scan ONLY: hard cap on how much of a file's text we route through the
@@ -1145,13 +1131,6 @@ def _pii_debug_dump(header: str, blocks: list, context_string: str):
     except Exception as e:
         log.warning("[PII-DEBUG] could not write dump file %s: %s", PII_DEBUG_FILE, e)
 
-# User-visible message emitted on the tool/agentic path when masking is blocked.
-PII_MASKING_BLOCK_MESSAGE = (
-    "Request blocked: attachment/tool content could not be PII-masked "
-    "(masking service unavailable). No unmasked data was sent to the model."
-)
-
-
 # Masked source documents, remembered per chat so an attachment is masked ONCE
 # instead of on every turn. Measured on staging: a 167 460-char attachment cost
 # 106.4s of masking, and `apply_source_context_to_messages` rebuilt and re-masked
@@ -1177,9 +1156,9 @@ PII_MASKING_BLOCK_MESSAGE = (
 # never correctness, so there is no cache-invalidation surface to get wrong.
 PII_SOURCE_CACHE_MAX_ENTRIES = 256
 
-# Total masked text held across all entries. 20 MB is ~120 documents the size of
-# the one measured above; past it the least-recently-used entries are dropped.
-# A bound on entry COUNT alone would not do — one entry can be a megabyte.
+# Upper bound on the total characters of masked text held in the cache. Past it
+# the least-recently-used entries are dropped. A limit on the entry count alone
+# is not enough, because one entry can hold a whole document.
 PII_SOURCE_CACHE_MAX_CHARS = 20_000_000
 
 _masked_source_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
@@ -1631,7 +1610,8 @@ async def scan_file_content_for_pii(
     # (bounded by PII_SCAN_CONCURRENCY). For a large document this turns ~100 serial
     # round-trips into a handful of parallel batches (minutes -> tens of seconds).
     pieces = split_text_for_pii(content)
-    # total scales with the (bounded-concurrency) number of sub-chunk POSTs.
+    # Applied per request by the session below: `total` limits one masking
+    # request to 120 seconds, including connecting and reading the response.
     timeout = aiohttp.ClientTimeout(
         sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=120
     )

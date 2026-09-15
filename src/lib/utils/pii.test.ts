@@ -448,7 +448,7 @@ describe('piiIngestScanEnabled', () => {
 	});
 
 	it('ignores a non-boolean value rather than treating it as on', () => {
-		// Waiting for a scan that will never write costs four extra fetches of the
+		// Waiting for a scan that will never write costs five extra fetches of the
 		// FULL file content; a malformed field must not switch that back on.
 		setConfig({ pii_ingest_scan: 'yes' });
 		expect(piiIngestScanEnabled()).toBe(false);

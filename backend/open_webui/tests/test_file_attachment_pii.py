@@ -214,13 +214,11 @@ def test_u1_fail_closed_file_connection_refused():
 
 
 def test_u2_fail_closed_tool_shaped_sources_raise():
-    """Tool path: hook raises on tool-sourced text when Presidio is down.
+    """Tool-shaped sources raise when the pipeline is down, like file sources.
 
-    The call-site (middleware.py:3486) catches this PiiMaskingBlockedError,
-    emits chat:message:error and skips the follow-up LLM dispatch — that wiring
-    runs inside process_chat_response's streaming handler and is asserted at the
-    integration/E2E layer, not here. This test locks the *contract* the call-site
-    relies on: tool-sourced masking failures raise (never return unmasked).
+    No caller passes tool sources to this hook today: `process_chat_response`
+    renders them as citation markers without content. The test keeps the hook
+    fail-closed for any future caller.
     """
     captured = []
     tool_sources = [
@@ -531,36 +529,40 @@ def test_u12_file_detections_collected_and_tagged():
 
 
 # ---------------------------------------------------------------------------
-# U13–U16  Long-document chunking — format parity (TRAU-513 truncation bug)
+# U13–U16  Long-document chunking — format parity
 #
-# A single external-pipeline masking call truncates its input at the pipeline's
-# tokenizer cap (~512 tokens). Before the fix, a source document longer than the
-# cap was sent as ONE blob and its tail was silently dropped: the same text as a
-# PDF (arriving pre-chunked per page, each page < cap) masked MORE entities than
-# as a single TXT blob. These tests pin the fix: every document is split into
-# sub-chunks under the cap before masking, so coverage is format-independent.
+# One pipeline call analyses only the start of its input (about 512 tokens).
+# Every document is split into pieces below that limit before masking, so the
+# same text is masked the same way whether it arrives as one TXT document or as
+# PDF pages.
 # ---------------------------------------------------------------------------
 
 import re
-from pathlib import Path
 
-# Repo-root/pii_scripts/e2e_files/test-pii-dokument.txt — the byte-for-byte
-# fixture the PDF/TXT discrepancy was first observed on.
-_E2E_TXT = (
-    Path(__file__).resolve().parents[3]
-    / "pii_scripts"
-    / "e2e_files"
-    / "test-pii-dokument.txt"
-)
-
-# Detectors the simulated pipeline uses. EMAIL + 11-digit OIB are unambiguous,
-# never contain a newline, and let us assert an exact expected count.
+# Detectors the simulated pipeline uses. EMAIL and 11-digit OIB are unambiguous,
+# never contain a newline, and give an exact expected count.
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _OIB_RE = re.compile(r"\b\d{11}\b")
-# The cap the live pipeline applies (~512 tokens). For the real fixture, 512
-# tokens lands near char 2973; 2048 is a conservative stand-in that still leaves
-# >40% of the document past the cutoff.
+# Characters the simulated pipeline analyses per call, standing in for its
+# token limit.
 _SIM_CAP = 2048
+
+
+def _long_document():
+    """A multi-paragraph document longer than two `_SIM_CAP` windows, with an
+    email in every paragraph and an OIB in every second one, so PII sits past
+    the simulated limit and in several chunks."""
+    filler = (
+        "The review covered access logs, backup schedules and the escalation "
+        "procedure agreed with the operations team. "
+    )
+    paragraphs = []
+    for i in range(13):
+        pii = f"Contact: person{i}@example.hr"
+        if i % 2 == 0:
+            pii += f", OIB {10000000000 + i * 7919}"
+        paragraphs.append(f"Section {i + 1}. {filler * 3}{pii}.")
+    return "\n\n".join(paragraphs)
 
 
 def _detect(text):
@@ -661,12 +663,11 @@ def _call(sources):
 
 
 def test_u13_split_helper_partitions_losslessly():
-    """The splitter is the core of the fix: pieces must concatenate back to the
-    exact original (no dropped/duplicated chars) and stay within the budget,
-    breaking only on whitespace so PII spans are never cut."""
-    text = _E2E_TXT.read_text(encoding="utf-8")
+    """Pieces join back to exactly the original text, stay within the chunk
+    size, and never cut a detected entity."""
+    text = _long_document()
     pieces = _split_text_for_pii(text, PII_MASK_CHUNK_CHARS)
-    assert len(pieces) > 1  # the fixture is longer than one budget
+    assert len(pieces) > 1  # the document spans several chunks
     assert "".join(p for _, p in pieces) == text  # lossless
     offset = 0
     for start, piece in pieces:
@@ -688,10 +689,9 @@ def test_u13_split_helper_partitions_losslessly():
 
 
 def test_u14_long_txt_blob_no_tail_truncation():
-    """RED before fix: a single full-document TXT source, under a CAPPED pipeline,
-    must still detect entities from the tail (past the cap). Without sub-chunking
-    the single blob is truncated and the tail entities vanish."""
-    text = _E2E_TXT.read_text(encoding="utf-8")
+    """A whole document sent as one TXT source is masked in full, including the
+    entities past the simulated per-call limit."""
+    text = _long_document()
     file_pii, captured, _ = _call(_file_sources(text, name="doc.txt"))
 
     # The blob exceeded one budget -> more than one masking POST was issued.
@@ -699,15 +699,15 @@ def test_u14_long_txt_blob_no_tail_truncation():
     got = _reconstruct(file_pii, {0: text})
     expected = _expected_entities(text)
     assert got == expected, f"missing tail entities: {expected - got}"
-    # Specifically: a witness email that lives well past the cap is recovered.
-    assert ("EMAIL", "ravnatelj@jadran-fin.hr") in got
-    assert ("EMAIL", "i.babic@example.hr") in got
+    tail = {entity for entity in expected if text.index(entity[1]) >= _SIM_CAP}
+    assert tail, "the document must place PII past the simulated limit"
+    assert tail <= got
 
 
 def test_u15_pdf_vs_txt_format_parity():
     """Acceptance criterion: identical content as a single TXT blob and as a
     multi-'page' PDF yields the SAME number and SET of masked entities."""
-    text = _E2E_TXT.read_text(encoding="utf-8")
+    text = _long_document()
 
     # TXT: whole document arrives as one source document.
     txt_sources = _file_sources(text, name="doc.txt")
@@ -744,9 +744,9 @@ def test_u15_pdf_vs_txt_format_parity():
 
 
 def test_u16_masked_doc_reassembled_no_pii_leak():
-    """The reassembled masked document sent to the LLM must contain none of the
-    original PII — including PII from the tail that used to be truncated."""
-    text = _E2E_TXT.read_text(encoding="utf-8")
+    """The reassembled document sent to the model contains none of the original
+    PII, including entities past the simulated per-call limit."""
+    text = _long_document()
     _file_pii, _captured, result = _call(_file_sources(text, name="doc.txt"))
     dumped = json.dumps(result)
     for _typ, val in _expected_entities(text):
@@ -989,16 +989,13 @@ def test_u22_source_text_past_the_masking_budget_is_refused_before_any_post():
     assert captured == [], "a refused request must not touch the pipeline at all"
 
 
-def test_u23_a_document_the_old_fixed_cap_refused_is_now_masked():
-    """The regression this parity work exists for: 50 000 characters (~15 pages)
-    were blocked outright by MAX_SOURCE_TEXT_CHARS while the prompt path took
-    five times as much. Same text, same pipeline, opposite answer depending only
-    on how the user supplied it."""
+def test_u23_a_document_within_the_budget_is_masked_not_refused():
+    """An attachment is admitted up to `max_maskable_chars()`, the same limit as
+    a pasted prompt, so a 60 000-character document is masked."""
     from open_webui.utils.pii_chunking import max_maskable_chars
 
     doc = "x" * 60000
-    assert len(doc) > 50000, "must exceed the old fixed cap"
-    assert len(doc) <= max_maskable_chars(), "the budget must admit what the wall refused"
+    assert len(doc) <= max_maskable_chars(), "the test document must fit the budget"
 
     captured = []
     with _patch_mw_session(captured, behavior="echo"):

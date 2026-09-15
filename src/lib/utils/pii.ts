@@ -13,19 +13,24 @@ import { config } from '$lib/stores';
 export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
 
 /**
- * Scope PII detections for the masked-values card on a user message.
+ * Whether the backend scans an uploaded file for PII at INGEST.
  *
- * The card mixes two sources of file PII:
- *  - the ingest scan (whole-file, authoritative) surfaced separately as fileItems, and
- *  - chat-time B2 detections (`fileId` set) that reflect exactly what was masked to the
- *    LLM at SEND time — the same signal ordinary text messages use.
+ * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`), because the send-time pass
+ * already covers everything that reaches the LLM and the preview cost a second
+ * full trip through the pipeline for a number the card then had to correct.
  *
- * A file whose ingest scan owns the display (`ingestCoveredFileIds`) is shown via
- * fileItems only, so its B2 detections are dropped to avoid double-counting. A file
- * the ingest scan did NOT cover (e.g. masking was off at upload, then turned on before
- * send) falls back to its B2 detections — scoped to the files on THIS message so PII
- * from other turns' attachments doesn't bleed in. Message PII (no `fileId`) is always kept.
+ * The card needs to know because a file whose `pii_scan_status` is null means
+ * "no scan has written yet" — worth briefly polling for when a scan is coming,
+ * and pure waste when none is: each retry re-fetches the file's ENTIRE content,
+ * so a 167 KB attachment turned one 167 KB request into six.
+ *
+ * Anything other than an explicit `true` is read as off: guessing wrong in that
+ * direction only costs a wait for a scan that never writes.
  */
+export function piiIngestScanEnabled(): boolean {
+	return get(config)?.features?.pii_ingest_scan === true;
+}
+
 /**
  * Which files the ingest scan is allowed to speak for on the card.
  *
@@ -45,25 +50,6 @@ export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
  * `running` still counts as covered: the card shows a spinner and re-fetches,
  * which is better than briefly listing a partial B2 set and then swapping it.
  */
-/**
- * Whether the backend scans an uploaded file for PII at INGEST.
- *
- * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`), because the send-time pass
- * already covers everything that reaches the LLM and the preview cost a second
- * full trip through the pipeline for a number the card then had to correct.
- *
- * The card needs to know because a file whose `pii_scan_status` is null means
- * "no scan has written yet" — worth briefly polling for when a scan is coming,
- * and pure waste when none is: each retry re-fetches the file's ENTIRE content,
- * so a 167 KB attachment turned one 167 KB request into five.
- *
- * Anything other than an explicit `true` is read as off: guessing wrong in that
- * direction only costs a wait for a scan that never writes.
- */
-export function piiIngestScanEnabled(): boolean {
-	return get(config)?.features?.pii_ingest_scan === true;
-}
-
 export function ingestCoveredFileIds(
 	files: { id: string; pii_scan_status?: string | null; pii_scan_truncated?: boolean }[]
 ): Set<string> {
