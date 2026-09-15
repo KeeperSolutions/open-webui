@@ -103,9 +103,8 @@
 		history?.messages?.[messageId]?.content ??
 		'';
 
-	// Citation sources from the SAME child whose detections we use — needed to
-	// reconstruct file-sourced PII values locally (B2). File-sourced detections
-	// index into these chunks; message-sourced ones ignore this.
+	// Citation sources of the child message whose detections are used. File-sourced
+	// detections index into these chunks.
 	$: piiSources = (() => {
 		const children = history?.messages?.[messageId]?.childrenIds ?? [];
 		for (let i = children.length - 1; i >= 0; i--) {
@@ -118,12 +117,10 @@
 	let fileItems: { key: string; type: string; value: string; source?: string }[] = [];
 	let _piiFetchKey = '';
 	let piiScanInProgress = false;
-	// File ids whose ingest scan owns the card display (status 'completed' = whole-file
-	// detections in fileItems, or 'running' = will populate shortly). For any OTHER
-	// attached file — scan skipped because masking was off at UPLOAD, then turned on
-	// before SEND — the card falls back to the chat-time B2 detections (exactly what
-	// was masked to the LLM), so files behave like ordinary messages. Starts optimistic
-	// (assume ingest covers everything) to avoid flashing B2 before the first poll.
+	// File ids whose card list comes from the ingest scan (see ingestCoveredFileIds
+	// in $lib/utils/pii). Other attached files show their send-time detections,
+	// which match what was masked for the LLM. Starts with every attached file
+	// covered so send-time detections do not flash before the first poll.
 	let ingestCoveredFileIds = new Set<string>();
 	$: {
 		const files = history?.messages?.[messageId]?.files ?? [];
@@ -144,11 +141,11 @@
 			(async () => {
 				const capturedKey = key;
 				let out: typeof fileItems = [];
-				// Poll until all files report a terminal pii_scan_status.
-				// "running"  → scan still in progress, show indicator and retry in 3 s.
-				// "completed"/"failed" → done (stop polling).
-				// null → legacy file (uploaded before this feature); retry a few times
-				//        in case the scan just hasn't written yet, then give up.
+				// Poll each file's pii_scan_status.
+				// "running": show the indicator and retry after 3 seconds.
+				// null: no scan has written yet, for example a file uploaded before scan
+				//   status was recorded. Retried below only when the ingest scan is on.
+				// Any other status: stop polling.
 				for (let attempt = 0; attempt < 100; attempt++) {
 					if (_piiFetchKey !== capturedKey) return;
 					if (!piiMaskingEnabled) {
@@ -180,10 +177,8 @@
 							pii_scan_truncated
 						});
 					}
-					// Ingest owns the card for files whose scan completed (in full) or is
-					// still running; everything else — skipped, failed, or TRUNCATED —
-					// falls back to B2 so the send-time pass can fill in what the
-					// capped scan never looked at.
+					// Skipped, failed and truncated scans fall back to send-time detections,
+					// which can cover text past the scan's character limit.
 					if (_piiFetchKey === capturedKey) {
 						ingestCoveredFileIds = computeIngestCoveredFileIds(fetched);
 					}
@@ -208,10 +203,9 @@
 						await new Promise((r) => setTimeout(r, 3000));
 						continue;
 					}
-					// All files are at a terminal status or legacy (null). A null status
-					// means no scan has written yet — worth a brief retry when a scan is
-					// actually coming, and pure waste when the upload scan is off, since
-					// each attempt re-fetches the file's ENTIRE content.
+					// A null status means no scan has written yet. Retry up to 5 times only
+					// when the ingest scan is on, because each attempt re-fetches the whole
+					// file content.
 					const awaitingScan =
 						piiIngestScanEnabled() && fetched.some((f) => f.pii_scan_status == null);
 					if (awaitingScan && out.length === 0 && attempt < 5) {
@@ -227,16 +221,15 @@
 			})();
 		}
 	}
-	// Ids of files attached to THIS user message — used to scope B2 file detections
-	// (which can cover any file resent in the turn) to the current message.
+	// Ids of files attached to this user message. Send-time file detections can
+	// cover any file sent in the turn, so the card keeps only these files.
 	$: messageFileIds = new Set<string>(
 		(history?.messages?.[messageId]?.files ?? [])
 			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
 			.filter((id: string | undefined): id is string => Boolean(id))
 	);
-	// Card detections = message PII (no fileId) + B2 file PII ONLY for files the
-	// ingest scan didn't cover (otherwise fileItems is the authoritative whole-file
-	// source and B2 would double-count the retrieved chunks). See scopeCardDetections.
+	// Message PII plus send-time file PII for files the ingest scan does not cover.
+	// Covered files are shown from fileItems. See scopeCardDetections.
 	$: piiDetectionsScoped = scopeCardDetections(
 		piiDetections ?? [],
 		ingestCoveredFileIds,

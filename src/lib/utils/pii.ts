@@ -13,42 +13,31 @@ import { config } from '$lib/stores';
 export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
 
 /**
- * Whether the backend scans an uploaded file for PII at INGEST.
+ * Whether the backend scans uploaded files for PII at ingest.
  *
- * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`), because the send-time pass
- * already covers everything that reaches the LLM and the preview cost a second
- * full trip through the pipeline for a number the card then had to correct.
+ * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`). The send-time pass already
+ * masks everything that reaches the LLM, and an ingest scan sends the file
+ * through the pipeline a second time.
  *
- * The card needs to know because a file whose `pii_scan_status` is null means
- * "no scan has written yet" — worth briefly polling for when a scan is coming,
- * and pure waste when none is: each retry re-fetches the file's ENTIRE content,
- * so a 167 KB attachment turned one 167 KB request into six.
- *
- * Anything other than an explicit `true` is read as off: guessing wrong in that
- * direction only costs a wait for a scan that never writes.
+ * The card uses this to decide whether to retry a file whose `pii_scan_status`
+ * is null. Each retry re-fetches the whole file content, so retries are skipped
+ * when no scan runs. Anything other than an explicit `true` is read as off.
  */
 export function piiIngestScanEnabled(): boolean {
 	return get(config)?.features?.pii_ingest_scan === true;
 }
 
 /**
- * Which files the ingest scan is allowed to speak for on the card.
+ * Returns the ids of files whose card list comes from the ingest scan.
  *
- * A covered file is displayed from `fileItems` alone and its send-time (B2)
- * detections are dropped by `scopeCardDetections`, so being covered means
- * claiming the file's list is COMPLETE.
+ * A covered file is shown from `fileItems` only, and `scopeCardDetections`
+ * drops its send-time detections to avoid double counting. A completed scan
+ * covers the file only when it was not truncated. A truncated scan read just
+ * the first `PII_SCAN_MAX_CHARS` characters, so both sources are shown and the
+ * card dedupes them by (type, value, source).
  *
- * A truncated scan cannot make that claim. The backend scan reads only the
- * first `PII_SCAN_MAX_CHARS` of a file; measured on staging, a 167 460-char
- * document was scanned to 50 000 and the card showed 28 detections where the
- * whole document holds 163 — and because the scan reported `completed`, the
- * send-time detections carrying the other 135 were suppressed too. Excluding
- * truncated files lets both sources through; the card already dedupes by
- * (type, value, source), so the overlapping prefix collapses instead of
- * double-counting.
- *
- * `running` still counts as covered: the card shows a spinner and re-fetches,
- * which is better than briefly listing a partial B2 set and then swapping it.
+ * `running` counts as covered, so the card shows the scan indicator instead of
+ * a partial send-time list that is later swapped out.
  */
 export function ingestCoveredFileIds(
 	files: { id: string; pii_scan_status?: string | null; pii_scan_truncated?: boolean }[]
@@ -64,6 +53,13 @@ export function ingestCoveredFileIds(
 	);
 }
 
+/**
+ * Filters detections down to the ones the card shows for one user message.
+ *
+ * Message PII (no `fileId`) is always kept. A file detection is kept only when
+ * its file is attached to this message and not covered by the ingest scan, so
+ * attachments from other turns do not appear on this card.
+ */
 export function scopeCardDetections<T extends { fileId?: string | null }>(
 	detections: T[],
 	ingestCoveredFileIds: Set<string>,

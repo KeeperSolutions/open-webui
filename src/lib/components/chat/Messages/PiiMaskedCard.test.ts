@@ -108,8 +108,7 @@ describe('PiiMaskedCard', () => {
 	});
 
 	it('counts a file-sourced detection by reconstructing the value from the citation chunk', () => {
-		// fileId-tagged detection: value is sliced from sources[].document[docIdx],
-		// not the message text (originalText is empty here).
+		// The value is sliced from sources[].document[docIdx], not from originalText.
 		renderCard({
 			detections: [
 				{ type: 'PERSON', start: 0, end: 10, fileId: 'f1', fileName: 'doc.pdf', docIdx: 0 }
@@ -127,7 +126,7 @@ describe('PiiMaskedCard', () => {
 	});
 
 	it('drops a file-sourced detection when its chunk cannot be located', () => {
-		// no source matches fileId -> empty reconstructed value -> filtered out
+		// No source matches the fileId, so the value is empty and the item is dropped.
 		const { container } = renderCard({
 			detections: [
 				{ type: 'PERSON', start: 0, end: 10, fileId: 'missing', fileName: 'doc.pdf', docIdx: 0 }
@@ -161,9 +160,8 @@ describe('PiiMaskedCard', () => {
 	});
 
 	it('dedupes a fileItem against an identical message detection by (type,value,source)', () => {
-		// fileItem has source=undefined (key ends in null), and the message detection
-		// also has source=undefined (no fileId). Both keys stringify to
-		// ["PERSON","Ivan Horvat",null] so they collapse to ONE item.
+		// Neither item has a source, so both keys are ["PERSON","Ivan Horvat",null]
+		// and the card shows one entry.
 		renderCard({
 			detections: [{ type: 'PERSON', start: 9, end: 20 }],
 			originalText: 'Zovem se Ivan Horvat',
@@ -176,8 +174,6 @@ describe('PiiMaskedCard', () => {
 				}
 			]
 		});
-		// The two items share the same (type, value, source=null) key and should
-		// be deduped to a single entry in the Map.
 		expect(screen.getByText('1 values masked')).toBeTruthy();
 	});
 });

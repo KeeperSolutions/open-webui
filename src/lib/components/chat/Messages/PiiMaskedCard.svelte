@@ -13,9 +13,9 @@
 		type: string;
 		start: number;
 		end: number;
-		// B2: file-sourced detections carry the file + chunk they came from so the
-		// value can be reconstructed from the citation chunk the browser already
-		// has. The wire/DB still never carry a plaintext value.
+		// Send-time detections from a file carry the file id and chunk index. The
+		// value is sliced from the citation chunk the browser already has, so the
+		// wire and DB never carry a plaintext value.
 		fileId?: string;
 		fileName?: string;
 		docIdx?: number;
@@ -29,11 +29,11 @@
 
 	export let detections: PiiDetection[] = [];
 	export let originalText = '';
-	// Citation sources for the same response — used to reconstruct file-sourced
-	// PII values locally (the original chunk text the user already received).
+	// Citation sources of the same response. File-sourced values are sliced from
+	// these chunks.
 	export let sources: CitationSource[] = [];
-	// Ingest-time file PII: already-reconstructed items from the full file content,
-	// fetched by UserMessage from GET /files/{id}/data/content.
+	// File PII from the ingest scan, already reconstructed from the file content.
+	// UserMessage fetches it from GET /files/{id}/data/content.
 	export let fileItems: PiiItem[] = [];
 	export let scanning = false;
 
@@ -41,9 +41,9 @@
 	let items: PiiItem[] = [];
 	let count = 0;
 
-	// Locate the original (unmasked) chunk a file-sourced detection points at, by
-	// matching fileId against the citation sources, then slice the value out of
-	// it. Returns '' when the chunk can't be located (filtered out below).
+	// Finds the citation chunk a file-sourced detection points at and slices the
+	// value from it. Returns '' when the chunk is not found; such items are
+	// filtered out.
 	const reconstructFileValue = (d: PiiDetection): string => {
 		const src = (sources ?? []).find(
 			(s) => s?.source?.id === d.fileId || (s?.metadata ?? []).some((m) => m?.file_id === d.fileId)
@@ -52,15 +52,13 @@
 		return typeof chunk === 'string' ? chunk.slice(d.start, d.end) : '';
 	};
 
-	// Reconstruct masked values locally and dedupe identical (type, value, source)
-	// triples. Nothing sensitive leaves the browser: the wire/DB only ever carried
-	// {type, start, end} (+ file/chunk refs for file-sourced detections).
-	// Map insertion order matters: file/ingest items come LAST so they win on a
-	// key collision — the ingest path is the authoritative, complete source of
-	// file PII, while the B2/detections path only covers retrieved chunks.
+	// Reconstruct masked values locally and dedupe by (type, value, source).
+	// Nothing sensitive leaves the browser: the wire and DB carry only
+	// {type, start, end}, plus file and chunk refs for file-sourced detections.
+	// Ingest items are spread last so they win on a key collision.
 	$: items = Array.from(
 		new Map([
-			// B2 / message-sourced items: reconstruct value from originalText or citation chunk
+			// Message and send-time file detections
 			...(detections ?? [])
 				.map((d): [string, PiiItem] => {
 					const isFile = d.fileId != null;
@@ -73,8 +71,7 @@
 					return [key, { key, type: d.type, value, source }];
 				})
 				.filter(([, it]) => it.value !== ''),
-			// ingest-path items (already reconstructed, carry value + source) —
-			// authoritative on collision, so spread LAST.
+			// Ingest scan items, already reconstructed
 			...(fileItems ?? []).map((it): [string, PiiItem] => [it.key, it])
 		]).values()
 	).filter((it) => it.value !== '');

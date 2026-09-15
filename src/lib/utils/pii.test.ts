@@ -295,22 +295,21 @@ describe('scopeCardDetections', () => {
 	});
 
 	it('drops file PII whose ingest scan owns the display (avoids double-count)', () => {
-		// file "a" is ingest-covered -> fileItems is authoritative, so B2 is dropped.
 		expect(scopeCardDetections([fileA], new Set(['a']), new Set(['a']))).toEqual([]);
 	});
 
-	it('keeps file PII (B2 fallback) when ingest did NOT cover the file', () => {
-		// toggle off at upload -> no ingest scan -> B2 is the only source -> keep it.
+	it('keeps file PII (send-time fallback) when ingest did not cover the file', () => {
+		// With no ingest scan, send-time detections are the only source for the file.
 		expect(scopeCardDetections([fileA], new Set(), new Set(['a']))).toEqual([fileA]);
 	});
 
 	it('drops file PII for a file not attached to this message (scoping)', () => {
-		// "b" was resent in the turn but is not on THIS user message.
+		// File "b" was sent in the turn but is not attached to this user message.
 		expect(scopeCardDetections([fileB], new Set(), new Set(['a']))).toEqual([]);
 	});
 
 	it('handles a mixed batch', () => {
-		const covered = new Set(['a']); // a via ingest, b falls back to B2
+		const covered = new Set(['a']); // "b" falls back to send-time detections
 		const onMessage = new Set(['a', 'b']);
 		expect(scopeCardDetections([msg, fileA, fileB], covered, onMessage)).toEqual([msg, fileB]);
 	});
@@ -406,12 +405,9 @@ describe('ingestCoveredFileIds', () => {
 		expect(ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'running' }])).toEqual(new Set(['a']));
 	});
 
-	it('does NOT cover a file whose scan was truncated', () => {
-		// The scan reads only the first PII_SCAN_MAX_CHARS. Measured on staging, a
-		// 167 460-char document was scanned to 50 000 and the card showed 28 of the
-		// document's 163 detections — while ALSO suppressing the send-time
-		// detections that hold the other 135, because a completed scan claimed the
-		// file. A partial scan must not claim authority it does not have.
+	it('does not cover a file whose scan was truncated', () => {
+		// A truncated scan misses PII past PII_SCAN_MAX_CHARS characters, so the
+		// file's send-time detections must stay on the card.
 		expect(
 			ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'completed', pii_scan_truncated: true }])
 		).toEqual(new Set());
@@ -448,8 +444,8 @@ describe('piiIngestScanEnabled', () => {
 	});
 
 	it('ignores a non-boolean value rather than treating it as on', () => {
-		// Waiting for a scan that will never write costs five extra fetches of the
-		// FULL file content; a malformed field must not switch that back on.
+		// Read as on, the card would re-fetch the whole file content up to five more
+		// times waiting for a scan that never runs.
 		setConfig({ pii_ingest_scan: 'yes' });
 		expect(piiIngestScanEnabled()).toBe(false);
 	});

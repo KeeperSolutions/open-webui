@@ -1,14 +1,13 @@
-"""LIVE end-to-end check of the ingest PII scan against a REAL pipeline (TRAU-513).
+"""End-to-end check of the ingest PII scan against a running PII pipeline.
 
-Opt-in: skipped unless KEEPER_PII_LIVE=1, so CI and the default suite never reach
-out to the network. Reads the pipeline connection from the local OWUI database
-(the same place the running backend reads it from), so there is no hardcoded URL
-or key anywhere in the repo.
+Skipped unless KEEPER_PII_LIVE=1, so CI and the default suite never use the
+network. The pipeline URL and key are read from the local Open WebUI database
+(KEEPER_PII_LIVE_DB), from the connection whose URL contains KEEPER_PII_LIVE_HOST,
+so no URL or key is stored in the repo.
 
-What it proves that the mocked tests cannot: that a real document actually comes
-back with detections, and that the offsets we store are usable — the PII card
-slices values straight out of the stored content using them, so an off-by-N here
-is a wrong card, and a cross-chunk rebasing bug is invisible to any mock.
+It checks what the mocked tests cannot: that a real pipeline returns detections,
+and that the stored offsets select the right values across chunks. The PII card
+slices values out of the stored content with these offsets.
 
     KEEPER_PII_LIVE=1 pytest open_webui/tests/test_ingest_pii_scan_live.py -q -s
 """
@@ -90,8 +89,8 @@ def _user():
 
 
 def _document():
-    """A document deliberately LONGER than PII_MASK_CHUNK_CHARS, with PII placed in
-    the first chunk and in a later one, so cross-chunk offset rebasing is exercised."""
+    """Build a document longer than PII_MASK_CHUNK_CHARS with PII in the first and
+    a later chunk, so offset rebasing across chunks is exercised."""
     head = f'Ugovorna strana: Ivan Horvat, OIB {NEEDLES["OIB"]}, IBAN {NEEDLES["IBAN"]}.\n\n'
     middle = FILLER * ((PII_MASK_CHUNK_CHARS * 2) // len(FILLER) + 1)
     tail = f'\n\nKontakt: {NEEDLES["EMAIL"]}, telefon {NEEDLES["PHONE"]}.\n'
@@ -108,8 +107,8 @@ def test_live_ingest_scan_detects_pii_with_usable_offsets():
 
     assert detections, 'live pipeline returned no detections for a document full of PII'
 
-    # Every detection must carry a span that indexes INTO the document — this is
-    # the contract the PII card relies on when it slices values client-side.
+    # Every span must lie inside the document; the PII card slices values
+    # client-side with these offsets.
     for d in detections:
         assert set(d) == {'type', 'start', 'end'}, f'unexpected keys: {sorted(d)}'
         assert 0 <= d['start'] < d['end'] <= len(content), f'span outside document: {d}'
@@ -124,16 +123,15 @@ def test_live_ingest_scan_detects_pii_with_usable_offsets():
     print(f'  recovered by offset: {sorted(found)}')
     print(f'  missed: {sorted(set(NEEDLES) - set(found))}')
 
-    # OIB is the flagship Croatian recognizer (checksum-validated) and sits in the
-    # FIRST chunk; the email sits in the LAST. Requiring both pins down that the
-    # scan covers the whole document, not just its head.
+    # The OIB (a checksum-validated Croatian ID) is in the first chunk and the
+    # email in the last. Requiring both shows the scan covers the whole document.
     assert 'OIB' in found, f'OIB not recovered by offset; got {sorted(sliced)[:10]}'
-    assert 'EMAIL' in found, 'tail PII not recovered — offsets not rebased across chunks'
+    assert 'EMAIL' in found, 'tail PII not recovered; offsets not rebased across chunks'
 
 
 def test_live_scan_is_a_no_op_without_a_pii_filter():
-    """Same live wiring, filter removed: the scan must degrade to [] rather than
-    raise — ingest is best-effort and must never block an upload."""
+    """Without a PII filter the scan returns [] instead of raising, because ingest
+    is best-effort and must never block an upload."""
     request, _ = _request_and_models()
     models = {'gpt-4': {'id': 'gpt-4'}}
     assert (

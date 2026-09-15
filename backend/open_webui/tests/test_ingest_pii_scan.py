@@ -1,5 +1,5 @@
-"""Unit tests for the ingest-time best-effort full-file PII scan (TRAU-513).
-Mirrors test_file_attachment_pii.py: the external Presidio inlet is MOCKED by
+"""Unit tests for the best-effort ingest-time PII scan of uploaded files.
+As in test_file_attachment_pii.py, the external PII pipeline is mocked by
 patching middleware.aiohttp.ClientSession; the scan opens its own session."""
 
 import asyncio, copy, json, sys
@@ -16,15 +16,14 @@ from open_webui.utils.middleware import (
 )
 import open_webui.routers.retrieval as _retrieval_at_import
 
-# Read BEFORE the autouse fixture below switches the scan on, so the shipped
-# default is still observable.
+# Read at import, before the autouse fixture below enables the scan, so the
+# shipped default is still visible.
 INGEST_SCAN_DEFAULT = _retrieval_at_import.ENABLE_INGEST_PII_SCAN
 
 
 @pytest.fixture(autouse=True)
 def _enable_ingest_scan(monkeypatch):
-    """The upload-time scan is OPT-IN (see `ENABLE_INGEST_PII_SCAN`). Everything
-    in this module tests the scan machinery itself, so it is switched on here;
+    """Enable the opt-in ingest scan for every test in this module.
     `test_the_ingest_scan_is_off_by_default` covers the shipped default."""
     import open_webui.routers.retrieval as R
 
@@ -55,8 +54,8 @@ def _user():
 
 
 def _patch_session(captured, cap=2048):
-    """Simulated CAPPED Presidio: scans only first `cap` chars, returns
-    {type,start,end} for 11-digit OIBs in the scanned region."""
+    """Mock a PII pipeline that scans only the first `cap` characters of each
+    request and returns {type,start,end} for 11-digit OIBs in that region."""
     import re
 
     OIB = re.compile(r'\b\d{11}\b')
@@ -97,7 +96,8 @@ def test_resolve_model_none_when_no_filter():
 
 
 def test_scan_long_content_covers_whole_file():
-    # 3 OIBs spread across >2 chunks; the tail OIB sits past the 2048 cap.
+    # Three OIBs spread over several chunks; the last one is past the mock's
+    # 2048-character per-request cap.
     head = 'OIB 11111111111 ' + ('x' * 1900)
     mid = ' OIB 22222222222 ' + ('y' * 1900)
     tail = ' OIB 33333333333 end'
@@ -145,8 +145,8 @@ def test_scan_skips_when_no_pii_filter():
 
 
 def test_process_file_persists_detections(monkeypatch):
-    """process_file's helper stores scan output under file.data['pii_detections']
-    without clobbering 'content', and never propagates scan errors."""
+    """`_store_ingest_pii_detections` stores scan output under
+    file.data['pii_detections'] and does not write the extracted content."""
     import open_webui.routers.retrieval as R
 
     saved = {}
@@ -164,11 +164,11 @@ def test_process_file_persists_detections(monkeypatch):
 
     asyncio.run(R._store_ingest_pii_detections(MagicMock(), 'f1', 'OIB 11111111111', _user()))
     assert saved['f1']['pii_detections'] == [{'type': 'HR_OIB', 'start': 4, 'end': 15}]
-    assert 'content' not in saved['f1']  # only the detections key is written here
+    assert 'content' not in saved['f1']  # the extracted content is never overwritten
 
 
 def test_store_ingest_pii_detections_swallows_scan_error(monkeypatch):
-    """Best-effort: a scan that raises must NOT propagate out of the helper."""
+    """A scan that raises must not propagate out of the helper, because ingest is best-effort."""
     import open_webui.routers.retrieval as R
 
     async def raising_scan(request, content, *, file_id, user, models=None, features=None):
@@ -180,7 +180,6 @@ def test_store_ingest_pii_detections_swallows_scan_error(monkeypatch):
         return None
 
     monkeypatch.setattr(R.Files, 'update_file_data_by_id', staticmethod(noop_update))
-    # must not raise
     asyncio.run(R._store_ingest_pii_detections(MagicMock(), 'f1', 'OIB 11111111111', _user()))
 
 
@@ -219,9 +218,8 @@ def test_content_endpoint_detections_default_empty(monkeypatch):
 
 
 def test_scan_partial_chunk_failure_keeps_other_detections():
-    """Best-effort + parallel: if ONE sub-chunk's POST fails, detections from the
-    other chunks must survive (the old sequential path lost everything on the
-    first failure)."""
+    """If one chunk's request keeps failing, detections from the other chunks are
+    still returned."""
     import re
 
     head = 'OIB 11111111111 ' + ('x' * 1900)
@@ -277,8 +275,8 @@ def test_scan_caps_large_content(monkeypatch):
 
 
 def test_scan_retries_transient_chunk_failure():
-    """A chunk whose call fails ONCE then succeeds must be RECOVERED, not dropped.
-    Guards against the non-deterministic under-count (same file -> 85/60/25)."""
+    """A chunk whose request fails once and then succeeds is retried, not dropped,
+    so transient pipeline errors do not make detection counts vary between runs."""
     import re
 
     head = 'OIB 11111111111 ' + ('x' * 1900)
@@ -323,21 +321,15 @@ def test_scan_retries_transient_chunk_failure():
 
 
 # ---------------------------------------------------------------------------
-# Merge-hazard regression tests (staging async refactor, 2026-09-03).
-#
-# Staging turned `process_file` / `process_uploaded_file` into coroutines and
-# rewrote the upload branching. Both changes could silently disable the ingest
-# scan WITHOUT failing any pre-existing test, so each hazard gets a test that
-# fails loudly if it comes back.
+# Guards against changes that would disable the ingest scan without breaking
+# any of the behavioural tests above.
 # ---------------------------------------------------------------------------
 
 
 def test_store_ingest_pii_detections_is_a_coroutine_and_is_always_awaited():
-    """HAZARD: the helper used to be sync and wrapped the scan in `asyncio.run`.
-    Inside the now-async `process_file` that raises, the helper's own `except`
-    swallows it, and every scan silently becomes `pii_scan_status='failed'` —
-    green tests, dead feature. Assert both halves of the contract: the helper is
-    a coroutine function, and no call site in retrieval.py invokes it bare."""
+    """`_store_ingest_pii_detections` is a coroutine function and no call in
+    retrieval.py leaves it un-awaited. A bare call never runs the scan, and a sync
+    helper using `asyncio.run` inside the running loop records every scan as failed."""
     import ast
     import inspect
     import open_webui.routers.retrieval as R
@@ -358,9 +350,8 @@ def test_store_ingest_pii_detections_is_a_coroutine_and_is_always_awaited():
 
 
 def test_ingest_scan_skips_a_file_whose_scan_already_completed(monkeypatch):
-    """HAZARD: staging added knowledge auto-link, which calls `process_file` a
-    SECOND time for the same upload (with collection_name). The text is
-    identical, so a re-scan only doubles the load on the remote pipeline."""
+    """A file whose scan already completed is not scanned again. Linking an upload
+    to a knowledge collection calls `process_file` a second time with the same text."""
     import open_webui.routers.retrieval as R
 
     updates = []
@@ -408,14 +399,10 @@ def test_ingest_scan_still_runs_for_non_completed_states(monkeypatch, status):
 
 
 def test_every_process_file_call_in_upload_forwards_the_masking_toggle():
-    """HAZARD: `process_uploaded_file` builds a ProcessFileForm in several
-    branches, and the merge showed how easy it is to lose the flag — staging's
-    rewrite silently dropped it from the STT branch, and its new knowledge
-    auto-link branch never had it. A dropped flag means the send-time toggle is
-    ignored and the ingest scan falls back to the stored valve.
-
-    Asserted structurally rather than per-branch on purpose: this covers branches
-    that do not exist yet, which is exactly how the regression arrived."""
+    """Every ProcessFileForm built in `process_uploaded_file` passes `pii_masking_enabled`.
+    Without it the chat-input toggle sent with the upload is ignored and the ingest
+    scan falls back to the stored valve setting. The check is structural so it also
+    covers branches added later."""
     import ast
     import inspect
     import open_webui.routers.files as F
@@ -438,12 +425,9 @@ def test_every_process_file_call_in_upload_forwards_the_masking_toggle():
 
 
 def test_a_truncated_scan_is_recorded_as_truncated(monkeypatch):
-    """The scan looks at only the first PII_SCAN_MAX_CHARS of a file. Measured
-    on staging: a 167 460-char document was scanned to 50 000 and the card
-    showed 28 detections where the full document holds 163 — and the frontend
-    treats a `completed` ingest scan as AUTHORITATIVE, suppressing the
-    send-time detections that would have filled the gap. Silently wrong is the
-    problem; the flag is what lets the card know it is looking at a prefix."""
+    """Content longer than PII_SCAN_MAX_CHARS characters is stored with
+    `pii_scan_truncated` True, shorter content with False. The card uses send-time
+    detections instead of a completed ingest scan only when this flag is set."""
     import open_webui.routers.retrieval as R
     from open_webui.utils.middleware import PII_SCAN_MAX_CHARS
 
@@ -468,8 +452,7 @@ def test_a_truncated_scan_is_recorded_as_truncated(monkeypatch):
         R._store_ingest_pii_detections(MagicMock(), 'small', 'x' * 10, _user())
     )
     assert saved['small']['pii_scan_truncated'] is False, (
-        'the flag must be written on every completed scan, not only when true — '
-        'otherwise a file re-scanned after shrinking keeps a stale True'
+        'the flag must be written on every completed scan, including False'
     )
 
 
@@ -492,18 +475,9 @@ def test_content_endpoint_exposes_the_truncation_flag(monkeypatch):
 
 
 def test_the_ingest_scan_is_off_by_default(monkeypatch):
-    """The upload preview is off unless an operator asks for it.
-
-    It cost a full extra pass over the file through a pipeline that serializes
-    NER (46.5s for the first 50 000 chars, measured on staging) and produced a
-    number the card then had to correct: 26 detections after upload, 59 once the
-    send-time pass over the whole document finished. The send-time pass is the
-    fail-closed one and covers everything actually sent to the LLM, so the
-    preview bought a wrong number in exchange for doubling the load.
-
-    The machinery stays in place: masking AT upload (keeping the masked text
-    rather than discarding it) is the fix for the first message still paying
-    full price, and it builds on exactly this path.
+    """The ingest scan is off by default, and when disabled it does not scan, read
+    or write anything. It is only a preview; fail-closed masking happens at send
+    time in `mask_sources_for_llm`.
     """
     import open_webui.routers.retrieval as R
 
