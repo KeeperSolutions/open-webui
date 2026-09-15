@@ -90,6 +90,14 @@
 			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {})
 		};
 
+		// setModelsConfig (POST /configs/models) writes the whole config form in
+		// one call, but FEATURED_MODELS is deliberately left OUT of this payload.
+		// `config` here is a snapshot loaded on mount; the Featured Models modal
+		// saves through its own dedicated endpoint and doesn't refresh it, so
+		// sending config?.FEATURED_MODELS could overwrite a featured-list save
+		// that happened after this panel loaded with stale data. Omitting the
+		// field is safe — the backend (set_models_config) treats a missing
+		// FEATURED_MODELS as "leave it alone", not "clear it".
 		const res = await setModelsConfig(localStorage.token, {
 			DEFAULT_MODELS: config?.DEFAULT_MODELS ?? null,
 			DEFAULT_PINNED_MODELS: config?.DEFAULT_PINNED_MODELS ?? null,

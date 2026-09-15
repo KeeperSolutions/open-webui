@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { models, settings, user } from '$lib/stores';
 	import { getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
 	import Selector from './ModelSelector/Selector.svelte';
 
 	import { updateUserSettings } from '$lib/apis/users';
@@ -11,25 +10,12 @@
 	export let selectedModels = [''];
 	export let disabled = false;
 
-	export let showSetDefault = true;
 	export let triggerClassName = 'text-lg';
 	export let className = undefined;
 	export let placement: 'top' | 'bottom' | 'auto' = 'bottom';
 	export let align: 'start' | 'end' = 'start';
 
 	let compareModels = selectedModels.length > 1;
-
-	const saveDefaultModel = async () => {
-		const hasEmptyModel = selectedModels.filter((it) => it === '');
-		if (hasEmptyModel.length) {
-			toast.error($i18n.t('Choose a model before saving...'));
-			return;
-		}
-		settings.set({ ...$settings, models: selectedModels });
-		await updateUserSettings(localStorage.token, { ui: $settings });
-
-		toast.success($i18n.t('Default model updated'));
-	};
 
 	const pinModelHandler = async (modelId) => {
 		let pinnedModels = $settings?.pinnedModels ?? [];
@@ -76,8 +62,6 @@
 					{triggerClassName}
 					{placement}
 					{align}
-					{showSetDefault}
-					onSetDefault={saveDefaultModel}
 					multipleEnabled={$user?.role === 'admin' ||
 						($user?.permissions?.chat?.multiple_models ?? true)}
 					{disabled}

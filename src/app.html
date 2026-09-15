@@ -103,16 +103,6 @@
 					metaThemeColorTag.setAttribute('content', '#ffffff');
 				}
 
-				const preloadHref = document.documentElement.classList.contains('dark')
-					? '/static/splash-dark.png'
-					: '/static/splash.png';
-				const preload = document.createElement('link');
-				preload.rel = 'preload';
-				preload.as = 'image';
-				preload.href = preloadHref;
-				preload.setAttribute('fetchpriority', 'high');
-				document.head.appendChild(preload);
-
 				window.matchMedia('(prefers-color-scheme: dark)').addListener((e) => {
 					if (localStorage.theme === 'system') {
 						if (e.matches) {
@@ -126,15 +116,6 @@
 						}
 					}
 				});
-				const isDarkMode = document.documentElement.classList.contains('dark');
-
-				const logo = document.createElement('img');
-				logo.id = 'logo';
-				logo.style =
-					'position: absolute; width: auto; height: 6rem; top: 44%; left: 50%; transform: translateX(-50%); display:block;';
-				logo.loading = 'eager';
-				logo.fetchPriority = 'high';
-				logo.src = isDarkMode ? '/static/splash-dark.png' : '/static/splash.png';
 			})();
 		</script>
 
@@ -202,14 +183,6 @@
 						alt="Hubgate logo"
 					/>
 				</div>
-				<img
-					id="logo-her"
-					style="width: auto; height: 13rem"
-					src="/static/splash.png"
-					loading="eager"
-					fetchpriority="high"
-					class="animate-pulse-fast"
-				/>
 
 				<div style="position: relative; width: 16rem; height: 0.5rem">
 					<div
@@ -258,10 +231,6 @@
 
 		html.her #splash-screen {
 			background: #983724;
-		}
-
-		#logo-her {
-			display: none;
 		}
 
 		#logo-hubgate {
@@ -321,15 +290,6 @@
 			background-color: #fff !important;
 		}
 
-		html.her #logo {
-			display: none;
-		}
-
-		html.her #logo-her {
-			display: block;
-			filter: invert(1);
-		}
-
 		html.her #progress-background {
 			display: block;
 		}
@@ -346,16 +306,6 @@
 			html.her #progress-bar {
 				display: none;
 			}
-		}
-
-		@keyframes pulse {
-			50% {
-				opacity: 0.65;
-			}
-		}
-
-		.animate-pulse-fast {
-			animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 		}
 	</style>
 </html>

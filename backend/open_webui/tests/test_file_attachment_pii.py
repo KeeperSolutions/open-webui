@@ -1478,9 +1478,8 @@ def test_progress_throttles_to_about_twenty_events_and_always_emits_the_terminal
     assert 2 <= len(events) <= 21, f'expected roughly twenty throttled events, got {len(events)}'
 
 def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_by_zero():
-    """`total // 10` is 0 for any `total < 10`; the throttle must guard
-    against a modulo-by-zero there and still guarantee the first and terminal
-    events are reported."""
+    """For a small `total` the throttle does not fail with a modulo-by-zero
+    error and still reports the first and terminal events."""
     import open_webui.utils.middleware as M
 
     events = []
@@ -1493,8 +1492,9 @@ def test_progress_on_a_small_total_still_emits_first_and_last_without_dividing_b
         on_progress(1, 3)
         on_progress(2, 3)
         on_progress(3, 3)
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Emissions are chained, so wait until every scheduled one has run.
+        while M._pii_progress_tasks:
+            await asyncio.sleep(0)
 
     asyncio.run(drive())  # must not raise (no ZeroDivisionError)
 

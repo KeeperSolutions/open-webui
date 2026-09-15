@@ -9,6 +9,7 @@
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
+	import Check from '$lib/components/icons/Check.svelte';
 	import { config, settings, showSettings, user } from '$lib/stores';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
@@ -18,6 +19,8 @@
 	export let model;
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
+	export let setDefaultHandler: (modelId: string) => void = () => {};
+	export let isDefault = false;
 	export let copyLinkHandler: Function = () => {};
 	export let deleteModelHandler: Function = () => {};
 
@@ -45,6 +48,31 @@
 
 	<div slot="content">
 		<DropdownMenu className="min-w-[210px] z-[9999999]">
+			<button
+				type="button"
+				aria-pressed={isDefault}
+				class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
+				on:click={(e) => {
+					e.stopPropagation();
+					e.preventDefault();
+
+					setDefaultHandler(model?.id);
+					show = false;
+				}}
+			>
+				<Check className="size-3.5 {isDefault ? '' : 'opacity-0'}" />
+
+				<div class="flex items-center">
+					{#if isDefault}
+						{$i18n.t('Unset as default')}
+					{:else}
+						{$i18n.t('Set as default')}
+					{/if}
+				</div>
+			</button>
+
+			<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
+
 			{#if model?.preset || model?.info?.base_model_id ? model?.info?.user_id === $user?.id : $user?.role === 'admin'}
 				<button
 					type="button"
@@ -127,25 +155,9 @@
 				</div>
 			</button>
 
-			<button
-				type="button"
-				class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
-				on:click={(e) => {
-					e.stopPropagation();
-					e.preventDefault();
-
-					copyLinkHandler();
-					show = false;
-				}}
-			>
-				<Link className="size-3.5" />
-
-				<div class="flex items-center">{$i18n.t('Copy Link')}</div>
-			</button>
-
-			{#if $config?.features.enable_community_sharing}
-				<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
-
+			<!-- TRAU-542: "Copy Link" and "Community Reviews" hidden pending a decision on
+				 whether we want them at all. Kept in code; flip `false` to restore. -->
+			{#if false}
 				<button
 					type="button"
 					class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
@@ -153,17 +165,37 @@
 						e.stopPropagation();
 						e.preventDefault();
 
-						window.open(
-							`https://openwebui.com/models?q=${encodeURIComponent(model?.id ?? '')}`,
-							'_blank'
-						);
+						copyLinkHandler();
 						show = false;
 					}}
 				>
-					<GlobeAlt className="size-3.5" />
+					<Link className="size-3.5" />
 
-					<div class="flex items-center">{$i18n.t('Community Reviews')}</div>
+					<div class="flex items-center">{$i18n.t('Copy Link')}</div>
 				</button>
+
+				{#if $config?.features.enable_community_sharing}
+					<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
+
+					<button
+						type="button"
+						class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
+						on:click={(e) => {
+							e.stopPropagation();
+							e.preventDefault();
+
+							window.open(
+								`https://openwebui.com/models?q=${encodeURIComponent(model?.id ?? '')}`,
+								'_blank'
+							);
+							show = false;
+						}}
+					>
+						<GlobeAlt className="size-3.5" />
+
+						<div class="flex items-center">{$i18n.t('Community Reviews')}</div>
+					</button>
+				{/if}
 			{/if}
 		</DropdownMenu>
 	</div>

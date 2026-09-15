@@ -4,8 +4,8 @@ import { render } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 import StatusItem from './StatusItem.svelte';
 
-// i18n mock: return the key and interpolate vars — mirrors the repo's
-// existing component-test convention (see PiiMaskedCard.test.ts).
+// i18n mock: returns the key with `{{var}}` placeholders filled in, the same
+// mock used in PiiMaskedCard.test.ts.
 const i18n = readable({
 	t: (key: string, vars?: Record<string, string>) => {
 		if (!vars) return key;

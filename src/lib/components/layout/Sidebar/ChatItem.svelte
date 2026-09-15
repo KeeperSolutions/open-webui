@@ -34,6 +34,7 @@
 		chatId,
 		chatTitle as _chatTitle,
 		mobile,
+		isTouchDevice,
 		showSidebar,
 		tags,
 		selectedFolder,
@@ -52,10 +53,9 @@
 	import ChatIcon from './icons/Chat.svelte';
 	import MoreHorizontalIcon from './icons/MoreHorizontal.svelte';
 	import SparklesIcon from './icons/Sparkles.svelte';
-	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
-	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
 	import { generateTitle } from '$lib/apis';
 	import { createMessagesList } from '$lib/utils';
+	import { longPress } from '$lib/utils/longPress';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 
 	const i18n = getContext('i18n');
@@ -72,7 +72,6 @@
 	export let active = false;
 
 	export let selected = false;
-	export let shiftKey = false;
 	export let readonly = false;
 
 	export let ownerName: string | null = null;
@@ -131,7 +130,10 @@
 		id !== $chatId &&
 		!active &&
 		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
-	$: showInlineActions = id === $chatId || confirmEdit || mouseOver || selected;
+
+	// Inline actions are hover-only; on touch the menu is reached by holding the row instead.
+	$: showInlineActions =
+		confirmEdit || (!$isTouchDevice && (id === $chatId || mouseOver || selected));
 
 	const loadChat = async () => {
 		if (!chat) {
@@ -318,6 +320,16 @@
 		onDragEnd(event);
 	};
 
+	// Touch devices have no hover, so press-and-hold opens the chat menu instead.
+	let menuOpen = false;
+
+	const openMenuHandler = () => {
+		openPreview = false;
+		menuOpen = true;
+
+		dispatch('select');
+	};
+
 	const onClickOutside = (event) => {
 		if (!itemElement.contains(event.target)) {
 			if (confirmEdit) {
@@ -491,7 +503,7 @@
 <div
 	id="sidebar-chat-group"
 	bind:this={itemElement}
-	class=" w-full {className} relative group"
+	class=" w-full {className} relative group {$mobile ? 'mb-2' : ''}"
 	draggable={!confirmEdit && !readonly}
 	on:mouseenter={() => {
 		mouseOver = true;
@@ -499,11 +511,18 @@
 	on:mouseleave={() => {
 		mouseOver = false;
 	}}
+	use:longPress={{
+		enabled: $isTouchDevice && !readonly && !confirmEdit,
+		suppressNativeMenu: $isTouchDevice && !confirmEdit,
+		onLongPress: openMenuHandler
+	}}
 >
 	{#if confirmEdit}
 		<div
 			id="sidebar-chat-item"
-			class=" w-full flex justify-between rounded-xl px-2 py-[6px] {id === $chatId || confirmEdit
+			class=" w-full flex justify-between rounded-xl {$mobile
+				? 'px-3 py-2.5'
+				: 'px-2 py-[6px]'} {id === $chatId || confirmEdit
 				? ($settings?.highContrastMode ?? false)
 					? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 					: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -548,7 +567,9 @@
 		>
 			<LinkPreview.Trigger
 				id="sidebar-chat-item"
-				class=" w-full flex justify-between rounded-xl px-2 py-[6px] {id === $chatId || confirmEdit
+				class=" w-full flex justify-between rounded-xl {$mobile
+					? 'px-3 py-2.5'
+					: 'px-2 py-[6px]'} {id === $chatId || confirmEdit
 					? ($settings?.highContrastMode ?? false)
 						? 'bg-black/[0.035] dark:bg-white/[0.06] selected'
 						: 'bg-black/[0.035] dark:bg-white/[0.045] selected'
@@ -576,7 +597,7 @@
 					lastReadAt = Date.now() / 1000;
 				}}
 				ondblclick={async (e) => {
-					if (readonly) return;
+					if ($isTouchDevice || readonly) return;
 					e.preventDefault();
 					e.stopPropagation();
 
@@ -610,7 +631,9 @@
 					{/if}
 					<div
 						dir="auto"
-						class="text-left self-center overflow-hidden w-full h-[20px] truncate {unread
+						class="text-left self-center overflow-hidden w-full truncate {$mobile
+							? 'h-[24px] text-[15px]'
+							: 'h-[20px]'} {unread
 							? 'font-normal text-gray-800 dark:text-gray-200'
 							: ''} {showInlineActions && !readonly ? 'pr-12' : ''}"
 					>
@@ -620,7 +643,7 @@
 
 				<!-- Time ago indicator -->
 				{#if (updatedAt ?? createdAt) && !showInlineActions}
-					<div class="shrink-0 self-center text-[10px] text-gray-400 dark:text-gray-500 pl-2">
+					<div class="shrink-0 self-center text-[10px] text-gray-300 dark:text-gray-600 pl-2">
 						{formatTimeAgo((updatedAt ?? createdAt) as number)}
 					</div>
 				{/if}
@@ -641,7 +664,9 @@
 			id="sidebar-chat-item-menu"
 			class="{showInlineActions
 				? 'selected'
-				: 'invisible group-hover:visible'} absolute {className === 'pr-2'
+				: $isTouchDevice
+					? 'invisible'
+					: 'invisible group-hover:visible'} absolute {className === 'pr-2'
 				? 'right-[8px]'
 				: 'right-1'} inset-y-0 mr-1.5 flex items-center"
 		>
@@ -651,7 +676,7 @@
 				>
 					<Tooltip content={$i18n.t('Generate')}>
 						<button
-							class="flex size-5 items-center justify-center self-center dark:hover:text-white transition disabled:cursor-not-allowed"
+							class="flex size-5 items-center justify-center self-center hover:text-black dark:hover:text-white transition disabled:cursor-not-allowed"
 							id="generate-title-button"
 							disabled={generating}
 							on:click={() => {
@@ -662,37 +687,10 @@
 						</button>
 					</Tooltip>
 				</div>
-			{:else if shiftKey && mouseOver}
-				<div class=" flex items-center self-center space-x-1.5">
-					<Tooltip content={$i18n.t('Archive')} className="flex items-center">
-						<button
-							class="flex size-5 items-center justify-center self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-							disabled={archiving}
-							on:click={() => {
-								archiveChatHandler(id);
-							}}
-							type="button"
-						>
-							<ArchiveBoxIcon className="size-3.5" strokeWidth="1.7" />
-						</button>
-					</Tooltip>
-
-					<Tooltip content={$i18n.t('Delete')}>
-						<button
-							class=" self-center dark:hover:text-white transition disabled:cursor-not-allowed"
-							disabled={deleting}
-							on:click={() => {
-								deleteChatHandler(id);
-							}}
-							type="button"
-						>
-							<GarbageBinIcon className="size-3.5" strokeWidth="1.7" />
-						</button>
-					</Tooltip>
-				</div>
 			{:else}
 				<div class="flex self-center z-10 items-end">
 					<ChatMenu
+						bind:showChatMenu={menuOpen}
 						chatId={id}
 						cloneChatHandler={() => {
 							cloneChatHandler(id);
@@ -718,12 +716,14 @@
 					>
 						<button
 							aria-label="Chat Menu"
-							class="flex size-5 items-center justify-center self-center dark:hover:text-white transition m-0"
+							class="flex items-center justify-center self-center hover:text-black dark:hover:text-white transition m-0 {$mobile
+								? 'size-8'
+								: 'size-5'}"
 							on:click={() => {
 								dispatch('select');
 							}}
 						>
-							<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+							<MoreHorizontalIcon className={$mobile ? 'size-4' : 'size-3.5'} strokeWidth="2" />
 						</button>
 					</ChatMenu>
 

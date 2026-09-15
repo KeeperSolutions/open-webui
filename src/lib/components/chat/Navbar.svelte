@@ -19,6 +19,7 @@
 	import { goto } from '$app/navigation';
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
+	import ModelSelector from '../chat/ModelSelector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
@@ -47,6 +48,8 @@
 	export let chat;
 	export let history;
 	export let title = '';
+	export let selectedModels = [''];
+	export let showModelSelector = true;
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
 	export let deleteChatHandler: (id: string) => void;
@@ -103,8 +106,8 @@
 								}}
 								aria-label={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
 							>
-								<div class="self-center p-1.5">
-									<Sidebar className="size-4" />
+								<div class="self-center {$mobile ? 'p-2' : 'p-1.5'}">
+									<Sidebar className={$mobile ? 'size-5' : 'size-4'} />
 								</div>
 							</button>
 						</Tooltip>
@@ -114,8 +117,14 @@
 				<div
 					class="flex-1 overflow-hidden max-w-full mt-0.5 py-0.5 pl-1 {$showSidebar ? 'ml-1' : ''}"
 				>
-					{#if chat?.id}
-						<div class="flex max-w-full min-w-0 items-center gap-2 mr-2">
+					<div class="flex max-w-full min-w-0 items-center gap-4 mr-4">
+						{#if showModelSelector}
+							<div class="flex min-w-0 max-w-[13rem] shrink items-center sm:max-w-[16rem]">
+								<ModelSelector bind:selectedModels />
+							</div>
+						{/if}
+
+						{#if chat?.id}
 							<div
 								class="min-w-0 truncate py-1 text-left text-[15px] font-normal text-gray-700 dark:text-gray-300"
 							>
@@ -140,24 +149,21 @@
 									{moveChatHandler}
 								>
 									<button
-										class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+										class="flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200 {$mobile
+											? 'size-9'
+											: 'size-6'}"
 										id="chat-context-menu-button"
 										aria-label={$i18n.t('Chat actions')}
 									>
-										<EllipsisHorizontal className="size-4.5" strokeWidth="1.5" />
+										<EllipsisHorizontal
+											className={$mobile ? 'size-5.5' : 'size-4.5'}
+											strokeWidth="1.5"
+										/>
 									</button>
 								</Menu>
 							{/if}
-						</div>
-					{:else}
-						<div class="pointer-events-none invisible flex max-w-full min-w-0 items-center gap-2">
-							<div
-								class="min-w-0 truncate py-1 text-left text-[15px] font-normal text-gray-700 dark:text-gray-300"
-							>
-								{$i18n.t('New Chat')}
-							</div>
-						</div>
-					{/if}
+						{/if}
+					</div>
 				</div>
 
 				<div class="mr-1 flex flex-none items-center gap-2 self-center">
@@ -167,7 +173,9 @@
 						{#if !chat?.id}
 							<Tooltip content={$i18n.t(`Temporary Chat`)}>
 								<button
-									class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+									class="flex cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200 {$mobile
+										? 'size-9'
+										: 'size-6'}"
 									id="temporary-chat-button"
 									on:click={async () => {
 										if (($settings?.temporaryChatByDefault ?? false) && $temporaryChatEnabled) {
@@ -189,23 +197,31 @@
 									aria-label={$i18n.t(`Temporary Chat`)}
 								>
 									{#if $temporaryChatEnabled}
-										<ChatBubbleDottedChecked className="size-4.5" strokeWidth="1.5" />
+										<ChatBubbleDottedChecked
+											className={$mobile ? 'size-5.5' : 'size-4.5'}
+											strokeWidth="1.5"
+										/>
 									{:else}
-										<ChatBubbleDotted className="size-4.5" strokeWidth="1.5" />
+										<ChatBubbleDotted
+											className={$mobile ? 'size-5.5' : 'size-4.5'}
+											strokeWidth="1.5"
+										/>
 									{/if}
 								</button>
 							</Tooltip>
 						{:else if $temporaryChatEnabled}
 							<Tooltip content={$i18n.t(`Save Chat`)}>
 								<button
-									class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+									class="flex cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200 {$mobile
+										? 'size-9'
+										: 'size-6'}"
 									id="save-temporary-chat-button"
 									on:click={async () => {
 										onSaveTempChat();
 									}}
 									aria-label={$i18n.t(`Save Chat`)}
 								>
-									<ChatCheck className="size-4.5" strokeWidth="1.5" />
+									<ChatCheck className={$mobile ? 'size-5.5' : 'size-4.5'} strokeWidth="1.5" />
 								</button>
 							</Tooltip>
 						{/if}
@@ -214,7 +230,7 @@
 					{#if $mobile && !$temporaryChatEnabled && chat && chat.id}
 						<Tooltip content={$i18n.t('New Chat')}>
 							<button
-								class="flex size-6 {$showSidebar
+								class="flex {$mobile ? 'size-9' : 'size-6'} {$showSidebar
 									? 'md:hidden'
 									: ''} cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
 								on:click={() => {
@@ -222,7 +238,7 @@
 								}}
 								aria-label="New Chat"
 							>
-								<ChatPlus className="size-4.5" strokeWidth="1.5" />
+								<ChatPlus className={$mobile ? 'size-5.5' : 'size-4.5'} strokeWidth="1.5" />
 							</button>
 						</Tooltip>
 					{/if}
@@ -230,13 +246,15 @@
 					{#if $user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true)}
 						<Tooltip content={$i18n.t('Controls')}>
 							<button
-								class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"
+								class="flex cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200 {$mobile
+									? 'size-9'
+									: 'size-6'}"
 								on:click={async () => {
 									await showControls.set(!$showControls);
 								}}
 								aria-label="Controls"
 							>
-								<Knobs className="size-5" strokeWidth="1" />
+								<Knobs className={$mobile ? 'size-6' : 'size-5'} strokeWidth="1" />
 							</button>
 						</Tooltip>
 					{/if}

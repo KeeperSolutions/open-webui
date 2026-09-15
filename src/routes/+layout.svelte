@@ -19,6 +19,7 @@
 		WEBUI_VERSION,
 		WEBUI_DEPLOYMENT_ID,
 		mobile,
+		isTouchDevice,
 		socket,
 		socketConnected,
 		chatId,
@@ -1129,6 +1130,10 @@
 			}
 		};
 		window.addEventListener('resize', onResize);
+
+		const touchMediaQuery = window.matchMedia('(hover: none) and (pointer: coarse)');
+		isTouchDevice.set(touchMediaQuery.matches);
+		touchMediaQuery.addEventListener('change', (e) => isTouchDevice.set(e.matches));
 
 		user.subscribe(async (value) => {
 			if (value) {
