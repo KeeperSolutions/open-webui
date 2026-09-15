@@ -2235,23 +2235,56 @@ async def convert_url_images_to_base64(form_data, user=None):
     return form_data
 
 
+_LOAD_MESSAGES_RETRY_ATTEMPTS = 3
+_LOAD_MESSAGES_RETRY_DELAY_SECONDS = 0.3  # ~900ms worst case total
+
+
 async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[dict]]:
     """
     Load the message chain from DB up to message_id,
     keeping only LLM-relevant fields (role, content, output).
+
+    Retries briefly if message_id isn't found yet — closes the window
+    between the two independently-committed writes in
+    Chats.upsert_message_to_chat_by_id_and_message_id (chat.history commits
+    before the chat_message dual-write). See
+    md-docs/chat-history-race-condition.md.
     """
-    messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
-    if not messages_map:
-        return None
+    for attempt in range(_LOAD_MESSAGES_RETRY_ATTEMPTS):
+        messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
+        if messages_map:
+            db_messages = get_message_list(messages_map, message_id)
+            if db_messages:
+                return [
+                    {
+                        k: v
+                        for k, v in msg.items()
+                        if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
+                    }
+                    for msg in db_messages
+                ]
+        if attempt < _LOAD_MESSAGES_RETRY_ATTEMPTS - 1:
+            await asyncio.sleep(_LOAD_MESSAGES_RETRY_DELAY_SECONDS)
 
-    db_messages = get_message_list(messages_map, message_id)
+    return None
+
+
+def _require_db_messages(db_messages: Optional[list[dict]], chat_id: str, user_message_id: str) -> list[dict]:
+    """Raise instead of silently leaving form_data['messages'] as whatever
+    the frontend originally sent (system-prompt-only for a saved chat) when
+    DB history reconstruction found nothing after retrying."""
     if not db_messages:
-        return None
-
-    return [
-        {k: v for k, v in msg.items() if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')}
-        for msg in db_messages
-    ]
+        log.warning(
+            'load_messages_from_db found no messages for chat %s / message %s '
+            'after retrying — refusing to forward an incomplete history to the LLM',
+            chat_id,
+            user_message_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail='Your message is still being saved — please try again.',
+        )
+    return db_messages
 
 
 def get_reasoning_format(model: dict) -> str | None:
@@ -2646,47 +2679,48 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     if is_saved_chat_id(chat_id) and user_message_id:
         db_messages = await load_messages_from_db(chat_id, user_message_id)
-        if db_messages:
-            # Continue: frontend sends assistant_message_id when continuing
-            # an existing response. Load its content so the LLM sees prior output.
-            assistant_message_id = metadata.get('assistant_message_id')
-            if assistant_message_id:
-                assistant_message = await Chats.get_message_by_id_and_message_id(chat_id, assistant_message_id)
-                if assistant_message and (assistant_message.get('content') or assistant_message.get('output')):
-                    db_messages.append(
-                        {
-                            k: v
-                            for k, v in assistant_message.items()
-                            if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
-                        }
-                    )
+        db_messages = _require_db_messages(db_messages, chat_id, user_message_id)
 
-            system_message = get_system_message(form_data.get('messages', []))
-            form_data['messages'] = [system_message, *db_messages] if system_message else db_messages
+        # Continue: frontend sends assistant_message_id when continuing
+        # an existing response. Load its content so the LLM sees prior output.
+        assistant_message_id = metadata.get('assistant_message_id')
+        if assistant_message_id:
+            assistant_message = await Chats.get_message_by_id_and_message_id(chat_id, assistant_message_id)
+            if assistant_message and (assistant_message.get('content') or assistant_message.get('output')):
+                db_messages.append(
+                    {
+                        k: v
+                        for k, v in assistant_message.items()
+                        if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
+                    }
+                )
 
-            # Inject image files into content as image_url parts (mirrors frontend logic)
-            for message in form_data['messages']:
-                image_files = [
-                    f
-                    for f in message.get('files', [])
-                    if f.get('type') == 'image' or (f.get('content_type') or '').startswith('image/')
-                ]
-                if message.get('role') == 'user' and image_files:
-                    text_content = message.get('content', '')
-                    if isinstance(text_content, str):
-                        message['content'] = [
-                            {'type': 'text', 'text': text_content},
-                            *[
-                                {
-                                    'type': 'image_url',
-                                    'image_url': {'url': f['url']},
-                                }
-                                for f in image_files
-                                if f.get('url')
-                            ],
-                        ]
-                # Strip files field — it's been incorporated into content
-                message.pop('files', None)
+        system_message = get_system_message(form_data.get('messages', []))
+        form_data['messages'] = [system_message, *db_messages] if system_message else db_messages
+
+        # Inject image files into content as image_url parts (mirrors frontend logic)
+        for message in form_data['messages']:
+            image_files = [
+                f
+                for f in message.get('files', [])
+                if f.get('type') == 'image' or (f.get('content_type') or '').startswith('image/')
+            ]
+            if message.get('role') == 'user' and image_files:
+                text_content = message.get('content', '')
+                if isinstance(text_content, str):
+                    message['content'] = [
+                        {'type': 'text', 'text': text_content},
+                        *[
+                            {
+                                'type': 'image_url',
+                                'image_url': {'url': f['url']},
+                            }
+                            for f in image_files
+                            if f.get('url')
+                        ],
+                    ]
+            # Strip files field — it's been incorporated into content
+            message.pop('files', None)
 
     if regeneration_prompt:
         form_data['messages'].append({'role': 'user', 'content': regeneration_prompt})
