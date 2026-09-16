@@ -1676,3 +1676,38 @@ def test_a_model_with_a_different_pii_filter_masks_the_document_again():
 
     assert first and second, "model-b reused text masked by model-a's filter"
     assert third == [], "the same model and filters must reuse the cached text"
+
+
+# ---------------------------------------------------------------------------
+# A turn that carries attachments and no typed message
+# ---------------------------------------------------------------------------
+
+
+def test_attachment_only_prompt_stands_in_for_an_empty_message():
+    """A turn with attachments and no text gets a short model-facing message, so
+    the source context and the masking that goes with it are not skipped."""
+    from open_webui.utils.middleware import _attachment_only_prompt
+
+    assert _attachment_only_prompt(_file_sources("John Smith")) == "Attached file"
+    assert (
+        _attachment_only_prompt(_file_sources("John Smith") + _file_sources("Jane Doe"))
+        == "Attached files"
+    )
+
+
+def test_attachment_only_prompt_never_carries_a_file_name():
+    """The text is set after the inlet has masked the turn, so a file name must
+    not reach the model: the name itself can contain PII."""
+    from open_webui.utils.middleware import _attachment_only_prompt
+
+    sources = _file_sources("John Smith", name="john-doe-cv.pdf", file_id="f1")
+
+    assert "john-doe" not in _attachment_only_prompt(sources)
+
+
+def test_attachment_only_prompt_is_empty_without_sources():
+    """With no sources there is nothing to stand in for, so the message is left
+    as it is."""
+    from open_webui.utils.middleware import _attachment_only_prompt
+
+    assert _attachment_only_prompt([]) == ""

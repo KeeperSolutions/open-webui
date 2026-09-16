@@ -3477,6 +3477,21 @@ def _pii_progress_emitter(event_emitter):
     return on_progress
 
 
+def _attachment_only_prompt(sources) -> str:
+    """Model-facing text for a turn whose message is empty but carries sources.
+
+    Without it the source-context block in `process_chat_payload` is skipped,
+    so the documents reach neither the model nor the PII masking that block
+    performs. File names are left out on purpose: this text is set after the
+    inlet has masked the turn, and a name such as `john-doe-cv.pdf` would
+    reach the model unmasked.
+    """
+    count = sum(1 for source in sources if isinstance(source, dict))
+    if count == 0:
+        return ''
+    return 'Attached file' if count == 1 else 'Attached files'
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
     # Ensure chat_id is always a string — external API clients may omit it.
     if not isinstance(metadata.get('chat_id'), str):
@@ -4231,6 +4246,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             f'{resolved_model_system_prompt}\n{system_content}' if system_content else resolved_model_system_prompt
         )
     metadata['system_prompt'] = system_content or None
+    # A turn that carries only attachments has an empty last user message, so
+    # the source-context block below would be skipped and the documents would
+    # reach neither the model nor its masking. Give the turn a short
+    # model-facing text instead, as the skill-mention fallback above does.
+    if sources and not (prompt or '').strip():
+        prompt = _attachment_only_prompt(sources)
+        set_last_user_message_content(prompt, form_data['messages'])
+
     metadata['user_prompt'] = get_last_user_message(form_data['messages'])
     metadata['sources'] = sources[:] if sources else []
     # PII-masked copy of metadata['sources'], filled in once masking succeeds.
