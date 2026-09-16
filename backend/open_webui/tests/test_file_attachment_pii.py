@@ -1553,3 +1553,126 @@ def test_u44_the_budget_does_not_charge_for_documents_it_will_not_mask():
     both = warm + _file_sources(extra, name="b.pdf", file_id="f2")
     result, _ = _mask_call(both)
     assert "[PERSON_1]" in json.dumps(result), "refused a turn for work it was not going to do"
+
+
+# ---------------------------------------------------------------------------
+# Only PII filters count as masking, and the cache follows what the pipeline
+# was told
+# ---------------------------------------------------------------------------
+
+
+def _filter(filter_id, url_idx=0, targets=("*",), priority=0):
+    return {
+        "id": filter_id,
+        "urlIdx": url_idx,
+        "pipeline": {"type": "filter", "priority": priority, "pipelines": list(targets)},
+    }
+
+
+def _apply(
+    sources,
+    *,
+    captured,
+    behavior,
+    models,
+    model_id="gpt-4",
+    user=None,
+    features=None,
+    request=None,
+):
+    with _patch_mw_session(captured, behavior=behavior, masked_text="[PERSON_1]"), _patch_policy(
+        False
+    ):
+        return _run(
+            apply_source_context_to_messages(
+                request or _make_request(),
+                [{"role": "user", "content": "q"}],
+                sources,
+                "q",
+                chat_id="chat-1",
+                user=user or _make_user(),
+                model_id=model_id,
+                models=models,
+                features=features if features is not None else {"pii_masking": True},
+            )
+        )
+
+
+def test_a_non_pii_filter_alone_is_not_accepted_as_masking():
+    """When only a non-PII filter applies to the model, the hook refuses before
+    any POST, so the raw attachment reaches neither that filter nor the LLM."""
+    captured = []
+    models = {"gpt-4": {"id": "gpt-4"}, "telemetry_filter": _filter("telemetry_filter")}
+
+    with pytest.raises(PiiMaskingBlockedError):
+        _apply(_file_sources("John Smith"), captured=captured, behavior="echo", models=models)
+
+    assert captured == [], "the raw text was sent to a non-PII filter"
+
+
+def test_a_skipped_pii_filter_is_not_covered_by_another_filter_answering():
+    """A PII filter without an API key is skipped. Another filter answering does
+    not count as masking, so the hook still refuses."""
+    models = {
+        "gpt-4": {"id": "gpt-4"},
+        "pii_filter": _filter("pii_filter", url_idx=0),
+        "telemetry_filter": _filter("telemetry_filter", url_idx=1, priority=1),
+    }
+    request = _make_request(
+        base_urls=["http://pii-host", "http://telemetry-host"], api_keys=["", "secret-key"]
+    )
+
+    with pytest.raises(PiiMaskingBlockedError):
+        _apply(
+            _file_sources("John Smith"),
+            captured=[],
+            behavior="echo",
+            models=models,
+            request=request,
+        )
+
+
+def test_a_turn_without_the_masking_flag_is_not_cached():
+    """Without `features.pii_masking` the pipeline receives the user's stored
+    valve, which can be False, so its unchanged text is not cached for a later
+    turn with masking on."""
+    sources = _file_sources("John Smith")
+    user = _make_user(pii_enabled=False)
+
+    raw_posts = []
+    raw = _apply(
+        sources,
+        captured=raw_posts,
+        behavior="echo",
+        models=_make_models(),
+        user=user,
+        features={},
+    )
+    assert raw_posts[0]["user"]["valves"]["pii_masking_enabled"] is False
+    assert "John Smith" in json.dumps(raw[0])
+
+    on_posts = []
+    on = _apply(sources, captured=on_posts, behavior="mask", models=_make_models(), user=user)
+    assert on_posts, "text returned under the stored valve was served from the cache"
+    assert "John Smith" not in json.dumps(on[0])
+
+
+def test_a_model_with_a_different_pii_filter_masks_the_document_again():
+    """Filters can target specific models, so switching to a model with a
+    different PII filter masks the document again. The same model still reuses
+    the cached text."""
+    models = {
+        "model-a": {"id": "model-a"},
+        "model-b": {"id": "model-b"},
+        "pii_filter": _filter("pii_filter", targets=("model-a",)),
+        "pii_filter_pipeline": _filter("pii_filter_pipeline", targets=("model-b",)),
+    }
+    sources = _file_sources("John Smith")
+
+    first, second, third = [], [], []
+    _apply(sources, captured=first, behavior="mask", models=models, model_id="model-a")
+    _apply(sources, captured=second, behavior="mask", models=models, model_id="model-b")
+    _apply(sources, captured=third, behavior="mask", models=models, model_id="model-b")
+
+    assert first and second, "model-b reused text masked by model-a's filter"
+    assert third == [], "the same model and filters must reuse the cached text"

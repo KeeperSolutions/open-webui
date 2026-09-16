@@ -44,6 +44,7 @@ from open_webui.env import (
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
     GLOBAL_LOG_LEVEL,
+    PII_FILTER_IDS,
     RAG_SYSTEM_CONTEXT,
     SSE_KEEPALIVE_INTERVAL,
 )
@@ -1144,17 +1145,29 @@ def reset_masked_source_cache():
     _masked_source_cache_chars = 0
 
 
-def _masked_source_cache_key(chat_id, file_id, doc):
-    """Identify a document by chat, file id and a hash of its text.
+def _applicable_filter_ids(model_id, models):
+    """Return the sorted ids of the filter pipelines that apply to `model_id`."""
+    if not isinstance(models, dict) or model_id not in models:
+        return ()
+    filters = get_sorted_filters(model_id, models)
+    model = models[model_id]
+    if isinstance(model, dict) and "pipeline" in model:
+        filters = [*filters, model]
+    return tuple(sorted(str(f.get("id")) for f in filters))
 
-    `model_id` is left out because the masked text depends on the thread vault
-    and the text, not on the model. Text masked under another model's filter
-    can only be over-masked, never raw. Including the model would discard the
-    cache whenever the user switches model mid-chat.
+
+def _masked_source_cache_key(chat_id, file_id, filter_ids, doc):
+    """Identify a document by chat, file id, applicable filters and text hash.
+
+    Filters can target specific models, so the ids of the filters that apply
+    are part of the key and a model with a different PII filter masks the
+    document again. The model id itself is left out, so switching between
+    models that share the same filters keeps the cache.
     """
     return (
         chat_id,
         file_id,
+        filter_ids,
         hashlib.sha256(doc.encode("utf-8", "surrogatepass")).hexdigest(),
     )
 
@@ -1238,9 +1251,8 @@ async def _mask_text_via_pii_pipeline(
     if models is None:
         models = request.app.state.MODELS
 
-    # See `_resolve_pii_masking_decision` for the empty-filter / policy-override
-    # semantics; `mask_sources_for_llm` asks the same question to decide whether
-    # a masking result is safe to cache.
+    # See `_resolve_pii_masking_decision` for how a policy overrides the
+    # per-request flag.
     features = features if isinstance(features, dict) else {}
     request_pii = features.get("pii_masking")
     policy_enforced, pii_expected = await _resolve_pii_masking_decision(
@@ -1271,6 +1283,15 @@ async def _mask_text_via_pii_pipeline(
     # only when masking is expected.
     if not pii_expected:
         return text, []
+
+    # Only a filter listed in PII_FILTER_IDS masks PII. When none applies, the
+    # other filters would receive the raw text and their successful response
+    # would pass for masking, so refuse before sending anything. An empty
+    # PII_FILTER_IDS disables the check, as it does on the prompt path.
+    if PII_FILTER_IDS and not any(f.get("id") in PII_FILTER_IDS for f in sorted_filters):
+        raise PiiMaskingBlockedError(
+            "PII masking expected but no PII filter applies to this model."
+        )
 
     # user.settings -> ui.pipelines.valves (mirror process_pipeline_inlet_filter).
     user_settings = getattr(user, "settings", None)
@@ -1305,6 +1326,7 @@ async def _mask_text_via_pii_pipeline(
     }
 
     masked_count = 0
+    pii_masked_count = 0
     for filter in sorted_filters:
         urlIdx = filter.get("urlIdx")
         try:
@@ -1352,6 +1374,8 @@ async def _mask_text_via_pii_pipeline(
                 # Count a successful POST and parse. A response with unchanged text
                 # (no PII found) is a valid pass and counts too.
                 masked_count += 1
+                if filter_id in PII_FILTER_IDS:
+                    pii_masked_count += 1
                 last_exc = None
                 break
             except Exception as e:
@@ -1370,6 +1394,14 @@ async def _mask_text_via_pii_pipeline(
     if pii_expected and masked_count == 0:
         raise PiiMaskingBlockedError(
             "PII masking expected but no applicable filter was usable "
+            "(missing API key / invalid urlIdx); blocked before LLM."
+        )
+
+    # A PII filter applies but was skipped (no API key or invalid urlIdx) while
+    # another filter answered, so the text was not masked.
+    if PII_FILTER_IDS and pii_masked_count == 0:
+        raise PiiMaskingBlockedError(
+            "PII masking expected but no PII filter was usable "
             "(missing API key / invalid urlIdx); blocked before LLM."
         )
 
@@ -1485,17 +1517,18 @@ async def _mask_long_text_via_pii_pipeline(
 
 
 def _resolve_pii_scan_model_id(models):
-    """Return the id of a model that at least one filter pipeline applies to,
-    or None.
+    """Return the id of a model that a PII filter applies to, or None.
 
     The ingest scan needs the filter, not a particular model, so any such model
-    works. With None the best-effort ingest scan is skipped."""
+    works. With None the best-effort ingest scan is skipped. When PII_FILTER_IDS
+    is empty any filter counts, as in `_mask_text_via_pii_pipeline`."""
     if not isinstance(models, dict):
         return None
     for model_id, model in models.items():
         if isinstance(model, dict) and "pipeline" in model:
             continue  # skip the filter-pipeline pseudo-models themselves
-        if get_sorted_filters(model_id, models):
+        filter_ids = {f.get("id") for f in get_sorted_filters(model_id, models)}
+        if filter_ids and (not PII_FILTER_IDS or filter_ids & PII_FILTER_IDS):
             return model_id
     return None
 
@@ -1686,12 +1719,17 @@ async def mask_sources_for_llm(
     _dbg_orig_chars = 0
     _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
 
-    # Cache only when masking is expected. With masking off,
-    # `_mask_text_via_pii_pipeline` returns the text unchanged; caching that
-    # would serve the raw document to a later turn with masking switched back
-    # on. Using the same decision function keeps the two checks in step.
-    _, _pii_expected = await _resolve_pii_masking_decision(request, user, features)
-    cache_enabled = bool(chat_id) and _pii_expected
+    # Cache only when this request forces the pipeline valve on: a policy
+    # mandates masking or `features.pii_masking` is True. Otherwise the pipeline
+    # receives the user's stored valve, which can be False, and returns the text
+    # unchanged; caching that would serve the raw document to a later turn with
+    # masking on.
+    _features = features if isinstance(features, dict) else {}
+    _policy_enforced, _ = await _resolve_pii_masking_decision(request, user, _features)
+    cache_enabled = bool(chat_id) and (_policy_enforced or _features.get("pii_masking") is True)
+    _filter_ids = _applicable_filter_ids(
+        model_id, models if models is not None else request.app.state.MODELS
+    )
     _dbg_cached_docs = 0
 
     # Resolve cache lookups first, so the budget check and the progress total
@@ -1706,7 +1744,7 @@ async def mask_sources_for_llm(
         for _d_idx, (_doc, _meta) in enumerate(zip(_docs, _metas)):
             _meta = _meta if isinstance(_meta, dict) else {}
             _key = (
-                _masked_source_cache_key(chat_id, _meta.get('file_id'), _doc)
+                _masked_source_cache_key(chat_id, _meta.get('file_id'), _filter_ids, _doc)
                 if cache_enabled and isinstance(_doc, str)
                 else None
             )
