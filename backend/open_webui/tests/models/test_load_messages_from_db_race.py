@@ -1,5 +1,4 @@
 """Regression tests for the chat-history race condition
-(md-docs/chat-history-race-condition.md).
 
 Chat message persistence is two separate, independently-committed writes
 inside Chats.upsert_message_to_chat_by_id_and_message_id
@@ -22,6 +21,7 @@ No live API key or network calls — everything here runs against an
 in-memory SQLite DB and asserts on load_messages_from_db()'s and
 _require_db_messages()'s real Python-level output.
 """
+
 import asyncio
 import time
 import uuid
@@ -102,9 +102,10 @@ class TestLoadMessagesFromDbRetryBehavior:
             call_count += 1
             return None
 
-        with patch(
-            'open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', always_miss
-        ), patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()) as mock_sleep:
+        with (
+            patch('open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', always_miss),
+            patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()) as mock_sleep,
+        ):
             result = await load_messages_from_db('chat-1', 'msg-1')
 
         assert result is None
@@ -125,9 +126,10 @@ class TestLoadMessagesFromDbRetryBehavior:
             call_count += 1
             return messages_map
 
-        with patch(
-            'open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', hit
-        ), patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()) as mock_sleep:
+        with (
+            patch('open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', hit),
+            patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()) as mock_sleep,
+        ):
             result = await load_messages_from_db('chat-1', 'msg-1')
 
         assert result is not None
@@ -151,9 +153,10 @@ class TestLoadMessagesFromDbRetryBehavior:
                 return None
             return messages_map
 
-        with patch(
-            'open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', miss_then_hit
-        ), patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()):
+        with (
+            patch('open_webui.utils.middleware.Chats.get_messages_map_by_chat_id', miss_then_hit),
+            patch('open_webui.utils.middleware.asyncio.sleep', AsyncMock()),
+        ):
             result = await load_messages_from_db('chat-1', 'msg-1')
 
         assert result is not None
@@ -203,9 +206,7 @@ class TestLoadMessagesFromDbClosesTheRealRace:
         prior_message_id = 'msg-prior'
         user_message_id = 'msg-a'
 
-        session_factory = async_sessionmaker(
-            bind=db_engine, autocommit=False, autoflush=False, expire_on_commit=False
-        )
+        session_factory = async_sessionmaker(bind=db_engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
         prior_message = _user_message(prior_message_id, 'Hello')
         async with session_factory() as setup_session:
@@ -236,9 +237,11 @@ class TestLoadMessagesFromDbClosesTheRealRace:
             await asyncio.sleep(_LOAD_MESSAGES_RETRY_DELAY_SECONDS * 1.5)
             return await original_upsert_message(*args, **kwargs)
 
-        with patch('open_webui.internal.db.AsyncSessionLocal', session_factory), patch(
-            'open_webui.internal.db.DATABASE_ENABLE_SESSION_SHARING', False
-        ), patch.object(ChatMessages, 'upsert_message', delayed_upsert_message):
+        with (
+            patch('open_webui.internal.db.AsyncSessionLocal', session_factory),
+            patch('open_webui.internal.db.DATABASE_ENABLE_SESSION_SHARING', False),
+            patch.object(ChatMessages, 'upsert_message', delayed_upsert_message),
+        ):
 
             async def save_user_message():
                 await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, user_message_id, message)
@@ -250,9 +253,7 @@ class TestLoadMessagesFromDbClosesTheRealRace:
             # before load_messages_from_db's first attempt runs.
             await asyncio.sleep(0.01)
 
-            result = await asyncio.wait_for(
-                load_messages_from_db(chat_id, user_message_id), timeout=15
-            )
+            result = await asyncio.wait_for(load_messages_from_db(chat_id, user_message_id), timeout=15)
             await asyncio.wait_for(save_task, timeout=15)
 
         assert result is not None, (
