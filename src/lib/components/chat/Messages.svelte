@@ -46,6 +46,8 @@
 	export let compactPreview = false;
 	export let editCodeBlock = true;
 
+	export let piiMaskingEnabled = true;
+
 	export let topPadding = false;
 	export let bottomPadding = false;
 	export let autoScroll;
@@ -561,6 +563,7 @@
 								{compactPreview}
 								{editCodeBlock}
 								{topPadding}
+								{piiMaskingEnabled}
 								{onInsertToNote}
 							/>
 						{/each}

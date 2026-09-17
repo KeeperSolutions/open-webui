@@ -11,6 +11,9 @@ import {
 	getPiiMaskingDefault,
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
+	scopeCardDetections,
+	ingestCoveredFileIds,
+	piiIngestScanEnabled,
 	piiFilterIds,
 	getStoredPiiMasking,
 	piiMaskingForRequest,
@@ -282,6 +285,44 @@ describe('isPiiPipelineConfigured', () => {
 	});
 });
 
+describe('scopeCardDetections', () => {
+	// Annotated rather than inferred: a literal without `fileId` shares no property
+	// with the function's optional-only constraint, which TypeScript rejects.
+	type Detection = { type: string; start: number; end: number; fileId?: string | null };
+
+	const msg: Detection = { type: 'PERSON', start: 0, end: 3 }; // message PII (no fileId)
+	const fileA: Detection = { type: 'EMAIL', start: 0, end: 5, fileId: 'a' };
+	const fileB: Detection = { type: 'PHONE', start: 0, end: 5, fileId: 'b' };
+
+	it('always keeps message PII (no fileId)', () => {
+		expect(scopeCardDetections([msg], new Set(), new Set())).toEqual([msg]);
+	});
+
+	it('drops file PII whose ingest scan owns the display (avoids double-count)', () => {
+		expect(scopeCardDetections([fileA], new Set(['a']), new Set(['a']))).toEqual([]);
+	});
+
+	it('keeps file PII (send-time fallback) when ingest did not cover the file', () => {
+		// With no ingest scan, send-time detections are the only source for the file.
+		expect(scopeCardDetections([fileA], new Set(), new Set(['a']))).toEqual([fileA]);
+	});
+
+	it('drops file PII for a file not attached to this message (scoping)', () => {
+		// File "b" was sent in the turn but is not attached to this user message.
+		expect(scopeCardDetections([fileB], new Set(), new Set(['a']))).toEqual([]);
+	});
+
+	it('handles a mixed batch', () => {
+		const covered = new Set(['a']); // "b" falls back to send-time detections
+		const onMessage = new Set(['a', 'b']);
+		expect(scopeCardDetections([msg, fileA, fileB], covered, onMessage)).toEqual([msg, fileB]);
+	});
+
+	it('returns [] for nullish input', () => {
+		expect(scopeCardDetections(undefined as never, new Set(), new Set())).toEqual([]);
+	});
+});
+
 describe('piiMaskingForRequest', () => {
 	// The value SENT to the server. Team policy wins over the per-conversation
 	// toggle. The backend enforces the same rule independently; this keeps the
@@ -354,5 +395,62 @@ describe('getStoredPiiMasking', () => {
 		// The two answer different questions and must not converge.
 		expect(getPiiMaskingDefault({})).toBe(true);
 		expect(getStoredPiiMasking({})).toBe('unset');
+	});
+});
+
+describe('ingestCoveredFileIds', () => {
+	it('covers a file whose scan completed', () => {
+		expect(ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'completed' }])).toEqual(
+			new Set(['a'])
+		);
+	});
+
+	it('covers a file still being scanned, so the card waits instead of double-listing', () => {
+		expect(ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'running' }])).toEqual(new Set(['a']));
+	});
+
+	it('does not cover a file whose scan was truncated', () => {
+		// A truncated scan misses PII past PII_SCAN_MAX_CHARS characters, so the
+		// file's send-time detections must stay on the card.
+		expect(
+			ingestCoveredFileIds([{ id: 'a', pii_scan_status: 'completed', pii_scan_truncated: true }])
+		).toEqual(new Set());
+	});
+
+	it('does not cover a file that was never scanned', () => {
+		expect(
+			ingestCoveredFileIds([
+				{ id: 'a', pii_scan_status: null },
+				{ id: 'b', pii_scan_status: 'failed' }
+			])
+		).toEqual(new Set());
+	});
+
+	it('returns an empty set for nullish input', () => {
+		expect(ingestCoveredFileIds(undefined as never)).toEqual(new Set());
+	});
+});
+
+describe('piiIngestScanEnabled', () => {
+	beforeEach(() => config.set(undefined));
+
+	it('is false when the backend does not say (the shipped default is off)', () => {
+		expect(piiIngestScanEnabled()).toBe(false);
+		setConfig({});
+		expect(piiIngestScanEnabled()).toBe(false);
+	});
+
+	it('is true only when the backend says so', () => {
+		setConfig({ pii_ingest_scan: true });
+		expect(piiIngestScanEnabled()).toBe(true);
+		setConfig({ pii_ingest_scan: false });
+		expect(piiIngestScanEnabled()).toBe(false);
+	});
+
+	it('ignores a non-boolean value rather than treating it as on', () => {
+		// Read as on, the card would re-fetch the whole file content up to five more
+		// times waiting for a scan that never runs.
+		setConfig({ pii_ingest_scan: 'yes' });
+		expect(piiIngestScanEnabled()).toBe(false);
 	});
 });

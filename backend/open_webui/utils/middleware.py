@@ -1,17 +1,21 @@
 import ast
 import asyncio
 import copy
+import hashlib
 import html
 import json
 import logging
+import os
 import random
 import re
 import sys
 import textwrap
 import time
+from collections import OrderedDict
 from typing import Optional
 from uuid import uuid4
 
+import aiohttp
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from open_webui.config import (
@@ -23,6 +27,7 @@ from open_webui.config import (
 )
 from open_webui.constants import TASKS
 from open_webui.env import (
+    AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
@@ -33,6 +38,7 @@ from open_webui.env import (
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
     GLOBAL_LOG_LEVEL,
+    PII_FILTER_IDS,
     RAG_SYSTEM_CONTEXT,
     SSE_KEEPALIVE_INTERVAL,
 )
@@ -48,10 +54,18 @@ from open_webui.routers.images import (
     image_edits,
     image_generations,
 )
+from open_webui.utils.pii_chunking import (
+    PII_INLET_CHUNK_CHARS,
+    PII_INLET_CONCURRENCY,
+    PII_INLET_TOTAL_BUDGET_S,
+    estimated_masking_seconds,
+    split_text_for_pii,
+)
 from open_webui.routers.pipelines import (
     get_sorted_filters,
     process_pipeline_inlet_filter,
     process_pipeline_outlet_filter,
+    resolve_pii_masking_enforced,
 )
 from open_webui.routers.retrieval import (
     SearchForm,
@@ -130,6 +144,7 @@ from open_webui.utils.tools import (
 )
 from open_webui.utils.webhook import post_webhook
 from starlette.responses import StreamingResponse
+
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -1004,6 +1019,642 @@ def handle_responses_streaming_event(
         return current_output, None
 
 
+class PiiMaskingBlockedError(Exception):
+    """Raised when source text cannot be guaranteed masked before the LLM.
+
+    Covers an unreachable, failing or misconfigured PII pipeline, a malformed
+    response, a missing chat_id, and work over the masking time budget. The
+    caller blocks the request instead of forwarding unmasked source text.
+    Unlike ``process_pipeline_inlet_filter``, which lets failures of non-PII
+    filters pass through, every failure here blocks.
+    """
+
+
+# Sub-chunk size for source text, in characters. One pipeline call truncates its
+# input at the tokenizer cap of about 512 tokens, so PII in the tail of a longer
+# document would go undetected. Aliased to the prompt-path constant so source
+# text and prompts are always split the same way.
+PII_MASK_CHUNK_CHARS = PII_INLET_CHUNK_CHARS
+
+# Concurrent masking requests per file for the ingest scan. The scan keeps only
+# detection spans, so the order in which chunks finish does not matter.
+# Send-time masking has its own limit, `PII_INLET_CONCURRENCY`. Kept low because
+# a large fan-out makes the pipeline start many instances at once.
+PII_SCAN_CONCURRENCY = 3
+
+# Ingest scan only: maximum characters of a file's text sent to the pipeline for
+# the PII card. The cap bounds scan time, not memory: the pipeline masks about
+# 240 characters per second per request, so this prefix takes about a minute at
+# PII_SCAN_CONCURRENCY. A longer file is scanned up to the prefix and its card
+# may be incomplete; offsets stay valid because the card slices stored content.
+PII_SCAN_MAX_CHARS = 50000
+
+# Ingest scan only: attempts per sub-chunk before its detections are dropped.
+# Retrying transient failures (cold start, timeout, connection error) keeps the
+# card from reporting different PII counts for the same file.
+PII_SCAN_PIECE_RETRIES = 3
+
+# Chat-time masking: attempts per source sub-chunk POST. Retrying only the failed
+# chunk rides out transient pipeline errors (5xx, timeout, connection error, or
+# a vault DB command timeout under load) instead of failing the whole message.
+# Still fail-closed: after the last attempt `PiiMaskingBlockedError` is raised
+# and no unmasked text reaches the LLM.
+PII_MASK_POST_RETRIES = 3
+
+# Set KEEPER_PII_DEBUG=true to log, per request, what the ingest scan detected
+# for the PII card and what source text is sent to the LLM. Read at import time,
+# so the backend must be restarted.
+PII_DEBUG = os.environ.get("KEEPER_PII_DEBUG", "False").lower() == "true"
+
+# When KEEPER_PII_DEBUG_FILE is set to a path, each request with file or RAG
+# sources appends the original and masked text of every chunk and the final
+# context string sent to the LLM. Covers both full-context and top-K retrieval,
+# since both go through `apply_source_context_to_messages`. Leave unset in
+# production: the file contains unmasked PII.
+PII_DEBUG_FILE = os.environ.get("KEEPER_PII_DEBUG_FILE", "").strip()
+
+
+def _pii_debug_dump(header: str, blocks: list, context_string: str):
+    """Append a readable request block to KEEPER_PII_DEBUG_FILE.
+
+    Best-effort: I/O errors are logged and swallowed so diagnostics cannot
+    break a chat request."""
+    if not PII_DEBUG_FILE:
+        return
+    try:
+        lines = [
+            "=" * 80,
+            header,
+            "=" * 80,
+        ]
+        for i, (orig, masked, marker) in enumerate(blocks):
+            changed = "CHANGED" if orig != masked else "unchanged"
+            lines.append(
+                f"\n--- chunk {i} [{marker}] "
+                f"(orig {len(orig)} chars -> masked {len(masked)} chars, {changed}) ---"
+            )
+            lines.append("[ORIGINAL]")
+            lines.append(orig)
+            lines.append("[MASKED -> LLM]")
+            lines.append(masked)
+        lines.append("\n" + "-" * 40 + " FINAL context_string SENT TO LLM " + "-" * 40)
+        lines.append(context_string)
+        lines.append("\n")
+        with open(PII_DEBUG_FILE, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+    except Exception as e:
+        log.warning("[PII-DEBUG] could not write dump file %s: %s", PII_DEBUG_FILE, e)
+
+# Maximum number of masked source documents cached, so an attachment is masked
+# once per chat instead of on every turn. Reuse is safe because a full-context
+# attachment yields the same text each turn, and `ThreadVault.get_placeholder`
+# returns the same placeholder for the same value in the same vault.
+#
+# Keyed by chat_id because placeholders belong to one thread vault; the outlet
+# of another chat cannot restore them. Keyed by a hash of the text as well as
+# the file id, so an edited or re-uploaded file misses. Entries are written only
+# when masking actually ran (see `mask_sources_for_llm`). The cache is
+# process-local; a miss costs latency, never correctness.
+PII_SOURCE_CACHE_MAX_ENTRIES = 256
+
+# Upper bound on the total characters of masked text held in the cache. Past it
+# the least-recently-used entries are dropped. A limit on the entry count alone
+# is not enough, because one entry can hold a whole document.
+PII_SOURCE_CACHE_MAX_CHARS = 20_000_000
+
+_masked_source_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+_masked_source_cache_chars = 0
+
+
+def reset_masked_source_cache():
+    """Drop every entry. For tests, which would otherwise be order-dependent."""
+    global _masked_source_cache_chars
+    _masked_source_cache.clear()
+    _masked_source_cache_chars = 0
+
+
+def _applicable_filter_ids(model_id, models):
+    """Return the sorted ids of the filter pipelines that apply to `model_id`."""
+    if not isinstance(models, dict) or model_id not in models:
+        return ()
+    filters = get_sorted_filters(model_id, models)
+    model = models[model_id]
+    if isinstance(model, dict) and "pipeline" in model:
+        filters = [*filters, model]
+    return tuple(sorted(str(f.get("id")) for f in filters))
+
+
+def _masked_source_cache_key(chat_id, file_id, filter_ids, doc):
+    """Identify a document by chat, file id, applicable filters and text hash.
+
+    Filters can target specific models, so the ids of the filters that apply
+    are part of the key and a model with a different PII filter masks the
+    document again. The model id itself is left out, so switching between
+    models that share the same filters keeps the cache.
+    """
+    return (
+        chat_id,
+        file_id,
+        filter_ids,
+        hashlib.sha256(doc.encode("utf-8", "surrogatepass")).hexdigest(),
+    )
+
+
+def _masked_source_cache_get(key):
+    """Return `(masked_doc, detections)` or None, refreshing LRU position.
+
+    The stored detections are copied out: callers tag them in place with
+    fileId/fileName/docIdx, which would otherwise mutate the cached entry and
+    accumulate on every hit.
+    """
+    hit = _masked_source_cache.get(key)
+    if hit is None:
+        return None
+    _masked_source_cache.move_to_end(key)
+    masked_doc, dets = hit
+    return masked_doc, [dict(d) for d in dets]
+
+
+def _masked_source_cache_put(key, masked_doc, detections):
+    global _masked_source_cache_chars
+    if not isinstance(masked_doc, str):
+        return
+    if key in _masked_source_cache:
+        _masked_source_cache_chars -= len(_masked_source_cache[key][0])
+        del _masked_source_cache[key]
+    _masked_source_cache[key] = (masked_doc, [dict(d) for d in detections])
+    _masked_source_cache_chars += len(masked_doc)
+    while _masked_source_cache and (
+        len(_masked_source_cache) > PII_SOURCE_CACHE_MAX_ENTRIES
+        or _masked_source_cache_chars > PII_SOURCE_CACHE_MAX_CHARS
+    ):
+        _, (evicted, _dets) = _masked_source_cache.popitem(last=False)
+        _masked_source_cache_chars -= len(evicted)
+
+
+async def _resolve_pii_masking_decision(request, user, features):
+    """Return `(policy_enforced, pii_expected)` for this request.
+
+    Masking is expected unless `features.pii_masking` is False. A team policy
+    that mandates masking overrides that flag, as it does on the prompt path;
+    otherwise a user could turn the toggle off and send an attachment unmasked
+    while the prompt stays masked. `resolve_pii_masking_enforced` is memoized
+    per request and fails closed, so repeated calls cost one permission lookup.
+    """
+    request_pii = features.get("pii_masking") if isinstance(features, dict) else None
+    policy_enforced = await resolve_pii_masking_enforced(request, user)
+    return policy_enforced, policy_enforced or request_pii is not False
+
+
+async def _mask_text_via_pii_pipeline(
+    request,
+    text,
+    *,
+    session,
+    chat_id,
+    user,
+    model_id,
+    models,
+    features,
+    source_marker,
+    post_retries: int = 1,
+):
+    """Mask one source-text chunk and return ``(masked_text, detections)``.
+
+    Mirrors ``process_pipeline_inlet_filter`` (filters from
+    ``get_sorted_filters()``, same per-filter valve injection) but raises
+    ``PiiMaskingBlockedError`` on any failure (5xx, timeout, connection error,
+    malformed response) instead of returning unmasked text. Detection runs in
+    the pipeline; this only sends the text, chat_id and a source marker.
+    """
+    if not isinstance(text, str) or text == "":
+        return text, []
+
+    if not chat_id:
+        # Without a thread-vault key the placeholders cannot be keyed/restored.
+        raise PiiMaskingBlockedError(
+            "chat_id missing; refusing to mask source text without a thread vault key."
+        )
+
+    if models is None:
+        models = request.app.state.MODELS
+
+    # See `_resolve_pii_masking_decision` for how a policy overrides the
+    # per-request flag.
+    features = features if isinstance(features, dict) else {}
+    request_pii = features.get("pii_masking")
+    policy_enforced, pii_expected = await _resolve_pii_masking_decision(
+        request, user, features
+    )
+
+    if model_id not in models:
+        # Cannot resolve the filter machinery for an unknown model -> leak risk.
+        raise PiiMaskingBlockedError(
+            f"model_id {model_id!r} not in model registry; cannot resolve PII inlet."
+        )
+
+    sorted_filters = get_sorted_filters(model_id, models)
+    model = models[model_id]
+    if "pipeline" in model:
+        sorted_filters = [*sorted_filters, model]
+
+    if not sorted_filters:
+        if pii_expected:
+            raise PiiMaskingBlockedError(
+                "PII masking expected but no filter pipeline is configured for this model."
+            )
+        # Masking not requested and no machinery -> benign, nothing to do.
+        return text, []
+
+    # The user switched masking off and no policy mandates it: pass the text
+    # through without calling the pipeline. The fail-closed guarantee applies
+    # only when masking is expected.
+    if not pii_expected:
+        return text, []
+
+    # Only a filter listed in PII_FILTER_IDS masks PII. When none applies, the
+    # other filters would receive the raw text and their successful response
+    # would pass for masking, so refuse before sending anything. An empty
+    # PII_FILTER_IDS disables the check, as it does on the prompt path.
+    if PII_FILTER_IDS and not any(f.get("id") in PII_FILTER_IDS for f in sorted_filters):
+        raise PiiMaskingBlockedError(
+            "PII masking expected but no PII filter applies to this model."
+        )
+
+    # user.settings -> ui.pipelines.valves (mirror process_pipeline_inlet_filter).
+    user_settings = getattr(user, "settings", None)
+    if isinstance(user_settings, dict):
+        user_settings_dict = user_settings
+    elif user_settings is not None:
+        user_settings_dict = user_settings.model_dump()
+    else:
+        user_settings_dict = {}
+    ui_settings = user_settings_dict.get("ui", {})
+    if not isinstance(ui_settings, dict):
+        ui_settings = {}
+    pipelines_settings = ui_settings.get("pipelines", {})
+    if not isinstance(pipelines_settings, dict):
+        pipelines_settings = {}
+    all_filter_valves = pipelines_settings.get("valves", {})
+    if not isinstance(all_filter_valves, dict):
+        all_filter_valves = {}
+
+    base_user_dict = {
+        "id": getattr(user, "id", None),
+        "email": getattr(user, "email", None),
+        "name": getattr(user, "name", None),
+        "role": getattr(user, "role", None),
+    }
+
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": text}],
+        "metadata": {"chat_id": chat_id, "pii_source": source_marker},
+        "features": features,
+    }
+
+    masked_count = 0
+    pii_masked_count = 0
+    for filter in sorted_filters:
+        urlIdx = filter.get("urlIdx")
+        try:
+            urlIdx = int(urlIdx)
+        except (TypeError, ValueError):
+            continue
+
+        url = request.app.state.config.OPENAI_API_BASE_URLS[urlIdx]
+        key = request.app.state.config.OPENAI_API_KEYS[urlIdx]
+        if not key:
+            continue
+
+        filter_id = filter.get("id")
+        per_filter_valves = all_filter_valves.get(filter_id, {})
+        if not isinstance(per_filter_valves, dict):
+            per_filter_valves = {}
+        if isinstance(request_pii, bool):
+            per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
+        # The pipeline decides only from `UserValves.pii_masking_enabled` and
+        # ignores `features`, so a mandated policy must also force the valve on.
+        # This runs after the per-request override on purpose: in the opposite
+        # order the user's False would win over the policy.
+        if policy_enforced:
+            per_filter_valves = {**per_filter_valves, "pii_masking_enabled": True}
+        user_with_valves = {**base_user_dict, "valves": per_filter_valves}
+
+        headers = {"Authorization": f"Bearer {key}"}
+        request_data = {"user": user_with_valves, "body": payload}
+
+        # Retry only this POST on transient failure (5xx, timeout, connection).
+        # The deterministic checks above would fail the same way again.
+        # `post_retries` defaults to a single attempt because the ingest scan
+        # retries at its own level; chat-time masking passes PII_MASK_POST_RETRIES.
+        last_exc = None
+        for attempt in range(max(1, post_retries)):
+            try:
+                async with session.post(
+                    f"{url}/{filter['id']}/filter/inlet",
+                    headers=headers,
+                    json=request_data,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                ) as response:
+                    response.raise_for_status()
+                    payload = await response.json()
+                # Count a successful POST and parse. A response with unchanged text
+                # (no PII found) is a valid pass and counts too.
+                masked_count += 1
+                if filter_id in PII_FILTER_IDS:
+                    pii_masked_count += 1
+                last_exc = None
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt + 1 < max(1, post_retries):
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        if last_exc is not None:
+            # Fail-closed after the last attempt: unmasked text is never returned.
+            raise PiiMaskingBlockedError(
+                f"PII inlet failed for filter {filter.get('id')!r} "
+                f"after {max(1, post_retries)} attempt(s): {last_exc}"
+            ) from last_exc
+
+    # Filters were present but all were skipped (no API key or invalid urlIdx),
+    # so nothing was masked. Fail closed on that outcome when masking was expected.
+    if pii_expected and masked_count == 0:
+        raise PiiMaskingBlockedError(
+            "PII masking expected but no applicable filter was usable "
+            "(missing API key / invalid urlIdx); blocked before LLM."
+        )
+
+    # A PII filter applies but was skipped (no API key or invalid urlIdx) while
+    # another filter answered, so the text was not masked.
+    if PII_FILTER_IDS and pii_masked_count == 0:
+        raise PiiMaskingBlockedError(
+            "PII masking expected but no PII filter was usable "
+            "(missing API key / invalid urlIdx); blocked before LLM."
+        )
+
+    try:
+        masked = payload["messages"][0]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise PiiMaskingBlockedError(
+            f"PII inlet returned a malformed payload: {e}"
+        ) from e
+    if not isinstance(masked, str):
+        raise PiiMaskingBlockedError("PII inlet returned non-string content.")
+
+    # Return the pipeline's chunk-relative detections so the caller can show file
+    # PII in the card. Only {type, start, end} are kept, never the value: the
+    # frontend reconstructs it from the original chunk it holds via citations.
+    detections = []
+    response_md = payload.get("metadata") if isinstance(payload, dict) else None
+    if isinstance(response_md, dict):
+        for d in response_md.get("pii_detections_public") or []:
+            if (
+                isinstance(d, dict)
+                and isinstance(d.get("type"), str)
+                and isinstance(d.get("start"), int)
+                and not isinstance(d.get("start"), bool)
+                and isinstance(d.get("end"), int)
+                and not isinstance(d.get("end"), bool)
+            ):
+                detections.append(
+                    {"type": d["type"], "start": d["start"], "end": d["end"]}
+                )
+    return masked, detections
+
+
+async def _mask_long_text_via_pii_pipeline(
+    request, text, *, semaphore=None, on_piece=None, **kwargs
+):
+    """Mask one source document of any length and return ``(masked_text, detections)``.
+
+    The document is split with ``split_text_for_pii`` into sub-chunks below the
+    pipeline's token cap, and the sub-chunks are masked concurrently. Masked
+    pieces are joined in document order. Detections are rebased to
+    document-relative offsets and de-duplicated by ``(type, start, end)``. A
+    document that fits in one sub-chunk takes a single masking call.
+
+    ``semaphore`` comes from the caller so one bound covers every document in
+    the request; a per-document semaphore would multiply the fan-out by the
+    number of attachments. Concurrent sub-chunks are safe because
+    ``ThreadVault.get_placeholder`` is an atomic get-or-mint.
+
+    Fail-closed: ``asyncio.gather`` without ``return_exceptions`` propagates the
+    first ``PiiMaskingBlockedError``, so a partially masked document is never
+    returned.
+    """
+    if not isinstance(text, str) or text == "":
+        return text, []
+
+    pieces = split_text_for_pii(text)
+    def _note_piece():
+        """Report one finished sub-chunk; callback errors are swallowed.
+
+        `asyncio.gather` below runs without `return_exceptions`, so an exception
+        escaping here would abort masking of the whole document."""
+        if on_piece is None:
+            return
+        try:
+            on_piece()
+        except Exception as e:  # noqa: BLE001 — diagnostics must not break masking
+            log.debug(f'[pii_chunking] progress callback failed: {e}')
+
+    if len(pieces) == 1:
+        # A short document takes a single masking call.
+        result = await _mask_text_via_pii_pipeline(request, text, **kwargs)
+        _note_piece()
+        return result
+
+    sem = semaphore if semaphore is not None else asyncio.Semaphore(PII_INLET_CONCURRENCY)
+    masked_pieces: dict[int, str] = {}
+    piece_detections: dict[int, list] = {}
+
+    async def _mask_piece(index, piece_start, piece):
+        async with sem:
+            masked_piece, piece_dets = await _mask_text_via_pii_pipeline(
+                request, piece, **kwargs
+            )
+        masked_pieces[index] = masked_piece
+        piece_detections[index] = [
+            {
+                "type": d["type"],
+                "start": d["start"] + piece_start,
+                "end": d["end"] + piece_start,
+            }
+            for d in piece_dets
+        ]
+        _note_piece()
+
+    await asyncio.gather(
+        *(_mask_piece(i, start, piece) for i, (start, piece) in enumerate(pieces))
+    )
+
+    # Iterate over `pieces`, not the keys of `masked_pieces`, so a missing result
+    # raises instead of silently truncating the document.
+    detections = []
+    seen = set()
+    for i in range(len(pieces)):
+        for doc_det in piece_detections[i]:
+            key = (doc_det["type"], doc_det["start"], doc_det["end"])
+            if key in seen:
+                continue
+            seen.add(key)
+            detections.append(doc_det)
+
+    return "".join(masked_pieces[i] for i in range(len(pieces))), detections
+
+
+def _resolve_pii_scan_model_id(models):
+    """Return the id of a model that a PII filter applies to, or None.
+
+    The ingest scan needs the filter, not a particular model, so any such model
+    works. With None the best-effort ingest scan is skipped. When PII_FILTER_IDS
+    is empty any filter counts, as in `_mask_text_via_pii_pipeline`."""
+    if not isinstance(models, dict):
+        return None
+    for model_id, model in models.items():
+        if isinstance(model, dict) and "pipeline" in model:
+            continue  # skip the filter-pipeline pseudo-models themselves
+        filter_ids = {f.get("id") for f in get_sorted_filters(model_id, models)}
+        if filter_ids and (not PII_FILTER_IDS or filter_ids & PII_FILTER_IDS):
+            return model_id
+    return None
+
+
+def ingest_scan_is_truncated(content) -> bool:
+    """Whether the ingest scan covers only a prefix of ``content``.
+
+    Used by the scan cap in ``scan_file_content_for_pii`` and by
+    ``_store_ingest_pii_detections``, which records the result on the file so
+    the card can show that it is partial. The frontend treats a completed scan
+    as authoritative and hides send-time detections, so both callers must use
+    this predicate or a truncated scan would under-report PII silently.
+    """
+    return isinstance(content, str) and len(content) > PII_SCAN_MAX_CHARS
+
+
+async def scan_file_content_for_pii(
+    request, content, *, file_id, user, models=None, features=None
+):
+    """Detect PII in a file's extracted text for the PII card.
+
+    Best-effort and not a security boundary: it never raises or blocks ingest,
+    and returns ``[]`` on any problem. The text is sub-chunked and scanned up to
+    ``PII_SCAN_MAX_CHARS``. Returns file-relative detections
+    ``[{type, start, end}]``; the masked text and the synthetic per-file vault
+    entry are discarded.
+    """
+    if not isinstance(content, str) or content == "":
+        return []
+    if models is None:
+        models = request.app.state.MODELS
+    model_id = _resolve_pii_scan_model_id(models)
+    if model_id is None:
+        return []  # no PII filter configured -> nothing to scan
+
+    feats = features if isinstance(features, dict) else {"pii_masking": True}
+    source_marker = {"type": "file", "file_id": file_id}
+    # Cap the scanned volume so a large file cannot become thousands of pipeline
+    # calls. The card slices the full stored content, so prefix offsets stay valid.
+    if ingest_scan_is_truncated(content):
+        log.info(
+            "ingest PII scan: capping file %s content %d -> %d chars",
+            file_id,
+            len(content),
+            PII_SCAN_MAX_CHARS,
+        )
+        content = content[:PII_SCAN_MAX_CHARS]
+    # Only detection spans are kept, not the masked text, so sub-chunks are
+    # independent and run concurrently, bounded by PII_SCAN_CONCURRENCY.
+    pieces = split_text_for_pii(content)
+    # Applied per request by the session below: `total` limits one masking
+    # request to 120 seconds, including connecting and reading the response.
+    timeout = aiohttp.ClientTimeout(
+        sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=120
+    )
+    semaphore = asyncio.Semaphore(PII_SCAN_CONCURRENCY)
+    _t0 = time.time()
+    _stats = {"ok": 0, "failed": 0}
+
+    async def _scan_piece(session, piece_start, piece):
+        last_exc = None
+        for attempt in range(PII_SCAN_PIECE_RETRIES):
+            try:
+                async with semaphore:
+                    _masked, piece_dets = await _mask_text_via_pii_pipeline(
+                        request,
+                        piece,
+                        session=session,
+                        chat_id=f"file-{file_id}",  # synthetic vault key; result ignored
+                        user=user,
+                        model_id=model_id,
+                        models=models,
+                        features=feats,
+                        source_marker=source_marker,
+                    )
+                _stats["ok"] += 1
+                # Rebase chunk-relative offsets to file-relative.
+                return [
+                    {"type": d["type"], "start": d["start"] + piece_start, "end": d["end"] + piece_start}
+                    for d in piece_dets
+                ]
+            except Exception as e:
+                # Transient failure (cold start, timeout, connection). The semaphore
+                # is released during the back-off so other sub-chunks proceed.
+                last_exc = e
+                if attempt + 1 < PII_SCAN_PIECE_RETRIES:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        log.warning(
+            "ingest PII scan chunk failed after %d attempts for file %s: %s",
+            PII_SCAN_PIECE_RETRIES,
+            file_id,
+            last_exc,
+        )
+        _stats["failed"] += 1
+        return []  # drop only this chunk after exhausting retries; keep the rest
+
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            results = await asyncio.gather(
+                *(_scan_piece(session, ps, p) for ps, p in pieces),
+                return_exceptions=True,  # one bad chunk must not drop the rest
+            )
+    except Exception as e:  # best-effort: log and degrade, never block ingest
+        log.warning(
+            "ingest PII scan failed for file %s: %s", file_id, e, exc_info=True
+        )
+        return []
+
+    # Merge and de-duplicate by (type, start, end); skip chunks that errored.
+    seen = set()
+    detections = []
+    for chunk in results:
+        if isinstance(chunk, BaseException):
+            log.warning(
+                "ingest PII scan chunk failed for file %s: %s", file_id, chunk
+            )
+            continue
+        for d in chunk:
+            key = (d["type"], d["start"], d["end"])
+            if key in seen:
+                continue
+            seen.add(key)
+            detections.append(d)
+    if PII_DEBUG:
+        log.info(
+            "[PII-DEBUG][INGEST] file=%s chars=%d chunks=%d ok=%d failed=%d "
+            "detections=%d elapsed=%.1fs (PII card)",
+            file_id,
+            len(content),
+            len(pieces),
+            _stats["ok"],
+            _stats["failed"],
+            len(detections),
+            time.time() - _t0,
+        )
+    return detections
+
+
 def get_source_context(sources: list, source_ids: dict = None, include_content: bool = True) -> str:
     """
     Build <source> tag context string from citation sources.
@@ -1030,13 +1681,235 @@ def get_source_context(sources: list, source_ids: dict = None, include_content: 
     return context_string
 
 
+async def mask_sources_for_llm(
+    request: Request,
+    sources: list,
+    chat_id: Optional[str] = None,
+    user=None,
+    model_id: Optional[str] = None,
+    models=None,
+    features=None,
+    on_progress=None,
+) -> tuple[list, list[dict]]:
+    """
+    Mask every source document and return ``(masked_sources, detections)``.
+
+    Any masking failure raises ``PiiMaskingBlockedError``, so no unmasked text
+    is returned. ``sources`` is not modified: it feeds the frontend citations,
+    from which the PII card reconstructs masked values, so detections carry
+    offsets but no values. Only the returned copy may reach the LLM.
+    ``source["metadata"]`` is carried over unchanged to keep citation mapping.
+    """
+    masked_sources = []
+    detections: list[dict] = []
+    _t0 = time.time()
+    _dbg_docs = 0
+    _dbg_orig_chars = 0
+    _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
+
+    _features = features if isinstance(features, dict) else {}
+    _policy_enforced, _pii_expected = await _resolve_pii_masking_decision(
+        request, user, _features
+    )
+
+    # The user opted out and no policy mandates masking, so no document is sent
+    # to the pipeline. Return before the time-budget check and the progress
+    # reporting below: they would refuse oversized attachments and report
+    # masking progress for text that is never masked.
+    if not _pii_expected:
+        return sources, []
+
+    # Cache only when this request forces the pipeline valve on: a policy
+    # mandates masking or `features.pii_masking` is True. Otherwise the pipeline
+    # receives the user's stored valve, which can be False, and returns the text
+    # unchanged; caching that would serve the raw document to a later turn with
+    # masking on.
+    cache_enabled = bool(chat_id) and (_policy_enforced or _features.get("pii_masking") is True)
+    _filter_ids = _applicable_filter_ids(
+        model_id, models if models is not None else request.app.state.MODELS
+    )
+    _dbg_cached_docs = 0
+
+    # Resolve cache lookups first, so the budget check and the progress total
+    # count only uncached work. Progress counts sub-chunks rather than documents
+    # because one large attachment needs many pipeline calls.
+    resolved: dict = {}
+    total_pieces = 0
+    uncached_chars = 0
+    for _s_idx, _source in enumerate(sources):
+        _docs = _source.get('document', []) or []
+        _metas = _source.get('metadata', []) or []
+        for _d_idx, (_doc, _meta) in enumerate(zip(_docs, _metas)):
+            _meta = _meta if isinstance(_meta, dict) else {}
+            _key = (
+                _masked_source_cache_key(chat_id, _meta.get('file_id'), _filter_ids, _doc)
+                if cache_enabled and isinstance(_doc, str)
+                else None
+            )
+            _hit = _masked_source_cache_get(_key) if _key is not None else None
+            resolved[(_s_idx, _d_idx)] = (_key, _hit)
+            if _hit is None and isinstance(_doc, str) and _doc:
+                total_pieces += len(split_text_for_pii(_doc))
+                uncached_chars += len(_doc)
+
+    # Refuse before any POST when the uncached work would exceed the time budget,
+    # instead of masking for minutes and refusing anyway. The estimate covers all
+    # sources together because the budget applies to the whole request.
+    # `estimated_masking_seconds(0, chars)` prices everything as chunked work, so
+    # the limit equals `max_maskable_chars()` on the prompt path and a document
+    # is admitted the same way whether pasted or attached.
+    if estimated_masking_seconds(0, uncached_chars) > PII_INLET_TOTAL_BUDGET_S:
+        raise PiiMaskingBlockedError(
+            'These attachments are too large to mask safely. Remove one, or shorten them.'
+        )
+
+    # One concurrency bound shared by every document in the request, so several
+    # attachments do not multiply the load on the pipeline.
+    semaphore = asyncio.Semaphore(PII_INLET_CONCURRENCY)
+
+    _done_pieces = 0
+
+    def _piece_done():
+        nonlocal _done_pieces
+        _done_pieces += 1
+        if on_progress is not None and total_pieces:
+            on_progress(_done_pieces, total_pieces)
+
+    # One aiohttp session for every masking call in this request. `total` limits
+    # each POST to 30 seconds, including connecting and reading the response.
+    timeout = aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ, connect=5, total=30)
+
+    async def _mask_every_source():
+        nonlocal _dbg_docs, _dbg_orig_chars, _dbg_cached_docs
+        async with aiohttp.ClientSession(trust_env=True, timeout=timeout) as session:
+            for src_idx, source in enumerate(sources):
+                docs = source.get('document', [])
+                metas = source.get('metadata', [])
+                src_meta = source.get('source', {}) or {}
+
+                masked_docs = []
+                for doc_idx, (doc, meta) in enumerate(zip(docs, metas)):
+                    meta = meta if isinstance(meta, dict) else {}
+                    # File-source marker so the vault records this PII as file/tool-sourced.
+                    source_marker = {
+                        'type': src_meta.get('type'),
+                        'name': src_meta.get('name'),
+                        'file_id': meta.get('file_id'),
+                        'note_id': meta.get('note_id'),
+                    }
+                    # Mask before wrapping in <source> tags. Long documents are
+                    # sub-chunked so the pipeline's token cap cannot truncate them.
+                    _orig_doc = doc
+                    cache_key, cached = resolved.get((src_idx, doc_idx), (None, None))
+                    if cached is not None:
+                        doc, chunk_detections = cached
+                        _dbg_cached_docs += 1
+                    else:
+                        doc, chunk_detections = await _mask_long_text_via_pii_pipeline(
+                            request,
+                            doc,
+                            semaphore=semaphore,
+                            session=session,
+                            chat_id=chat_id,
+                            user=user,
+                            model_id=model_id,
+                            models=models if models is not None else request.app.state.MODELS,
+                            features=features,
+                            source_marker=source_marker,
+                            post_retries=PII_MASK_POST_RETRIES,
+                            on_piece=_piece_done,
+                        )
+                        # Reached only when masking succeeded. A failure raises
+                        # PiiMaskingBlockedError past this line, so it is never cached.
+                        if cache_key is not None:
+                            _masked_source_cache_put(cache_key, doc, chunk_detections)
+                    masked_docs.append(doc)
+
+                    if PII_DEBUG:
+                        _dbg_docs += 1
+                        _dbg_orig_chars += len(_orig_doc) if isinstance(_orig_doc, str) else 0
+                    if PII_DEBUG_FILE:
+                        _dbg_blocks.append(
+                            (
+                                _orig_doc if isinstance(_orig_doc, str) else str(_orig_doc),
+                                doc if isinstance(doc, str) else str(doc),
+                                f"{src_meta.get('name') or src_meta.get('type') or 'source'} doc={doc_idx}",
+                            )
+                        )
+
+                    # Tag each chunk-relative detection with its file and chunk. The
+                    # frontend slices the value out of the original chunk it holds
+                    # via citations, so no value is sent.
+                    file_id = meta.get('file_id') or src_meta.get('id')
+                    file_name = src_meta.get('name')
+                    for d in chunk_detections:
+                        detections.append(
+                            {
+                                'type': d['type'],
+                                'start': d['start'],
+                                'end': d['end'],
+                                'fileId': file_id,
+                                'fileName': file_name,
+                                'docIdx': doc_idx,
+                            }
+                        )
+
+                masked_source = {**source, 'document': masked_docs}
+                masked_sources.append(masked_source)
+
+    # Deadline for the actual masking run. The budget check above is only an
+    # estimate; when the pipeline is slower than estimated (cold start,
+    # contention), this refuses instead of holding the chat request open.
+    # Fail-closed: `wait_for` cancels the work, so no partially masked document
+    # is assembled, and a document is cached only after its masking completes.
+    try:
+        await asyncio.wait_for(_mask_every_source(), timeout=PII_INLET_TOTAL_BUDGET_S)
+    except asyncio.TimeoutError:
+        raise PiiMaskingBlockedError(
+            'Masking the attached files did not finish in time, so nothing was sent. '
+            'Try again, or use a smaller document.'
+        )
+
+    if PII_DEBUG:
+        log.info(
+            '[PII-DEBUG][SOURCES->LLM] full_context=%s sources=%d docs=%d '
+            'cached_docs=%d orig_chars=%d masked_entities=%d elapsed=%.1fs',
+            getattr(request.app.state.config, 'RAG_FULL_CONTEXT', None),
+            len(sources),
+            _dbg_docs,
+            _dbg_cached_docs,
+            _dbg_orig_chars,
+            len(detections),
+            time.time() - _t0,
+        )
+    if PII_DEBUG_FILE:
+        _pii_debug_dump(
+            header=(
+                f'[SOURCES->LLM] chat_id={chat_id} model={model_id} '
+                f"bypass={getattr(request.app.state.config, 'BYPASS_EMBEDDING_AND_RETRIEVAL', None)} "
+                f"full_context={getattr(request.app.state.config, 'RAG_FULL_CONTEXT', None)} "
+                f'sources={len(sources)} chunks={len(_dbg_blocks)}'
+            ),
+            blocks=_dbg_blocks,
+            context_string=get_source_context(masked_sources).strip(),
+        )
+
+    return masked_sources, detections
+
+
 async def apply_source_context_to_messages(
     request: Request,
     messages: list,
     sources: list,
     user_message: str,
     include_content: bool = True,
-) -> list:
+    chat_id: Optional[str] = None,
+    user=None,
+    model_id: Optional[str] = None,
+    models=None,
+    features=None,
+    on_progress=None,
+) -> tuple[list, list[dict], list]:
     """
     Build source context from citation sources and apply to messages.
     Uses RAG template to format context for model consumption.
@@ -1044,28 +1917,51 @@ async def apply_source_context_to_messages(
     When include_content is False, emit <source> tags with id/name but no
     document body — useful when the content is already present elsewhere
     (e.g. in a tool result message) and only citation markers are needed.
+
+    Documents are PII-masked (fail-closed) before they are wrapped in
+    ``<source>`` tags. Returns ``(messages, pii_detections, masked_sources)``.
+    The caller keeps ``masked_sources`` so later re-renders of the same sources
+    in the tool-call loop use the masked text.
     """
     if not sources or not user_message:
-        return messages
+        return messages, [], []
 
-    context = get_source_context(sources, include_content=include_content)
+    # Masking is skipped when the document body is not emitted, because no
+    # document text reaches the LLM through this call.
+    if include_content:
+        masked_sources, detections = await mask_sources_for_llm(
+            request,
+            sources,
+            chat_id=chat_id,
+            user=user,
+            model_id=model_id,
+            models=models,
+            features=features,
+            on_progress=on_progress,
+        )
+    else:
+        masked_sources, detections = sources, []
+
+    context = get_source_context(masked_sources, include_content=include_content)
 
     context = context.strip()
     if not context:
-        return messages
+        return messages, detections, masked_sources
 
     if RAG_SYSTEM_CONTEXT:
-        return add_or_update_system_message(
+        messages = add_or_update_system_message(
             await rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
             messages,
             append=True,
         )
     else:
-        return add_or_update_user_message(
+        messages = add_or_update_user_message(
             await rag_template(request.app.state.config.RAG_TEMPLATE, context, user_message),
             messages,
             append=False,
         )
+
+    return messages, detections, masked_sources
 
 
 async def process_tool_result(
@@ -2625,6 +3521,21 @@ def _pii_progress_emitter(event_emitter):
     return on_progress
 
 
+def _attachment_only_prompt(sources) -> str:
+    """Model-facing text for a turn whose message is empty but carries sources.
+
+    Without it the source-context block in `process_chat_payload` is skipped,
+    so the documents reach neither the model nor the PII masking that block
+    performs. File names are left out on purpose: this text is set after the
+    inlet has masked the turn, and a name such as `john-doe-cv.pdf` would
+    reach the model unmasked.
+    """
+    count = sum(1 for source in sources if isinstance(source, dict))
+    if count == 0:
+        return ''
+    return 'Attached file' if count == 1 else 'Attached files'
+
+
 async def process_chat_payload(request, form_data, user, metadata, model):
     # Ensure chat_id is always a string — external API clients may omit it.
     if not isinstance(metadata.get('chat_id'), str):
@@ -3380,12 +4291,46 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             f'{resolved_model_system_prompt}\n{system_content}' if system_content else resolved_model_system_prompt
         )
     metadata['system_prompt'] = system_content or None
+    # A turn that carries only attachments has an empty last user message, so
+    # the source-context block below would be skipped and the documents would
+    # reach neither the model nor its masking. Give the turn a short
+    # model-facing text instead, as the skill-mention fallback above does.
+    if sources and not (prompt or '').strip():
+        prompt = _attachment_only_prompt(sources)
+        set_last_user_message_content(prompt, form_data['messages'])
+
     metadata['user_prompt'] = get_last_user_message(form_data['messages'])
     metadata['sources'] = sources[:] if sources else []
+    # PII-masked copy of metadata['sources'], filled in once masking succeeds.
+    # Code that re-renders file sources into the prompt must read this key, not
+    # metadata['sources'], which keeps the original text for the citations. It
+    # stays empty if masking does not run, so nothing unmasked can be re-rendered.
+    metadata['masked_sources'] = []
 
     # If context is not empty, insert it into the messages
     if sources and prompt:
-        form_data['messages'] = await apply_source_context_to_messages(request, form_data['messages'], sources, prompt)
+        form_data['messages'], file_pii, masked_sources = await apply_source_context_to_messages(
+            request,
+            form_data['messages'],
+            sources,
+            prompt,
+            chat_id=chat_id,
+            user=user,
+            model_id=form_data['model'],
+            models=models,
+            features=features,
+            # Report masking progress with the same event as a long pasted prompt.
+            on_progress=(_pii_progress_emitter(event_emitter) if event_emitter else None),
+        )
+        # The native tool-call loop re-renders sources into the RAG template, so
+        # it reads this masked copy. metadata['sources'] keeps the original text
+        # for the citations the frontend uses to reconstruct masked values.
+        metadata['masked_sources'] = masked_sources
+        # Merge file detections into the same channel as prompt detections. Each
+        # carries {type, start, end, fileId, fileName, docIdx} but no value; the
+        # frontend reconstructs the value from the citation.
+        if file_pii:
+            metadata['pii_detections_public'] = (metadata.get('pii_detections_public') or []) + file_pii
 
     # If there are citations, add them to the data_items
     sources = [
@@ -5654,9 +6599,11 @@ async def streaming_chat_response_handler(response, ctx):
 
                             # Build context: file sources with content,
                             # tool sources as citation markers only.
+                            # File sources come from the PII-masked copy, so this
+                            # re-render cannot send unmasked file text to the LLM.
                             source_ids = {}
                             source_context = get_source_context(
-                                metadata.get('sources', []), source_ids
+                                metadata.get('masked_sources', []), source_ids
                             ) + get_source_context(
                                 all_tool_call_sources,
                                 source_ids,
