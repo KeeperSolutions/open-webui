@@ -129,8 +129,10 @@
 			.filter((id: string | undefined): id is string => Boolean(id));
 		const key = ids.join(',');
 		// When masking is disabled, clear any stale card state and skip polling.
+		// The fetch key is cleared rather than set to `key`, so re-enabling masking
+		// with the same attachments refetches instead of leaving the card empty.
 		if (!piiMaskingEnabled) {
-			_piiFetchKey = key;
+			_piiFetchKey = '';
 			piiScanInProgress = false;
 			fileItems = [];
 			ingestCoveredFileIds = new Set();
