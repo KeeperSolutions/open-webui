@@ -1,10 +1,8 @@
 import ast
 import asyncio
-import base64
 import copy
 import hashlib
 import html
-import inspect
 import json
 import logging
 import os
@@ -14,16 +12,13 @@ import sys
 import textwrap
 import time
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from typing import Optional
 from uuid import uuid4
 
 import aiohttp
-from aiocache import cached
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from open_webui.config import (
-    CACHE_DIR,
     CODE_INTERPRETER_BLOCKED_MODULES,
     CODE_INTERPRETER_PYODIDE_PROMPT,
     DEFAULT_CODE_INTERPRETER_PROMPT,
@@ -34,7 +29,6 @@ from open_webui.constants import TASKS
 from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
-    BYPASS_MODEL_ACCESS_CONTROL,
     CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     ENABLE_API_OUTLET_FILTERS,
@@ -51,10 +45,7 @@ from open_webui.env import (
 from open_webui.events import EVENTS, publish_event
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
-from open_webui.models.functions import Functions
-from open_webui.models.models import Models
 from open_webui.models.notes import Notes
-from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import UserModel, Users
 from open_webui.retrieval.utils import get_sources_from_items
 from open_webui.routers.images import (
@@ -63,7 +54,6 @@ from open_webui.routers.images import (
     image_edits,
     image_generations,
 )
-from open_webui.routers.memories import QueryMemoryForm, query_memory
 from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_CHARS,
     PII_INLET_CONCURRENCY,
@@ -112,7 +102,6 @@ from open_webui.utils.files import (
 from open_webui.utils.filter import (
     FilterContext,
     get_filter_functions,
-    get_sorted_filter_ids,
     process_filter_functions,
 )
 from open_webui.utils.json_codec import JSONCodec
@@ -124,7 +113,6 @@ from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
     convert_output_to_messages,
     deep_update,
-    extract_urls,
     get_content_from_message,
     get_last_assistant_message,
     get_last_user_message,
@@ -134,13 +122,11 @@ from open_webui.utils.misc import (
     get_system_message,
     is_string_allowed,
     merge_system_messages,
-    prepend_to_first_user_message_content,
     replace_system_message_content,
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
 from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
-from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.task import (
@@ -157,7 +143,7 @@ from open_webui.utils.tools import (
     get_updated_tool_function,
 )
 from open_webui.utils.webhook import post_webhook
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import StreamingResponse
 
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -197,6 +183,7 @@ async def publish_chat_finished_event(
     if event_emitter:
         folder_id = metadata.get('folder_id') or await Chats.get_chat_folder_id(chat_id, metadata.get('user_id'))
         await event_emitter({'type': 'chat:list', 'data': {'chat_id': chat_id, 'folder_id': folder_id}})
+
 
 # We believe in one maker of all models, seen and unseen,
 # and in the reasoning which proceeds from the architect.
@@ -3121,23 +3108,69 @@ async def convert_url_images_to_base64(form_data, user=None):
     return form_data
 
 
+_LOAD_MESSAGES_RETRY_ATTEMPTS = 3
+_LOAD_MESSAGES_RETRY_DELAY_SECONDS = 0.3  # sleeps only between attempts (attempts - 1) — ~600ms worst case total
+
+
 async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[dict]]:
     """
     Load the message chain from DB up to message_id,
     keeping only LLM-relevant fields (role, content, output).
+
+    Retries briefly if message_id isn't found yet — closes the window
+    between the two independently-committed writes in
+    Chats.upsert_message_to_chat_by_id_and_message_id (chat.history commits
+    before the chat_message dual-write).
     """
-    messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
-    if not messages_map:
-        return None
+    for attempt in range(_LOAD_MESSAGES_RETRY_ATTEMPTS):
+        messages_map = await Chats.get_messages_map_by_chat_id(chat_id)
+        if messages_map:
+            db_messages = get_message_list(messages_map, message_id)
+            if db_messages:
+                return [
+                    {
+                        k: v
+                        for k, v in msg.items()
+                        if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
+                    }
+                    for msg in db_messages
+                ]
+        if attempt < _LOAD_MESSAGES_RETRY_ATTEMPTS - 1:
+            await asyncio.sleep(_LOAD_MESSAGES_RETRY_DELAY_SECONDS)
 
-    db_messages = get_message_list(messages_map, message_id)
+    return None
+
+
+def _require_db_messages(db_messages: Optional[list[dict]], chat_id: str, user_message_id: str) -> list[dict]:
+    """Raise instead of silently leaving form_data['messages'] as whatever
+    the frontend originally sent (system-prompt-only for a saved chat) when
+    DB history reconstruction found nothing after retrying.
+
+    Only `detail` reaches the user in the normal (session_id-present)
+    browser flow: process_chat runs as a background task there (see
+    main.py's fan-out around create_task), so the original HTTP request has
+    already returned 200 with task metadata before this can ever raise.
+    process_chat's own except Exception block (main.py) catches this,
+    extracts `e.detail` (the status code is never read), and delivers it to
+    the client as a `chat:message:error` WebSocket event — not an HTTP
+    response. `status_code` only matters for the legacy/direct API path
+    (no chat_id/message_id), and even there main.py's handler re-wraps it
+    as a hardcoded HTTPException(400, ...), discarding whatever status was
+    set here. So the value chosen below is effectively unused; kept as 409
+    for semantic accuracy on that one remaining path, not because any
+    caller currently observes it."""
     if not db_messages:
-        return None
-
-    return [
-        {k: v for k, v in msg.items() if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')}
-        for msg in db_messages
-    ]
+        log.warning(
+            'load_messages_from_db found no messages for chat %s / message %s '
+            'after retrying — refusing to forward an incomplete history to the LLM',
+            chat_id,
+            user_message_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail='Your message is still being saved — please try again.',
+        )
+    return db_messages
 
 
 def get_reasoning_format(model: dict) -> str | None:
@@ -3547,47 +3580,48 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     if is_saved_chat_id(chat_id) and user_message_id:
         db_messages = await load_messages_from_db(chat_id, user_message_id)
-        if db_messages:
-            # Continue: frontend sends assistant_message_id when continuing
-            # an existing response. Load its content so the LLM sees prior output.
-            assistant_message_id = metadata.get('assistant_message_id')
-            if assistant_message_id:
-                assistant_message = await Chats.get_message_by_id_and_message_id(chat_id, assistant_message_id)
-                if assistant_message and (assistant_message.get('content') or assistant_message.get('output')):
-                    db_messages.append(
-                        {
-                            k: v
-                            for k, v in assistant_message.items()
-                            if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
-                        }
-                    )
+        db_messages = _require_db_messages(db_messages, chat_id, user_message_id)
 
-            system_message = get_system_message(form_data.get('messages', []))
-            form_data['messages'] = [system_message, *db_messages] if system_message else db_messages
+        # Continue: frontend sends assistant_message_id when continuing
+        # an existing response. Load its content so the LLM sees prior output.
+        assistant_message_id = metadata.get('assistant_message_id')
+        if assistant_message_id:
+            assistant_message = await Chats.get_message_by_id_and_message_id(chat_id, assistant_message_id)
+            if assistant_message and (assistant_message.get('content') or assistant_message.get('output')):
+                db_messages.append(
+                    {
+                        k: v
+                        for k, v in assistant_message.items()
+                        if k in ('id', 'role', 'content', 'output', 'files', 'contextSummary', 'usage')
+                    }
+                )
 
-            # Inject image files into content as image_url parts (mirrors frontend logic)
-            for message in form_data['messages']:
-                image_files = [
-                    f
-                    for f in message.get('files', [])
-                    if f.get('type') == 'image' or (f.get('content_type') or '').startswith('image/')
-                ]
-                if message.get('role') == 'user' and image_files:
-                    text_content = message.get('content', '')
-                    if isinstance(text_content, str):
-                        message['content'] = [
-                            {'type': 'text', 'text': text_content},
-                            *[
-                                {
-                                    'type': 'image_url',
-                                    'image_url': {'url': f['url']},
-                                }
-                                for f in image_files
-                                if f.get('url')
-                            ],
-                        ]
-                # Strip files field — it's been incorporated into content
-                message.pop('files', None)
+        system_message = get_system_message(form_data.get('messages', []))
+        form_data['messages'] = [system_message, *db_messages] if system_message else db_messages
+
+        # Inject image files into content as image_url parts (mirrors frontend logic)
+        for message in form_data['messages']:
+            image_files = [
+                f
+                for f in message.get('files', [])
+                if f.get('type') == 'image' or (f.get('content_type') or '').startswith('image/')
+            ]
+            if message.get('role') == 'user' and image_files:
+                text_content = message.get('content', '')
+                if isinstance(text_content, str):
+                    message['content'] = [
+                        {'type': 'text', 'text': text_content},
+                        *[
+                            {
+                                'type': 'image_url',
+                                'image_url': {'url': f['url']},
+                            }
+                            for f in image_files
+                            if f.get('url')
+                        ],
+                    ]
+            # Strip files field — it's been incorporated into content
+            message.pop('files', None)
 
     if regeneration_prompt:
         form_data['messages'].append({'role': 'user', 'content': regeneration_prompt})
@@ -3983,21 +4017,21 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Only the slim, non-PII `pii_detections_public` ([{type,start,end}]) is
     # carried forward — never `pii_detections`/`pii_reverse_map`/
     # `pii_placeholder_map`, which contain plaintext originals + placeholders.
-    pipeline_md = form_data.get("metadata") or {}
+    pipeline_md = form_data.get('metadata') or {}
     # Defense-in-depth: re-whitelist to exactly {type:str, start:int, end:int}
     # right at the trust boundary (data entering OWUI from the separately
     # deployed pipeline). Even if the pipeline ever emits extra keys (e.g. a
     # plaintext `original`) or malformed offsets, nothing beyond {type,start,end}
     # can reach the socket event or the persisted chat record.
     pii_public = [
-        {"type": d["type"], "start": d["start"], "end": d["end"]}
-        for d in (pipeline_md.get("pii_detections_public") or [])
+        {'type': d['type'], 'start': d['start'], 'end': d['end']}
+        for d in (pipeline_md.get('pii_detections_public') or [])
         if isinstance(d, dict)
-        and isinstance(d.get("type"), str)
-        and isinstance(d.get("start"), int)
-        and not isinstance(d.get("start"), bool)
-        and isinstance(d.get("end"), int)
-        and not isinstance(d.get("end"), bool)
+        and isinstance(d.get('type'), str)
+        and isinstance(d.get('start'), int)
+        and not isinstance(d.get('start'), bool)
+        and isinstance(d.get('end'), int)
+        and not isinstance(d.get('end'), bool)
     ]
 
     metadata.update(
@@ -4011,9 +4045,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         }
     )
     if pii_public:
-        metadata["pii_detections_public"] = pii_public
+        metadata['pii_detections_public'] = pii_public
         log.info(
-            "pii_card bridge: captured %d detection(s) from pipeline metadata",
+            'pii_card bridge: captured %d detection(s) from pipeline metadata',
             len(pii_public),
         )
     form_data['metadata'] = metadata
@@ -4538,22 +4572,22 @@ async def background_tasks_handler(ctx):
     # to the frontend and persist it. The list was already re-whitelisted to
     # exactly [{type,start,end}] at the trust boundary in process_chat_payload,
     # so no plaintext PII can pass through here. Mirrors the follow-ups path.
-    pii_detections = (metadata or {}).get("pii_detections_public") or []
+    pii_detections = (metadata or {}).get('pii_detections_public') or []
     if pii_detections:
         await event_emitter(
             {
-                "type": "chat:message:pii",
-                "data": {"pii_detections": pii_detections},
+                'type': 'chat:message:pii',
+                'data': {'pii_detections': pii_detections},
             }
         )
-        if not metadata.get("chat_id", "").startswith("local:"):
+        if not metadata.get('chat_id', '').startswith('local:'):
             await Chats.upsert_message_to_chat_by_id_and_message_id(
-                metadata["chat_id"],
-                metadata["message_id"],
-                {"piiDetections": pii_detections},
+                metadata['chat_id'],
+                metadata['message_id'],
+                {'piiDetections': pii_detections},
             )
         log.info(
-            "pii_card bridge: emitted chat:message:pii with %d detection(s)",
+            'pii_card bridge: emitted chat:message:pii with %d detection(s)',
             len(pii_detections),
         )
 
@@ -5748,12 +5782,12 @@ async def streaming_chat_response_handler(response, ctx):
                                         )
                                         try:
                                             await Chats.upsert_message_to_chat_by_id_and_message_id(
-                                                metadata["chat_id"],
-                                                metadata["message_id"],
-                                                {"usage": usage},
+                                                metadata['chat_id'],
+                                                metadata['message_id'],
+                                                {'usage': usage},
                                             )
                                         except Exception as e:
-                                            log.warning(f"failed to persist usage: {e}")
+                                            log.warning(f'failed to persist usage: {e}')
 
                                     if not choices:
                                         error = data.get('error', {})
@@ -6252,24 +6286,21 @@ async def streaming_chat_response_handler(response, ctx):
                     try:
                         await stream_body_handler(response, form_data)
                     except asyncio.TimeoutError:
-                        _timeout_error = (
-                            "Stream timed out — the model stopped responding. "
-                            "Please try again."
-                        )
+                        _timeout_error = 'Stream timed out — the model stopped responding. Please try again.'
                         log.warning(
-                            f"[stream] Upstream idle timeout (sock_read) after "
-                            f"{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: "
-                            f"chat_id={metadata.get('chat_id')} model={model_id}"
+                            f'[stream] Upstream idle timeout (sock_read) after '
+                            f'{AIOHTTP_CLIENT_TIMEOUT_SOCK_READ}s with no chunks: '
+                            f'chat_id={metadata.get("chat_id")} model={model_id}'
                         )
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
-                            {"error": {"content": _timeout_error}},
+                            metadata['chat_id'],
+                            metadata['message_id'],
+                            {'error': {'content': _timeout_error}},
                         )
                         await event_emitter(
                             {
-                                "type": "chat:message:error",
-                                "data": {"error": {"content": _timeout_error}},
+                                'type': 'chat:message:error',
+                                'data': {'error': {'content': _timeout_error}},
                             }
                         )
                 finally:
@@ -6740,9 +6771,9 @@ async def streaming_chat_response_handler(response, ctx):
                                 if CODE_INTERPRETER_BLOCKED_MODULES:
                                     blocking_code = textwrap.dedent(f"""
                                         import builtins
-    
+
                                         BLOCKED_MODULES = {CODE_INTERPRETER_BLOCKED_MODULES}
-    
+
                                         _real_import = builtins.__import__
                                         async def restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
                                             if name.split('.')[0] in BLOCKED_MODULES:
@@ -6752,7 +6783,7 @@ async def streaming_chat_response_handler(response, ctx):
                                                         f"Direct import of module {{name}} is restricted."
                                                     )
                                             return _real_import(name, globals, locals, fromlist, level)
-    
+
                                         builtins.__import__ = restricted_import
                                     """)
                                     code = blocking_code + '\n' + code
@@ -6933,12 +6964,12 @@ async def streaming_chat_response_handler(response, ctx):
                         await post_webhook(
                             request.app.state.WEBUI_NAME,
                             webhook_url,
-                            f"{_webhook_content}\n\n{title} - {request.app.state.WEBUI_URL}/c/{metadata['chat_id']}",
+                            f'{_webhook_content}\n\n{title} - {request.app.state.WEBUI_URL}/c/{metadata["chat_id"]}',
                             {
-                                "action": "chat",
-                                "message": _webhook_content,
-                                "title": title,
-                                "url": f"{request.app.state.WEBUI_URL}/c/{metadata['chat_id']}",
+                                'action': 'chat',
+                                'message': _webhook_content,
+                                'title': title,
+                                'url': f'{request.app.state.WEBUI_URL}/c/{metadata["chat_id"]}',
                             },
                         )
 
@@ -7041,7 +7072,7 @@ async def streaming_chat_response_handler(response, ctx):
             )
             async for data in _source:
                 if data is _KEEPALIVE:
-                    yield ": keepalive\n\n"
+                    yield ': keepalive\n\n'
                     continue
 
                 data, _ = await process_filter_functions(
