@@ -1707,13 +1707,23 @@ async def mask_sources_for_llm(
     _dbg_orig_chars = 0
     _dbg_blocks = []  # [(orig, masked, marker)] for the full-content dump file
 
+    _features = features if isinstance(features, dict) else {}
+    _policy_enforced, _pii_expected = await _resolve_pii_masking_decision(
+        request, user, _features
+    )
+
+    # The user opted out and no policy mandates masking, so no document is sent
+    # to the pipeline. Return before the time-budget check and the progress
+    # reporting below: they would refuse oversized attachments and report
+    # masking progress for text that is never masked.
+    if not _pii_expected:
+        return sources, []
+
     # Cache only when this request forces the pipeline valve on: a policy
     # mandates masking or `features.pii_masking` is True. Otherwise the pipeline
     # receives the user's stored valve, which can be False, and returns the text
     # unchanged; caching that would serve the raw document to a later turn with
     # masking on.
-    _features = features if isinstance(features, dict) else {}
-    _policy_enforced, _ = await _resolve_pii_masking_decision(request, user, _features)
     cache_enabled = bool(chat_id) and (_policy_enforced or _features.get("pii_masking") is True)
     _filter_ids = _applicable_filter_ids(
         model_id, models if models is not None else request.app.state.MODELS

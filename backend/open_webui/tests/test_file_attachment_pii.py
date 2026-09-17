@@ -899,6 +899,52 @@ def test_u20_without_a_mandated_policy_the_user_opt_out_still_holds():
     assert "John Smith" in json.dumps(result)
 
 
+def test_u45_opting_out_reports_no_masking_progress():
+    """With masking off the UI must not show masking progress, because no text is
+    sent to the pipeline."""
+    progress = []
+    with _patch_mw_session([], behavior="mask", masked_text="[PERSON_1]"), _patch_policy(False):
+        _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources("John Smith"),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": False},
+                on_progress=lambda done, total: progress.append((done, total)),
+            )
+        )
+
+    assert progress == [], "masking progress was reported for text that was never masked"
+
+
+def test_u46_opting_out_admits_an_attachment_over_the_masking_budget():
+    """The masking time budget must not reject an attachment when masking is off,
+    since nothing would be masked."""
+    with _patch_mw_session([], behavior="mask", masked_text="[PERSON_1]"), _patch_policy(
+        False
+    ), _patch_budget(0.001):
+        result, _, _ = _run(
+            apply_source_context_to_messages(
+                _make_request(),
+                [{"role": "user", "content": "q"}],
+                _file_sources("John Smith lives in Zagreb"),
+                "q",
+                chat_id="chat-1",
+                user=_make_user(),
+                model_id="gpt-4",
+                models=_make_models(),
+                features={"pii_masking": False},
+            )
+        )
+
+    assert "John Smith" in json.dumps(result)
+
+
 # ---------------------------------------------------------------------------
 # Concurrency and the masking budget, shared with the prompt path
 # ---------------------------------------------------------------------------
