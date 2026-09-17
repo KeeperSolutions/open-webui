@@ -1056,9 +1056,10 @@ PII_MASK_CHUNK_CHARS = PII_INLET_CHUNK_CHARS
 PII_SCAN_CONCURRENCY = 3
 
 # Ingest scan only: maximum characters of a file's text sent to the pipeline for
-# the PII card. Longer files are scanned up to this prefix, so their card may be
-# incomplete. Detection offsets stay valid because the card slices the full
-# stored content.
+# the PII card. The cap bounds scan time, not memory: the pipeline masks about
+# 240 characters per second per request, so this prefix takes about a minute at
+# PII_SCAN_CONCURRENCY. A longer file is scanned up to the prefix and its card
+# may be incomplete; offsets stay valid because the card slices stored content.
 PII_SCAN_MAX_CHARS = 50000
 
 # Ingest scan only: attempts per sub-chunk before its detections are dropped.
@@ -1073,10 +1074,10 @@ PII_SCAN_PIECE_RETRIES = 3
 # and no unmasked text reaches the LLM.
 PII_MASK_POST_RETRIES = 3
 
-# Set KEEPER_PII_DEBUG=1 to log, per request, what the ingest scan detected for
-# the PII card and what source text is sent to the LLM. Read at import time, so
-# the backend must be restarted.
-PII_DEBUG = os.environ.get("KEEPER_PII_DEBUG", "").lower() in ("1", "true", "yes", "on")
+# Set KEEPER_PII_DEBUG=true to log, per request, what the ingest scan detected
+# for the PII card and what source text is sent to the LLM. Read at import time,
+# so the backend must be restarted.
+PII_DEBUG = os.environ.get("KEEPER_PII_DEBUG", "False").lower() == "true"
 
 # When KEEPER_PII_DEBUG_FILE is set to a path, each request with file or RAG
 # sources appends the original and masked text of every chunk and the final

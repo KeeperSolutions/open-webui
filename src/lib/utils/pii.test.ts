@@ -286,9 +286,13 @@ describe('isPiiPipelineConfigured', () => {
 });
 
 describe('scopeCardDetections', () => {
-	const msg = { type: 'PERSON', start: 0, end: 3 }; // message PII (no fileId)
-	const fileA = { type: 'EMAIL', start: 0, end: 5, fileId: 'a' };
-	const fileB = { type: 'PHONE', start: 0, end: 5, fileId: 'b' };
+	// Annotated rather than inferred: a literal without `fileId` shares no property
+	// with the function's optional-only constraint, which TypeScript rejects.
+	type Detection = { type: string; start: number; end: number; fileId?: string | null };
+
+	const msg: Detection = { type: 'PERSON', start: 0, end: 3 }; // message PII (no fileId)
+	const fileA: Detection = { type: 'EMAIL', start: 0, end: 5, fileId: 'a' };
+	const fileB: Detection = { type: 'PHONE', start: 0, end: 5, fileId: 'b' };
 
 	it('always keeps message PII (no fileId)', () => {
 		expect(scopeCardDetections([msg], new Set(), new Set())).toEqual([msg]);

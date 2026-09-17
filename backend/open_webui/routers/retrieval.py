@@ -1871,19 +1871,14 @@ scan_file_content_for_pii = None
 _PII_FILTER_IDS = ('pii_filter', 'pii_filter_pipeline')
 
 # Scan uploaded files for PII at ingest so the PII card can show detections
-# before the first message. Off by default; KEEPER_ENABLE_INGEST_PII_SCAN=1
-# (or true/yes/on) turns it on.
+# before the first message. Off by default; KEEPER_ENABLE_INGEST_PII_SCAN=true
+# turns it on.
 #
 # The scan is a preview, not a security boundary. Everything sent to the LLM is
 # masked fail-closed at send time by `mask_sources_for_llm`. The preview adds a
 # second pass through the PII pipeline and covers only the first
 # PII_SCAN_MAX_CHARS characters, so its count can differ from the send-time one.
-ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', '').lower() in (
-    '1',
-    'true',
-    'yes',
-    'on',
-)
+ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', 'False').lower() == 'true'
 
 
 def _user_pii_masking_enabled(user) -> bool:

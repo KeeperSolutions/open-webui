@@ -3,7 +3,9 @@
 Skipped unless KEEPER_PII_LIVE=1, so CI and the default suite never use the
 network. The pipeline URL and key are read from the local Open WebUI database
 (KEEPER_PII_LIVE_DB), from the connection whose URL contains KEEPER_PII_LIVE_HOST,
-so no URL or key is stored in the repo.
+so no URL or key is stored in the repo. Once KEEPER_PII_LIVE=1 is set, a database
+or connection that cannot be used fails the test and names what it found, rather
+than skipping.
 
 It checks what the mocked tests cannot: that a real pipeline returns detections,
 and that the stored offsets select the right values across chunks. The PII card
@@ -13,6 +15,7 @@ slices values out of the stored content with these offsets.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sqlite3
@@ -38,7 +41,7 @@ DB_PATH = os.environ.get(
     'KEEPER_PII_LIVE_DB',
     os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'webui.db'),
 )
-HOST_MATCH = os.environ.get('KEEPER_PII_LIVE_HOST', 'pipelines-v4--staging')
+HOST_MATCH = os.environ.get('KEEPER_PII_LIVE_HOST', 'pipelines-v4')
 
 # Synthetic Croatian PII. Each value is unique and appears verbatim exactly once,
 # so an offset can be checked by slicing the document.
@@ -55,14 +58,33 @@ FILLER = (
 
 
 def _connection():
-    row = (
-        sqlite3.connect(os.path.abspath(DB_PATH)).execute('SELECT data FROM config ORDER BY id DESC LIMIT 1').fetchone()
-    )
+    """Return (index, url, key) of the first connection whose URL contains HOST_MATCH.
+
+    Every failure here reports the URLs that were found and the variable that
+    selects one, so an unusable database cannot look like a test that ran."""
+    path = os.path.abspath(DB_PATH)
+    if not os.path.isfile(path):
+        pytest.fail(f'no Open WebUI database at {path}; set KEEPER_PII_LIVE_DB to one')
+
+    try:
+        with contextlib.closing(sqlite3.connect(f'file:{path}?mode=ro', uri=True)) as db:
+            row = db.execute('SELECT data FROM config ORDER BY id DESC LIMIT 1').fetchone()
+    except sqlite3.Error as err:
+        pytest.fail(f'cannot read the config table of {path}: {err}')
+    if row is None:
+        pytest.fail(f'{path} holds no config row; open Open WebUI once to write one')
+
     openai = json.loads(row[0]).get('openai', {})
-    for idx, (url, key) in enumerate(zip(openai.get('api_base_urls', []), openai.get('api_keys', []))):
+    urls = openai.get('api_base_urls', [])
+    for idx, (url, key) in enumerate(zip(urls, openai.get('api_keys', []))):
         if HOST_MATCH in url:
+            if not key:
+                pytest.fail(f'connection {url} has no API key in {path}')
             return idx, url.rstrip('/'), key
-    pytest.skip(f'no connection matching {HOST_MATCH!r} in {DB_PATH}')
+    pytest.fail(
+        f'no connection URL of {path} contains {HOST_MATCH!r}; found {urls}. '
+        f'Set KEEPER_PII_LIVE_HOST to a substring of the pipeline connection you want.'
+    )
 
 
 def _request_and_models():
