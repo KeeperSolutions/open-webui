@@ -170,7 +170,12 @@
 	let eventConfirmationInputValue = '';
 	let eventConfirmationInputType = '';
 	let eventConfirmationInputOptions: ({ label?: string; value: string } | string)[] = [];
+	let eventConfirmationAction = '';
+	let eventConfirmationShowRemember = false;
 	let eventCallback = null;
+
+	// Actions the user opted to skip confirmation for, for the lifetime of this chat session
+	const skippedConfirmationActions = new Set<string>();
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -1139,6 +1144,11 @@
 						toast.info(toastContent);
 					}
 				} else if (type === 'confirmation') {
+					if (data.action && skippedConfirmationActions.has(data.action)) {
+						cb(true);
+						return;
+					}
+
 					eventCallback = cb;
 
 					eventConfirmationInput = false;
@@ -1147,6 +1157,8 @@
 
 					eventConfirmationTitle = data.title;
 					eventConfirmationMessage = data.message;
+					eventConfirmationAction = data.action ?? '';
+					eventConfirmationShowRemember = !!data.allow_remember;
 				} else if (type === 'execute') {
 					eventCallback = cb;
 
@@ -3815,8 +3827,14 @@
 	inputValue={eventConfirmationInputValue}
 	inputType={eventConfirmationInputType}
 	inputOptions={eventConfirmationInputOptions}
+	showRemember={eventConfirmationShowRemember}
 	on:confirm={(e) => {
-		if (eventConfirmationInput) {
+		if (eventConfirmationShowRemember) {
+			if (e.detail?.remember && eventConfirmationAction) {
+				skippedConfirmationActions.add(eventConfirmationAction);
+			}
+			eventCallback(true);
+		} else if (eventConfirmationInput) {
 			eventCallback(e.detail);
 		} else if (e.detail) {
 			eventCallback(e.detail);

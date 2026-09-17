@@ -206,6 +206,11 @@
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 
+	// The Drive card already links out, so strip any Drive link the model added in its own text
+	const stripDriveLinks = (content: string) =>
+		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
+	$: displayContent = message.driveDocuments ? stripDriveLinks(message.content ?? '') : message.content;
+
 	let edit = false;
 	let editedContent = '';
 	let editedOutput: any[] | null = null;
@@ -849,7 +854,7 @@
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
-									content={message.content}
+									content={displayContent}
 									output={message.output}
 									sources={message.sources}
 									floatingButtons={message?.done &&

@@ -58,12 +58,15 @@ export const getGoogleDriveStatus = async (token: string) => {
 export const downloadGoogleDriveDocument = async (
 	token: string,
 	fileId: string,
-	format: string,
+	format: string | null | undefined,
 	filename: string
 ) => {
-	const params = new URLSearchParams({ format, filename });
+	const params = new URLSearchParams({ filename });
+	if (format) {
+		params.set('format', format);
+	}
 
-	const blob = await fetch(
+	const result = await fetch(
 		`${WEBUI_API_BASE_URL}/connectors/google-drive/download/${fileId}?${params}`,
 		{
 			method: 'GET',
@@ -74,14 +77,18 @@ export const downloadGoogleDriveDocument = async (
 	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
-			return res.blob();
+
+			const disposition = res.headers.get('Content-Disposition') ?? '';
+			const match = disposition.match(/filename="?([^";]+)"?/);
+
+			return { blob: await res.blob(), filename: match ? match[1] : null };
 		})
 		.catch((err) => {
 			console.error(err);
 			return null;
 		});
 
-	return blob;
+	return result;
 };
 
 export const disconnectGoogleDrive = async (token: string) => {

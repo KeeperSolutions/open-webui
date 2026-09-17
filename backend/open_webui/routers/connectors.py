@@ -34,13 +34,21 @@ GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
 GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 
 GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
-GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
+# Full (restricted) scope, not drive.file - lets move/delete act on files this connector didn't create
+GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive'
 
 # PDF has no native Google format, so it's downloaded via alt=media instead of exported
 GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
     'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
+
+# Used to pick a default export format when the caller doesn't specify one for a native Google file
+GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS = {
+    'application/vnd.google-apps.document': 'docx',
+    'application/vnd.google-apps.spreadsheet': 'xlsx',
+    'application/vnd.google-apps.presentation': 'pptx',
 }
 
 # Refresh a bit before actual expiry to avoid handing out a token that expires mid-request
@@ -218,21 +226,38 @@ async def disconnect_google_drive(user=Depends(get_verified_user)):
 @router.get('/google-drive/download/{file_id}')
 async def download_google_drive_document(
     file_id: str,
-    format: str,
+    format: str | None = None,
     filename: str = 'document',
     user=Depends(get_verified_user),
 ):
-    if format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
+    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
 
     access_token = await get_valid_access_token(user.id)
     if not access_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Drive isn't connected")
 
-    export_mime_type = GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES.get(format)
     headers = {'Authorization': f'Bearer {access_token}'}
 
     async with httpx.AsyncClient() as client:
+        # No format given - look up the real mimeType so a native Google file still exports correctly
+        if format is None:
+            metadata_response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}',
+                headers=headers,
+                params={'fields': 'mimeType', 'supportsAllDrives': 'true'},
+            )
+            if metadata_response.status_code != 200:
+                log.error(
+                    f'Google Drive metadata fetch failed: {metadata_response.status_code} {metadata_response.text}'
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to look up this file in Google Drive.'
+                )
+            format = GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS.get(metadata_response.json().get('mimeType', ''))
+
+        export_mime_type = GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES.get(format)
+
         if export_mime_type:
             response = await client.get(
                 f'https://www.googleapis.com/drive/v3/files/{file_id}/export',
@@ -252,10 +277,16 @@ async def download_google_drive_document(
             status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to download this document from Google Drive.'
         )
 
+    content_type = export_mime_type or response.headers.get('Content-Type', 'application/octet-stream')
+    if not format:
+        import mimetypes
+
+        format = (mimetypes.guess_extension(content_type.split(';')[0].strip()) or '.bin').lstrip('.')
+
     safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
     return Response(
         content=response.content,
-        media_type=export_mime_type or response.headers.get('Content-Type', 'application/octet-stream'),
+        media_type=content_type,
         headers={'Content-Disposition': f'attachment; filename="{safe_filename}.{format}"'},
     )
 

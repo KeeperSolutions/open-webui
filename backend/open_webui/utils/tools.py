@@ -62,7 +62,13 @@ from open_webui.tools.builtin import (
     drive_copy_file,
     drive_create_document,
     drive_create_file,
+    drive_delete_file,
+    drive_list_folder,
+    drive_move_file,
     drive_read,
+    drive_rename_file,
+    drive_restore_file,
+    drive_save_edited_copy,
     drive_search,
     edit_image,
     execute_code,
@@ -689,8 +695,19 @@ async def get_builtin_tools(
         builtin_functions.extend([search_web, fetch_url])
 
     # Connectors - functional access once the user has connected the account (not gated by toolIds)
-    CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read]}
-    CONNECTOR_WRITE_FUNCTIONS = {'google_drive': [drive_copy_file, drive_create_file, drive_create_document]}
+    CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read, drive_list_folder]}
+    CONNECTOR_WRITE_FUNCTIONS = {
+        'google_drive': [
+            drive_copy_file,
+            drive_create_file,
+            drive_create_document,
+            drive_save_edited_copy,
+            drive_move_file,
+            drive_delete_file,
+            drive_restore_file,
+            drive_rename_file,
+        ]
+    }
     CONNECTOR_WRITE_SCOPES = {'google_drive': GOOGLE_DRIVE_WRITE_SCOPE}
     if is_builtin_tool_enabled('connectors'):
         user_id = user.get('id')

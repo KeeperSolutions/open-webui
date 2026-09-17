@@ -247,6 +247,10 @@ STATIC_DIR = Path(os.getenv('STATIC_DIR', OPEN_WEBUI_DIR / 'static'))
 
 FONTS_DIR = Path(os.getenv('FONTS_DIR', OPEN_WEBUI_DIR / 'static' / 'fonts'))
 
+PANDOC_REFERENCE_DOC = Path(
+    os.getenv('PANDOC_REFERENCE_DOC', OPEN_WEBUI_DIR / 'static' / 'pandoc' / 'reference.docx')
+)
+
 FRONTEND_BUILD_DIR = Path(os.getenv('FRONTEND_BUILD_DIR', BASE_DIR / 'build')).resolve()
 
 if FROM_INIT_PY:

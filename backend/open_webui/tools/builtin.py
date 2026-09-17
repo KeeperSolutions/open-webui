@@ -4372,10 +4372,59 @@ GOOGLE_DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 GOOGLE_DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
 GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES = {
-    'application/vnd.google-apps.document': 'text/plain',
+    'application/vnd.google-apps.document': 'text/html',
     'application/vnd.google-apps.spreadsheet': 'text/csv',
     'application/vnd.google-apps.presentation': 'text/plain',
 }
+
+# Docs export as HTML above so headings/bold/lists survive - converted to markdown in drive_read
+GOOGLE_DRIVE_HTML_EXPORT_MIME_TYPES = {'application/vnd.google-apps.document'}
+
+
+def _normalize_google_docs_html(html: str) -> str:
+    """Google Docs' HTML export marks bold/italic/headings via CSS classes (e.g. font-weight:700
+    on a <span class="c1">) rather than semantic tags, so markdownify can't see them - this
+    rewrites those spans/paragraphs into <strong>/<em>/<hN> first."""
+    import re
+
+    from bs4 import BeautifulSoup
+
+    style_rules: dict[str, dict[str, str]] = {}
+    for class_name, body in re.findall(r'\.([\w-]+)\s*\{([^}]*)\}', html):
+        props = {}
+        for decl in body.split(';'):
+            if ':' in decl:
+                key, value = decl.split(':', 1)
+                props[key.strip()] = value.strip()
+        style_rules[class_name] = props
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    for el in soup.find_all(['p', 'span']):
+        props = {}
+        for class_name in el.get('class') or []:
+            props.update(style_rules.get(class_name, {}))
+        if not props:
+            continue
+
+        font_weight = props.get('font-weight', '')
+        is_bold = font_weight == 'bold' or (font_weight.isdigit() and int(font_weight) >= 600)
+        is_italic = props.get('font-style') == 'italic'
+
+        size_match = re.match(r'([\d.]+)pt', props.get('font-size', ''))
+        font_size = float(size_match.group(1)) if size_match else None
+
+        if el.name == 'p' and font_size and font_size >= 13:
+            el.name = 'h1' if font_size >= 18 else 'h2' if font_size >= 15 else 'h3'
+            continue
+
+        if is_italic:
+            el.wrap(soup.new_tag('em'))
+        if is_bold:
+            el.wrap(soup.new_tag('strong'))
+
+    return str(soup)
+
 
 DRIVE_MAX_RESPONSE_BYTES = 100_000
 
@@ -4415,6 +4464,77 @@ async def _drive_get(client, url: str, headers: dict, params: dict):
     return response
 
 
+def _drive_escape_query_value(value: str) -> str:
+    """Escape a string for safe use inside a single-quoted Drive API query value."""
+    return value.replace('\\', '\\\\').replace("'", "\\'")
+
+
+async def _drive_get_access_token(__user__: dict) -> str:
+    from open_webui.routers.connectors import get_valid_access_token
+
+    user_id = (__user__ or {}).get('id')
+    return await get_valid_access_token(user_id) if user_id else None
+
+
+async def _drive_name_exists(client, headers: dict, name: str, parent_id: str = None) -> bool:
+    """Check if a non-trashed file with this exact name already exists in the user's Drive
+    (optionally scoped to one folder, since the same name in a different folder isn't a clash)."""
+    escaped_name = _drive_escape_query_value(name)
+    query = f"name = '{escaped_name}' and trashed = false"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    response = await _drive_get(
+        client,
+        GOOGLE_DRIVE_FILES_URL,
+        headers=headers,
+        params={
+            'q': query,
+            'includeItemsFromAllDrives': 'true',
+            'supportsAllDrives': 'true',
+            'fields': 'files(id)',
+            'pageSize': 1,
+        },
+    )
+    return response.status_code == 200 and bool(response.json().get('files'))
+
+
+DRIVE_ROOT_FOLDER_ALIASES = {'my drive', 'root', 'drive', 'top level', 'the root'}
+
+
+async def _drive_resolve_folder_id(client, headers: dict, folder_name: str):
+    """Look up a folder by exact name. Returns (folder_id, None) on a single match,
+    or (None, error_message) if there's no match or more than one.
+
+    "My Drive" (the root) isn't a real folder object in the Drive API, so it can't be found by
+    name - it's handled separately here via Drive's special 'root' alias id."""
+    if folder_name.strip().lower() in DRIVE_ROOT_FOLDER_ALIASES:
+        return 'root', None
+
+    escaped_name = _drive_escape_query_value(folder_name)
+    response = await _drive_get(
+        client,
+        GOOGLE_DRIVE_FILES_URL,
+        headers=headers,
+        params={
+            'q': f"name = '{escaped_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            'includeItemsFromAllDrives': 'true',
+            'supportsAllDrives': 'true',
+            'fields': 'files(id,name)',
+            'pageSize': 10,
+        },
+    )
+    if response.status_code != 200:
+        return None, _drive_error_message(response, f'Failed to look up the folder "{folder_name}".')
+
+    folders = response.json().get('files', [])
+    if not folders:
+        return None, f'No folder named "{folder_name}" was found in your Drive.'
+    if len(folders) > 1:
+        return None, f'There are {len(folders)} folders named "{folder_name}" - ask the user which one they mean.'
+
+    return folders[0]['id'], None
+
+
 async def _drive_request(client, method: str, url: str, headers: dict, **kwargs):
     """Make a Drive API request, retrying once if the first attempt is rate-limited."""
     response = await client.request(method, url, headers=headers, **kwargs)
@@ -4438,11 +4558,38 @@ DRIVE_DOCUMENT_SOURCE_MIME_TYPES = {
     'pdf': 'application/pdf',
 }
 
+DRIVE_NATIVE_MIME_TYPE_FORMATS = {v: k for k, v in DRIVE_DOCUMENT_NATIVE_MIME_TYPES.items()}
+DRIVE_NATIVE_MIME_TYPE_FORMATS['application/pdf'] = 'pdf'
 
-async def _drive_upload_multipart(client, headers: dict, name: str, target_mime_type: str, content_bytes: bytes, source_mime_type: str):
+
+async def _drive_emit_created_card(event_emitter, f: dict, format: str = None):
+    """Emit the chat card for a written Drive file - always call this on success so the user
+    gets a reliable link/download card instead of the model composing its own text link."""
+    if not event_emitter:
+        return
+
+    await event_emitter(
+        {
+            'type': 'chat:message:drive_document_created',
+            'data': {
+                'id': f['id'],
+                'name': f['name'],
+                'format': format or DRIVE_NATIVE_MIME_TYPE_FORMATS.get(f.get('mimeType', '')),
+                'web_link': f.get('webViewLink'),
+            },
+        }
+    )
+
+
+async def _drive_upload_multipart(
+    client, headers: dict, name: str, target_mime_type: str, content_bytes: bytes, source_mime_type: str, parent_id: str = None
+):
     """Upload in one request via multipart/related, converting to target_mime_type if it differs from source_mime_type."""
     boundary = 'hubgate_drive_upload_boundary'
-    metadata = json.dumps({'name': name, 'mimeType': target_mime_type})
+    file_metadata = {'name': name, 'mimeType': target_mime_type}
+    if parent_id:
+        file_metadata['parents'] = [parent_id]
+    metadata = json.dumps(file_metadata)
     body = (
         f'--{boundary}\r\n'
         'Content-Type: application/json; charset=UTF-8\r\n\r\n'
@@ -4462,21 +4609,31 @@ async def _drive_upload_multipart(client, headers: dict, name: str, target_mime_
     )
 
 
-def _build_pdf_document_bytes(title: str, content: str) -> bytes:
+def _resolve_static_asset_dir(configured_path, relative_subpath: str):
+    """Fall back from the configured path to site-packages, then a repo-relative path -
+    handles running from an installed package vs. straight from the backend/ checkout."""
     import site
-    from html import escape
     from pathlib import Path
+
+    for candidate in (
+        configured_path,
+        Path(site.getsitepackages()[0]) / relative_subpath,
+        Path('.') / 'backend' / relative_subpath,
+    ):
+        if candidate.exists():
+            return candidate
+    return configured_path
+
+
+def _build_pdf_document_bytes(title: str, content: str) -> bytes:
+    from html import escape
 
     from fpdf import FPDF
     from markdown import markdown
 
     from open_webui.env import FONTS_DIR
 
-    fonts_dir = FONTS_DIR
-    if not fonts_dir.exists():
-        fonts_dir = Path(site.getsitepackages()[0]) / 'static/fonts'
-    if not fonts_dir.exists():
-        fonts_dir = Path('.') / 'backend' / 'static' / 'fonts'
+    fonts_dir = _resolve_static_asset_dir(FONTS_DIR, 'static/fonts')
 
     pdf = FPDF()
     pdf.add_page()
@@ -4495,10 +4652,18 @@ def _build_docx_document_bytes(content: str) -> bytes:
 
     import pypandoc
 
+    from open_webui.env import PANDOC_REFERENCE_DOC
+
+    reference_doc = _resolve_static_asset_dir(PANDOC_REFERENCE_DOC, 'static/pandoc/reference.docx')
+    extra_args = ['--reference-doc', str(reference_doc)] if reference_doc.exists() else []
+
     with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
         tmp_path = tmp.name
     try:
-        pypandoc.convert_text(content, 'docx', format='md', outputfile=tmp_path)
+        # markdown-auto_identifiers avoids pandoc turning each heading into a stray Word bookmark
+        pypandoc.convert_text(
+            content, 'docx', format='markdown-auto_identifiers', outputfile=tmp_path, extra_args=extra_args
+        )
         with open(tmp_path, 'rb') as f:
             return f.read()
     finally:
@@ -4550,6 +4715,65 @@ def _build_pptx_document_bytes(content: str) -> bytes:
     return buf.getvalue()
 
 
+def _drive_build_document_bytes(format: str, name: str, content: str) -> bytes:
+    if format == 'pdf':
+        return _build_pdf_document_bytes(name, content)
+    elif format == 'docx':
+        return _build_docx_document_bytes(content)
+    elif format == 'xlsx':
+        return _build_xlsx_document_bytes(content)
+    return _build_pptx_document_bytes(content)
+
+
+async def _drive_upload_document_bytes(
+    client, headers: dict, name: str, format: str, file_bytes: bytes, parent_id: str = None
+):
+    source_mime_type = DRIVE_DOCUMENT_SOURCE_MIME_TYPES[format]
+    target_mime_type = DRIVE_DOCUMENT_NATIVE_MIME_TYPES.get(format, source_mime_type)
+    return await _drive_upload_multipart(
+        client, headers, name, target_mime_type, file_bytes, source_mime_type, parent_id=parent_id
+    )
+
+
+async def _drive_create_plain_file(
+    client, headers: dict, name: str, content: str, mime_type: str = 'text/plain', parent_id: str = None
+):
+    """Create a plain file and, if content is given, upload it as the file's body.
+    Returns (file_dict, None) on success or (None, error_message) on failure."""
+    file_metadata = {'name': name, 'mimeType': mime_type}
+    if parent_id:
+        file_metadata['parents'] = [parent_id]
+
+    create_response = await _drive_request(
+        client,
+        'POST',
+        GOOGLE_DRIVE_FILES_URL,
+        headers=headers,
+        params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+        json=file_metadata,
+    )
+    if create_response.status_code != 200:
+        log.error(f'Google Drive file creation failed: {create_response.status_code} {create_response.text}')
+        return None, _drive_error_message(create_response, 'Failed to create this file.')
+
+    f = create_response.json()
+
+    if content:
+        upload_response = await _drive_request(
+            client,
+            'PATCH',
+            f'{GOOGLE_DRIVE_UPLOAD_URL}/{f["id"]}',
+            headers={**headers, 'Content-Type': mime_type},
+            params={'uploadType': 'media', 'supportsAllDrives': 'true'},
+            content=content.encode('utf-8'),
+        )
+        if upload_response.status_code != 200:
+            log.error(f'Google Drive content upload failed: {upload_response.status_code} {upload_response.text}')
+            return None, _drive_error_message(upload_response, 'File was created but content upload failed.')
+
+    return f, None
+
+
 def _drive_error_message(response, fallback: str) -> str:
     if _drive_is_rate_limited(response):
         return 'Google Drive is rate-limited right now - try again in a moment.'
@@ -4560,6 +4784,74 @@ def _drive_error_message(response, fallback: str) -> str:
     if response.status_code == 404:
         return 'This file no longer exists or was deleted.'
     return fallback
+
+
+# Shown to the model on every successful write - the UI already renders a card with this link
+DRIVE_CARD_NOTE = 'A card with an Open in Drive link is already shown to the user - do not include a link or the word "here" in your reply.'
+
+
+def _drive_cancelled(action: str, consequence: str) -> str:
+    """Build the JSON response for a write tool the user declined via the confirmation popup."""
+    return json.dumps(
+        {
+            'status': 'cancelled',
+            'message': f'The user declined to {action} - this is not an error, they simply chose not to proceed. {consequence} because they cancelled it, and do not retry.',
+        }
+    )
+
+
+async def _drive_fetch_metadata(client, headers: dict, file_id: str, fields: str, action_desc: str):
+    """GET a file's metadata fields. Returns (data, None) on success or (None, error_message)."""
+    from urllib.parse import quote
+
+    response = await _drive_get(
+        client,
+        f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+        headers=headers,
+        params={'fields': fields, 'supportsAllDrives': 'true'},
+    )
+    if response.status_code != 200:
+        log.error(f'Google Drive metadata fetch failed: {response.status_code} {response.text}')
+        return None, _drive_error_message(response, f'Failed to {action_desc}.')
+    return response.json(), None
+
+
+async def _drive_resolve_optional_folder(headers: dict, folder: str, default_id: str = None):
+    """Resolve an optional folder name to an id. Returns (folder_id, None), or (default_id, None)
+    without a network call if folder is empty, or (None, error_message) if it can't be resolved."""
+    if not folder:
+        return default_id, None
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            return await _drive_resolve_folder_id(client, headers, folder)
+    except Exception as e:
+        log.exception(f'drive folder lookup error: {e}')
+        return None, str(e)
+
+
+def _drive_files_page_result(data: dict, tool_name: str, extra_fields: callable = None) -> dict:
+    """Shape a Drive files.list response into the {results, next_page_token} shape our
+    search/listing tools return, tagging each file with any tool-specific extra fields."""
+    result = {
+        'results': [
+            {
+                'id': f['id'],
+                'name': f['name'],
+                'mime_type': f['mimeType'],
+                'modified_time': f.get('modifiedTime'),
+                'web_link': f.get('webViewLink'),
+                **(extra_fields(f) if extra_fields else {}),
+            }
+            for f in data.get('files', [])
+        ]
+    }
+    if data.get('nextPageToken'):
+        result['next_page_token'] = data['nextPageToken']
+        result['note'] = f'More results are available - call {tool_name} again with this page_token to see them.'
+    return result
 
 
 async def drive_search(
@@ -4576,18 +4868,15 @@ async def drive_search(
     """
     import httpx
 
-    from open_webui.routers.connectors import get_valid_access_token
-
-    user_id = (__user__ or {}).get('id')
-    access_token = await get_valid_access_token(user_id) if user_id else None
+    access_token = await _drive_get_access_token(__user__)
     if not access_token:
         return json.dumps({'error': "Google Drive isn't connected for this user."})
 
     try:
-        escaped_query = query.replace('\\', '\\\\').replace("'", "\\'")
+        escaped_query = _drive_escape_query_value(query)
 
         params = {
-            'q': f"fullText contains '{escaped_query}' or name contains '{escaped_query}'",
+            'q': f"(fullText contains '{escaped_query}' or name contains '{escaped_query}') and trashed = false",
             'includeItemsFromAllDrives': 'true',
             'supportsAllDrives': 'true',
             'fields': 'nextPageToken, files(id,name,mimeType,modifiedTime,webViewLink)',
@@ -4608,27 +4897,67 @@ async def drive_search(
             log.error(f'Google Drive search failed: {response.status_code} {response.text}')
             return json.dumps({'error': _drive_error_message(response, 'Failed to search Google Drive.')})
 
-        data = response.json()
-        files = data.get('files', [])
-        result = {
-            'results': [
-                {
-                    'id': f['id'],
-                    'name': f['name'],
-                    'mime_type': f['mimeType'],
-                    'modified_time': f.get('modifiedTime'),
-                    'web_link': f.get('webViewLink'),
-                }
-                for f in files
-            ]
-        }
-        if data.get('nextPageToken'):
-            result['next_page_token'] = data['nextPageToken']
-            result['note'] = 'More results are available - call drive_search again with this page_token to see them.'
-
-        return json.dumps(result, ensure_ascii=False)
+        return json.dumps(_drive_files_page_result(response.json(), 'drive_search'), ensure_ascii=False)
     except Exception as e:
         log.exception(f'drive_search error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_list_folder(
+    folder: str = '',
+    page_token: str = '',
+    __user__: dict = None,
+) -> str:
+    """
+    List the files and subfolders directly inside a Google Drive folder - use this to see what's
+    in a folder, instead of drive_search, when the user doesn't give you a filename or keyword to
+    search for (e.g. "what's in my Reports folder?", or checking what's already in a folder
+    before creating something there).
+
+    :param folder: Name of the folder to list. Pass "My Drive" (or leave empty) for the top level
+    :param page_token: Pass the next_page_token from a previous result to fetch the next page
+    :return: JSON with the folder's direct contents (id, name, mime_type, modified_time,
+        web_link, is_folder) and an optional next_page_token if more results are available -
+        subfolders aren't expanded, call this again with a subfolder's name to see inside it
+    """
+    import httpx
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+
+        async with httpx.AsyncClient() as client:
+            folder_id, folder_error = await _drive_resolve_folder_id(client, headers, folder or 'My Drive')
+            if folder_error:
+                return json.dumps({'error': folder_error})
+
+            params = {
+                'q': f"'{folder_id}' in parents and trashed = false",
+                'includeItemsFromAllDrives': 'true',
+                'supportsAllDrives': 'true',
+                'fields': 'nextPageToken, files(id,name,mimeType,modifiedTime,webViewLink)',
+                'pageSize': 50,
+            }
+            if page_token:
+                params['pageToken'] = page_token
+
+            response = await _drive_get(client, GOOGLE_DRIVE_FILES_URL, headers=headers, params=params)
+
+        if response.status_code != 200:
+            log.error(f'Google Drive folder listing failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to list this folder.')})
+
+        result = _drive_files_page_result(
+            response.json(),
+            'drive_list_folder',
+            lambda f: {'is_folder': f['mimeType'] == 'application/vnd.google-apps.folder'},
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        log.exception(f'drive_list_folder error: {e}')
         return json.dumps({'error': str(e)})
 
 
@@ -4639,20 +4968,30 @@ async def drive_read(
     """
     Read the contents of a Google Drive file by id (as returned by drive_search).
 
-    Google Docs/Sheets/Slides are exported to plain text/CSV. Other files (e.g. PDF, DOCX)
-    are downloaded directly if the owner allows it. Google Vids are not supported yet.
-    Large files are truncated with a note.
+    Google Docs are exported as markdown (headings, bold, lists are preserved). Sheets/Slides
+    export to CSV/plain text. Other files (e.g. PDF, DOCX) are downloaded directly if the owner
+    allows it. Google Vids are not supported yet. Large files are truncated with a note.
+
+    Note: if the source Google Doc has multiple tabs, their content is flattened into one
+    continuous document - separate named tabs can't be read or reproduced through this connector.
+
+    This connector can't edit an existing file in place. If the user asks to edit, update, or
+    fix something in a file, read it with this tool, preserve its markdown structure (headings,
+    bold, lists) while applying the requested changes, then call drive_save_edited_copy with the
+    same file_id and your edited content - it automatically matches the original's format, so
+    you don't need to figure out which format or which other tool to use. This is a single
+    read-then-save flow - don't call drive_copy_file first, that would ask the user to confirm
+    twice and leave behind an unedited duplicate.
 
     :param file_id: The Google Drive file id to read
-    :return: The file's text content, or an error message
+    :return: The file's text content, or an error message. Don't paste this whole result back
+        into your reply to the user - summarize it, answer their question about it, or use it to
+        prepare an edit, unless they explicitly asked to see the raw content
     """
     import httpx
     from urllib.parse import quote
 
-    from open_webui.routers.connectors import get_valid_access_token
-
-    user_id = (__user__ or {}).get('id')
-    access_token = await get_valid_access_token(user_id) if user_id else None
+    access_token = await _drive_get_access_token(__user__)
     if not access_token:
         return json.dumps({'error': "Google Drive isn't connected for this user."})
 
@@ -4660,22 +4999,12 @@ async def drive_read(
         headers = {'Authorization': f'Bearer {access_token}'}
 
         async with httpx.AsyncClient() as client:
-            metadata_response = await _drive_get(
-                client,
-                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
-                headers=headers,
-                params={'fields': 'mimeType,capabilities(canDownload)', 'supportsAllDrives': 'true'},
+            metadata, error = await _drive_fetch_metadata(
+                client, headers, file_id, 'mimeType,capabilities(canDownload)', 'read this file from Google Drive'
             )
+            if error:
+                return json.dumps({'error': error})
 
-            if metadata_response.status_code != 200:
-                log.error(
-                    f'Google Drive metadata fetch failed: {metadata_response.status_code} {metadata_response.text}'
-                )
-                return json.dumps(
-                    {'error': _drive_error_message(metadata_response, 'Failed to read this file from Google Drive.')}
-                )
-
-            metadata = metadata_response.json()
             mime_type = metadata['mimeType']
 
             if mime_type in GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES:
@@ -4705,6 +5034,13 @@ async def drive_read(
             )
 
         content_bytes = content_response.content
+
+        if mime_type in GOOGLE_DRIVE_HTML_EXPORT_MIME_TYPES:
+            from markdownify import markdownify
+
+            html = _normalize_google_docs_html(content_bytes.decode('utf-8', errors='replace'))
+            content_bytes = markdownify(html).encode('utf-8')
+
         truncated = len(content_bytes) > DRIVE_MAX_RESPONSE_BYTES
         content = content_bytes[:DRIVE_MAX_RESPONSE_BYTES].decode('utf-8', errors='replace')
         if truncated:
@@ -4716,49 +5052,578 @@ async def drive_read(
         return json.dumps({'error': str(e)})
 
 
-async def drive_copy_file(
+async def drive_save_edited_copy(
     file_id: str,
+    content: str,
     name: str = '',
+    folder: str = '',
     __user__: dict = None,
     __event_call__: callable = None,
+    __event_emitter__: callable = None,
 ) -> str:
     """
-    Copy a Google Drive file (as returned by drive_search), creating a new file with the same content.
+    Save an edited version of an existing Google Drive file as a new file. This is the ONLY
+    tool to use for "edit/update/fix this file" requests - not drive_create_file or
+    drive_create_document. The save format (Google Doc, Sheet, Slides, PDF, or plain text) is
+    detected automatically from the original file, so you never need to figure out or specify a
+    format yourself - just pass the same file_id you read, and your edited content.
 
-    :param file_id: The Google Drive file id to copy
-    :param name: Name for the copy (optional - Google Drive names it "Copy of <original name>" if omitted)
-    :return: JSON with the new file's id, name, mime_type, and web_link
+    Read the original with drive_read first, apply the requested changes to its content while
+    preserving its markdown structure (headings, bold, lists), then call this tool.
+
+    :param file_id: The id of the file being edited (from drive_search or drive_read) - the
+        SAME id you passed to drive_read, not a new or copied file
+    :param content: Your edited content, in the same shape drive_read gave you: markdown for a
+        Google Doc/PDF original, CSV for a Sheet, "---"-separated slides for a Slides deck
+        (first line of each slide is the title, remaining lines are bullet points), or plain
+        text if the original was already plain text
+    :param name: Only pass this if the user asked for a specific name for the saved copy. Leave
+        it empty otherwise (don't just repeat the original file's name) - it will automatically
+        default to "<original name> - edited", or add another " - edited" if that's taken
+    :param folder: Only pass this if the user asked to save the edit into a different folder.
+        Leave it empty otherwise - it defaults to the same folder the original file is in.
+        Pass "My Drive" for the top level (Drive's root)
+    :return: JSON with the created file's id and name. There is no link in this result on purpose
+        - the UI already shows an "Open in Drive" button for this file, so don't invent or repeat
+        a link (or the word "here") in your reply to the user
     """
     import httpx
-    from urllib.parse import quote
+    import re
 
-    from open_webui.routers.connectors import get_valid_access_token
-
-    user_id = (__user__ or {}).get('id')
-    access_token = await get_valid_access_token(user_id) if user_id else None
+    access_token = await _drive_get_access_token(__user__)
     if not access_token:
         return json.dumps({'error': "Google Drive isn't connected for this user."})
 
     if not __event_call__:
         return json.dumps({'error': 'Confirmation channel not available.'})
 
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            original, error = await _drive_fetch_metadata(
+                client, headers, file_id, 'name,mimeType,parents', 'save this edit'
+            )
+    except Exception as e:
+        log.exception(f'drive_save_edited_copy metadata error: {e}')
+        return json.dumps({'error': str(e)})
+    if error:
+        return json.dumps({'error': error})
+
+    original_name = original.get('name', 'this file')
+    # None means the original wasn't a rich Google-native/PDF type - save as plain text instead
+    format = DRIVE_NATIVE_MIME_TYPE_FORMATS.get(original.get('mimeType', ''))
+
+    # Default to the original's own folder (not Drive root) unless a different one was requested
+    original_folder_id = (original.get('parents') or [None])[0]
+    folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder, default_id=original_folder_id)
+    if folder_error:
+        return json.dumps({'error': folder_error})
+
+    # Treat a model-echoed "<original> - edited" guess (any case) as no name given, not a rename
+    stripped_name = name.strip()
+    while True:
+        match = re.match(r'^(.*?)\s*-\s*edited$', stripped_name, re.IGNORECASE)
+        if not match:
+            break
+        stripped_name = match.group(1).strip()
+    if stripped_name.casefold() == original_name.strip().casefold():
+        name = ''
+
+    duplicate_exists = False
+    try:
+        async with httpx.AsyncClient() as client:
+            if name:
+                save_name = name
+                duplicate_exists = await _drive_name_exists(client, headers, save_name, parent_id=folder_id)
+            else:
+                # Auto-name as "<original> - edited", adding another " - edited" if that's taken
+                save_name = f'{original_name} - edited'
+                for _ in range(20):
+                    if not await _drive_name_exists(client, headers, save_name, parent_id=folder_id):
+                        break
+                    save_name += ' - edited'
+    except Exception as e:
+        log.exception(f'drive_save_edited_copy duplicate check error: {e}')
+
+    display_name = f'{save_name}.{format}' if format else save_name
+    message = f'Save edit as "{display_name}"' + (f' in "{folder}"?' if folder else '?')
+    if duplicate_exists:
+        message += ' A file with this name already exists - this creates a separate copy.'
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Save edited file?',
+                'message': message,
+                'action': 'drive_save_edited_copy',
+                'allow_remember': True,
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('save this edit', 'Tell the user the edit was not saved')
+
+    if format:
+        try:
+            file_bytes = _drive_build_document_bytes(format, save_name, content)
+        except Exception as e:
+            log.exception(f'drive_save_edited_copy build error: {e}')
+            return json.dumps({'error': f'Failed to generate the {format} file: {e}'})
+
+    try:
+        async with httpx.AsyncClient() as client:
+            if format:
+                response = await _drive_upload_document_bytes(
+                    client, headers, save_name, format, file_bytes, parent_id=folder_id
+                )
+                if response.status_code != 200:
+                    log.error(f'Google Drive document upload failed: {response.status_code} {response.text}')
+                    return json.dumps({'error': _drive_error_message(response, 'Failed to save this edit.')})
+                f = response.json()
+            else:
+                f, error = await _drive_create_plain_file(client, headers, save_name, content, parent_id=folder_id)
+                if error:
+                    return json.dumps({'error': error})
+
+        await _drive_emit_created_card(__event_emitter__, f, format=format)
+        return json.dumps(
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_save_edited_copy error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_move_file(
+    file_id: str,
+    folder: str,
+    __user__: dict = None,
+    __event_call__: callable = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Move an existing Google Drive file into a different folder - the file itself is unchanged,
+    it just relocates. This actually relocates the file (its id and content stay the same); it
+    does NOT create a copy. Use drive_copy_file instead if the user wants a duplicate left in
+    both places.
+
+    If Google Drive returns a permission error (e.g. the user doesn't own or have edit access to
+    this file), tell the user the file couldn't be moved because of insufficient permissions, and
+    suggest drive_copy_file into the target folder instead.
+
+    :param file_id: The Google Drive file id to move (from drive_search or a previous write tool's result)
+    :param folder: Name of the Drive folder to move the file into. Pass "My Drive" for the top
+        level (Drive's root) - it's a valid target even though it isn't a real named folder
+    :return: JSON with the file's id, name, and its new folder. There is no link in this result
+        on purpose - the UI already shows an "Open in Drive" button for this file, so don't
+        invent or repeat a link (or the word "here") in your reply to the user
+    """
+    import httpx
+    from urllib.parse import quote
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            source, error = await _drive_fetch_metadata(client, headers, file_id, 'name,parents', 'move this file')
+            if error:
+                return json.dumps({'error': error})
+
+            source_name = source.get('name', 'this file')
+            current_parents = source.get('parents', [])
+
+            folder_id, folder_error = await _drive_resolve_folder_id(client, headers, folder)
+    except Exception as e:
+        log.exception(f'drive_move_file lookup error: {e}')
+        return json.dumps({'error': str(e)})
+
+    if folder_error:
+        return json.dumps({'error': folder_error})
+
+    if folder_id in current_parents:
+        return json.dumps({'error': f'"{source_name}" is already in "{folder}".'})
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Move Google Drive file?',
+                'message': f'Move "{source_name}" to "{folder}"?',
+                'action': 'drive_move_file',
+                'allow_remember': True,
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('move this file', 'Tell the user the file was not moved')
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await _drive_request(
+                client,
+                'PATCH',
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                headers=headers,
+                params={
+                    'addParents': folder_id,
+                    'removeParents': ','.join(current_parents),
+                    'supportsAllDrives': 'true',
+                    'fields': 'id,name,mimeType,webViewLink',
+                },
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive move failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to move this file.')})
+
+        f = response.json()
+        await _drive_emit_created_card(__event_emitter__, f)
+        return json.dumps(
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'folder': folder, 'note': DRIVE_CARD_NOTE},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_move_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_delete_file(
+    file_id: str,
+    __user__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """
+    Move an existing Google Drive file to Trash. This does NOT permanently delete it - the user
+    can still restore it from Google Drive's Trash (Drive keeps trashed files for 30 days before
+    permanently removing them).
+
+    Call this tool directly as soon as the user asks to delete a file - do NOT ask the user to
+    confirm in a chat message yourself first. This tool automatically shows its own confirmation
+    popup (with no "don't ask again" option - it always asks, every time, with no skip), so
+    asking in text first is redundant and just makes the user confirm twice.
+
+    If Google Drive returns a permission error (e.g. the user doesn't own or have edit access to
+    this file), tell the user the file couldn't be deleted because of insufficient permissions.
+
+    :param file_id: The Google Drive file id to delete (from drive_search or a previous write tool's result)
+    :return: JSON confirming the file was moved to Trash, or an error message
+    """
+    import httpx
+    from urllib.parse import quote
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            metadata, error = await _drive_fetch_metadata(client, headers, file_id, 'name', 'delete this file')
+    except Exception as e:
+        log.exception(f'drive_delete_file metadata error: {e}')
+        return json.dumps({'error': str(e)})
+    if error:
+        return json.dumps({'error': error})
+
+    source_name = metadata.get('name', 'this file')
+
+    # No 'allow_remember' on purpose - deletes always ask, every time, no skip option
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Move to Trash?',
+                'message': f'Move "{source_name}" to Trash? You can restore it from Google Drive\'s Trash within 30 days.',
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('delete this file', 'Tell the user the file was not deleted')
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await _drive_request(
+                client,
+                'PATCH',
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                headers=headers,
+                params={'supportsAllDrives': 'true', 'fields': 'id,name'},
+                json={'trashed': True},
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive delete failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to delete this file.')})
+
+        f = response.json()
+        return json.dumps(
+            {
+                'status': 'success',
+                'id': f['id'],
+                'name': f['name'],
+                'message': f'"{f["name"]}" was moved to Trash and can be restored within 30 days.',
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_delete_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_restore_file(
+    file_id: str,
+    __user__: dict = None,
+    __event_call__: callable = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Restore a Google Drive file out of Trash, undoing a previous drive_delete_file. The file
+    goes back to wherever it was before it was trashed.
+
+    :param file_id: The Google Drive file id to restore (from drive_search, which includes
+        trashed files, or from a previous drive_delete_file result)
+    :return: JSON confirming the file was restored, or an error message
+    """
+    import httpx
+    from urllib.parse import quote
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            metadata, error = await _drive_fetch_metadata(
+                client, headers, file_id, 'name,trashed', 'restore this file'
+            )
+    except Exception as e:
+        log.exception(f'drive_restore_file metadata error: {e}')
+        return json.dumps({'error': str(e)})
+    if error:
+        return json.dumps({'error': error})
+
+    source_name = metadata.get('name', 'this file')
+    if not metadata.get('trashed'):
+        return json.dumps({'error': f'"{source_name}" is not in Trash.'})
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Restore from Trash?',
+                'message': f'Restore "{source_name}" from Trash?',
+                'action': 'drive_restore_file',
+                'allow_remember': True,
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('restore this file', 'Tell the user the file was not restored')
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await _drive_request(
+                client,
+                'PATCH',
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                headers=headers,
+                params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+                json={'trashed': False},
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive restore failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to restore this file.')})
+
+        f = response.json()
+        await _drive_emit_created_card(__event_emitter__, f)
+        return json.dumps(
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_restore_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_rename_file(
+    file_id: str,
+    name: str,
+    __user__: dict = None,
+    __event_call__: callable = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Rename an existing Google Drive file - its content, location, and id are unchanged, only the
+    name changes. Use this instead of drive_copy_file or drive_save_edited_copy when the user
+    just wants a different name, with nothing else about the file changed.
+
+    :param file_id: The Google Drive file id to rename (from drive_search or a previous write tool's result)
+    :param name: The new name for the file
+    :return: JSON with the file's id and new name. There is no link in this result on purpose -
+        the UI already shows an "Open in Drive" button for this file, so don't invent or repeat
+        a link (or the word "here") in your reply to the user
+    """
+    import httpx
+    from urllib.parse import quote
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            metadata, error = await _drive_fetch_metadata(client, headers, file_id, 'name,parents', 'rename this file')
+            if error:
+                return json.dumps({'error': error})
+
+            source_name = metadata.get('name', 'this file')
+            if source_name == name:
+                return json.dumps({'error': f'"{source_name}" is already named "{name}".'})
+
+            parent_id = (metadata.get('parents') or [None])[0]
+            duplicate_exists = await _drive_name_exists(client, headers, name, parent_id=parent_id)
+    except Exception as e:
+        log.exception(f'drive_rename_file lookup error: {e}')
+        return json.dumps({'error': str(e)})
+
+    message = f'Rename "{source_name}" to "{name}"?'
+    if duplicate_exists:
+        message += ' A file with this name already exists in the same folder.'
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': 'Rename Google Drive file?',
+                'message': message,
+                'action': 'drive_rename_file',
+                'allow_remember': True,
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('rename this file', 'Tell the user the file was not renamed')
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await _drive_request(
+                client,
+                'PATCH',
+                f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
+                headers=headers,
+                params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
+                json={'name': name},
+            )
+
+        if response.status_code != 200:
+            log.error(f'Google Drive rename failed: {response.status_code} {response.text}')
+            return json.dumps({'error': _drive_error_message(response, 'Failed to rename this file.')})
+
+        f = response.json()
+        await _drive_emit_created_card(__event_emitter__, f)
+        return json.dumps(
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        log.exception(f'drive_rename_file error: {e}')
+        return json.dumps({'error': str(e)})
+
+
+async def drive_copy_file(
+    file_id: str,
+    name: str = '',
+    folder: str = '',
+    __user__: dict = None,
+    __event_call__: callable = None,
+    __event_emitter__: callable = None,
+) -> str:
+    """
+    Copy a Google Drive file (as returned by drive_search), creating a new file with the same content.
+
+    Only use this for an exact, unmodified duplicate. If the user wants to edit or change
+    something, don't call this first - go straight to drive_read then drive_save_edited_copy.
+    Chaining copy + save for an edit means two separate confirmation prompts and an unwanted,
+    unedited duplicate left behind.
+
+    :param file_id: The Google Drive file id to copy
+    :param name: Name for the copy (optional - Google Drive names it "Copy of <original name>" if omitted)
+    :param folder: Name of the Drive folder to put the copy in (optional - defaults to the same
+        folder as the original if omitted). Pass "My Drive" for the top level (Drive's root)
+    :return: JSON with the new file's id, name, and mime_type. There is no link in this result on
+        purpose - the UI already shows an "Open in Drive" button for this file, so don't invent
+        or repeat a link (or the word "here") in your reply to the user
+    """
+    import httpx
+    from urllib.parse import quote
+
+    access_token = await _drive_get_access_token(__user__)
+    if not access_token:
+        return json.dumps({'error': "Google Drive isn't connected for this user."})
+
+    if not __event_call__:
+        return json.dumps({'error': 'Confirmation channel not available.'})
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            metadata, error = await _drive_fetch_metadata(client, headers, file_id, 'name', 'copy this file')
+    except Exception as e:
+        log.exception(f'drive_copy_file metadata error: {e}')
+        return json.dumps({'error': str(e)})
+    if error:
+        return json.dumps({'error': error})
+
+    source_name = metadata.get('name', 'this file')
+
+    folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder)
+    if folder_error:
+        return json.dumps({'error': folder_error})
+
     confirmed = await __event_call__(
         {
             'type': 'confirmation',
             'data': {
                 'title': 'Copy Google Drive file?',
-                'message': f'Create a copy of this file named "{name}" in your Google Drive?'
-                if name
-                else 'Create a copy of this file in your Google Drive?',
+                'message': f'Copy "{source_name}"' + (f' into "{folder}"?' if folder else '?'),
+                'action': 'drive_copy',
+                'allow_remember': True,
             },
         }
     )
     if confirmed is not True:
-        return json.dumps({'status': 'cancelled', 'message': 'File copy was not confirmed by the user.'})
+        return _drive_cancelled('copy this file', 'Tell the user the copy was not made')
 
     try:
-        headers = {'Authorization': f'Bearer {access_token}'}
         body = {'name': name} if name else {}
+        if folder_id:
+            body['parents'] = [folder_id]
 
         async with httpx.AsyncClient() as client:
             response = await _drive_request(
@@ -4775,14 +5640,9 @@ async def drive_copy_file(
             return json.dumps({'error': _drive_error_message(response, 'Failed to copy this file.')})
 
         f = response.json()
+        await _drive_emit_created_card(__event_emitter__, f)
         return json.dumps(
-            {
-                'status': 'success',
-                'id': f['id'],
-                'name': f['name'],
-                'mime_type': f['mimeType'],
-                'web_link': f.get('webViewLink'),
-            },
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'mime_type': f['mimeType'], 'note': DRIVE_CARD_NOTE},
             ensure_ascii=False,
         )
     except Exception as e:
@@ -4794,90 +5654,76 @@ async def drive_create_file(
     name: str,
     content: str = '',
     mime_type: str = 'text/plain',
+    folder: str = '',
     __user__: dict = None,
     __event_call__: callable = None,
+    __event_emitter__: callable = None,
 ) -> str:
     """
-    Create a new file in the current user's Google Drive.
+    Create a brand new PLAIN TEXT file in the current user's Google Drive, with no relation to an
+    existing one. If the user asks for a Word/docx, PDF, Excel/xlsx, or PowerPoint/pptx file, use
+    drive_create_document instead - not this tool - so it's created in that actual format instead
+    of becoming a plain .txt file. If the user is asking to edit, update, or fix an existing file,
+    use drive_save_edited_copy instead of either of these.
 
     :param name: Name for the new file
     :param content: Text content for the file (optional - creates an empty file if omitted)
     :param mime_type: MIME type of the file content (default: text/plain)
-    :return: JSON with the created file's id, name, mime_type, and web_link
+    :param folder: Name of the Drive folder to create the file in (optional - defaults to the
+        top level of My Drive if omitted)
+    :return: JSON with the created file's id, name, and mime_type. There is no link in this result
+        on purpose - the UI already shows an "Open in Drive" button for this file, so don't invent
+        or repeat a link (or the word "here") in your reply to the user
     """
     import httpx
 
-    from open_webui.routers.connectors import get_valid_access_token
-
-    user_id = (__user__ or {}).get('id')
-    access_token = await get_valid_access_token(user_id) if user_id else None
+    access_token = await _drive_get_access_token(__user__)
     if not access_token:
         return json.dumps({'error': "Google Drive isn't connected for this user."})
 
     if not __event_call__:
         return json.dumps({'error': 'Confirmation channel not available.'})
 
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder)
+    if folder_error:
+        return json.dumps({'error': folder_error})
+
+    try:
+        async with httpx.AsyncClient() as client:
+            duplicate_exists = await _drive_name_exists(client, headers, name, parent_id=folder_id)
+    except Exception as e:
+        log.exception(f'drive_create_file duplicate check error: {e}')
+        duplicate_exists = False
+
+    message = f'Create "{name}"' + (f' in "{folder}"?' if folder else '?')
+    if duplicate_exists:
+        message += ' A file with this name already exists - this creates a separate copy.'
+
     confirmed = await __event_call__(
         {
             'type': 'confirmation',
             'data': {
                 'title': 'Create Google Drive file?',
-                'message': f'Create a new file named "{name}" in your Google Drive?',
+                'message': message,
+                'action': 'drive_create_file',
+                'allow_remember': True,
             },
         }
     )
     if confirmed is not True:
-        return json.dumps({'status': 'cancelled', 'message': 'File creation was not confirmed by the user.'})
+        return _drive_cancelled('create this file', 'Tell the user the file was not created')
 
     try:
-        headers = {'Authorization': f'Bearer {access_token}'}
-
         async with httpx.AsyncClient() as client:
-            create_response = await _drive_request(
-                client,
-                'POST',
-                GOOGLE_DRIVE_FILES_URL,
-                headers=headers,
-                params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
-                json={'name': name, 'mimeType': mime_type},
-            )
+            f, error = await _drive_create_plain_file(client, headers, name, content, mime_type, parent_id=folder_id)
+            if error:
+                return json.dumps({'error': error})
 
-            if create_response.status_code != 200:
-                log.error(f'Google Drive file creation failed: {create_response.status_code} {create_response.text}')
-                return json.dumps({'error': _drive_error_message(create_response, 'Failed to create this file.')})
-
-            f = create_response.json()
-
-            if content:
-                upload_response = await _drive_request(
-                    client,
-                    'PATCH',
-                    f'{GOOGLE_DRIVE_UPLOAD_URL}/{f["id"]}',
-                    headers={**headers, 'Content-Type': mime_type},
-                    params={'uploadType': 'media', 'supportsAllDrives': 'true'},
-                    content=content.encode('utf-8'),
-                )
-
-                if upload_response.status_code != 200:
-                    log.error(
-                        f'Google Drive content upload failed: {upload_response.status_code} {upload_response.text}'
-                    )
-                    return json.dumps(
-                        {
-                            'error': _drive_error_message(
-                                upload_response, 'File was created but content upload failed.'
-                            )
-                        }
-                    )
-
+        await _drive_emit_created_card(__event_emitter__, f)
         return json.dumps(
-            {
-                'status': 'success',
-                'id': f['id'],
-                'name': f['name'],
-                'mime_type': f['mimeType'],
-                'web_link': f.get('webViewLink'),
-            },
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'mime_type': f['mimeType'], 'note': DRIVE_CARD_NOTE},
             ensure_ascii=False,
         )
     except Exception as e:
@@ -4889,19 +5735,28 @@ async def drive_create_document(
     name: str,
     format: str,
     content: str,
+    folder: str = '',
     __user__: dict = None,
     __event_call__: callable = None,
     __event_emitter__: callable = None,
 ) -> str:
     """
-    Create a rich document (PDF, Word, Excel, or PowerPoint) in the current user's Google Drive.
-    Word/Excel/PowerPoint are created as native Google Docs/Sheets/Slides, so the user can open and
-    edit them directly in Drive, or download the same file as .docx/.xlsx/.pptx.
+    Create a brand new rich document (PDF, Word, Excel, or PowerPoint) in the current user's
+    Google Drive, with no relation to an existing one. Word/Excel/PowerPoint are created as
+    native Google Docs/Sheets/Slides, so the user can open and edit them directly in Drive, or
+    download the same file as .docx/.xlsx/.pptx.
+
+    If the user is asking to edit, update, or fix an existing file, use drive_save_edited_copy
+    instead - not this tool.
 
     :param name: Name for the new document (without file extension)
     :param format: One of "pdf", "docx", "xlsx", "pptx"
     :param content: For pdf/docx: markdown text. For xlsx: CSV text (rows on new lines, columns comma-separated). For pptx: slides separated by "---", first line of each is the title, remaining lines are bullet points
-    :return: JSON with the created file's id, name, and web_link
+    :param folder: Name of the Drive folder to create the document in (optional - defaults to
+        the top level of My Drive if omitted)
+    :return: JSON with the created file's id and name. There is no link in this result on purpose
+        - the UI already shows an "Open in Drive" button for this file, so don't invent or repeat
+        a link (or the word "here") in your reply to the user
     """
     format = (format or '').lower()
     if format not in DRIVE_DOCUMENT_SOURCE_MIME_TYPES:
@@ -4909,49 +5764,54 @@ async def drive_create_document(
 
     import httpx
 
-    from open_webui.routers.connectors import get_valid_access_token
-
-    user_id = (__user__ or {}).get('id')
-    access_token = await get_valid_access_token(user_id) if user_id else None
+    access_token = await _drive_get_access_token(__user__)
     if not access_token:
         return json.dumps({'error': "Google Drive isn't connected for this user."})
 
     if not __event_call__:
         return json.dumps({'error': 'Confirmation channel not available.'})
 
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder)
+    if folder_error:
+        return json.dumps({'error': folder_error})
+
+    try:
+        async with httpx.AsyncClient() as client:
+            duplicate_exists = await _drive_name_exists(client, headers, name, parent_id=folder_id)
+    except Exception as e:
+        log.exception(f'drive_create_document duplicate check error: {e}')
+        duplicate_exists = False
+
+    message = f'Create {format.upper()} file "{name}"' + (f' in "{folder}"?' if folder else '?')
+    if duplicate_exists:
+        message += ' A file with this name already exists - this creates a separate copy.'
+
     confirmed = await __event_call__(
         {
             'type': 'confirmation',
             'data': {
                 'title': f'Create {format.upper()} file?',
-                'message': f'Create a new {format.upper()} file named "{name}" in your Google Drive?',
+                'message': message,
+                'action': 'drive_create_document',
+                'allow_remember': True,
             },
         }
     )
     if confirmed is not True:
-        return json.dumps({'status': 'cancelled', 'message': 'Document creation was not confirmed by the user.'})
+        return _drive_cancelled('create this document', 'Tell the user the document was not created')
 
     try:
-        if format == 'pdf':
-            file_bytes = _build_pdf_document_bytes(name, content)
-        elif format == 'docx':
-            file_bytes = _build_docx_document_bytes(content)
-        elif format == 'xlsx':
-            file_bytes = _build_xlsx_document_bytes(content)
-        else:
-            file_bytes = _build_pptx_document_bytes(content)
+        file_bytes = _drive_build_document_bytes(format, name, content)
     except Exception as e:
         log.exception(f'drive_create_document build error: {e}')
         return json.dumps({'error': f'Failed to generate the {format} file: {e}'})
 
-    source_mime_type = DRIVE_DOCUMENT_SOURCE_MIME_TYPES[format]
-    target_mime_type = DRIVE_DOCUMENT_NATIVE_MIME_TYPES.get(format, source_mime_type)
-
     try:
-        headers = {'Authorization': f'Bearer {access_token}'}
         async with httpx.AsyncClient() as client:
-            response = await _drive_upload_multipart(
-                client, headers, name, target_mime_type, file_bytes, source_mime_type
+            response = await _drive_upload_document_bytes(
+                client, headers, name, format, file_bytes, parent_id=folder_id
             )
 
         if response.status_code != 200:
@@ -4959,22 +5819,10 @@ async def drive_create_document(
             return json.dumps({'error': _drive_error_message(response, 'Failed to create this document.')})
 
         f = response.json()
-
-        if __event_emitter__:
-            await __event_emitter__(
-                {
-                    'type': 'chat:message:drive_document_created',
-                    'data': {
-                        'id': f['id'],
-                        'name': f['name'],
-                        'format': format,
-                        'web_link': f.get('webViewLink'),
-                    },
-                }
-            )
+        await _drive_emit_created_card(__event_emitter__, f, format=format)
 
         return json.dumps(
-            {'status': 'success', 'id': f['id'], 'name': f['name'], 'web_link': f.get('webViewLink')},
+            {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
             ensure_ascii=False,
         )
     except Exception as e:
