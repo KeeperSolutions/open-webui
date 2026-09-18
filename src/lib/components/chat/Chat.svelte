@@ -174,8 +174,33 @@
 	let eventConfirmationShowRemember = false;
 	let eventCallback = null;
 
-	// Actions the user opted to skip confirmation for, for the lifetime of this chat session
-	const skippedConfirmationActions = new Set<string>();
+	// Actions the user opted to skip confirmation for, across every chat - survives a page
+	// refresh and up to SKIPPED_CONFIRMATIONS_TTL_MS after the tab is closed, then expires.
+	const SKIPPED_CONFIRMATIONS_STORAGE_KEY = 'skippedConfirmationActions';
+	const SKIPPED_CONFIRMATIONS_TTL_MS = 10 * 60 * 1000;
+
+	const loadSkippedConfirmations = (): Set<string> => {
+		try {
+			const raw = localStorage.getItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY);
+			if (!raw) return new Set();
+			const { actions, savedAt } = JSON.parse(raw);
+			if (Date.now() - savedAt > SKIPPED_CONFIRMATIONS_TTL_MS) return new Set();
+			return new Set(actions);
+		} catch {
+			return new Set();
+		}
+	};
+
+	const saveSkippedConfirmations = (actions: Set<string>) => {
+		try {
+			const payload = { actions: [...actions], savedAt: Date.now() };
+			localStorage.setItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY, JSON.stringify(payload));
+		} catch {
+			// best-effort only (e.g. private browsing) - stays remembered for this load either way
+		}
+	};
+
+	const skippedConfirmationActions: Set<string> = loadSkippedConfirmations();
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -3832,6 +3857,7 @@
 		if (eventConfirmationShowRemember) {
 			if (e.detail?.remember && eventConfirmationAction) {
 				skippedConfirmationActions.add(eventConfirmationAction);
+				saveSkippedConfirmations(skippedConfirmationActions);
 			}
 			eventCallback(true);
 		} else if (eventConfirmationInput) {

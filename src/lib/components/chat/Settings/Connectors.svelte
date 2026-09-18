@@ -7,13 +7,10 @@
 	import { connectConnector, getGoogleDriveStatus, disconnectGoogleDrive } from '$lib/apis/connectors';
 
 	import Search from '../../icons/Search.svelte';
-	import GoogleDrive from '../../icons/GoogleDrive.svelte';
+	import { connectorIcons } from '../../icons/connectorIcons';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import ConnectorListItem from '$lib/components/common/ConnectorListItem.svelte';
 	import UserSettingSection from './UserSettingSection.svelte';
-
-	const icons: Record<string, any> = {
-		google_drive: GoogleDrive
-	};
 
 	interface ConnectorItem {
 		id: 'google_drive';
@@ -137,19 +134,13 @@
 				<div class="flex flex-col gap-4 max-h-72 overflow-y-auto scrollbar-hover pr-1">
 					{#each filteredConnectors as item (item.id)}
 						<div class="flex items-center justify-between gap-2.5 py-1">
-							<div class="flex items-center gap-2.5 min-w-0">
-								<svelte:component this={icons[item.id]} />
-								<div class="min-w-0">
-									<div class="text-sm text-gray-900 dark:text-white">{item.name}</div>
-									<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600 truncate">
-										{#if item.connected}
-											{$i18n.t('Connected as {{email}}', { email: item.externalAccount })}
-										{:else}
-											{item.description}
-										{/if}
-									</div>
-								</div>
-							</div>
+							<ConnectorListItem
+								icon={connectorIcons[item.id]}
+								name={item.name}
+								subtext={item.connected
+									? $i18n.t('Connected as {{email}}', { email: item.externalAccount })
+									: item.description}
+							/>
 
 							{#if item.connected}
 								<button

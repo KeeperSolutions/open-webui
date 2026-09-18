@@ -47,11 +47,10 @@
 					>
 						{#if doc.format === 'pdf'}
 							<span class="text-[8px] font-bold text-white tracking-tight">PDF</span>
-						{:else if doc.format === 'pptx'}
-							<!-- Slides icon: a blank slide, matching the plain colored-block look -->
 						{:else if doc.format === 'xlsx'}
 							<DriveXlsxGlyph />
 						{:else}
+							<!-- Also covers pptx: a blank slide, matching the plain colored-block look -->
 							<DriveDocGlyph />
 						{/if}
 					</div>

@@ -145,7 +145,7 @@
 				</div>
 
 				<slot>
-					<div class=" text-sm text-gray-500 flex-1">
+					<div class="markdown-prose-sm text-gray-500 flex-1">
 						{#if message !== ''}
 							{@const html = DOMPurify.sanitize(marked.parse(message))}
 							{@html html}

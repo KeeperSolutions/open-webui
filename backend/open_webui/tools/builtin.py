@@ -4760,32 +4760,32 @@ async def _drive_create_plain_file(
     if parent_id:
         file_metadata['parents'] = [parent_id]
 
-    create_response = await _drive_request(
+    f, error = await _drive_call_raw(
         client,
         'POST',
         GOOGLE_DRIVE_FILES_URL,
-        headers=headers,
+        headers,
+        'Google Drive file creation failed',
+        'Failed to create this file.',
         params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
         json=file_metadata,
     )
-    if create_response.status_code != 200:
-        log.error(f'Google Drive file creation failed: {create_response.status_code} {create_response.text}')
-        return None, _drive_error_message(create_response, 'Failed to create this file.')
-
-    f = create_response.json()
+    if error:
+        return None, error
 
     if content:
-        upload_response = await _drive_request(
+        _, error = await _drive_call_raw(
             client,
             'PATCH',
             f'{GOOGLE_DRIVE_UPLOAD_URL}/{f["id"]}',
-            headers={**headers, 'Content-Type': mime_type},
+            {**headers, 'Content-Type': mime_type},
+            'Google Drive content upload failed',
+            'File was created but content upload failed.',
             params={'uploadType': 'media', 'supportsAllDrives': 'true'},
             content=content.encode('utf-8'),
         )
-        if upload_response.status_code != 200:
-            log.error(f'Google Drive content upload failed: {upload_response.status_code} {upload_response.text}')
-            return None, _drive_error_message(upload_response, 'File was created but content upload failed.')
+        if error:
+            return None, error
 
     return f, None
 
@@ -4802,14 +4802,24 @@ def _drive_error_message(response, fallback: str) -> str:
     return fallback
 
 
-async def _drive_call(client, method: str, url: str, headers: dict, log_label: str, fallback: str, **kwargs):
+async def _drive_call_raw(client, method: str, url: str, headers: dict, log_label: str, fallback: str, **kwargs):
     """Make a Drive API request and check its status. Returns (data, None) on a 200 response, or
-    (None, error_json) with the failure already logged."""
+    (None, error_message) with the failure already logged - error_message is a plain string, for
+    batch call sites that collect it into a `failed` list rather than returning it directly."""
     response = await _drive_request(client, method, url, headers, **kwargs)
     if response.status_code != 200:
         log.error(f'{log_label}: {response.status_code} {response.text}')
-        return None, json.dumps({'error': _drive_error_message(response, fallback)})
+        return None, _drive_error_message(response, fallback)
     return response.json(), None
+
+
+async def _drive_call(client, method: str, url: str, headers: dict, log_label: str, fallback: str, **kwargs):
+    """Like _drive_call_raw, but wraps the error as a JSON string ready to return directly from a
+    single-file tool (e.g. `if error: return error`)."""
+    data, error = await _drive_call_raw(client, method, url, headers, log_label, fallback, **kwargs)
+    if error:
+        return None, json.dumps({'error': error})
+    return data, None
 
 
 # Shown to the model on every successful write - the UI already renders a card with this link
@@ -5092,6 +5102,10 @@ async def drive_save_edited_copy(
     Read the original with drive_read first, apply the requested changes to its content while
     preserving its markdown structure (headings, bold, lists), then call this tool.
 
+    Before calling it, send one short line telling the user what you're about to do (e.g. "Saving
+    your edit now.") - the popup this tool shows already handles asking permission, this is just
+    so the user sees something instead of a blank reply while it loads.
+
     :param file_id: The id of the file being edited (from drive_search or drive_read) - the
         SAME id you passed to drive_read, not a new or copied file
     :param content: Your edited content, in the same shape drive_read gave you: markdown for a
@@ -5100,7 +5114,7 @@ async def drive_save_edited_copy(
         text if the original was already plain text
     :param name: Only pass this if the user asked for a specific name for the saved copy. Leave
         it empty otherwise (don't just repeat the original file's name) - it will automatically
-        default to "<original name> - edited", or add another " - edited" if that's taken
+        default to "Edit of <original name>"
     :param folder: Only pass this if the user asked to save the edit into a different folder.
         Leave it empty otherwise - it defaults to the same folder the original file is in.
         Pass "My Drive" for the top level (Drive's root)
@@ -5137,36 +5151,20 @@ async def drive_save_edited_copy(
     if folder_error:
         return json.dumps({'error': folder_error})
 
-    # Treat a model-echoed "<original> - edited" guess (any case) as no name given, not a rename
+    # Treat a model-echoed "Edit of <original>" guess (any case) as no name given, not a rename
     stripped_name = name.strip()
-    while True:
-        match = re.match(r'^(.*?)\s*-\s*edited$', stripped_name, re.IGNORECASE)
-        if not match:
-            break
+    match = re.match(r'^edit of\s+(.*)$', stripped_name, re.IGNORECASE)
+    if match:
         stripped_name = match.group(1).strip()
     if stripped_name.casefold() == original_name.strip().casefold():
         name = ''
 
-    duplicate_exists = False
-    try:
-        async with httpx.AsyncClient() as client:
-            if name:
-                save_name = name
-                duplicate_exists = await _drive_name_exists(client, headers, save_name, parent_id=folder_id)
-            else:
-                # Auto-name as "<original> - edited", adding another " - edited" if that's taken
-                save_name = f'{original_name} - edited'
-                for _ in range(20):
-                    if not await _drive_name_exists(client, headers, save_name, parent_id=folder_id):
-                        break
-                    save_name += ' - edited'
-    except Exception as e:
-        log.exception(f'drive_save_edited_copy duplicate check error: {e}')
+    # Drive allows duplicate names, so this never needs to check for or dodge one - same as
+    # drive_copy_files always naming things "Copy of X".
+    save_name = name or f'Edit of {original_name}'
 
     display_name = f'{save_name}.{format}' if format else save_name
     message = f'Save edit as "{display_name}"' + (f' in "{folder}"?' if folder else '?')
-    if duplicate_exists:
-        message += ' A file with this name already exists - this creates a separate copy.'
 
     confirmed = await __event_call__(
         {
@@ -5234,6 +5232,10 @@ async def drive_move_files(
     access to it), that file is reported as failed in the result while the rest still proceed;
     suggest drive_copy_files into the target folder instead for that one.
 
+    Before calling it, send one short line telling the user what you're about to do (e.g. "Moving
+    those files now.") - the popup this tool shows already handles asking permission, this is
+    just so the user sees something instead of a blank reply while it loads.
+
     :param file_ids: One or more Google Drive file ids to move (from drive_search or a previous
         write tool's result)
     :param folder: Name of the Drive folder to move the files into. Pass "My Drive" for the top
@@ -5250,10 +5252,10 @@ async def drive_move_files(
 
     try:
         async with httpx.AsyncClient() as client:
-            metadata_by_id, failed = await _drive_fetch_metadata_batch(
-                client, headers, file_ids, 'name,parents', 'move this file'
+            (metadata_by_id, failed), (folder_id, folder_error) = await asyncio.gather(
+                _drive_fetch_metadata_batch(client, headers, file_ids, 'name,parents', 'move this file'),
+                _drive_resolve_folder_id(client, headers, folder),
             )
-            folder_id, folder_error = await _drive_resolve_folder_id(client, headers, folder)
     except Exception as e:
         log.exception(f'drive_move_files lookup error: {e}')
         return json.dumps({'error': str(e)})
@@ -5279,7 +5281,7 @@ async def drive_move_files(
             'type': 'confirmation',
             'data': {
                 'title': title,
-                'message': f'Move {_drive_batch_label(names)} to "{folder}"?',
+                'message': _drive_batch_message(f'Move {{}} to "{folder}"?', names),
                 'action': 'drive_move_files',
                 'allow_remember': True,
             },
@@ -5289,11 +5291,13 @@ async def drive_move_files(
         return _drive_cancelled('move these files', 'Tell the user the files were not moved')
 
     async def move_one(client, file_id):
-        response = await _drive_request(
+        return await _drive_call_raw(
             client,
             'PATCH',
             f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
             headers,
+            'Google Drive move failed',
+            'Failed to move this file.',
             params={
                 'addParents': folder_id,
                 'removeParents': ','.join(parents_by_id[file_id]),
@@ -5301,10 +5305,6 @@ async def drive_move_files(
                 'fields': 'id,name,mimeType,webViewLink',
             },
         )
-        if response.status_code != 200:
-            log.error(f'Google Drive move failed: {response.status_code} {response.text}')
-            return None, _drive_error_message(response, 'Failed to move this file.')
-        return response.json(), None
 
     try:
         async with httpx.AsyncClient() as client:
@@ -5330,19 +5330,17 @@ async def drive_move_files(
 
 async def _drive_trash_file(client, headers: dict, file_id: str, trashed: bool, fields: str = 'id,name'):
     """PATCH a single file's trashed state. Returns (data, None) or (None, error_message)."""
-    response = await _drive_request(
+    action = 'delete' if trashed else 'restore'
+    return await _drive_call_raw(
         client,
         'PATCH',
         f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}',
         headers,
+        f'Google Drive {action} failed',
+        f'Failed to {action} this file.',
         params={'supportsAllDrives': 'true', 'fields': fields},
         json={'trashed': trashed},
     )
-    if response.status_code != 200:
-        action = 'delete' if trashed else 'restore'
-        log.error(f'Google Drive {action} failed: {response.status_code} {response.text}')
-        return None, _drive_error_message(response, f'Failed to {action} this file.')
-    return response.json(), None
 
 
 async def _drive_fetch_metadata_batch(client, headers: dict, file_ids: list[str], fields: str, action_desc: str):
@@ -5361,13 +5359,21 @@ async def _drive_fetch_metadata_batch(client, headers: dict, file_ids: list[str]
     return metadata_by_id, failed
 
 
-def _drive_batch_label(names: dict) -> str:
-    """'"X"' for one file, or '3 files: "X", "Y", "Z"' for many - drop into a confirmation message."""
+def _drive_batch_message(template: str, names: dict, trailing: str = '') -> str:
+    """Fill `template`'s single `{}` with either the one quoted name, or the count ("3 files")
+    followed by an indented, bulleted line for every name below it - so a multi-item confirmation
+    renders as a readable list in the dialog instead of one long comma-separated line. Uses <br>
+    line breaks rather than a real markdown list, to sidestep list/paragraph margin inconsistency
+    in the dialog's rendering. `trailing` (e.g. a restore-window note) stays inline for one file,
+    or becomes its own line after the list for many."""
     if len(names) == 1:
         (only_name,) = names.values()
-        return f'"{only_name}"'
-    listed = ', '.join(f'"{name}"' for name in names.values())
-    return f'{len(names)} files: {listed}'
+        message = template.format(f'"{only_name}"')
+        return f'{message} {trailing}' if trailing else message
+
+    listed = '<br>'.join(f'&nbsp;&nbsp;• "{name}"' for name in names.values())
+    message = f'{template.format(f"{len(names)} files")}<br>{listed}'
+    return f'{message}<br>{trailing}' if trailing else message
 
 
 def _drive_batch_status(succeeded: list, failed: list) -> str:
@@ -5400,13 +5406,22 @@ async def drive_delete_files(
     - the user can still restore them from Google Drive's Trash (Drive keeps trashed files for 30
     days before permanently removing them).
 
+    This also deletes folders - a folder is just another file id as far as this tool is concerned.
+    When the user wants everything cleared (e.g. "delete everything we made" or "clean this up"),
+    gather every file id AND every folder id into the SAME call - don't split it into a folders
+    pass and a files pass, and don't pause to check in with the user in between; one call, one
+    confirmation, done.
+
     Pass every file_id the user wants deleted in ONE call, even for a single file - do not call
     this tool once per file. A single confirmation covers the whole batch.
 
     Call this tool directly as soon as the user asks to delete a file - do NOT ask the user to
     confirm in a chat message yourself first. This tool automatically shows its own confirmation
     popup (with no "don't ask again" option - it always asks, every time, with no skip), so
-    asking in text first is redundant and just makes the user confirm twice.
+    asking in text first is redundant and just makes the user confirm twice. This is different
+    from a plain acknowledgment though - still send one short line telling the user what you're
+    about to do (e.g. "Deleting those files now.") before calling this tool, so they see
+    something instead of a blank reply while the popup loads.
 
     If Google Drive returns a permission error for a file (e.g. the user doesn't own or have edit
     access to it), that file is reported as failed in the result while the rest still proceed.
@@ -5436,9 +5451,8 @@ async def drive_delete_files(
 
     title = 'Move to Trash?' if len(names) == 1 else f'Move {len(names)} files to Trash?'
     plural = 'it' if len(names) == 1 else 'them'
-    message = (
-        f'Move {_drive_batch_label(names)} to Trash? '
-        f"You can restore {plural} from Google Drive's Trash within 30 days."
+    message = _drive_batch_message(
+        'Move {} to Trash?', names, f"You can restore {plural} from Google Drive's Trash within 30 days."
     )
 
     # No 'allow_remember' on purpose - deletes always ask, every time, no skip option
@@ -5478,6 +5492,10 @@ async def drive_restore_files(
     Pass every file_id the user wants restored in ONE call, even for a single file - a single
     confirmation covers the whole batch.
 
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Restoring those files now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
+
     :param file_ids: One or more Google Drive file ids to restore (from drive_search, which
         includes trashed files, or from a previous drive_delete_files result)
     :return: JSON with which files were restored and which failed, or an error message
@@ -5515,7 +5533,7 @@ async def drive_restore_files(
             'type': 'confirmation',
             'data': {
                 'title': title,
-                'message': f'Restore {_drive_batch_label(names)} from Trash?',
+                'message': _drive_batch_message('Restore {} from Trash?', names),
                 'action': 'drive_restore_files',
                 'allow_remember': True,
             },
@@ -5561,6 +5579,10 @@ async def drive_rename_file(
     Rename an existing Google Drive file - its content, location, and id are unchanged, only the
     name changes. Use this instead of drive_copy_files or drive_save_edited_copy when the user
     just wants a different name, with nothing else about the file changed.
+
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Renaming that file now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
 
     :param file_id: The Google Drive file id to rename (from drive_search or a previous write tool's result)
     :param name: The new name for the file
@@ -5649,6 +5671,10 @@ async def drive_copy_files(
     then drive_save_edited_copy. Chaining copy + save for an edit means two separate confirmation
     prompts and an unwanted, unedited duplicate left behind.
 
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Copying those files now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
+
     :param file_ids: One or more Google Drive file ids to copy
     :param folder: Name of the Drive folder to put the copies in (optional - defaults to each
         file's own folder if omitted). Pass "My Drive" for the top level (Drive's root)
@@ -5665,8 +5691,10 @@ async def drive_copy_files(
 
     try:
         async with httpx.AsyncClient() as client:
-            metadata_by_id, failed = await _drive_fetch_metadata_batch(client, headers, file_ids, 'name', 'copy this file')
-            folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder, client=client)
+            (metadata_by_id, failed), (folder_id, folder_error) = await asyncio.gather(
+                _drive_fetch_metadata_batch(client, headers, file_ids, 'name', 'copy this file'),
+                _drive_resolve_optional_folder(headers, folder, client=client),
+            )
     except Exception as e:
         log.exception(f'drive_copy_files metadata error: {e}')
         return json.dumps({'error': str(e)})
@@ -5683,7 +5711,7 @@ async def drive_copy_files(
             'type': 'confirmation',
             'data': {
                 'title': title,
-                'message': f'Copy {_drive_batch_label(names)}' + (f' into "{folder}"?' if folder else '?'),
+                'message': _drive_batch_message('Copy {}' + (f' into "{folder}"?' if folder else '?'), names),
                 'action': 'drive_copy',
                 'allow_remember': True,
             },
@@ -5692,21 +5720,25 @@ async def drive_copy_files(
     if confirmed is not True:
         return _drive_cancelled('copy these files', 'Tell the user the copies were not made')
 
-    body = {'parents': [folder_id]} if folder_id else {}
-
     async def copy_one(client, file_id):
-        response = await _drive_request(
+        # Drive API v3 doesn't auto-prefix "Copy of" like the web UI does - a copy request with
+        # no name keeps the exact source name, so it has to be set explicitly here. Drive allows
+        # duplicate names, so no need to check for or dodge one - copying the same file twice
+        # just makes two files both named "Copy of X", same as Drive's own web UI would.
+        body = {'name': f'Copy of {names[file_id]}'}
+        if folder_id:
+            body['parents'] = [folder_id]
+
+        return await _drive_call_raw(
             client,
             'POST',
             f'{GOOGLE_DRIVE_FILES_URL}/{quote(file_id)}/copy',
             headers,
+            'Google Drive copy failed',
+            'Failed to copy this file.',
             params={'supportsAllDrives': 'true', 'fields': 'id,name,mimeType,webViewLink'},
             json=body,
         )
-        if response.status_code != 200:
-            log.error(f'Google Drive copy failed: {response.status_code} {response.text}')
-            return None, _drive_error_message(response, 'Failed to copy this file.')
-        return response.json(), None
 
     try:
         async with httpx.AsyncClient() as client:
@@ -5740,10 +5772,16 @@ async def drive_create_files(
     relation to existing files. If the user asks for a Word/docx, PDF, Excel/xlsx, or
     PowerPoint/pptx file, use drive_create_documents instead - not this tool - so it's created in
     that actual format instead of becoming a plain .txt file. If the user is asking to edit,
-    update, or fix an existing file, use drive_save_edited_copy instead of either of these.
+    update, or fix an existing file, use drive_save_edited_copy instead of either of these. If the
+    user wants a FOLDER (not a file with content), use drive_create_folders instead - not this
+    tool - a folder is not a plain text file.
 
     Pass every file the user wants created in ONE call, even for a single file - a single
     confirmation covers the whole batch. All files are created in the same folder.
+
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Creating that file now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
 
     :param files: One or more files to create, each shaped {"name": "...", "content": "..."
         (optional, empty file if omitted), "mime_type": "..." (optional, default text/plain)}
@@ -5765,19 +5803,9 @@ async def drive_create_files(
         if folder_error:
             return json.dumps({'error': folder_error})
 
-        try:
-            duplicate_flags = await asyncio.gather(
-                *(_drive_name_exists(client, headers, f['name'], parent_id=folder_id) for f in files)
-            )
-        except Exception as e:
-            log.exception(f'drive_create_files duplicate check error: {e}')
-            duplicate_flags = [False] * len(files)
-
     names = {i: f['name'] for i, f in enumerate(files)}
     title = 'Create Google Drive file?' if len(files) == 1 else f'Create {len(files)} files?'
-    message = f'Create {_drive_batch_label(names)}' + (f' in "{folder}"?' if folder else '?')
-    if any(duplicate_flags):
-        message += ' Some of these names already exist - this creates separate copies.'
+    message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), names)
 
     confirmed = await __event_call__(
         {
@@ -5832,13 +5860,18 @@ async def drive_create_documents(
     Create one or more brand new rich documents (PDF, Word, Excel, or PowerPoint) in the current
     user's Google Drive, with no relation to existing files. Word/Excel/PowerPoint are created as
     native Google Docs/Sheets/Slides, so the user can open and edit them directly in Drive, or
-    download the same file as .docx/.xlsx/.pptx.
+    download the same file as .docx/.xlsx/.pptx. If the user wants a FOLDER, use
+    drive_create_folders instead - not this tool.
 
     Pass every document the user wants created in ONE call, even for a single document - a single
     confirmation covers the whole batch. All documents are created in the same folder.
 
     If the user is asking to edit, update, or fix an existing file, use drive_save_edited_copy
     instead - not this tool.
+
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Creating that document now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
 
     :param files: One or more documents to create, each shaped {"name": "..." (without file
         extension), "format": "pdf"|"docx"|"xlsx"|"pptx", "content": "For pdf/docx: markdown
@@ -5865,19 +5898,9 @@ async def drive_create_documents(
         if folder_error:
             return json.dumps({'error': folder_error})
 
-        try:
-            duplicate_flags = await asyncio.gather(
-                *(_drive_name_exists(client, headers, f['name'], parent_id=folder_id) for f in files)
-            )
-        except Exception as e:
-            log.exception(f'drive_create_documents duplicate check error: {e}')
-            duplicate_flags = [False] * len(files)
-
     names = {i: f'{f["name"]}.{f["format"]}' for i, f in enumerate(files)}
-    title = 'Create Google Drive document?' if len(files) == 1 else f'Create {len(files)} documents?'
-    message = f'Create {_drive_batch_label(names)}' + (f' in "{folder}"?' if folder else '?')
-    if any(duplicate_flags):
-        message += ' Some of these names already exist - this creates separate copies.'
+    title = 'Create Google Drive file?' if len(files) == 1 else f'Create {len(files)} files?'
+    message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), names)
 
     confirmed = await __event_call__(
         {
@@ -5885,7 +5908,7 @@ async def drive_create_documents(
             'data': {
                 'title': title,
                 'message': message,
-                'action': 'drive_create_documents',
+                'action': 'drive_create_files',
                 'allow_remember': True,
             },
         }
@@ -5929,6 +5952,141 @@ async def drive_create_documents(
     if created:
         result['note'] = DRIVE_CARD_NOTE
     return json.dumps(result, ensure_ascii=False)
+
+
+def _drive_folder_creation_levels(folders: list[dict]):
+    """Group folders into ordered levels so each folder's in-batch parent (if any) is created in
+    an earlier level - folders with no dependency, or whose parent isn't in this batch, go first.
+    Raises ValueError on a circular parent reference."""
+    remaining = {f['name']: f for f in folders}
+    levels = []
+    while remaining:
+        level = [f for f in remaining.values() if not f.get('parent') or f['parent'] not in remaining]
+        if not level:
+            raise ValueError('Circular parent reference among the folders to create.')
+        levels.append(level)
+        for f in level:
+            del remaining[f['name']]
+    return levels
+
+
+async def drive_create_folders(
+    folders: list[dict],
+    folder: str = '',
+    __user__: dict = None,
+    __event_call__: callable = None,
+) -> str:
+    """
+    Create one or more new folders in the current user's Google Drive. Use this - not
+    drive_create_files or drive_create_documents - whenever the user asks for a folder; a folder
+    is not a file, plain text or otherwise.
+
+    Pass every folder the user wants created in ONE call, even for a single folder - a single
+    confirmation covers the whole batch. Folders can be created side by side (independent, made
+    concurrently), or nested inside each other in the same call by setting a folder's "parent" to
+    another folder's "name" in this same list - e.g. to create "2024" then "Q1" inside it: pass
+    [{"name": "2024"}, {"name": "Q1", "parent": "2024"}].
+
+    Before calling it, send one short line telling the user what you're about to do (e.g.
+    "Creating that folder now.") - the popup this tool shows already handles asking permission,
+    this is just so the user sees something instead of a blank reply while it loads.
+
+    :param folders: One or more folders to create, each shaped {"name": "...", "parent": "..."
+        (optional - the exact "name" of another folder in this same list to nest inside; leave
+        empty or omit to create directly under `folder`)}
+    :param folder: Name of the existing Drive folder these new folders should be created under
+        (optional - defaults to the top level of My Drive if omitted). Pass "My Drive" for the
+        top level explicitly
+    :return: JSON with which folders were created (id, name) and which failed, or an error message
+    """
+    if not folders:
+        return json.dumps({'error': 'No folders given to create.'})
+
+    names = [f.get('name') for f in folders]
+    if not all(names) or len(set(names)) != len(names):
+        return json.dumps({'error': 'Every folder needs its own, non-empty name.'})
+    for f in folders:
+        if f.get('parent') == f['name']:
+            return json.dumps({'error': f'"{f["name"]}" can\'t be its own parent.'})
+        if f.get('parent') and f['parent'] not in names:
+            return json.dumps({'error': f'"{f["parent"]}" is not one of the folders in this same request.'})
+
+    try:
+        levels = _drive_folder_creation_levels(folders)
+    except ValueError as e:
+        return json.dumps({'error': str(e)})
+
+    headers, error = await _drive_prepare_write(__user__, __event_call__)
+    if error:
+        return error
+
+    async with httpx.AsyncClient() as client:
+        folder_id, folder_error = await _drive_resolve_optional_folder(headers, folder, client=client)
+        if folder_error:
+            return json.dumps({'error': folder_error})
+
+    display_names = {
+        i: f['name'] + (f' (in "{f["parent"]}")' if f.get('parent') else '') for i, f in enumerate(folders)
+    }
+    title = 'Create Google Drive folder?' if len(folders) == 1 else f'Create {len(folders)} folders?'
+    message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), display_names)
+
+    confirmed = await __event_call__(
+        {
+            'type': 'confirmation',
+            'data': {
+                'title': title,
+                'message': message,
+                'action': 'drive_create_folders',
+                'allow_remember': True,
+            },
+        }
+    )
+    if confirmed is not True:
+        return _drive_cancelled('create these folders', 'Tell the user the folders were not created')
+
+    created_ids: dict[str, str] = {}
+    failed_names: set = set()
+    created, failed = [], []
+    try:
+        async with httpx.AsyncClient() as client:
+            for level in levels:
+                pending = [f for f in level if not f.get('parent') or f['parent'] not in failed_names]
+                for f in level:
+                    if f not in pending:
+                        failed.append({'name': f['name'], 'error': f'Skipped - parent "{f["parent"]}" failed to create.'})
+                        failed_names.add(f['name'])
+                if not pending:
+                    continue
+
+                results = await asyncio.gather(
+                    *(
+                        _drive_create_plain_file(
+                            client,
+                            headers,
+                            f['name'],
+                            '',
+                            'application/vnd.google-apps.folder',
+                            parent_id=created_ids.get(f.get('parent'), folder_id),
+                        )
+                        for f in pending
+                    )
+                )
+                for f, (data, create_error) in zip(pending, results):
+                    if create_error:
+                        failed.append({'name': f['name'], 'error': create_error})
+                        failed_names.add(f['name'])
+                    else:
+                        created_ids[f['name']] = data['id']
+                        created.append({'id': data['id'], 'name': data['name']})
+    except Exception as e:
+        log.exception(f'drive_create_folders error: {e}')
+        return json.dumps({'error': str(e)})
+
+    return json.dumps(
+        {'status': _drive_batch_status(created, failed), 'created': created, 'failed': failed},
+        ensure_ascii=False,
+    )
 
 
 async def suggest_connector(

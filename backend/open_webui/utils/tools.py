@@ -62,6 +62,7 @@ from open_webui.tools.builtin import (
     drive_copy_files,
     drive_create_documents,
     drive_create_files,
+    drive_create_folders,
     drive_delete_files,
     drive_list_folder,
     drive_move_files,
@@ -531,6 +532,24 @@ def get_attached_knowledge(model: dict, metadata: dict) -> list[dict]:
     return knowledge
 
 
+# Connectors - functional access once the user has connected the account (not gated by toolIds)
+CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read, drive_list_folder]}
+CONNECTOR_WRITE_FUNCTIONS = {
+    'google_drive': [
+        drive_copy_files,
+        drive_create_files,
+        drive_create_documents,
+        drive_create_folders,
+        drive_save_edited_copy,
+        drive_move_files,
+        drive_delete_files,
+        drive_restore_files,
+        drive_rename_file,
+    ]
+}
+CONNECTOR_WRITE_SCOPES = {'google_drive': GOOGLE_DRIVE_WRITE_SCOPE}
+
+
 async def get_builtin_tools(
     request: Request, extra_params: dict, features: dict = None, model: dict = None
 ) -> dict[str, dict]:
@@ -694,21 +713,6 @@ async def get_builtin_tools(
     ):
         builtin_functions.extend([search_web, fetch_url])
 
-    # Connectors - functional access once the user has connected the account (not gated by toolIds)
-    CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read, drive_list_folder]}
-    CONNECTOR_WRITE_FUNCTIONS = {
-        'google_drive': [
-            drive_copy_files,
-            drive_create_files,
-            drive_create_documents,
-            drive_save_edited_copy,
-            drive_move_files,
-            drive_delete_files,
-            drive_restore_files,
-            drive_rename_file,
-        ]
-    }
-    CONNECTOR_WRITE_SCOPES = {'google_drive': GOOGLE_DRIVE_WRITE_SCOPE}
     # Drive's OAuth app is unverified with Google, so keep it invisible to the model for
     # non-internal accounts too - not just the Settings tab and connect endpoints.
     if is_builtin_tool_enabled('connectors') and is_internal_email(user.get('email')):

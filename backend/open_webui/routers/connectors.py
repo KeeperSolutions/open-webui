@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import mimetypes
 import re
 import time
 from datetime import timedelta
@@ -296,8 +297,6 @@ async def download_google_drive_document(
 
     content_type = export_mime_type or response.headers.get('Content-Type', 'application/octet-stream')
     if not format:
-        import mimetypes
-
         format = (mimetypes.guess_extension(content_type.split(';')[0].strip()) or '.bin').lstrip('.')
 
     safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
