@@ -2,6 +2,8 @@
 	import { getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	import { downloadGoogleDriveDocument } from '$lib/apis/connectors';
+	import DriveXlsxGlyph from '$lib/components/icons/DriveXlsxGlyph.svelte';
+	import DriveDocGlyph from '$lib/components/icons/DriveDocGlyph.svelte';
 
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
@@ -48,18 +50,9 @@
 						{:else if doc.format === 'pptx'}
 							<!-- Slides icon: a blank slide, matching the plain colored-block look -->
 						{:else if doc.format === 'xlsx'}
-							<svg width="14" height="14" viewBox="0 0 14 14" fill="white">
-								<rect x="0" y="0" width="6" height="6" rx="1.2" />
-								<rect x="8" y="0" width="6" height="6" rx="1.2" />
-								<rect x="0" y="8" width="6" height="6" rx="1.2" />
-								<rect x="8" y="8" width="6" height="6" rx="1.2" />
-							</svg>
+							<DriveXlsxGlyph />
 						{:else}
-							<svg width="16" height="14" viewBox="0 0 16 14" fill="white">
-								<rect y="0.5" width="16" height="2.2" rx="1.1" />
-								<rect y="5.9" width="16" height="2.2" rx="1.1" />
-								<rect y="11.3" width="10" height="2.2" rx="1.1" />
-							</svg>
+							<DriveDocGlyph />
 						{/if}
 					</div>
 					<div class="min-w-0">

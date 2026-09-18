@@ -82,11 +82,11 @@ async def test_resolve_folder_id_ambiguous():
 
 
 # ---------------------------------------------------------------------------
-# drive_create_file
+# drive_create_files (single or batch)
 # ---------------------------------------------------------------------------
 
 
-class TestDriveCreateFile:
+class TestDriveCreateFiles:
     @pytest.mark.asyncio
     async def test_creates_in_named_folder_with_parents_set(self):
         class FakeClient(FakeClientBase):
@@ -110,8 +110,8 @@ class TestDriveCreateFile:
         client = FakeClient()
         with patch('httpx.AsyncClient', return_value=client):
             result = json.loads(
-                await drive.drive_create_file(
-                    name='Test File', content='hello', folder='Reports',
+                await drive.drive_create_files(
+                    files=[{'name': 'Test File', 'content': 'hello'}], folder='Reports',
                     __user__=USER, __event_call__=confirm, __event_emitter__=None,
                 )
             )
@@ -134,8 +134,8 @@ class TestDriveCreateFile:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_create_file(
-                    name='Test File', folder='Ghost Folder',
+                await drive.drive_create_files(
+                    files=[{'name': 'Test File'}], folder='Ghost Folder',
                     __user__=USER, __event_call__=confirm_and_flag, __event_emitter__=None,
                 )
             )
@@ -147,20 +147,50 @@ class TestDriveCreateFile:
     async def test_declined_confirmation_is_reported_as_cancelled_not_an_error(self):
         with patch('httpx.AsyncClient'):
             result = json.loads(
-                await drive.drive_create_file(
-                    name='Test File', __user__=USER, __event_call__=decline, __event_emitter__=None,
+                await drive.drive_create_files(
+                    files=[{'name': 'Test File'}], __user__=USER, __event_call__=decline, __event_emitter__=None,
                 )
             )
 
         assert result['status'] == 'cancelled'
 
+    @pytest.mark.asyncio
+    async def test_batch_create_asks_once_and_creates_every_file(self):
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                return FakeResponse(200, {'files': []})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                if 'json' not in kwargs:
+                    return FakeResponse(200, {})
+                body = kwargs['json']
+                return FakeResponse(200, {'id': body['name'], 'name': body['name'], 'mimeType': body['mimeType'], 'webViewLink': 'x'})
+
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_create_files(
+                    files=[{'name': 'One.txt'}, {'name': 'Two.txt'}],
+                    __user__=USER, __event_call__=confirm_and_capture, __event_emitter__=None,
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert {c['name'] for c in result['created']} == {'One.txt', 'Two.txt'}
+        assert seen_confirmation_data['title'] == 'Create 2 files?'
+
 
 # ---------------------------------------------------------------------------
-# drive_copy_file
+# drive_copy_files (single or batch)
 # ---------------------------------------------------------------------------
 
 
-class TestDriveCopyFile:
+class TestDriveCopyFiles:
     @pytest.mark.asyncio
     async def test_copy_into_a_different_folder_sets_parents(self):
         class FakeClient(FakeClientBase):
@@ -183,14 +213,44 @@ class TestDriveCopyFile:
         client = FakeClient()
         with patch('httpx.AsyncClient', return_value=client):
             result = json.loads(
-                await drive.drive_copy_file(
-                    file_id='src123', folder='Archive',
+                await drive.drive_copy_files(
+                    file_ids=['src123'], folder='Archive',
                     __user__=USER, __event_call__=confirm, __event_emitter__=None,
                 )
             )
 
         assert result['status'] == 'success'
         assert client.copy_calls[0]['json']['parents'] == ['folder-xyz']
+
+    @pytest.mark.asyncio
+    async def test_batch_copy_asks_once_and_copies_every_file(self):
+        names = {'file1': 'One.txt', 'file2': 'Two.txt'}
+
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                file_id = url.rsplit('/', 1)[-1]
+                return FakeResponse(200, {'name': names[file_id]})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                file_id = url.split('/')[-2]  # .../<file_id>/copy
+                return FakeResponse(200, {'id': f'copy-{file_id}', 'name': names[file_id], 'mimeType': 'text/plain'})
+
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_copy_files(
+                    file_ids=list(names), __user__=USER, __event_call__=confirm_and_capture, __event_emitter__=None,
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert {c['id'] for c in result['copied']} == {'copy-file1', 'copy-file2'}
+        assert seen_confirmation_data['title'] == 'Copy 2 files?'
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +324,11 @@ class TestDriveSaveEditedCopy:
 
 
 # ---------------------------------------------------------------------------
-# drive_move_file
+# drive_move_files (single or batch)
 # ---------------------------------------------------------------------------
 
 
-class TestDriveMoveFile:
+class TestDriveMoveFiles:
     @pytest.mark.asyncio
     async def test_move_sends_add_and_remove_parents(self):
         class FakeClient(FakeClientBase):
@@ -287,13 +347,14 @@ class TestDriveMoveFile:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_move_file(
-                    file_id='file1', folder='Archive',
+                await drive.drive_move_files(
+                    file_ids=['file1'], folder='Archive',
                     __user__=USER, __event_call__=confirm, __event_emitter__=None,
                 )
             )
 
         assert result['status'] == 'success'
+        assert result['moved'] == [{'id': 'file1', 'name': 'Report.docx', 'folder': 'Archive'}]
 
     @pytest.mark.asyncio
     async def test_moving_a_file_already_in_the_target_folder_errors_without_asking(self):
@@ -305,13 +366,14 @@ class TestDriveMoveFile:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_move_file(
-                    file_id='file1', folder='Archive',
+                await drive.drive_move_files(
+                    file_ids=['file1'], folder='Archive',
                     __user__=USER, __event_call__=confirm, __event_emitter__=None,
                 )
             )
 
-        assert 'already in' in result['error']
+        assert result['status'] == 'error'
+        assert 'already in' in result['failed'][0]['error']
 
     @pytest.mark.asyncio
     async def test_permission_error_from_google_surfaces_cleanly(self):
@@ -326,17 +388,51 @@ class TestDriveMoveFile:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_move_file(
-                    file_id='file2', folder='Archive',
+                await drive.drive_move_files(
+                    file_ids=['file2'], folder='Archive',
                     __user__=USER, __event_call__=confirm, __event_emitter__=None,
                 )
             )
 
-        assert 'error' in result
+        assert result['status'] == 'error'
+        assert result['failed'][0]['id'] == 'file2'
+
+    @pytest.mark.asyncio
+    async def test_batch_move_asks_once_and_moves_every_file(self):
+        names = {'file1': 'One.txt', 'file2': 'Two.txt'}
+
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                file_id = url.rsplit('/', 1)[-1]
+                if file_id in names:
+                    return FakeResponse(200, {'name': names[file_id], 'parents': ['old-folder']})
+                return FakeResponse(200, {'files': [{'id': 'new-folder', 'name': 'Archive'}]})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                file_id = url.rsplit('/', 1)[-1]
+                return FakeResponse(200, {'id': file_id, 'name': names[file_id], 'mimeType': 'text/plain', 'webViewLink': 'x'})
+
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_move_files(
+                    file_ids=list(names), folder='Archive',
+                    __user__=USER, __event_call__=confirm_and_capture, __event_emitter__=None,
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert {m['id'] for m in result['moved']} == {'file1', 'file2'}
+        assert seen_confirmation_data['title'] == 'Move 2 files?'
 
 
 # ---------------------------------------------------------------------------
-# drive_delete_file (trash) and drive_restore_file
+# drive_delete_files and drive_restore_files (single or batch)
 # ---------------------------------------------------------------------------
 
 
@@ -359,10 +455,13 @@ class TestDriveDeleteAndRestore:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_delete_file(file_id='file1', __user__=USER, __event_call__=confirm_and_capture)
+                await drive.drive_delete_files(
+                    file_ids=['file1'], __user__=USER, __event_call__=confirm_and_capture
+                )
             )
 
         assert result['status'] == 'success'
+        assert result['deleted'] == [{'id': 'file1', 'name': 'Old Draft.docx'}]
         assert 'allow_remember' not in seen_confirmation_data
 
     @pytest.mark.asyncio
@@ -373,10 +472,63 @@ class TestDriveDeleteAndRestore:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_delete_file(file_id='file1', __user__=USER, __event_call__=decline)
+                await drive.drive_delete_files(file_ids=['file1'], __user__=USER, __event_call__=decline)
             )
 
         assert result['status'] == 'cancelled'
+
+    @pytest.mark.asyncio
+    async def test_batch_delete_asks_once_and_deletes_every_file(self):
+        names = {'file1': 'Old Draft.docx', 'file2': 'Notes.txt', 'file3': 'Budget.xlsx'}
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                file_id = url.rsplit('/', 1)[-1]
+                return FakeResponse(200, {'name': names[file_id]})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                file_id = url.rsplit('/', 1)[-1]
+                assert kwargs['json'] == {'trashed': True}
+                return FakeResponse(200, {'id': file_id, 'name': names[file_id]})
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_delete_files(
+                    file_ids=list(names), __user__=USER, __event_call__=confirm_and_capture
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert {d['id'] for d in result['deleted']} == set(names)
+        assert result['failed'] == []
+        # One confirmation for the whole batch, not one per file
+        assert seen_confirmation_data['title'] == 'Move 3 files to Trash?'
+
+    @pytest.mark.asyncio
+    async def test_batch_delete_reports_per_file_failures_without_failing_the_rest(self):
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                file_id = url.rsplit('/', 1)[-1]
+                if file_id == 'file1':
+                    return FakeResponse(200, {'name': 'Old Draft.docx'})
+                return FakeResponse(403, {'error': {'message': 'The user does not have sufficient permissions'}})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                return FakeResponse(200, {'id': 'file1', 'name': 'Old Draft.docx'})
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_delete_files(file_ids=['file1', 'file2'], __user__=USER, __event_call__=confirm)
+            )
+
+        assert result['status'] == 'partial'
+        assert result['deleted'] == [{'id': 'file1', 'name': 'Old Draft.docx'}]
+        assert [f['id'] for f in result['failed']] == ['file2']
 
     @pytest.mark.asyncio
     async def test_restore_brings_a_trashed_file_back(self):
@@ -392,10 +544,11 @@ class TestDriveDeleteAndRestore:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_restore_file(file_id='file3', __user__=USER, __event_call__=confirm, __event_emitter__=None)
+                await drive.drive_restore_files(file_ids=['file3'], __user__=USER, __event_call__=confirm, __event_emitter__=None)
             )
 
         assert result['status'] == 'success'
+        assert result['restored'] == [{'id': 'file3', 'name': 'Trashed.docx'}]
 
     @pytest.mark.asyncio
     async def test_restoring_a_file_thats_not_trashed_errors_without_asking(self):
@@ -405,10 +558,42 @@ class TestDriveDeleteAndRestore:
 
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
-                await drive.drive_restore_file(file_id='file4', __user__=USER, __event_call__=confirm, __event_emitter__=None)
+                await drive.drive_restore_files(file_ids=['file4'], __user__=USER, __event_call__=confirm, __event_emitter__=None)
             )
 
-        assert 'not in Trash' in result['error']
+        assert result['status'] == 'error'
+        assert 'not in Trash' in result['failed'][0]['error']
+
+    @pytest.mark.asyncio
+    async def test_batch_restore_asks_once_and_restores_every_file(self):
+        names = {'file1': 'One.txt', 'file2': 'Two.txt'}
+
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                file_id = url.rsplit('/', 1)[-1]
+                return FakeResponse(200, {'name': names[file_id], 'trashed': True})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                file_id = url.rsplit('/', 1)[-1]
+                assert kwargs['json'] == {'trashed': False}
+                return FakeResponse(200, {'id': file_id, 'name': names[file_id], 'mimeType': 'text/plain', 'webViewLink': 'x'})
+
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_restore_files(
+                    file_ids=list(names), __user__=USER, __event_call__=confirm_and_capture, __event_emitter__=None
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert {r['id'] for r in result['restored']} == {'file1', 'file2'}
+        assert seen_confirmation_data['title'] == 'Restore 2 files from Trash?'
 
 
 # ---------------------------------------------------------------------------

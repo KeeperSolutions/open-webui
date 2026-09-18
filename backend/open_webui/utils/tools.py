@@ -46,7 +46,7 @@ from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.models.groups import Groups
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserModel
-from open_webui.routers.connectors import GOOGLE_DRIVE_WRITE_SCOPE
+from open_webui.routers.connectors import GOOGLE_DRIVE_WRITE_SCOPE, is_internal_email
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.connector_registry import CONNECTOR_REGISTRY
 from open_webui.tools.builtin import (
@@ -59,15 +59,15 @@ from open_webui.tools.builtin import (
     delete_automation,
     delete_calendar_event,
     delete_memory,
-    drive_copy_file,
-    drive_create_document,
-    drive_create_file,
-    drive_delete_file,
+    drive_copy_files,
+    drive_create_documents,
+    drive_create_files,
+    drive_delete_files,
     drive_list_folder,
-    drive_move_file,
+    drive_move_files,
     drive_read,
     drive_rename_file,
-    drive_restore_file,
+    drive_restore_files,
     drive_save_edited_copy,
     drive_search,
     edit_image,
@@ -698,18 +698,20 @@ async def get_builtin_tools(
     CONNECTOR_FUNCTIONS = {'google_drive': [drive_search, drive_read, drive_list_folder]}
     CONNECTOR_WRITE_FUNCTIONS = {
         'google_drive': [
-            drive_copy_file,
-            drive_create_file,
-            drive_create_document,
+            drive_copy_files,
+            drive_create_files,
+            drive_create_documents,
             drive_save_edited_copy,
-            drive_move_file,
-            drive_delete_file,
-            drive_restore_file,
+            drive_move_files,
+            drive_delete_files,
+            drive_restore_files,
             drive_rename_file,
         ]
     }
     CONNECTOR_WRITE_SCOPES = {'google_drive': GOOGLE_DRIVE_WRITE_SCOPE}
-    if is_builtin_tool_enabled('connectors'):
+    # Drive's OAuth app is unverified with Google, so keep it invisible to the model for
+    # non-internal accounts too - not just the Settings tab and connect endpoints.
+    if is_builtin_tool_enabled('connectors') and is_internal_email(user.get('email')):
         user_id = user.get('id')
         all_connected = True
         for connector in CONNECTOR_REGISTRY:

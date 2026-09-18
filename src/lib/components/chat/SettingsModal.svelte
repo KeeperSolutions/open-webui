@@ -101,6 +101,13 @@
 		keywords: string[];
 	}
 
+	// The Drive connector's OAuth app is unverified with Google, so the tab stays hidden for
+	// non-internal accounts until verification clears - keep in sync with INTERNAL_EMAIL_DOMAINS
+	// on the backend (backend/open_webui/routers/connectors.py).
+	const DRIVE_CONNECTOR_ALLOWED_DOMAINS = ['keepersolutions.com'];
+	const isDriveConnectorAllowed = (email?: string | null) =>
+		!!email && DRIVE_CONNECTOR_ALLOWED_DOMAINS.includes(email.split('@').pop()?.toLowerCase() ?? '');
+
 	const isAdminTab = (tabId: string) => tabId.startsWith('admin:');
 	const adminTabSegment = (tabId: string) => tabId.replace('admin:', '');
 	const adminTabPanelId = (tabId: string) => `tab-${tabId.replace(':', '-')}`;
@@ -810,6 +817,10 @@
 					$config?.features?.enable_memories &&
 					($user?.role === 'admin' || ($user?.permissions?.features?.memories ?? true))
 				);
+			}
+
+			if (tab.id === 'connectors') {
+				return isDriveConnectorAllowed($user?.email);
 			}
 
 			return true;

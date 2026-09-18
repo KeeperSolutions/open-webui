@@ -12,6 +12,7 @@ from open_webui.config import (
     GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET,
     GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI,
 )
+from open_webui.env import INTERNAL_EMAIL_DOMAINS
 from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.utils.auth import (
     create_token,
@@ -28,13 +29,31 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 GOOGLE_DRIVE_CONNECTOR = 'google_drive'
+
+
+def is_internal_email(email: str | None) -> bool:
+    """The Drive connector's OAuth app is unverified with Google, so access is limited to
+    internal accounts until verification clears - see INTERNAL_EMAIL_DOMAINS."""
+    domain = (email or '').rsplit('@', 1)[-1].lower()
+    return domain in INTERNAL_EMAIL_DOMAINS
+
+
+def get_internal_drive_user(user=Depends(get_verified_user)):
+    if not is_internal_email(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Google Drive connector is not available for this account yet',
+        )
+    return user
+
+
 GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
 GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 
-GOOGLE_DRIVE_READ_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
-# Full (restricted) scope, not drive.file - lets move/delete act on files this connector didn't create
+# Full (restricted) scope, not drive.file - lets read/move/delete act on files this connector
+# didn't create, and covers drive.readonly's access too, so that scope isn't requested separately
 GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive'
 
 # PDF has no native Google format, so it's downloaded via alt=media instead of exported
@@ -91,7 +110,7 @@ class ConnectorStatusResponse(BaseModel):
 
 
 @router.get('/google-drive/status', response_model=ConnectorStatusResponse)
-async def get_google_drive_status(user=Depends(get_verified_user)):
+async def get_google_drive_status(user=Depends(get_internal_drive_user)):
     connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
     if not connection:
         return ConnectorStatusResponse(connected=False)
@@ -104,7 +123,7 @@ async def get_google_drive_status(user=Depends(get_verified_user)):
 
 
 @router.get('/google-drive/connect')
-async def connect_google_drive(user=Depends(get_verified_user)):
+async def connect_google_drive(user=Depends(get_internal_drive_user)):
     if not GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value or not GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -117,9 +136,7 @@ async def connect_google_drive(user=Depends(get_verified_user)):
         'client_id': GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value,
         'redirect_uri': GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value,
         'response_type': 'code',
-        # Requesting both scopes lets Google's consent screen offer them as separate,
-        # individually grantable items - the callback stores whatever the user actually approved.
-        'scope': f'{GOOGLE_DRIVE_READ_SCOPE} {GOOGLE_DRIVE_WRITE_SCOPE} email',
+        'scope': f'{GOOGLE_DRIVE_WRITE_SCOPE} email',
         'access_type': 'offline',
         'prompt': 'consent',
         'include_granted_scopes': 'true',
@@ -135,7 +152,7 @@ async def google_drive_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    user=Depends(get_verified_user),
+    user=Depends(get_internal_drive_user),
 ):
     if error:
         # The user declined consent on Google's screen - not an app error, just close the popup
@@ -200,7 +217,7 @@ async def google_drive_callback(
 
 
 @router.post('/google-drive/disconnect', response_model=ConnectorStatusResponse)
-async def disconnect_google_drive(user=Depends(get_verified_user)):
+async def disconnect_google_drive(user=Depends(get_internal_drive_user)):
     connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
 
     revoked = None
@@ -228,7 +245,7 @@ async def download_google_drive_document(
     file_id: str,
     format: str | None = None,
     filename: str = 'document',
-    user=Depends(get_verified_user),
+    user=Depends(get_internal_drive_user),
 ):
     if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
