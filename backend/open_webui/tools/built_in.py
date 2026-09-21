@@ -4902,7 +4902,11 @@ def _drive_files_page_result(data: dict, tool_name: str, extra_fields: callable 
     }
     if data.get('nextPageToken'):
         result['next_page_token'] = data['nextPageToken']
-        result['note'] = f'More results are available - call {tool_name} again with this page_token to see them.'
+        result['note'] = (
+            f'{len(result["results"])} result(s) shown; more are available. '
+            f"If these don't already answer the user's request, call {tool_name} again "
+            'with this page_token - otherwise, answer with what you have.'
+        )
     return result
 
 

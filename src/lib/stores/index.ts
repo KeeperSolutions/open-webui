@@ -352,7 +352,6 @@ type Config = {
 		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
-		/** Absent on older backends, hence optional. */
 		enable_google_drive_connector?: boolean;
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;

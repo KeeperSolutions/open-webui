@@ -49,7 +49,7 @@ from open_webui.models.users import UserModel
 from open_webui.routers.connectors import GOOGLE_DRIVE_WRITE_SCOPE, is_internal_email
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.connector_registry import CONNECTOR_REGISTRY
-from open_webui.tools.builtin import (
+from open_webui.tools.built_in import (
     add_memory,
     calculate_timestamp,
     create_automation,

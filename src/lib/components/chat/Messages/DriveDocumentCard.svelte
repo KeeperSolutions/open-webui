@@ -8,7 +8,14 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	export let driveDocuments = [];
+	type DriveDocument = {
+		id: string;
+		name: string;
+		format?: string;
+		web_link?: string;
+	};
+
+	export let driveDocuments: DriveDocument[] = [];
 
 	const formatLabels: Record<string, string> = {
 		pdf: 'PDF',
@@ -25,7 +32,7 @@
 		pptx: '#F5DFA0'
 	};
 
-	const download = async (doc: { id: string; name: string; format?: string }) => {
+	const download = async (doc: DriveDocument) => {
 		const token = localStorage.token;
 		const result = await downloadGoogleDriveDocument(token, doc.id, doc.format, doc.name);
 		if (result) {
@@ -43,7 +50,7 @@
 				<div class="flex items-center gap-2.5 min-w-0">
 					<div
 						class="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-						style="background-color: {formatColors[doc.format] ?? '#5f6368'}"
+						style="background-color: {formatColors[doc.format ?? ''] ?? '#5f6368'}"
 					>
 						{#if doc.format === 'pdf'}
 							<span class="text-[8px] font-bold text-white tracking-tight">PDF</span>
@@ -57,7 +64,7 @@
 					<div class="min-w-0">
 						<div class="text-sm text-white truncate">{doc.name}</div>
 						<div class="text-[0.6875rem] text-gray-400">
-							{formatLabels[doc.format] ?? $i18n.t('File')}
+							{formatLabels[doc.format ?? ''] ?? $i18n.t('File')}
 						</div>
 					</div>
 				</div>

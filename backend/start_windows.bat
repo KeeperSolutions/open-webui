@@ -47,26 +47,9 @@ IF "%WEBUI_SECRET_KEY% %WEBUI_JWT_SECRET_KEY%" == " " (
     SET /p WEBUI_SECRET_KEY=<%KEY_FILE%
 )
 
-SET "CONNECTOR_KEY_FILE=.connector_token_encryption_key"
-IF NOT "%CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE%" == "" (
-    SET "CONNECTOR_KEY_FILE=%CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE%"
-)
-IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%" == "" (
-    SET "CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH=24"
-)
-
-:: Check if CONNECTOR_TOKEN_ENCRYPTION_KEY is not set
+:: Must come from the environment - never auto-generated into a file
 IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY%" == "" (
-    echo Loading CONNECTOR_TOKEN_ENCRYPTION_KEY from file, not provided as an environment variable.
-
-    IF NOT EXIST "%CONNECTOR_KEY_FILE%" (
-        echo Generating CONNECTOR_TOKEN_ENCRYPTION_KEY
-        powershell -NoProfile -Command "$b = New-Object byte[] %CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)" > "%CONNECTOR_KEY_FILE%"
-        echo CONNECTOR_TOKEN_ENCRYPTION_KEY generated
-    )
-
-    echo Loading CONNECTOR_TOKEN_ENCRYPTION_KEY from %CONNECTOR_KEY_FILE%
-    SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<%CONNECTOR_KEY_FILE%
+    echo No CONNECTOR_TOKEN_ENCRYPTION_KEY environment variable set - connector token storage will be disabled.
 )
 
 :: Execute uvicorn

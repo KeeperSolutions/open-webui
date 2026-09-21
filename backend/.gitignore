@@ -10,7 +10,6 @@ Pipfile
 /data/*
 /open_webui/data/*
 .webui_secret_key
-.connector_token_encryption_key
 
 # Runtime-generated static files (copied from frontend build or downloaded on startup)
 /open_webui/static/favicon.png

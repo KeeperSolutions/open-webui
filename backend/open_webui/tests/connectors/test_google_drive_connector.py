@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import open_webui.tools.builtin as drive
+import open_webui.tools.built_in as drive
 
 USER = {'id': 'test-user-id'}
 

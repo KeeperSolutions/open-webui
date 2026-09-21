@@ -1,7 +1,17 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+const isMobile = () => /android|iphone|ipad|ipod/i.test(navigator?.userAgent ?? '');
+
 export const connectConnector = (connectUrl: string): Promise<void> => {
 	return new Promise((resolve) => {
+		// Mobile browsers commonly ignore window.open size hints or block popups outright,
+		// so go straight to the full-page redirect fallback instead of a fixed-size popup.
+		if (isMobile()) {
+			window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+			resolve();
+			return;
+		}
+
 		const width = 520;
 		const height = 680;
 		const left = window.screenX + (window.outerWidth - width) / 2;
