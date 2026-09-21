@@ -106,4 +106,74 @@ describe('PiiMaskedCard', () => {
 		});
 		expect(container.textContent).toBe('');
 	});
+
+	it('counts a file-sourced detection by reconstructing the value from the citation chunk', () => {
+		// The value is sliced from sources[].document[docIdx], not from originalText.
+		renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'f1', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('drops a file-sourced detection when its chunk cannot be located', () => {
+		// No source matches the fileId, so the value is empty and the item is dropped.
+		const { container } = renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'missing', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(container.textContent).toBe('');
+	});
+
+	it('renders ingest-sourced file PII from the fileItems prop', () => {
+		renderCard({
+			detections: [],
+			originalText: '',
+			fileItems: [
+				{
+					key: JSON.stringify(['HR_OIB', '11111111111', 'doc.pdf']),
+					type: 'HR_OIB',
+					value: '11111111111',
+					source: 'doc.pdf'
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('dedupes a fileItem against an identical message detection by (type,value,source)', () => {
+		// Neither item has a source, so both keys are ["PERSON","Ivan Horvat",null]
+		// and the card shows one entry.
+		renderCard({
+			detections: [{ type: 'PERSON', start: 9, end: 20 }],
+			originalText: 'Zovem se Ivan Horvat',
+			fileItems: [
+				{
+					key: JSON.stringify(['PERSON', 'Ivan Horvat', null]),
+					type: 'PERSON',
+					value: 'Ivan Horvat',
+					source: undefined
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
 });

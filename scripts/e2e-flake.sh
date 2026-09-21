@@ -45,6 +45,18 @@ if [[ -z "${CYPRESS_E2E_MODEL:-}" ]]; then
 	exit 1
 fi
 
+# Color the PASS/FAIL status only on a real terminal — a redirected/piped
+# output (CI logs, `tee`, a file) gets plain text, never raw escape codes.
+if [[ -t 1 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
+	GREEN="$(tput setaf 2)"
+	RED="$(tput setaf 1)"
+	RESET="$(tput sgr0)"
+else
+	GREEN=""
+	RED=""
+	RESET=""
+fi
+
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/owui-e2e-flake.XXXXXX")"
 echo "==> $RUNS runs; per-run logs in $LOG_DIR"
 echo "==> forwarding to npm run e2e: ${*:-<none>}"
@@ -100,9 +112,11 @@ for ((i = 1; i <= RUNS; i++)); do
 
 	if [[ "$rc" -eq 0 ]]; then
 		status="PASS"
+		status_colored="${GREEN}✔ PASS${RESET}"
 		pass=$((pass + 1))
 	else
 		status="FAIL"
+		status_colored="${RED}✖ FAIL${RESET}"
 		fail=$((fail + 1))
 	fi
 
@@ -112,9 +126,9 @@ for ((i = 1; i <= RUNS; i++)); do
 	# Pull the Cypress summary line(s) for a quick per-run readout.
 	summary="$(grep -E '^\s+(✔|✖)\s+[0-9]{2}-.*\.cy\.ts' "$log" | sed 's/^/      /')"
 
-	printf -- '=== run %d/%d -> %s (%ds)\n' "$i" "$RUNS" "$status" "$dur"
+	printf -- '=== run %d/%d -> %b (%ds)\n' "$i" "$RUNS" "$status_colored" "$dur"
 	[[ -n "$summary" ]] && echo "$summary"
-	results+=("run $(printf '%02d' "$i"): $status (${dur}s) — $log")
+	results+=("run $(printf '%02d' "$i"): $status_colored (${dur}s) — $log")
 done
 
 end=$(date +%s)
@@ -126,7 +140,7 @@ printf '%s\n' "${results[@]}"
 echo "======================================================================"
 
 if [[ "$fail" -gt 0 ]]; then
-	echo "Flaky or broken. Inspect the FAIL logs above."
+	echo "${RED}Flaky or broken.${RESET} Inspect the FAIL logs above."
 	exit 1
 fi
-echo "All green across $RUNS runs."
+echo "${GREEN}All green across $RUNS runs.${RESET}"

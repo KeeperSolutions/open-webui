@@ -35,6 +35,19 @@ from open_webui.routers.pipelines import (
 GROUPS_LOOKUP = "open_webui.utils.access_control.Groups.get_groups_by_member_id"
 
 
+# Enforcement only fires when PII_FILTER_IDS is non-empty. The module-level value
+# is read from the environment at import time, so a dev/CI shell with
+# `PII_FILTER_IDS=` set (common for local dev without a pipeline) would silently
+# turn every enforcement assertion below into a no-op. Pin it to the default.
+@pytest.fixture(autouse=True)
+def _pin_pii_filter_ids():
+    with patch(
+        "open_webui.routers.pipelines.PII_FILTER_IDS",
+        {"pii_filter", "pii_filter_pipeline"},
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

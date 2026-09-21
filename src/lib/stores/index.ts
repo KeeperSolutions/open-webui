@@ -39,6 +39,7 @@ export const appData = writable(null);
 export const MODEL_DOWNLOAD_POOL = writable({});
 
 export const mobile = writable(false);
+export const isTouchDevice = writable(false);
 
 export const socket: Writable<null | Socket> = writable(null);
 export const socketConnected: Writable<boolean> = writable(true);
@@ -358,6 +359,7 @@ type Config = {
 		folder_max_file_count?: number;
 		/** Backend's PII_FILTER_IDS; absent on older backends, hence optional. */
 		pii_filter_ids?: string[];
+		pii_ingest_scan?: boolean;
 	};
 	oauth: {
 		providers: {

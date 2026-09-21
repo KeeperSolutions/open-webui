@@ -46,6 +46,7 @@
 	export let compactPreview = false;
 	export let editCodeBlock = true;
 	export let topPadding = false;
+	export let piiMaskingEnabled = true;
 	export let onInsertToNote: ((content: string) => void) | null = null;
 
 	// Safari's content-visibility implementation has paint bugs that leave
@@ -82,6 +83,7 @@
 				{compactPreview}
 				{editCodeBlock}
 				{topPadding}
+				{piiMaskingEnabled}
 				{onInsertToNote}
 			/>
 		{:else if (history.messages[history.messages[messageId].parentId]?.models?.length ?? 1) === 1}

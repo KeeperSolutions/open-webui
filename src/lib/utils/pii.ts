@@ -13,6 +13,66 @@ import { config } from '$lib/stores';
 export const PII_FILTER_IDS = ['pii_filter', 'pii_filter_pipeline'] as const;
 
 /**
+ * Whether the backend scans uploaded files for PII at ingest.
+ *
+ * Off by default (`KEEPER_ENABLE_INGEST_PII_SCAN`). The send-time pass already
+ * masks everything that reaches the LLM, and an ingest scan sends the file
+ * through the pipeline a second time.
+ *
+ * The card uses this to decide whether to retry a file whose `pii_scan_status`
+ * is null. Each retry re-fetches the whole file content, so retries are skipped
+ * when no scan runs. Anything other than an explicit `true` is read as off.
+ */
+export function piiIngestScanEnabled(): boolean {
+	return get(config)?.features?.pii_ingest_scan === true;
+}
+
+/**
+ * Returns the ids of files whose card list comes from the ingest scan.
+ *
+ * A covered file is shown from `fileItems` only, and `scopeCardDetections`
+ * drops its send-time detections to avoid double counting. A completed scan
+ * covers the file only when it was not truncated. A truncated scan read just
+ * the first `PII_SCAN_MAX_CHARS` characters, so both sources are shown and the
+ * card dedupes them by (type, value, source).
+ *
+ * `running` counts as covered, so the card shows the scan indicator instead of
+ * a partial send-time list that is later swapped out.
+ */
+export function ingestCoveredFileIds(
+	files: { id: string; pii_scan_status?: string | null; pii_scan_truncated?: boolean }[]
+): Set<string> {
+	return new Set(
+		(files ?? [])
+			.filter(
+				(f) =>
+					(f.pii_scan_status === 'completed' || f.pii_scan_status === 'running') &&
+					!f.pii_scan_truncated
+			)
+			.map((f) => f.id)
+	);
+}
+
+/**
+ * Filters detections down to the ones the card shows for one user message.
+ *
+ * Message PII (no `fileId`) is always kept. A file detection is kept only when
+ * its file is attached to this message and not covered by the ingest scan, so
+ * attachments from other turns do not appear on this card.
+ */
+export function scopeCardDetections<T extends { fileId?: string | null }>(
+	detections: T[],
+	ingestCoveredFileIds: Set<string>,
+	messageFileIds: Set<string>
+): T[] {
+	return (detections ?? []).filter((d) => {
+		if (d?.fileId == null) return true;
+		if (ingestCoveredFileIds.has(d.fileId)) return false;
+		return messageFileIds.has(d.fileId);
+	});
+}
+
+/**
  * The ids the backend treats as mandatory PII filters.
  *
  * Read from `/api/config` so the frontend stops keeping a hand-copy of an env

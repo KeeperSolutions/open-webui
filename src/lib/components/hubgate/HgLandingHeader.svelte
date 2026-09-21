@@ -81,6 +81,7 @@
 	on:close={() => (menuOpen = false)}
 	on:signin={() => {
 		menuOpen = false;
+		modalForm = null;
 		showModal = true;
 	}}
 />

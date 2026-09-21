@@ -65,6 +65,7 @@
 		isYoutubeUrl,
 		displayFileHandler
 	} from '$lib/utils';
+	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { getOutputText } from './Messages/structuredOutput';
@@ -105,6 +106,7 @@
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
+	import ModelSelector from '$lib/components/chat/ModelSelector.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -1006,7 +1008,7 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		if (event.chat_id === $chatId) {
+		if (isEventForLoadedChat(event, $chatId, history?.messages)) {
 			await tick();
 			const type = event?.data?.type ?? null;
 			if (type === 'chat:reload') {
@@ -1603,7 +1605,13 @@
 			}
 
 			// Upload file to server
-			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
+			const uploadedFile = await uploadFile(
+				localStorage.token,
+				file,
+				metadata,
+				null,
+				piiMaskingEnabled
+			);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
@@ -3931,6 +3939,9 @@
 									onDeleteChat={onDeleteEmbeddedChat}
 								/>
 							</div>
+							<div class="flex min-w-0 shrink items-center gap-1">
+								<ModelSelector bind:selectedModels triggerClassName="text-sm" align="end" />
+							</div>
 							<Tooltip content={$i18n.t('Close')} placement="bottom">
 								<button
 									type="button"
@@ -3959,6 +3970,7 @@
 							}}
 							{history}
 							title={$chatTitle}
+							bind:selectedModels
 							shareEnabled={!!history.currentId}
 							{initNewChat}
 							scrollToTop={!isNearTop ? scrollToTop : null}
@@ -4045,6 +4057,7 @@
 										topPadding={!embedded}
 										bottomPadding={files.length > 0}
 										{onSelect}
+										{piiMaskingEnabled}
 										{onInsertToNote}
 									/>
 								</div>

@@ -9,35 +9,86 @@
 	const i18n =
 		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
 
-	type PiiItem = { key: string; type: string; value: string };
+	type PiiDetection = {
+		type: string;
+		start: number;
+		end: number;
+		// Send-time detections from a file carry the file id and chunk index. The
+		// value is sliced from the citation chunk the browser already has, so the
+		// wire and DB never carry a plaintext value.
+		fileId?: string;
+		fileName?: string;
+		docIdx?: number;
+	};
+	type PiiItem = { key: string; type: string; value: string; source?: string };
+	type CitationSource = {
+		source?: { id?: string; name?: string; type?: string };
+		document?: string[];
+		metadata?: { file_id?: string }[];
+	};
 
-	export let detections: { type: string; start: number; end: number }[] = [];
+	export let detections: PiiDetection[] = [];
 	export let originalText = '';
+	// Citation sources of the same response. File-sourced values are sliced from
+	// these chunks.
+	export let sources: CitationSource[] = [];
+	// File PII from the ingest scan, already reconstructed from the file content.
+	// UserMessage fetches it from GET /files/{id}/data/content.
+	export let fileItems: PiiItem[] = [];
+	export let scanning = false;
 
 	let show = false;
 	let items: PiiItem[] = [];
 	let count = 0;
 
-	// Reconstruct masked values locally from the user's own message text and
-	// dedupe identical (type, value) pairs. Nothing here leaves the browser:
-	// the wire/DB only ever carried {type, start, end}.
+	// Finds the citation chunk a file-sourced detection points at and slices the
+	// value from it. Returns '' when the chunk is not found; such items are
+	// filtered out.
+	const reconstructFileValue = (d: PiiDetection): string => {
+		const src = (sources ?? []).find(
+			(s) => s?.source?.id === d.fileId || (s?.metadata ?? []).some((m) => m?.file_id === d.fileId)
+		);
+		const chunk = src?.document?.[d.docIdx ?? -1];
+		return typeof chunk === 'string' ? chunk.slice(d.start, d.end) : '';
+	};
+
+	// Reconstruct masked values locally and dedupe by (type, value, source).
+	// Nothing sensitive leaves the browser: the wire and DB carry only
+	// {type, start, end}, plus file and chunk refs for file-sourced detections.
+	// Ingest items are spread last so they win on a key collision.
 	$: items = Array.from(
-		new Map(
-			(detections ?? [])
+		new Map([
+			// Message and send-time file detections
+			...(detections ?? [])
 				.map((d): [string, PiiItem] => {
-					const value = (originalText ?? '').slice(d.start, d.end);
-					// JSON.stringify gives an unambiguous (type, value) key — a plain
-					// `${type}::${value}` join could collide if a value contained "::".
-					const key = JSON.stringify([d.type, value]);
-					return [key, { key, type: d.type, value }];
+					const isFile = d.fileId != null;
+					const value = isFile
+						? reconstructFileValue(d)
+						: (originalText ?? '').slice(d.start, d.end);
+					const source = isFile ? d.fileName : undefined;
+					// JSON.stringify gives an unambiguous (type, value, source) key.
+					const key = JSON.stringify([d.type, value, source ?? null]);
+					return [key, { key, type: d.type, value, source }];
 				})
-				.filter(([, it]) => it.value !== '')
-		).values()
-	);
+				.filter(([, it]) => it.value !== ''),
+			// Ingest scan items, already reconstructed
+			...(fileItems ?? []).map((it): [string, PiiItem] => [it.key, it])
+		]).values()
+	).filter((it) => it.value !== '');
 	$: count = items.length;
 </script>
 
-{#if count > 0}
+{#if scanning && count === 0}
+	<div
+		class="flex items-center gap-1 h-9 px-3 py-1 self-center rounded-full bg-stone-50 dark:bg-gray-800"
+	>
+		<HgIconShield class="size-3.5 text-hg-text-secondary dark:text-gray-400 animate-pulse" />
+		<span
+			class="font-hg-body text-xs font-normal text-hg-text-secondary dark:text-gray-400 whitespace-nowrap"
+			>{$i18n.t('PII scan in progress…')}</span
+		>
+	</div>
+{:else if count > 0}
 	<Popover.Root bind:open={show}>
 		<!-- Badge — Figma "PiiMaskingResult" pill; chevron flips while open -->
 		<Popover.Trigger

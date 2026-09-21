@@ -20,6 +20,12 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
+	import { getFileDataContentById } from '$lib/apis/files';
+	import {
+		scopeCardDetections,
+		ingestCoveredFileIds as computeIngestCoveredFileIds,
+		piiIngestScanEnabled
+	} from '$lib/utils/pii';
 	import SubagentResultRow from './SubagentResultRow.svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
@@ -30,6 +36,7 @@
 	export let chatId;
 	export let history;
 	export let messageId;
+	export let piiMaskingEnabled = true;
 
 	export let siblings;
 
@@ -71,9 +78,17 @@
 		}
 	}
 
+	type PiiCardDetection = {
+		type: string;
+		start: number;
+		end: number;
+		fileId?: string;
+		fileName?: string;
+		docIdx?: number;
+	};
 	// Keeper PII card: detections live on the child (assistant) message; read them
 	// from live history so the card sits on the user message it describes.
-	$: piiDetections = (() => {
+	$: piiDetections = ((): PiiCardDetection[] => {
 		// Iterate newest-first: childrenIds grow with regenerations / multi-model
 		// responses, so the latest child holds the freshest detections.
 		const children = history?.messages?.[messageId]?.childrenIds ?? [];
@@ -87,6 +102,141 @@
 		history?.messages?.[messageId]?.originalContent ??
 		history?.messages?.[messageId]?.content ??
 		'';
+
+	// Citation sources of the child message whose detections are used. File-sourced
+	// detections index into these chunks.
+	$: piiSources = (() => {
+		const children = history?.messages?.[messageId]?.childrenIds ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			const child = history?.messages?.[children[i]];
+			if ((child?.piiDetections ?? []).length > 0) return child?.sources ?? [];
+		}
+		return [];
+	})();
+
+	let fileItems: { key: string; type: string; value: string; source?: string }[] = [];
+	let _piiFetchKey = '';
+	let piiScanInProgress = false;
+	// File ids whose card list comes from the ingest scan (see ingestCoveredFileIds
+	// in $lib/utils/pii). Other attached files show their send-time detections,
+	// which match what was masked for the LLM. Starts with every attached file
+	// covered so send-time detections do not flash before the first poll.
+	let ingestCoveredFileIds = new Set<string>();
+	$: {
+		const files = history?.messages?.[messageId]?.files ?? [];
+		const ids = files
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id));
+		const key = ids.join(',');
+		// When masking is disabled, clear any stale card state and skip polling.
+		// The fetch key is cleared rather than set to `key`, so re-enabling masking
+		// with the same attachments refetches instead of leaving the card empty.
+		if (!piiMaskingEnabled) {
+			_piiFetchKey = '';
+			piiScanInProgress = false;
+			fileItems = [];
+			ingestCoveredFileIds = new Set();
+		} else if (key !== _piiFetchKey) {
+			_piiFetchKey = key;
+			piiScanInProgress = false;
+			ingestCoveredFileIds = new Set(ids); // optimistic until first poll narrows it
+			(async () => {
+				const capturedKey = key;
+				let out: typeof fileItems = [];
+				// Poll each file's pii_scan_status.
+				// "running": show the indicator and retry after 3 seconds.
+				// null: no scan has written yet, for example a file uploaded before scan
+				//   status was recorded. Retried below only when the ingest scan is on.
+				// Any other status: stop polling.
+				for (let attempt = 0; attempt < 100; attempt++) {
+					if (_piiFetchKey !== capturedKey) return;
+					if (!piiMaskingEnabled) {
+						piiScanInProgress = false;
+						fileItems = [];
+						return;
+					}
+					type FetchedFile = {
+						id: string;
+						name: string | undefined;
+						content: string;
+						pii_detections: Array<{ type: string; start: number; end: number }>;
+						pii_scan_status: string | null;
+						pii_scan_truncated?: boolean;
+					};
+					const fetched: FetchedFile[] = [];
+					for (const f of files) {
+						const id = f?.id ?? f?.file?.id;
+						if (!id) continue;
+						const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
+						const { content, pii_detections, pii_scan_status, pii_scan_truncated } =
+							await getFileDataContentById(localStorage.token, id);
+						fetched.push({
+							id,
+							name,
+							content,
+							pii_detections,
+							pii_scan_status,
+							pii_scan_truncated
+						});
+					}
+					// Skipped, failed and truncated scans fall back to send-time detections,
+					// which can cover text past the scan's character limit.
+					if (_piiFetchKey === capturedKey) {
+						ingestCoveredFileIds = computeIngestCoveredFileIds(fetched);
+					}
+					const anyRunning = fetched.some((f) => f.pii_scan_status === 'running');
+					out = fetched.flatMap((f) =>
+						(f.pii_detections ?? [])
+							.map((d) => {
+								const value = (f.content ?? '').slice(d.start, d.end);
+								return value
+									? {
+											key: JSON.stringify([d.type, value, f.name ?? null]),
+											type: d.type,
+											value,
+											source: f.name
+										}
+									: null;
+							})
+							.filter((x): x is NonNullable<typeof x> => x !== null)
+					);
+					if (anyRunning) {
+						if (_piiFetchKey === capturedKey) piiScanInProgress = true;
+						await new Promise((r) => setTimeout(r, 3000));
+						continue;
+					}
+					// A null status means no scan has written yet. Retry up to 5 times only
+					// when the ingest scan is on, because each attempt re-fetches the whole
+					// file content.
+					const awaitingScan =
+						piiIngestScanEnabled() && fetched.some((f) => f.pii_scan_status == null);
+					if (awaitingScan && out.length === 0 && attempt < 5) {
+						await new Promise((r) => setTimeout(r, 2500));
+						continue;
+					}
+					break;
+				}
+				if (_piiFetchKey === capturedKey) {
+					piiScanInProgress = false;
+					fileItems = out;
+				}
+			})();
+		}
+	}
+	// Ids of files attached to this user message. Send-time file detections can
+	// cover any file sent in the turn, so the card keeps only these files.
+	$: messageFileIds = new Set<string>(
+		(history?.messages?.[messageId]?.files ?? [])
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id))
+	);
+	// Message PII plus send-time file PII for files the ingest scan does not cover.
+	// Covered files are shown from fileItems. See scopeCardDetections.
+	$: piiDetectionsScoped = scopeCardDetections(
+		piiDetections ?? [],
+		ingestCoveredFileIds,
+		messageFileIds
+	);
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -639,7 +789,13 @@
 						{/if}
 					{/if}
 
-					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
+					<PiiMaskedCard
+						detections={piiDetectionsScoped}
+						originalText={piiOriginalText}
+						sources={piiSources}
+						{fileItems}
+						scanning={piiScanInProgress}
+					/>
 
 					{#if !compactPreview && ($settings?.chatBubble ?? true)}
 						{#if siblings.length > 1}

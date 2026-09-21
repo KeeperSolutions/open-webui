@@ -1,0 +1,81 @@
+// Featured Models (TRAU-469) — logic extracted from Selector.svelte so it can be
+// unit-tested without rendering the (Fuse + portal + virtualized) dropdown.
+//
+// An admin curates a short list of "featured" models via Admin → Settings → Models
+// → "Featured Models". Each entry carries a display name, provider, and up to 3
+// short tags. The model selector shows these first, under a "Featured" pill, using
+// the curated values.
+
+/** One entry as stored in the FEATURED_MODELS config by the admin. */
+export type FeaturedModelConfig = {
+	model_id: string;
+	provider_name: string;
+	featured_name: string;
+	tags: [string, string, string];
+	order: number;
+};
+
+// The `items` here are the `{ label, value, model }[]` entries Selector.svelte
+// feeds to ModelItem.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SelectorItem = { label?: string; value: string; model?: any; [key: string]: any };
+
+/**
+ * The featured entries to actually display: those whose model exists in the
+ * selector (respecting the hidden flag), sorted by their configured `order`.
+ */
+export const buildFeaturedModels = (
+	config: FeaturedModelConfig[],
+	items: SelectorItem[],
+	includeHidden = false
+): FeaturedModelConfig[] => {
+	if (!config?.length) return [];
+
+	const availableIds = new Set(
+		items
+			.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false))
+			.map((item) => item.value)
+	);
+
+	return (
+		config
+			// The backend validator (routers/configs.py) rejects malformed entries
+			// on save, but this also reads whatever is already stored, from before
+			// that validation existed or from a direct API/DB write it missed — a
+			// non-object entry, or one with no model_id, must not crash the model
+			// selector for every user. Drop it rather than let it reach .order or
+			// featuredToItem() below.
+			.filter(
+				(entry): entry is FeaturedModelConfig =>
+					!!entry && typeof entry === 'object' && typeof entry.model_id === 'string'
+			)
+			.filter((entry) => availableIds.has(entry.model_id))
+			.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+	);
+};
+
+/**
+ * Map a featured entry onto the `item` shape ModelItem consumes: keep the real
+ * backing model (logo, menu, connection badges) but override the display name and
+ * tags with the curated values. Safe to call for an entry with no backing item —
+ * used only after buildFeaturedModels() has filtered to available ids.
+ */
+export const featuredToItem = (entry: FeaturedModelConfig, items: SelectorItem[]) => {
+	const backing = items.find((item) => item.value === entry.model_id);
+	const curatedTags = (Array.isArray(entry.tags) ? entry.tags : [])
+		.filter(Boolean)
+		.map((name) => ({ name }));
+
+	return {
+		...backing,
+		value: entry.model_id,
+		label: entry.featured_name || backing?.label,
+		providerName: entry.provider_name || undefined,
+		model: {
+			...backing?.model,
+			id: entry.model_id,
+			tags: curatedTags.length > 0 ? curatedTags : (backing?.model?.tags ?? [])
+		}
+	};
+};
