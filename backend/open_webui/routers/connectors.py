@@ -92,12 +92,20 @@ def _get_refresh_lock(user_id: str) -> asyncio.Lock:
 
 
 def _connector_popup_response(message: str = 'You can close this window.') -> HTMLResponse:
-    """The connect flow runs in a popup window - close it instead of redirecting the popup itself."""
+    """The connect flow normally runs in a popup window, which this closes. When the popup was
+    blocked, the frontend falls back to a full-page redirect instead - there's no window to close
+    in that case (a normal top-level tab won't close itself), so send the user back into the app."""
     return HTMLResponse(f"""<!doctype html>
 <html>
 <body style="font-family: sans-serif; padding: 2rem;">
 <p>{message}</p>
-<script>window.close();</script>
+<script>
+if (window.opener) {{
+    window.close();
+}} else {{
+    window.location.href = '/';
+}}
+</script>
 </body>
 </html>""")
 
@@ -125,7 +133,11 @@ async def get_google_drive_status(user=Depends(get_internal_drive_user)):
 
 @router.get('/google-drive/connect')
 async def connect_google_drive(user=Depends(get_internal_drive_user)):
-    if not GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value or not GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value:
+    if (
+        not GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value
+        or not GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET.value
+        or not GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail='Google Drive connector is not configured',
@@ -201,7 +213,7 @@ async def google_drive_callback(
         else:
             log.warning(f'Failed to fetch Google Drive userinfo: {userinfo_response.status_code} {userinfo_response.text}')
 
-    await ConnectorConnections.upsert(
+    connection = await ConnectorConnections.upsert(
         user_id=user.id,
         connector=GOOGLE_DRIVE_CONNECTOR,
         token={
@@ -213,6 +225,10 @@ async def google_drive_callback(
         external_account=external_account,
         scopes=token_data.get('scope'),
     )
+
+    if not connection:
+        log.error(f'Failed to persist Google Drive connection for user {user.id}')
+        return _connector_popup_response('Failed to connect Google Drive.')
 
     return _connector_popup_response('Google Drive connected. This window will close automatically.')
 
@@ -300,6 +316,8 @@ async def download_google_drive_document(
         format = (mimetypes.guess_extension(content_type.split(';')[0].strip()) or '.bin').lstrip('.')
 
     safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
+    if safe_filename.lower().endswith(f'.{format.lower()}'):
+        safe_filename = safe_filename[: -(len(format) + 1)]
     return Response(
         content=response.content,
         media_type=content_type,

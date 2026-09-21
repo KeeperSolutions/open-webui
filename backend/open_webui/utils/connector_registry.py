@@ -9,7 +9,7 @@ CONNECTOR_REGISTRY = [
     {
         'id': 'google_drive',
         'name': 'Google Drive',
-        'description': 'Search, read, and upload files instantly',
+        'description': 'Search, read, create, and manage (rename, move, delete) your files - changes and deletions always ask for your confirmation first',
         'icon': 'google_drive',
         'connect_url': '/connectors/google-drive/connect',
     },

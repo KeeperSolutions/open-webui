@@ -9,8 +9,10 @@ IMPORTANT: DO NOT IMPORT THIS MODULE DIRECTLY IN OTHER PARTS OF THE CODEBASE.
 from open_webui.tools.knowledge_fs import kb_exec  # noqa: F401 — re-exported
 
 import asyncio
+import html
 import json
 import logging
+import mimetypes
 import time
 from functools import lru_cache
 from typing import Literal, Optional
@@ -18,6 +20,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException, Request
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 
 from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
 from open_webui.env import (
@@ -4785,6 +4788,16 @@ async def _drive_create_plain_file(
             content=content.encode('utf-8'),
         )
         if error:
+            # Content upload failed after the (empty) file was already created - remove it rather
+            # than leaving an orphan behind, since the caller has no id to clean it up with itself
+            delete_response = await _drive_request(
+                client, 'DELETE', f'{GOOGLE_DRIVE_FILES_URL}/{f["id"]}', headers, params={'supportsAllDrives': 'true'}
+            )
+            if delete_response.status_code not in (200, 204, 404):
+                log.error(
+                    f'Failed to clean up orphaned Drive file {f["id"]}: '
+                    f'{delete_response.status_code} {delete_response.text}'
+                )
             return None, error
 
     return f, None
@@ -4892,6 +4905,7 @@ def _drive_files_page_result(data: dict, tool_name: str, extra_fields: callable 
 async def drive_search(
     query: str,
     page_token: str = '',
+    include_trashed: bool = False,
     __user__: dict = None,
 ) -> str:
     """
@@ -4899,6 +4913,7 @@ async def drive_search(
 
     :param query: Search query matched against file name and content
     :param page_token: Pass the next_page_token from a previous result to fetch the next page
+    :param include_trashed: Set to true to search files in Trash instead - use this to find the id of a file the user wants restored with drive_restore_files
     :return: JSON with matching files (id, name, mime_type, modified_time, web_link) and an optional next_page_token if more results are available - use the file id with drive_read to fetch a file's contents
     """
 
@@ -4908,9 +4923,10 @@ async def drive_search(
 
     try:
         escaped_query = _drive_escape_query_value(query)
+        trashed_clause = 'trashed = true' if include_trashed else 'trashed = false'
 
         params = {
-            'q': f"(fullText contains '{escaped_query}' or name contains '{escaped_query}') and trashed = false",
+            'q': f"(fullText contains '{escaped_query}' or name contains '{escaped_query}') and {trashed_clause}",
             'includeItemsFromAllDrives': 'true',
             'supportsAllDrives': 'true',
             'fields': 'nextPageToken, files(id,name,mimeType,modifiedTime,webViewLink)',
@@ -4994,6 +5010,40 @@ async def drive_list_folder(
         return json.dumps({'error': str(e)})
 
 
+def _drive_is_text_mime_type(mime_type: str) -> bool:
+    return mime_type.startswith('text/') or mime_type in (
+        'application/json',
+        'application/xml',
+        'application/x-yaml',
+    )
+
+
+# Binary formats drive_read can extract readable text from, mapped to the langchain loader class
+# (already a dependency - used for the same formats during RAG ingestion) that handles each one
+DRIVE_BINARY_TEXT_EXTRACTORS = {
+    'application/pdf': PyPDFLoader,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': Docx2txtLoader,
+}
+
+
+def _drive_extract_binary_text(mime_type: str, content_bytes: bytes) -> str:
+    """Write content_bytes to a temp file and run it through the matching loader - these
+    langchain loaders need a real file path, not bytes, and are synchronous/CPU-bound so this
+    must be called via asyncio.to_thread rather than awaited directly."""
+    import os
+    import tempfile
+
+    extension = mimetypes.guess_extension(mime_type) or ''
+    fd, temp_path = tempfile.mkstemp(suffix=extension)
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(content_bytes)
+        loader = DRIVE_BINARY_TEXT_EXTRACTORS[mime_type](temp_path)
+        return '\n\n'.join(doc.page_content for doc in loader.load())
+    finally:
+        os.remove(temp_path)
+
+
 async def drive_read(
     file_id: str,
     __user__: dict = None,
@@ -5071,6 +5121,18 @@ async def drive_read(
 
             html = _normalize_google_docs_html(content_bytes.decode('utf-8', errors='replace'))
             content_bytes = markdownify(html).encode('utf-8')
+        elif mime_type not in GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES and not _drive_is_text_mime_type(mime_type):
+            if mime_type not in DRIVE_BINARY_TEXT_EXTRACTORS:
+                return json.dumps(
+                    {'error': f"This file's format ({mime_type}) can't be read as text - only text, PDF, and DOCX files are supported."}
+                )
+            try:
+                content_bytes = (await asyncio.to_thread(_drive_extract_binary_text, mime_type, content_bytes)).encode(
+                    'utf-8'
+                )
+            except Exception as e:
+                log.exception(f'drive_read binary extraction error: {e}')
+                return json.dumps({'error': f'Failed to extract text from this {mime_type} file.'})
 
         truncated = len(content_bytes) > DRIVE_MAX_RESPONSE_BYTES
         content = content_bytes[:DRIVE_MAX_RESPONSE_BYTES].decode('utf-8', errors='replace')
@@ -5368,10 +5430,10 @@ def _drive_batch_message(template: str, names: dict, trailing: str = '') -> str:
     or becomes its own line after the list for many."""
     if len(names) == 1:
         (only_name,) = names.values()
-        message = template.format(f'"{only_name}"')
+        message = template.format(f'"{html.escape(only_name)}"')
         return f'{message} {trailing}' if trailing else message
 
-    listed = '<br>'.join(f'&nbsp;&nbsp;• "{name}"' for name in names.values())
+    listed = '<br>'.join(f'&nbsp;&nbsp;• "{html.escape(name)}"' for name in names.values())
     message = f'{template.format(f"{len(names)} files")}<br>{listed}'
     return f'{message}<br>{trailing}' if trailing else message
 
@@ -5385,10 +5447,17 @@ def _drive_batch_status(succeeded: list, failed: list) -> str:
 
 async def _drive_run_batch(ids_to_names: dict, failed: list[dict], call):
     """Run call(id) for every id in ids_to_names concurrently, merging into (succeeded, failed) -
-    failed may already carry earlier lookup failures, which are kept and added to."""
-    results = await asyncio.gather(*(call(item_id) for item_id in ids_to_names))
+    failed may already carry earlier lookup failures, which are kept and added to. Collects
+    exceptions per item rather than letting one bad request cancel the rest of the batch and
+    lose the results of sibling mutations that already succeeded."""
+    results = await asyncio.gather(*(call(item_id) for item_id in ids_to_names), return_exceptions=True)
     succeeded = []
-    for item_id, (data, error) in zip(ids_to_names, results):
+    for item_id, result in zip(ids_to_names, results):
+        if isinstance(result, BaseException):
+            log.exception(f'Drive batch operation failed for {item_id}: {result}')
+            failed.append({'id': item_id, 'error': str(result)})
+            continue
+        data, error = result
         if error:
             failed.append({'id': item_id, 'error': error})
         else:

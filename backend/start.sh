@@ -63,6 +63,7 @@ if [[ -z "${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" ]]; then
       exit 1
     fi
     head -c "$CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH" /dev/random | base64 > "$CONNECTOR_KEY_FILE"
+    chmod 600 "$CONNECTOR_KEY_FILE"
   fi
 
   echo "Loading CONNECTOR_TOKEN_ENCRYPTION_KEY from ${CONNECTOR_KEY_FILE}"

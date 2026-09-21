@@ -183,7 +183,8 @@
 		try {
 			const raw = localStorage.getItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY);
 			if (!raw) return new Set();
-			const { actions, savedAt } = JSON.parse(raw);
+			const { userId, actions, savedAt } = JSON.parse(raw);
+			if (userId !== $user?.id) return new Set();
 			if (Date.now() - savedAt > SKIPPED_CONFIRMATIONS_TTL_MS) return new Set();
 			return new Set(actions);
 		} catch {
@@ -193,7 +194,7 @@
 
 	const saveSkippedConfirmations = (actions: Set<string>) => {
 		try {
-			const payload = { actions: [...actions], savedAt: Date.now() };
+			const payload = { userId: $user?.id, actions: [...actions], savedAt: Date.now() };
 			localStorage.setItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY, JSON.stringify(payload));
 		} catch {
 			// best-effort only (e.g. private browsing) - stays remembered for this load either way
@@ -1151,7 +1152,10 @@
 					}
 				} else if (type === 'chat:message:drive_document_created') {
 					if (message?.driveDocuments) {
-						message.driveDocuments.push(data);
+						message.driveDocuments = [
+							...message.driveDocuments.filter((doc) => doc.id !== data.id),
+							data
+						];
 					} else {
 						message.driveDocuments = [data];
 					}
@@ -1202,6 +1206,7 @@
 					eventCallback = cb;
 
 					eventConfirmationInput = true;
+					eventConfirmationShowRemember = false;
 					showEventConfirmation = true;
 
 					eventConfirmationTitle = data.title;
@@ -1256,6 +1261,7 @@
 					submitHandler(prompt);
 				} else {
 					eventConfirmationInput = false;
+					eventConfirmationShowRemember = false;
 					eventConfirmationTitle = $i18n.t('Confirm Prompt from Embed');
 					eventConfirmationMessage = prompt;
 					eventCallback = async (confirmed: boolean) => {
@@ -1286,6 +1292,7 @@
 					submitHandler(event.data.text);
 				} else {
 					eventConfirmationInput = false;
+					eventConfirmationShowRemember = false;
 					eventConfirmationTitle = $i18n.t('Confirm Prompt from Embed');
 					eventConfirmationMessage = event.data.text;
 					eventCallback = async (confirmed: boolean) => {
@@ -3854,14 +3861,14 @@
 	inputOptions={eventConfirmationInputOptions}
 	showRemember={eventConfirmationShowRemember}
 	on:confirm={(e) => {
-		if (eventConfirmationShowRemember) {
+		if (eventConfirmationInput) {
+			eventCallback(e.detail);
+		} else if (eventConfirmationShowRemember) {
 			if (e.detail?.remember && eventConfirmationAction) {
 				skippedConfirmationActions.add(eventConfirmationAction);
 				saveSkippedConfirmations(skippedConfirmationActions);
 			}
 			eventCallback(true);
-		} else if (eventConfirmationInput) {
-			eventCallback(e.detail);
 		} else if (e.detail) {
 			eventCallback(e.detail);
 		} else {

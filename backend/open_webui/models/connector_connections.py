@@ -68,18 +68,18 @@ class ConnectorConnectionsTable:
             log.error('CONNECTOR_TOKEN_ENCRYPTION_KEY is not set - connector token storage is disabled')
             return
 
-        # check if encryption key is in the right format for Fernet (32 url-safe base64-encoded bytes)
-        if len(self.encryption_key) != 44:
+        # try the key as-is first (32 url-safe base64-encoded bytes, the format Fernet expects) -
+        # only fall back to deriving one via SHA-256 if it isn't actually valid in that format
+        try:
+            self.fernet = Fernet(self.encryption_key.encode())
+        except Exception:
             key_bytes = hashlib.sha256(self.encryption_key.encode()).digest()
             self.encryption_key = base64.urlsafe_b64encode(key_bytes)
-        else:
-            self.encryption_key = self.encryption_key.encode()
-
-        try:
-            self.fernet = Fernet(self.encryption_key)
-        except Exception as e:
-            log.error(f'Error initializing Fernet with provided key: {e}')
-            self.fernet = None
+            try:
+                self.fernet = Fernet(self.encryption_key)
+            except Exception as e:
+                log.error(f'Error initializing Fernet with provided key: {e}')
+                self.fernet = None
 
     def _encrypt_token(self, token: dict) -> str:
         if not self.fernet:

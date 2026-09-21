@@ -61,8 +61,7 @@ IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY%" == "" (
 
     IF NOT EXIST "%CONNECTOR_KEY_FILE%" (
         echo Generating CONNECTOR_TOKEN_ENCRYPTION_KEY
-        SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<nul
-        FOR /L %%i IN (1,1,%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%) DO SET /p CONNECTOR_TOKEN_ENCRYPTION_KEY=<!random!>>%CONNECTOR_KEY_FILE%
+        powershell -NoProfile -Command "[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%))" > "%CONNECTOR_KEY_FILE%"
         echo CONNECTOR_TOKEN_ENCRYPTION_KEY generated
     )
 

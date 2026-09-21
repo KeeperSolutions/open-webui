@@ -28,7 +28,8 @@
 		{
 			id: 'google_drive',
 			name: 'Google Drive',
-			description: 'Let the model search and read files from your Google Drive.',
+			description:
+				"Let the model search, read, create, and manage (rename, move, delete) files in your Google Drive. It will always ask for your confirmation before changing or deleting anything.",
 			connected: false,
 			externalAccount: null
 		}

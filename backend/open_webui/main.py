@@ -2921,6 +2921,7 @@ async def get_app_config(request: Request):
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    'enable_google_drive_connector': connectors.is_internal_email(user.email if user else None),
                     'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': app.state.config.ENABLE_FOLDERS,
                     'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
