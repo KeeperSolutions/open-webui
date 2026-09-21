@@ -4434,6 +4434,10 @@ def _normalize_google_docs_html(html: str) -> str:
 
 DRIVE_MAX_RESPONSE_BYTES = 100_000
 
+# Raw file download cap for drive_read - guards memory use before DRIVE_MAX_RESPONSE_BYTES
+# truncation runs, since that truncation only applies after the whole file is downloaded
+DRIVE_MAX_DOWNLOAD_BYTES = 25_000_000
+
 # Google Drive quota errors surface as 429, but can also come back as 403 with one of these reasons
 DRIVE_RATE_LIMIT_REASONS = {'userRateLimitExceeded', 'rateLimitExceeded', 'quotaExceeded'}
 
@@ -5081,12 +5085,21 @@ async def drive_read(
 
         async with httpx.AsyncClient() as client:
             metadata, error = await _drive_fetch_metadata(
-                client, headers, file_id, 'mimeType,capabilities(canDownload)', 'read this file from Google Drive'
+                client, headers, file_id, 'mimeType,size,capabilities(canDownload)', 'read this file from Google Drive'
             )
             if error:
                 return json.dumps({'error': error})
 
             mime_type = metadata['mimeType']
+
+            # Google-native exports (Docs/Sheets/Slides) are already size-capped by Google's own
+            # export endpoint - this only guards the raw-download path below, which would
+            # otherwise buffer the whole file into memory before the truncation further down runs
+            if (
+                not mime_type.startswith('application/vnd.google-apps.')
+                and int(metadata.get('size') or 0) > DRIVE_MAX_DOWNLOAD_BYTES
+            ):
+                return json.dumps({'error': 'This file is too large to read (over 25 MB).'})
 
             if mime_type in GOOGLE_DRIVE_NATIVE_EXPORT_MIME_TYPES:
                 content_response = await _drive_get(

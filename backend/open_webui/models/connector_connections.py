@@ -117,11 +117,8 @@ class ConnectorConnectionsTable:
                     # Transient config issue, not corrupted data - leave the row alone
                     return None
                 except Exception as e:
-                    log.warning(
-                        f'Deleting connector connection {row.id} due to decryption failure: {type(e).__name__}: {e}'
-                    )
-                    await db.execute(delete(ConnectorConnection).filter_by(id=row.id))
-                    await db.commit()
+                    # Could be a transient key mismatch (rolling deploy) - fail closed, don't delete
+                    log.error(f'Failed to decrypt connector connection {row.id}: {type(e).__name__}: {e}')
                     return None
 
                 return ConnectorConnectionModel(

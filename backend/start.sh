@@ -50,7 +50,10 @@ if [[ -z "${WEBUI_SECRET_KEY:-}" && -z "${WEBUI_JWT_SECRET_KEY:-}" ]]; then
   WEBUI_SECRET_KEY=$(cat "$KEY_FILE")
 fi
 
-CONNECTOR_KEY_FILE="${CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE:-.connector_token_encryption_key}"
+# Defaults into DATA_DIR (persisted across container recreation), not the working directory -
+# a key generated outside the persisted volume is lost on the next deploy, stranding every
+# already-encrypted connector row under a key that no longer exists
+CONNECTOR_KEY_FILE="${CONNECTOR_TOKEN_ENCRYPTION_KEY_FILE:-${DATA_DIR:-./data}/.connector_token_encryption_key}"
 CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH="${CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH:-24}"
 
 if [[ -z "${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" ]]; then
@@ -62,6 +65,7 @@ if [[ -z "${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" ]]; then
       echo "CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH must be a positive integer." >&2
       exit 1
     fi
+    mkdir -p "$(dirname "$CONNECTOR_KEY_FILE")"
     head -c "$CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH" /dev/random | base64 > "$CONNECTOR_KEY_FILE"
     chmod 600 "$CONNECTOR_KEY_FILE"
   fi

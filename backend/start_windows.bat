@@ -61,7 +61,7 @@ IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY%" == "" (
 
     IF NOT EXIST "%CONNECTOR_KEY_FILE%" (
         echo Generating CONNECTOR_TOKEN_ENCRYPTION_KEY
-        powershell -NoProfile -Command "[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(%CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%))" > "%CONNECTOR_KEY_FILE%"
+        powershell -NoProfile -Command "$b = New-Object byte[] %CONNECTOR_TOKEN_ENCRYPTION_KEY_LENGTH%; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)" > "%CONNECTOR_KEY_FILE%"
         echo CONNECTOR_TOKEN_ENCRYPTION_KEY generated
     )
 
