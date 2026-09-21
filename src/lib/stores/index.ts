@@ -221,6 +221,8 @@ type Settings = {
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;
 	showChangelog?: boolean;
+	/** Onboarding wizard ids the user has already dismissed, e.g. "long-press-hint" */
+	seenWizards?: Record<string, boolean>;
 	showEmojiInCall?: boolean;
 	voiceInterruption?: boolean;
 	collapseCodeBlocks?: boolean;
