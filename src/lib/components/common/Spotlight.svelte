@@ -1,6 +1,11 @@
+<script context="module" lang="ts">
+	let spotlightIdCounter = 0;
+</script>
+
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
+	import * as FocusTrap from 'focus-trap';
 
 	/** The element to spotlight (found via a `data-spotlight-id` attribute) - stays inert while shown, the only way out is the dismiss button */
 	export let target: HTMLElement | null = null;
@@ -23,6 +28,10 @@
 	let calloutPlacement: 'top' | 'bottom' = 'bottom';
 	let autoDismissTimeout: ReturnType<typeof setTimeout> | null = null;
 	let listenersAttached = false;
+	let overlayElement: HTMLElement | null = null;
+	let focusTrap: FocusTrap.FocusTrap | null = null;
+	const spotlightId = `spotlight-${++spotlightIdCounter}`;
+	$: plainMessage = message.replace(/<[^>]+>/g, '');
 
 	const rectsEqual = (a: Rect | null, b: Rect | null) =>
 		a === b || (!!a && !!b && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height);
@@ -90,8 +99,8 @@
 	const onResize = () => measure();
 	const onScroll = () => measure();
 
-	// Callers should scroll target into view and wait for it to settle before setting it - this only measures once
-	$: if (show && target) {
+	// Runs on `show` alone so a target cleared while still shown still clears `rect`, via measure()'s own null check
+	$: if (show) {
 		measure();
 	}
 
@@ -128,6 +137,15 @@
 		}
 	}
 
+	// Traps focus on the dismiss button while shown; focus-trap restores the caller's focus on deactivate
+	$: if (show && rect && overlayElement && !focusTrap) {
+		focusTrap = FocusTrap.createFocusTrap(overlayElement, { escapeDeactivates: false });
+		focusTrap.activate();
+	} else if ((!show || !rect) && focusTrap) {
+		focusTrap.deactivate();
+		focusTrap = null;
+	}
+
 	onDestroy(() => {
 		if (listenersAttached) {
 			window.removeEventListener('resize', onResize);
@@ -135,6 +153,7 @@
 		}
 		if (autoDismissTimeout) clearTimeout(autoDismissTimeout);
 		if (pollInterval) clearInterval(pollInterval);
+		if (focusTrap) focusTrap.deactivate();
 	});
 
 	const CALLOUT_WIDTH = 288;
@@ -154,7 +173,16 @@
 
 {#if show && rect}
 	<!-- Inert overlay - only the callout button dismisses; the cutout's box-shadow darkens everything except the target -->
-	<div class="fixed inset-0 z-9999" transition:fade={{ duration: 200 }}>
+	<div
+		bind:this={overlayElement}
+		class="fixed inset-0 z-9999"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby={title ? `${spotlightId}-title` : undefined}
+		aria-label={title ? undefined : plainMessage}
+		aria-describedby={`${spotlightId}-message`}
+		transition:fade={{ duration: 200 }}
+	>
 		<div
 			class="absolute rounded-xl"
 			style="top:{rect.top}px; left:{rect.left}px; width:{rect.width}px; height:{rect.height}px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7);"
@@ -173,9 +201,9 @@
 			transition:scale={{ duration: 200, start: 0.95 }}
 		>
 			{#if title}
-				<div class="font-medium mb-1">{title}</div>
+				<div id="{spotlightId}-title" class="font-medium mb-1">{title}</div>
 			{/if}
-			<div class="text-gray-600 dark:text-gray-300">{@html message}</div>
+			<div id="{spotlightId}-message" class="text-gray-600 dark:text-gray-300">{@html message}</div>
 			<div class="flex justify-end mt-2.5">
 				<button
 					type="button"

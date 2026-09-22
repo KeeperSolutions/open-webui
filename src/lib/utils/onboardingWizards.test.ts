@@ -12,6 +12,7 @@ import { hasSeenWizard, markWizardSeen } from './onboardingWizards';
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
 	settings.set({});
 	localStorage.setItem('token', 'test-token');
 });
@@ -28,6 +29,11 @@ describe('hasSeenWizard', () => {
 
 	it('is true once the id is present and true in seenWizards', () => {
 		settings.set({ seenWizards: { 'long-press-hint': true } });
+		expect(hasSeenWizard('long-press-hint')).toBe(true);
+	});
+
+	it('is true via the localStorage fallback even when the settings store has no record', () => {
+		localStorage.setItem('seenWizards', JSON.stringify({ 'long-press-hint': true }));
 		expect(hasSeenWizard('long-press-hint')).toBe(true);
 	});
 });
@@ -67,5 +73,15 @@ describe('markWizardSeen', () => {
 		await markWizardSeen('long-press-hint');
 
 		expect(updateUserSettings).not.toHaveBeenCalled();
+	});
+
+	it('writes to localStorage even if updateUserSettings rejects, and does not throw', async () => {
+		(updateUserSettings as any).mockRejectedValueOnce(new Error('403 Access prohibited'));
+
+		await expect(markWizardSeen('long-press-hint')).resolves.toBeUndefined();
+
+		expect(JSON.parse(localStorage.getItem('seenWizards') ?? '{}')).toEqual({
+			'long-press-hint': true
+		});
 	});
 });

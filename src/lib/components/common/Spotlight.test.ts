@@ -2,6 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 
+// jsdom can't calculate tabbable visibility, so focus-trap would refuse to activate - stub it
+vi.mock('focus-trap', () => ({
+	createFocusTrap: () => ({
+		activate: () => {},
+		deactivate: () => {}
+	})
+}));
+
 import Spotlight from './Spotlight.svelte';
 
 beforeEach(() => vi.clearAllMocks());
@@ -130,6 +138,28 @@ describe('Spotlight', () => {
 		await fireEvent.click(getByText('Got it'));
 
 		expect(onDismiss).toHaveBeenCalledOnce();
+	});
+
+	it('exposes dialog semantics and an accessible name for screen readers', () => {
+		const target = makeTarget();
+		const { container } = render(Spotlight, {
+			props: { show: true, target, title: 'Long-press', message: 'Try this gesture' }
+		});
+
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		expect(dialog).not.toBeNull();
+		expect(dialog.getAttribute('aria-modal')).toBe('true');
+		expect(dialog.getAttribute('aria-labelledby')).not.toBeNull();
+	});
+
+	it('falls back to the message as the accessible name when there is no title', () => {
+		const target = makeTarget();
+		const { container } = render(Spotlight, {
+			props: { show: true, target, message: 'Touch and <strong>hold</strong> a chat.' }
+		});
+
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		expect(dialog.getAttribute('aria-label')).toBe('Touch and hold a chat.');
 	});
 
 	it('auto-dismisses after the timeout with no interaction', async () => {

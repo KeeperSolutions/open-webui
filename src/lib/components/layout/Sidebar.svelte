@@ -226,8 +226,11 @@
 
 	const dismissLongPressHint = async () => {
 		showLongPressHint = false;
-		await markWizardSeen(LONG_PRESS_WIZARD_ID);
-		maybeShowSettingsHint();
+		try {
+			await markWizardSeen(LONG_PRESS_WIZARD_ID);
+		} finally {
+			maybeShowSettingsHint();
+		}
 	};
 
 	let settingsHintAttemptInProgress = false;
