@@ -30,6 +30,7 @@ fi
 # ── Secret key setup ─────────────────────────────────────────────────────────
 
 KEY_FILE="${WEBUI_SECRET_KEY_FILE:-.webui_secret_key}"
+WEBUI_SECRET_KEY_LENGTH="${WEBUI_SECRET_KEY_LENGTH:-24}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 
@@ -38,11 +39,20 @@ if [[ -z "${WEBUI_SECRET_KEY:-}" && -z "${WEBUI_JWT_SECRET_KEY:-}" ]]; then
 
   if [[ ! -f "$KEY_FILE" ]]; then
     echo "Generating new WEBUI_SECRET_KEY..."
-    head -c 12 /dev/random | base64 > "$KEY_FILE"
+    if ! [[ "$WEBUI_SECRET_KEY_LENGTH" =~ ^[1-9][0-9]*$ ]]; then
+      echo "WEBUI_SECRET_KEY_LENGTH must be a positive integer." >&2
+      exit 1
+    fi
+    head -c "$WEBUI_SECRET_KEY_LENGTH" /dev/random | base64 > "$KEY_FILE"
   fi
 
   echo "Loading WEBUI_SECRET_KEY from ${KEY_FILE}"
   WEBUI_SECRET_KEY=$(cat "$KEY_FILE")
+fi
+
+# Must come from the environment (e.g. GCP Secret Manager) - never auto-generated into a file
+if [[ -z "${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" ]]; then
+  echo "No CONNECTOR_TOKEN_ENCRYPTION_KEY environment variable set - connector token storage will be disabled."
 fi
 
 # ── Ollama (bundled Docker image) ────────────────────────────────────────────
@@ -136,6 +146,7 @@ else
 fi
 
 exec env WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-}" \
+  CONNECTOR_TOKEN_ENCRYPTION_KEY="${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" \
   "$PYTHON_CMD" -m uvicorn open_webui.main:app \
     --host "$HOST" \
     --port "$PORT" \

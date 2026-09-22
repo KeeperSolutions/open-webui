@@ -22,7 +22,7 @@
 	out of flow, so a stretched item spans the whole viewport and slides UNDER it —
 	measured left edge 1, with the sidebar ending at 260. The width has to be
 	reserved explicitly, which is what the `max-w` clamp below does. It is copied
-	from `admin/+layout.svelte:31-33` rather than reinvented, including the 49px
+	from `admin/+layout.svelte:36-38` rather than reinvented, including the 42px
 	rail for the collapsed state.
 
 	Deliberately here rather than on `PiiDashboard`'s own root: the admin copy is
@@ -30,11 +30,11 @@
 	a screen this fix has no business touching.
 -->
 <div
-	class="flex flex-col h-screen max-h-[100dvh] flex-1 transition-width duration-200 ease-in-out {$showSidebar
+	class="flex flex-col h-screen max-h-[100dvh] flex-1 min-w-0 transition-width duration-200 ease-in-out {$showSidebar
 		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-		: 'md:max-w-[calc(100%-49px)]'} w-full max-w-full"
+		: 'md:max-w-[calc(100%-42px)]'} w-full max-w-full"
 >
-	<div class="pb-1 flex-1 max-h-full overflow-y-auto">
+	<div class="pb-1 flex-1 min-w-0 max-h-full overflow-y-auto overflow-x-hidden">
 		<!--
 			⚠️ Keyed on `teamId`, which the `/admin` copy of this page does not need.
 

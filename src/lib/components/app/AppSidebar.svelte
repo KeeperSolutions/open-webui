@@ -30,8 +30,8 @@
 				}}
 			>
 				<img
-					src="{WEBUI_BASE_URL}/static/splash.png"
-					class="size-11 dark:invert p-0.5"
+					src="{WEBUI_BASE_URL}/hubgate/hubgate-logomark.svg"
+					class="size-11 p-0.5"
 					alt="logo"
 					draggable="false"
 				/>

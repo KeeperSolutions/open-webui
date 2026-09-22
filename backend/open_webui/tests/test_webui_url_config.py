@@ -96,6 +96,7 @@ def _make_form_data(webui_url="https://ignored.example.com", **overrides):
         ENABLE_FOLDERS=True,
         ENABLE_CHANNELS=True,
         ENABLE_MEMORIES=True,
+        ENABLE_MEMORY_SYSTEM_CONTEXT=True,
         ENABLE_NOTES=True,
         ENABLE_USER_WEBHOOKS=False,
         ENABLE_USER_STATUS=True,

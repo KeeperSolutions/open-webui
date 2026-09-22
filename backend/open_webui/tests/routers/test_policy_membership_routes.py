@@ -129,6 +129,7 @@ async def _add(group_id, user_ids, user, session, reason=None):
     from open_webui.routers import groups as groups_router
 
     return await groups_router.add_user_to_group(
+        request=MagicMock(),
         id=group_id,
         form_data=GroupMembershipForm(user_ids=user_ids, reason=reason),
         user=user,
@@ -140,6 +141,7 @@ async def _remove(group_id, user_ids, user, session, reason=None):
     from open_webui.routers import groups as groups_router
 
     return await groups_router.remove_users_from_group(
+        request=MagicMock(),
         id=group_id,
         form_data=GroupMembershipForm(user_ids=user_ids, reason=reason),
         user=user,

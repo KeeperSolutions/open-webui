@@ -6,6 +6,7 @@ export const uploadFile = async (
 	file: File,
 	metadata?: object | null,
 	process?: boolean | null,
+	piiMasking?: boolean | null,
 	stream: boolean = true
 ) => {
 	const data = new FormData();
@@ -17,6 +18,9 @@ export const uploadFile = async (
 	const searchParams = new URLSearchParams();
 	if (process !== undefined && process !== null) {
 		searchParams.append('process', String(process));
+	}
+	if (piiMasking !== undefined && piiMasking !== null) {
+		searchParams.append('pii_masking', String(piiMasking));
 	}
 
 	let error = null;
@@ -145,10 +149,13 @@ export const uploadDir = async (token: string) => {
 	return res;
 };
 
-export const getFiles = async (token: string = '') => {
+export const getFiles = async (token: string = '', content: boolean = false) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
+	const searchParams = new URLSearchParams();
+	searchParams.append('content', String(content));
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',
@@ -180,7 +187,8 @@ export const searchFiles = async (
 	token: string,
 	filename: string = '*',
 	skip: number = 0,
-	limit: number = 50
+	limit: number = 50,
+	content: boolean = false
 ) => {
 	let error = null;
 
@@ -188,6 +196,7 @@ export const searchFiles = async (
 	searchParams.append('filename', filename);
 	searchParams.append('skip', String(skip));
 	searchParams.append('limit', String(limit));
+	searchParams.append('content', String(content));
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/search?${searchParams.toString()}`, {
 		method: 'GET',
@@ -205,6 +214,34 @@ export const searchFiles = async (
 			error = err.detail;
 			console.error(err);
 			return [];
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getFileCount = async (token: string = '') => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/count`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err;
+			console.error(err);
+			return null;
 		});
 
 	if (error) {
@@ -365,6 +402,18 @@ export const deleteFileById = async (token: string, id: string) => {
 	}
 
 	return res;
+};
+
+export const getFileDataContentById = async (token: string, id: string) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/data/content`, {
+		method: 'GET',
+		headers: { Accept: 'application/json', authorization: `Bearer ${token}` }
+	})
+		.then((r) => (r.ok ? r.json() : null))
+		.catch(() => null);
+	return (
+		res ?? { content: '', pii_detections: [], pii_scan_status: null, pii_scan_truncated: false }
+	);
 };
 
 export const deleteAllFiles = async (token: string) => {

@@ -2,7 +2,6 @@
 	import { getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { Popover } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import HgIconShield from '$lib/components/icons/HgIconShield.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import MaskedValuesList from './MaskedValuesList.svelte';
@@ -10,35 +9,86 @@
 	const i18n =
 		getContext<Writable<{ t: (key: string, vars?: Record<string, unknown>) => string }>>('i18n');
 
-	type PiiItem = { key: string; type: string; value: string };
+	type PiiDetection = {
+		type: string;
+		start: number;
+		end: number;
+		// Send-time detections from a file carry the file id and chunk index. The
+		// value is sliced from the citation chunk the browser already has, so the
+		// wire and DB never carry a plaintext value.
+		fileId?: string;
+		fileName?: string;
+		docIdx?: number;
+	};
+	type PiiItem = { key: string; type: string; value: string; source?: string };
+	type CitationSource = {
+		source?: { id?: string; name?: string; type?: string };
+		document?: string[];
+		metadata?: { file_id?: string }[];
+	};
 
-	export let detections: { type: string; start: number; end: number }[] = [];
+	export let detections: PiiDetection[] = [];
 	export let originalText = '';
+	// Citation sources of the same response. File-sourced values are sliced from
+	// these chunks.
+	export let sources: CitationSource[] = [];
+	// File PII from the ingest scan, already reconstructed from the file content.
+	// UserMessage fetches it from GET /files/{id}/data/content.
+	export let fileItems: PiiItem[] = [];
+	export let scanning = false;
 
 	let show = false;
 	let items: PiiItem[] = [];
 	let count = 0;
 
-	// Reconstruct masked values locally from the user's own message text and
-	// dedupe identical (type, value) pairs. Nothing here leaves the browser:
-	// the wire/DB only ever carried {type, start, end}.
+	// Finds the citation chunk a file-sourced detection points at and slices the
+	// value from it. Returns '' when the chunk is not found; such items are
+	// filtered out.
+	const reconstructFileValue = (d: PiiDetection): string => {
+		const src = (sources ?? []).find(
+			(s) => s?.source?.id === d.fileId || (s?.metadata ?? []).some((m) => m?.file_id === d.fileId)
+		);
+		const chunk = src?.document?.[d.docIdx ?? -1];
+		return typeof chunk === 'string' ? chunk.slice(d.start, d.end) : '';
+	};
+
+	// Reconstruct masked values locally and dedupe by (type, value, source).
+	// Nothing sensitive leaves the browser: the wire and DB carry only
+	// {type, start, end}, plus file and chunk refs for file-sourced detections.
+	// Ingest items are spread last so they win on a key collision.
 	$: items = Array.from(
-		new Map(
-			(detections ?? [])
+		new Map([
+			// Message and send-time file detections
+			...(detections ?? [])
 				.map((d): [string, PiiItem] => {
-					const value = (originalText ?? '').slice(d.start, d.end);
-					// JSON.stringify gives an unambiguous (type, value) key — a plain
-					// `${type}::${value}` join could collide if a value contained "::".
-					const key = JSON.stringify([d.type, value]);
-					return [key, { key, type: d.type, value }];
+					const isFile = d.fileId != null;
+					const value = isFile
+						? reconstructFileValue(d)
+						: (originalText ?? '').slice(d.start, d.end);
+					const source = isFile ? d.fileName : undefined;
+					// JSON.stringify gives an unambiguous (type, value, source) key.
+					const key = JSON.stringify([d.type, value, source ?? null]);
+					return [key, { key, type: d.type, value, source }];
 				})
-				.filter(([, it]) => it.value !== '')
-		).values()
-	);
+				.filter(([, it]) => it.value !== ''),
+			// Ingest scan items, already reconstructed
+			...(fileItems ?? []).map((it): [string, PiiItem] => [it.key, it])
+		]).values()
+	).filter((it) => it.value !== '');
 	$: count = items.length;
 </script>
 
-{#if count > 0}
+{#if scanning && count === 0}
+	<div
+		class="flex items-center gap-1 h-9 px-3 py-1 self-center rounded-full bg-stone-50 dark:bg-gray-800"
+	>
+		<HgIconShield class="size-3.5 text-hg-text-secondary dark:text-gray-400 animate-pulse" />
+		<span
+			class="font-hg-body text-xs font-normal text-hg-text-secondary dark:text-gray-400 whitespace-nowrap"
+			>{$i18n.t('PII scan in progress…')}</span
+		>
+	</div>
+{:else if count > 0}
 	<Popover.Root bind:open={show}>
 		<!-- Badge — Figma "PiiMaskingResult" pill; chevron flips while open -->
 		<Popover.Trigger
@@ -56,17 +106,64 @@
 			/>
 		</Popover.Trigger>
 
-		<Popover.Content
-			side="bottom"
-			align="end"
-			sideOffset={6}
-			collisionPadding={12}
-			strategy="fixed"
-			fitViewport={true}
-			transition={flyAndScale}
-			class="z-[9999] rounded-2xl border border-hg-border dark:border-gray-800 bg-hg-bg-surface dark:bg-gray-900 shadow-xl overflow-hidden"
-		>
-			<MaskedValuesList {items} />
-		</Popover.Content>
+		<!-- Portal is required, not cosmetic: the chat column is a Tailwind
+			`@container` (container-type: inline-size), which makes it the containing
+			block for position:fixed descendants. Rendered in place, the panel's
+			viewport coordinates get offset by the column's origin and it lands off
+			the right edge of the screen. bits-ui portalled Content by default in
+			0.21; since 2.x it is opt-in. -->
+		<Popover.Portal>
+			<Popover.Content
+				side="bottom"
+				align="end"
+				sideOffset={6}
+				collisionPadding={12}
+				strategy="fixed"
+				class="pii-masked-panel z-[9999] rounded-2xl border border-hg-border dark:border-gray-800 bg-hg-bg-surface dark:bg-gray-900 shadow-xl overflow-hidden"
+			>
+				<MaskedValuesList {items} />
+			</Popover.Content>
+		</Popover.Portal>
 	</Popover.Root>
 {/if}
+
+<style>
+	/* Open/close motion. bits-ui 0.21 drove this through a `transition` prop; 2.x
+		removed it and instead marks the content with data-starting-style (first
+		frame open) and data-ending-style (while closing), holding the unmount until
+		the animation finishes. Values mirror the flyAndScale the card used before:
+		y -8px, scale 0.95, 200ms cubicOut. Scaling from the floating origin makes it
+		grow out of the badge rather than out of thin air.
+
+		:global is required — the panel is portalled to <body>, so it is outside this
+		component's subtree and scoped selectors would never reach it. The class is
+		card-specific to avoid touching any other popover. */
+	:global(.pii-masked-panel) {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+		transform-origin: var(--bits-popover-content-transform-origin, center);
+		transition:
+			opacity 200ms cubic-bezier(0.33, 1, 0.68, 1),
+			transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+	}
+
+	:global(.pii-masked-panel[data-starting-style]),
+	:global(.pii-masked-panel[data-ending-style]) {
+		opacity: 0;
+		transform: translateY(-8px) scale(0.95);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.pii-masked-panel) {
+			transition: none;
+		}
+
+		/* Land on the final values straight away instead of flashing the offset
+			start/end frame with the transition switched off. */
+		:global(.pii-masked-panel[data-starting-style]),
+		:global(.pii-masked-panel[data-ending-style]) {
+			opacity: 1;
+			transform: none;
+		}
+	}
+</style>

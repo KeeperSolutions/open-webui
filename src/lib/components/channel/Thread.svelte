@@ -18,6 +18,7 @@
 	export let channel = null;
 
 	export let onClose = () => {};
+	export let onPin = () => {};
 
 	let messages = null;
 	let top = false;
@@ -173,7 +174,7 @@
 {#if channel}
 	<div class="flex flex-col w-full h-full bg-gray-50 dark:bg-gray-850">
 		<div class="sticky top-0 flex items-center justify-between px-3.5 py-3">
-			<div class=" font-medium text-lg">{$i18n.t('Thread')}</div>
+			<div class=" font-normal text-lg">{$i18n.t('Thread')}</div>
 
 			<div>
 				<button
@@ -196,6 +197,7 @@
 					{messages}
 					{replyToMessage}
 					thread={true}
+					{onPin}
 					onReply={async (message) => {
 						replyToMessage = message;
 

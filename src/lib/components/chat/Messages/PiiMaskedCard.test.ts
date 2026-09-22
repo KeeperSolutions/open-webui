@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import { readable } from 'svelte/store';
 
 import PiiMaskedCard from './PiiMaskedCard.svelte';
@@ -75,6 +75,29 @@ describe('PiiMaskedCard', () => {
 		expect(screen.getByText('2 values masked')).toBeTruthy();
 	});
 
+	// Regression (bits-ui 0.21 -> 2.x): Content used to be portalled to <body> by
+	// default. In 2.x it renders in place unless wrapped in Popover.Portal, and the
+	// chat column above it is a Tailwind `@container` (container-type: inline-size),
+	// which becomes the containing block for position:fixed descendants -- the panel
+	// then lands hundreds of px off the right edge of the viewport and reads as
+	// "clicking the badge does nothing". Assert the content escapes the component.
+	it('portals the opened panel out to the document body', async () => {
+		const { container } = renderCard({
+			detections: [{ type: 'PERSON', start: 9, end: 20 }],
+			originalText: SENTENCE
+		});
+		await fireEvent.click(screen.getByText('1 values masked'));
+
+		const content = document.querySelector('[data-popover-content]');
+		expect(content).not.toBeNull();
+		expect(screen.getByText('Ivan Horvat')).toBeTruthy();
+		// escaped the component's own subtree
+		expect(container.contains(content)).toBe(false);
+		// the hook the open/close CSS animation keys off (see the component's
+		// <style> block) — asserted so markup and selector can't drift apart
+		expect(content?.classList.contains('pii-masked-panel')).toBe(true);
+	});
+
 	it('filters out detections whose offsets yield an empty value', () => {
 		// offsets out of range for the given text -> empty slice -> filtered
 		const { container } = renderCard({
@@ -82,5 +105,75 @@ describe('PiiMaskedCard', () => {
 			originalText: SENTENCE
 		});
 		expect(container.textContent).toBe('');
+	});
+
+	it('counts a file-sourced detection by reconstructing the value from the citation chunk', () => {
+		// The value is sliced from sources[].document[docIdx], not from originalText.
+		renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'f1', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('drops a file-sourced detection when its chunk cannot be located', () => {
+		// No source matches the fileId, so the value is empty and the item is dropped.
+		const { container } = renderCard({
+			detections: [
+				{ type: 'PERSON', start: 0, end: 10, fileId: 'missing', fileName: 'doc.pdf', docIdx: 0 }
+			],
+			originalText: '',
+			sources: [
+				{
+					source: { id: 'f1' },
+					document: ['John Smith works here'],
+					metadata: [{ file_id: 'f1' }]
+				}
+			]
+		});
+		expect(container.textContent).toBe('');
+	});
+
+	it('renders ingest-sourced file PII from the fileItems prop', () => {
+		renderCard({
+			detections: [],
+			originalText: '',
+			fileItems: [
+				{
+					key: JSON.stringify(['HR_OIB', '11111111111', 'doc.pdf']),
+					type: 'HR_OIB',
+					value: '11111111111',
+					source: 'doc.pdf'
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
+	});
+
+	it('dedupes a fileItem against an identical message detection by (type,value,source)', () => {
+		// Neither item has a source, so both keys are ["PERSON","Ivan Horvat",null]
+		// and the card shows one entry.
+		renderCard({
+			detections: [{ type: 'PERSON', start: 9, end: 20 }],
+			originalText: 'Zovem se Ivan Horvat',
+			fileItems: [
+				{
+					key: JSON.stringify(['PERSON', 'Ivan Horvat', null]),
+					type: 'PERSON',
+					value: 'Ivan Horvat',
+					source: undefined
+				}
+			]
+		});
+		expect(screen.getByText('1 values masked')).toBeTruthy();
 	});
 });

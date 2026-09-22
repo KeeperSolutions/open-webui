@@ -85,6 +85,33 @@ export const updateUserDefaultPermissions = async (token: string, permissions: o
 	return res;
 };
 
+export const getUserDefaultPermissionsDefaults = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/default/permissions/defaults`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const updateUserRole = async (token: string, id: string, role: string) => {
 	let error = null;
 
@@ -344,7 +371,16 @@ export const updateUserSettings = async (token: string, settings: object) => {
 		})
 		.catch((err) => {
 			console.error(err);
-			error = err.detail;
+			// A non-ok HTTP response lands here with a real `.detail` from the
+			// server. A network-level failure (offline, DNS, connection refused
+			// — fetch() itself rejecting) lands here too, but as a bare
+			// TypeError with no `.detail`, so `err.detail` is undefined —
+			// falsy, so the `if (error)` check below used to skip the throw
+			// entirely and this call site would return null having actually
+			// failed. Callers (e.g. Selector.svelte's setDefaultHandler) rely
+			// on this throwing on ANY failure to avoid reporting success
+			// (and updating local state) when the save never reached the server.
+			error = err?.detail ?? err?.message ?? 'Network error';
 			return null;
 		});
 
@@ -449,6 +485,62 @@ export const updateUserInfo = async (token: string, info: object) => {
 		},
 		body: JSON.stringify({
 			...info
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getUserVariables = async (token: string) => {
+	let error = null;
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/variables`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateUserVariables = async (token: string, variables: Record<string, string>) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/user/variables/update`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			variables
 		})
 	})
 		.then(async (res) => {
@@ -610,6 +702,90 @@ export const getUserPreview = async (token: string, userId: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}/preview`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export type UserUsageHeatmapEntry = {
+	date: string;
+	messages: number;
+	chats: number;
+	tokens: number;
+	models: Record<string, number>;
+};
+
+export type UserUsageResponse = {
+	totals: {
+		lifetime_tokens: number;
+		input_tokens: number;
+		output_tokens: number;
+		peak_daily_tokens: number;
+		longest_chat_seconds: number;
+		current_streak: number;
+		longest_streak: number;
+		total_chats: number;
+		active_days: number;
+		models_used: number;
+		messages: number;
+		user_messages: number;
+		assistant_messages: number;
+	};
+	heatmap: UserUsageHeatmapEntry[];
+	weekly_heatmap: UserUsageHeatmapEntry[];
+	cumulative_heatmap: UserUsageHeatmapEntry[];
+	insights: {
+		most_used_model: string | null;
+		average_tokens_per_chat: number;
+		average_messages_per_active_day: number;
+		user_message_share: number;
+		assistant_message_share: number;
+	};
+	top_models: Array<{
+		model_id: string;
+		messages: number;
+		input_tokens: number;
+		output_tokens: number;
+		total_tokens: number;
+	}>;
+	top_tools: Array<{ name: string; count: number }>;
+	period: {
+		start_date: number;
+		end_date: number;
+		days: number;
+	};
+};
+
+export const getUserUsage = async (
+	token: string,
+	options: { days?: number; startDate?: number | null; endDate?: number | null } = {}
+): Promise<UserUsageResponse | null> => {
+	let error = null;
+	const searchParams = new URLSearchParams();
+
+	if (options.days) searchParams.append('days', options.days.toString());
+	if (options.startDate) searchParams.append('start_date', options.startDate.toString());
+	if (options.endDate) searchParams.append('end_date', options.endDate.toString());
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/users/usage?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			'Content-Type': 'application/json',

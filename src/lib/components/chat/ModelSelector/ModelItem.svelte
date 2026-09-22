@@ -1,34 +1,45 @@
 <script lang="ts">
 	import { marked } from 'marked';
+
+	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { getContext } from 'svelte';
-
-	import { user, theme } from '$lib/stores';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isTouchDevice, settings, user } from '$lib/stores';
+	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { longPress } from '$lib/utils/longPress';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
-	import { resolveTheme } from '$lib/utils/theme';
 	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import ModelItemMenu from './ModelItemMenu.svelte';
-	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
-	import Tag from '$lib/components/icons/Tag.svelte';
+	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import { toast } from 'svelte-sonner';
+	import Tag from '$lib/components/icons/Tag.svelte';
+	import Label from '$lib/components/icons/Label.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let selectedModelIdx: number = -1;
 	export let item: any = {};
 	export let index: number = -1;
-	export let value: string = '';
+	export let value: string | null = '';
+	export let selectedValues: string[] = [];
+	export let compareEnabled = false;
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
 	export let deleteModelHandler: (model: any) => void = () => {};
+	export let setDefaultHandler: (modelId: string) => void = () => {};
+	export let isDefault = false;
+	export let selectionOnly = false;
 
 	export let onClick: () => void = () => {};
+
+	// Set by Selector.svelte when this row is rendered inside the "Featured" pill.
+	// Featured rows use a two-line card: curated provider + name on line 1, curated
+	// tags (or the model description) on line 2.
+	export let featured = false;
 
 	const copyLinkHandler = async (model) => {
 		const baseUrl = window.location.origin;
@@ -42,80 +53,133 @@
 	};
 
 	let showMenu = false;
+	$: isSelected = compareEnabled ? selectedValues.includes(item.value) : value === item.value;
 
-	// Resolve theme to 'light' or 'dark' for API call
-	$: resolvedTheme = resolveTheme($theme);
+	// `providerName` is a curated brand name ("Google"), set only on featured
+	// entries by featuredToItem() in featuredModels.ts. It is deliberately NOT
+	// derived from the model's `owned_by` — that is infrastructure ("ollama"), not
+	// a brand — so it stays empty for All/Local rows.
+	$: providerDisplay = featured ? ((item?.providerName as string) ?? '') : '';
 
-	// providerName prop is only set by featured entries (curated brand name e.g. "Google").
-	// For All/Local tabs owned_by is infrastructure ("ollama"), not the model brand — ignore it.
-	$: providerDisplay = (item?.providerName as string) ?? '';
+	// Featured line 1 is two-tone: provider in primary, model name in tertiary,
+	// separated by an en-dash. With no curated provider, fall back to just the
+	// label (no separator).
+	$: featuredNameHead = providerDisplay || (item?.label ?? '').trim();
+	$: featuredNameTail = providerDisplay ? ` – ${(item?.label ?? '').trim()}` : '';
 
-	// Line 1 two-tone split: provider name in primary, model name in tertiary.
-	// With explicit provider: nameHead = provider, nameTail = full label.
-	// Without provider: split label on first space as before.
-	$: nameHead = (() => {
-		if (providerDisplay) return providerDisplay;
-		const label = (item?.label ?? '').trim();
-		const spaceIdx = label.indexOf(' ');
-		return spaceIdx === -1 ? label : label.slice(0, spaceIdx);
-	})();
-	$: nameTail = (() => {
-		const label = (item?.label ?? '').trim();
-		if (providerDisplay) return label;
-		const spaceIdx = label.indexOf(' ');
-		return spaceIdx === -1 ? '' : label.slice(spaceIdx + 1).trim();
-	})();
-
-	// Line 2 capability string: model tags joined, else fall back to description.
-	$: capabilityLine = (() => {
-		const tags = (item?.model?.tags ?? []).map((t: { name?: string }) => t?.name).filter(Boolean);
-		if (tags.length > 0) {
-			return tags.join(' • ');
-		}
-		return (item?.model?.info?.meta?.description ?? '').trim();
-	})();
+	// Featured line 2: the curated tags as chips (up to 3), else the description.
+	$: featuredTags = featured
+		? (item?.model?.tags ?? [])
+				.map((t: { name?: string }) => t?.name)
+				.filter(Boolean)
+				.slice(0, 3)
+		: [];
+	$: featuredDescription = (item?.model?.info?.meta?.description ?? '').trim();
 </script>
 
 <button
-	aria-roledescription="model-item"
 	role="option"
-	aria-selected={value === item.value}
+	aria-selected={isSelected}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
-	class="flex group/item w-full text-left select-none items-center rounded-xl px-3 py-2 outline-hidden transition-all duration-75 hover:bg-hg-bg-muted dark:hover:bg-gray-800 cursor-pointer data-highlighted:bg-muted {index ===
-	selectedModelIdx
-		? 'bg-hg-bg-muted dark:bg-gray-800 group-hover:bg-transparent'
-		: ''}"
+	class="group/item flex w-full cursor-pointer select-none items-center rounded-xl px-2 text-left text-[13px] font-normal text-gray-700 outline-hidden transition-colors duration-75 hover:bg-gray-50/40 dark:text-gray-100 dark:hover:bg-gray-800/40 {featured
+		? 'py-2'
+		: 'h-8'} {index === selectedModelIdx && !compareEnabled
+		? 'bg-gray-50/70 dark:bg-gray-800/60'
+		: ''} {isSelected ? 'bg-gray-50/70 dark:bg-gray-800/60' : ''}"
 	data-arrow-selected={index === selectedModelIdx}
 	data-value={item.value}
+	use:longPress={{
+		enabled: $isTouchDevice && !selectionOnly,
+		onLongPress: () => {
+			showMenu = true;
+		}
+	}}
 	on:click={() => {
 		onClick();
 	}}
 >
-	<div class="flex flex-[1_0_0] items-center gap-2 min-w-px">
-		<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
-			<img
-				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&theme=${resolvedTheme}&lang=${$i18n.language}`}
-				alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
-				class="rounded-full size-5 shrink-0"
-				loading="lazy"
-				on:error={(e) => {
-					e.currentTarget.src = '/favicon.png';
-				}}
-			/>
-		</Tooltip>
-		<div class="flex flex-[1_0_0] flex-col gap-1 items-start min-w-px">
-			<span class="font-semibold text-base truncate w-full leading-[1.4]">
-				<span class="text-hg-text-primary dark:text-gray-100">{nameHead}</span>{#if nameTail}<span
-						class="text-hg-text-tertiary dark:text-gray-500">{' '}– {nameTail}</span
-					>{/if}
-			</span>
-			{#if capabilityLine}
-				<p class="text-xs text-hg-text-tertiary dark:text-gray-500 truncate w-full leading-[1.4]">
-					{capabilityLine}
-				</p>
+	<div class="flex flex-1 flex-col gap-1.5 overflow-hidden">
+		<!-- {#if (item?.model?.tags ?? []).length > 0}
+			<div
+				class="flex gap-0.5 self-center items-start h-full w-full translate-y-[0.5px] overflow-x-auto scrollbar-none"
+			>
+				{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
+					<Tooltip content={tag.name} className="flex-shrink-0">
+						<div
+							class=" text-xs font-normal px-1 rounded-sm uppercase bg-gray-500/20 text-gray-700 dark:text-gray-200"
+						>
+							{tag.name}
+						</div>
+					</Tooltip>
+				{/each}
+			</div>
+		{/if} -->
+
+		<div class="flex items-center gap-2 overflow-hidden">
+			<div class="flex items-center min-w-fit">
+				<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
+					<img
+						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&lang=${$i18n.language}`}
+						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
+						class="flex size-4 items-center rounded-full"
+						loading="lazy"
+						on:error={(e) => {
+							e.currentTarget.src = '/favicon.png';
+						}}
+					/>
+				</Tooltip>
+			</div>
+
+			{#if featured}
+				<div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
+					<Tooltip
+						content={`${item.label} (${item.value})`}
+						placement="top-start"
+						className="min-w-0"
+					>
+						<div class="line-clamp-1 font-medium leading-tight">
+							<span class="text-gray-700 dark:text-gray-100">{featuredNameHead}</span><span
+								class="text-gray-400 dark:text-gray-500">{featuredNameTail}</span
+							>
+						</div>
+					</Tooltip>
+					{#if featuredTags.length > 0}
+						<div class="flex flex-wrap items-center gap-1">
+							{#each featuredTags as tag}
+								<span
+									class="rounded bg-gray-500/15 px-1.5 py-px text-[10px] font-medium uppercase leading-4 tracking-wide text-gray-500 dark:text-gray-400"
+								>
+									{tag}
+								</span>
+							{/each}
+						</div>
+					{:else if featuredDescription}
+						<div class="line-clamp-1 text-[11px] text-gray-400 dark:text-gray-500">
+							{featuredDescription}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="flex min-w-0 items-center">
+					<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
+						<div class="line-clamp-1">
+							{item.label}
+						</div>
+					</Tooltip>
+				</div>
 			{/if}
 
-			<div class="shrink-0 flex items-center gap-2">
+			<div class="flex shrink-0 items-center gap-1.5">
+				{#if isDefault}
+					<Tooltip content={$i18n.t('Default model')} className="self-end">
+						<span
+							class="rounded-full bg-hg-info-bg px-1.5 py-px text-[10px] font-medium uppercase leading-4 tracking-wide text-hg-info-text dark:bg-hg-blue/20 dark:text-hg-blue"
+						>
+							{$i18n.t('Default')}
+						</span>
+					</Tooltip>
+				{/if}
+
 				{#if item.model.owned_by === 'ollama'}
 					{#if (item.model.ollama?.details?.parameter_size ?? '') !== ''}
 						<div class="flex items-center translate-y-[0.5px]">
@@ -131,7 +195,7 @@
 								}`}
 								className="self-end"
 							>
-								<span class=" text-xs font-medium text-gray-600 dark:text-gray-400 line-clamp-1"
+								<span class="line-clamp-1 text-[11px] font-normal text-gray-500 dark:text-gray-400"
 									>{item.model.ollama?.details?.parameter_size ?? ''}</span
 								>
 							</Tooltip>
@@ -140,7 +204,7 @@
 				{/if}
 
 				{#if item.model.loaded}
-					<div class="flex items-center translate-y-[0.5px] px-0.5">
+					<div class="flex items-center px-0.5">
 						<Tooltip
 							content={item.model.ollama?.expires_at &&
 							new Date(item.model.ollama?.expires_at * 1000) > new Date()
@@ -151,11 +215,11 @@
 							className="self-end"
 						>
 							<div class=" flex items-center">
-								<span class="relative flex size-2">
+								<span class="relative flex size-1.5">
 									<span
 										class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
 									/>
-									<span class="relative inline-flex rounded-full size-2 bg-green-500" />
+									<span class="relative inline-flex size-1.5 rounded-full bg-green-500" />
 								</span>
 							</div>
 						</Tooltip>
@@ -164,13 +228,13 @@
 
 				<!-- {JSON.stringify(item.info)} -->
 
-				{#if (item?.model?.tags ?? []).length > 0}
+				{#if !featured && (item?.model?.tags ?? []).length > 0}
 					{#key item.model.id}
 						<Tooltip elementId="tags-{item.model.id}">
 							<div slot="tooltip" id="tags-{item.model.id}">
 								{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
 									<Tooltip content={tag.name} className="flex-shrink-0">
-										<div class=" text-xs font-medium rounded-sm uppercase text-white">
+										<div class=" text-xs font-normal rounded-sm uppercase text-white">
 											{tag.name}
 										</div>
 									</Tooltip>
@@ -253,11 +317,11 @@
 		</div>
 	</div>
 
-	<div class="ml-auto pl-2 pr-1 flex items-center gap-1.5 shrink-0">
-		{#if $user?.role === 'admin' && item.model.loaded}
+	<div class="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+		{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
 			<Tooltip
 				content={`${$i18n.t('Eject')}`}
-				className="shrink-0 group-hover/item:opacity-100 opacity-0"
+				className="flex-shrink-0 group-hover/item:opacity-100 opacity-0 "
 			>
 				<button
 					class="flex"
@@ -273,32 +337,36 @@
 			</Tooltip>
 		{/if}
 
-		{#if value === item.value}
-			<div class="shrink-0">
-				<Check className="size-5 text-hg-blue dark:text-gray-400" />
-			</div>
-		{/if}
-
-		<ModelItemMenu
-			bind:show={showMenu}
-			model={item.model}
-			{pinModelHandler}
-			{deleteModelHandler}
-			copyLinkHandler={() => {
-				copyLinkHandler(item.model);
-			}}
-		>
-			<button
-				aria-label={`${$i18n.t('More Options')}`}
-				class="flex"
-				on:click={(e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					showMenu = !showMenu;
+		{#if !selectionOnly}
+			<ModelItemMenu
+				bind:show={showMenu}
+				model={item.model}
+				{pinModelHandler}
+				{deleteModelHandler}
+				{setDefaultHandler}
+				{isDefault}
+				copyLinkHandler={() => {
+					copyLinkHandler(item.model);
 				}}
 			>
-				<EllipsisVertical className="size-5 text-hg-text-tertiary dark:text-gray-500" />
-			</button>
-		</ModelItemMenu>
+				<button
+					aria-label={`${$i18n.t('More Options')}`}
+					class="flex {$isTouchDevice ? 'invisible' : ''}"
+					on:click={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						showMenu = !showMenu;
+					}}
+				>
+					<EllipsisHorizontal />
+				</button>
+			</ModelItemMenu>
+		{/if}
+
+		{#if isSelected}
+			<div>
+				<Check className="size-3" />
+			</div>
+		{/if}
 	</div>
 </button>

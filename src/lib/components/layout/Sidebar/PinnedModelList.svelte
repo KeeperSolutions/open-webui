@@ -9,15 +9,31 @@
 	import PinnedModelItem from './PinnedModelItem.svelte';
 
 	export let selectedChatId = null;
-	export let shiftKey = false;
 
 	let pinnedModels = [];
 
 	const initPinnedModelsSortable = () => {
 		const pinnedModelsList = document.getElementById('pinned-models-list');
-		if (pinnedModelsList && !$mobile) {
+		if (pinnedModelsList) {
 			new Sortable(pinnedModelsList, {
 				animation: 150,
+				delay: $mobile ? 400 : 0,
+				delayOnTouchOnly: true,
+				touchStartThreshold: 5,
+				forceFallback: $mobile,
+				fallbackTolerance: 3,
+				ghostClass: $mobile ? 'opacity-0' : 'opacity-30',
+				fallbackClass: 'opacity-90 shadow-lg',
+				chosenClass: 'opacity-100',
+				setData: function (dataTransfer, dragEl) {
+					dataTransfer.setData(
+						'text/plain',
+						JSON.stringify({
+							type: 'model',
+							id: dragEl.dataset.id
+						})
+					);
+				},
 				onUpdate: async (event) => {
 					const modelId = event.item.dataset.id;
 					const newIndex = event.newIndex;
@@ -88,7 +104,6 @@
 		{#if model}
 			<PinnedModelItem
 				{model}
-				{shiftKey}
 				onClick={() => {
 					selectedChatId = null;
 					chatId.set('');

@@ -52,19 +52,19 @@ describe('the team dashboard route brings its own container', () => {
 	});
 
 	it('reserves the narrower rail when the sidebar is collapsed', () => {
-		expect(source).toContain('md:max-w-[calc(100%-49px)]');
+		expect(source).toContain('md:max-w-[calc(100%-42px)]');
 	});
 
 	it('keeps the two clamps identical to the admin layout it is copied from', () => {
 		/**
-		 * ⚠️ Copied, not reinvented — including the 49px rail for the collapsed
+		 * ⚠️ Copied, not reinvented — including the 42px rail for the collapsed
 		 * sidebar. If the shell ever changes how it reserves that width, this test
 		 * fails on the route that has no layout to inherit the change from.
 		 */
 		const admin = read(ADMIN_LAYOUT);
 		for (const clamp of [
 			'md:max-w-[calc(100%-var(--sidebar-width))]',
-			'md:max-w-[calc(100%-49px)]'
+			'md:max-w-[calc(100%-42px)]'
 		]) {
 			expect(admin).toContain(clamp);
 		}

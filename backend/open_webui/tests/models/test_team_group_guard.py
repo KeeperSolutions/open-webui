@@ -192,7 +192,10 @@ class TestDeleteGuard:
         with patch.object(groups_router, "Groups", groups):
             with pytest.raises(HTTPException) as exc:
                 await groups_router.delete_group_by_id(
-                    id=TEAM_GROUP, user=MagicMock(id="admin", role="admin"), db=db_session
+                    request=MagicMock(),
+                    id=TEAM_GROUP,
+                    user=MagicMock(id="admin", role="admin"),
+                    db=db_session,
                 )
         assert exc.value.status_code == 400
         assert await _stored(db_session, TEAM_GROUP) is not None

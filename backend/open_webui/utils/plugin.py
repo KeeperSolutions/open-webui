@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -12,6 +13,7 @@ from typing import Any
 
 from open_webui.env import (
     ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS,
+    ENABLE_PLUGINS,
     OFFLINE_MODE,
     PIP_OPTIONS,
     PIP_PACKAGE_INDEX_OPTIONS,
@@ -202,6 +204,10 @@ def replace_imports(content):
 # May the intent of the one who wrote it survive every
 # import and transformation, as a deed survives the generations.
 async def load_tool_module_by_id(tool_id, content=None):
+    if not ENABLE_PLUGINS:
+        raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
+
+    frontmatter = None
     if content is None:
         tool = await Tools.get_tool_by_id(tool_id)
         if not tool:
@@ -213,8 +219,10 @@ async def load_tool_module_by_id(tool_id, content=None):
         await Tools.update_tool_by_id(tool_id, {'content': content})
     else:
         frontmatter = extract_frontmatter(content)
-        # Install required packages found within the frontmatter
-        install_frontmatter_requirements(frontmatter.get('requirements', ''))
+        # Install required packages found within the frontmatter.
+        # Runs `pip install` via subprocess, which can take a long time;
+        # offload to a thread so it doesn't block the event loop.
+        await asyncio.to_thread(install_frontmatter_requirements, frontmatter.get('requirements', ''))
 
     module_name = f'tool_{tool_id}'
     module = types.ModuleType(module_name)
@@ -231,7 +239,8 @@ async def load_tool_module_by_id(tool_id, content=None):
 
         # Executing the modified content in the created module's namespace
         exec(content, module.__dict__)
-        frontmatter = extract_frontmatter(content)
+        if frontmatter is None:
+            frontmatter = extract_frontmatter(content)
         log.info(f'Loaded module: {module.__name__}')
 
         # Create and return the object if the class 'Tools' is found in the module
@@ -248,6 +257,10 @@ async def load_tool_module_by_id(tool_id, content=None):
 
 
 async def load_function_module_by_id(function_id: str, content: str | None = None):
+    if not ENABLE_PLUGINS:
+        raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
+
+    frontmatter = None
     if content is None:
         function = await Functions.get_function_by_id(function_id)
         if not function:
@@ -258,7 +271,8 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
         await Functions.update_function_by_id(function_id, {'content': content})
     else:
         frontmatter = extract_frontmatter(content)
-        install_frontmatter_requirements(frontmatter.get('requirements', ''))
+        # `pip install` via subprocess can block for a long time; offload it.
+        await asyncio.to_thread(install_frontmatter_requirements, frontmatter.get('requirements', ''))
 
     module_name = f'function_{function_id}'
     module = types.ModuleType(module_name)
@@ -275,7 +289,8 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
 
         # Execute the modified content in the created module's namespace
         exec(content, module.__dict__)
-        frontmatter = extract_frontmatter(content)
+        if frontmatter is None:
+            frontmatter = extract_frontmatter(content)
         log.info(f'Loaded module: {module.__name__}')
 
         # Create appropriate object based on available class type in the module
@@ -285,6 +300,8 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
             return module.Filter(), 'filter', frontmatter
         elif hasattr(module, 'Action'):
             return module.Action(), 'action', frontmatter
+        elif hasattr(module, 'Event'):
+            return module.Event(), 'event', frontmatter
         else:
             raise Exception('No Function class found in the module')
     except Exception as e:
@@ -298,7 +315,33 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
         os.unlink(temp_file.name)
 
 
+def _state_cache(request, name: str) -> dict:
+    if not hasattr(request.app.state, name):
+        setattr(request.app.state, name, {})
+    return getattr(request.app.state, name)
+
+
+def get_tools_cache(request) -> dict:
+    return _state_cache(request, 'TOOLS')
+
+
+def get_tool_contents_cache(request) -> dict:
+    return _state_cache(request, 'TOOL_CONTENTS')
+
+
+def get_functions_cache(request) -> dict:
+    return _state_cache(request, 'FUNCTIONS')
+
+
+def get_function_contents_cache(request) -> dict:
+    return _state_cache(request, 'FUNCTION_CONTENTS')
+
+
 async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
+    tools_cache = get_tools_cache(request)
+    tool_contents_cache = get_tool_contents_cache(request)
+    content = None
+
     if load_from_db:
         # Always load from the database by default
         tool = await Tools.get_tool_by_id(tool_id)
@@ -312,27 +355,19 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
             # Update the tool content in the database
             await Tools.update_tool_by_id(tool_id, {'content': content})
 
-        if (hasattr(request.app.state, 'TOOL_CONTENTS') and tool_id in request.app.state.TOOL_CONTENTS) and (
-            hasattr(request.app.state, 'TOOLS') and tool_id in request.app.state.TOOLS
-        ):
-            if request.app.state.TOOL_CONTENTS[tool_id] == content:
-                return request.app.state.TOOLS[tool_id], None
+        if tool_id in tool_contents_cache and tool_id in tools_cache:
+            if tool_contents_cache[tool_id] == content:
+                return tools_cache[tool_id], None
 
         tool_module, frontmatter = await load_tool_module_by_id(tool_id, content)
     else:
-        if hasattr(request.app.state, 'TOOLS') and tool_id in request.app.state.TOOLS:
-            return request.app.state.TOOLS[tool_id], None
+        if tool_id in tools_cache:
+            return tools_cache[tool_id], None
 
         tool_module, frontmatter = await load_tool_module_by_id(tool_id)
 
-    if not hasattr(request.app.state, 'TOOLS'):
-        request.app.state.TOOLS = {}
-
-    if not hasattr(request.app.state, 'TOOL_CONTENTS'):
-        request.app.state.TOOL_CONTENTS = {}
-
-    request.app.state.TOOLS[tool_id] = tool_module
-    request.app.state.TOOL_CONTENTS[tool_id] = content
+    tools_cache[tool_id] = tool_module
+    tool_contents_cache[tool_id] = content
 
     return tool_module, frontmatter
 
@@ -340,6 +375,10 @@ async def get_tool_module_from_cache(request, tool_id, load_from_db=True):
 async def get_function_module_from_cache(
     request, function_id, function: FunctionModel | None = None, load_from_db=True
 ):
+    functions_cache = get_functions_cache(request)
+    function_contents_cache = get_function_contents_cache(request)
+    content = None
+
     if load_from_db:
         # Always load from the database by default
         # This is useful for hooks like "inlet" or "outlet" where the content might change
@@ -357,30 +396,22 @@ async def get_function_module_from_cache(
             # Update the function content in the database
             await Functions.update_function_by_id(function_id, {'content': content})
 
-        if (
-            hasattr(request.app.state, 'FUNCTION_CONTENTS') and function_id in request.app.state.FUNCTION_CONTENTS
-        ) and (hasattr(request.app.state, 'FUNCTIONS') and function_id in request.app.state.FUNCTIONS):
-            if request.app.state.FUNCTION_CONTENTS[function_id] == content:
-                return request.app.state.FUNCTIONS[function_id], None, None
+        if function_id in function_contents_cache and function_id in functions_cache:
+            if function_contents_cache[function_id] == content:
+                return functions_cache[function_id], None, None
 
         function_module, function_type, frontmatter = await load_function_module_by_id(function_id, content)
     else:
         # Load from cache (e.g. "stream" hook)
         # This is useful for performance reasons
 
-        if hasattr(request.app.state, 'FUNCTIONS') and function_id in request.app.state.FUNCTIONS:
-            return request.app.state.FUNCTIONS[function_id], None, None
+        if function_id in functions_cache:
+            return functions_cache[function_id], None, None
 
         function_module, function_type, frontmatter = await load_function_module_by_id(function_id)
 
-    if not hasattr(request.app.state, 'FUNCTIONS'):
-        request.app.state.FUNCTIONS = {}
-
-    if not hasattr(request.app.state, 'FUNCTION_CONTENTS'):
-        request.app.state.FUNCTION_CONTENTS = {}
-
-    request.app.state.FUNCTIONS[function_id] = function_module
-    request.app.state.FUNCTION_CONTENTS[function_id] = content
+    functions_cache[function_id] = function_module
+    function_contents_cache[function_id] = content
 
     return function_module, function_type, frontmatter
 
@@ -427,6 +458,10 @@ async def install_tool_and_function_dependencies():
     and then installing them using pip. Duplicates or similar version specifications are
     handled by pip as much as possible.
     """
+    if not ENABLE_PLUGINS:
+        log.info('ENABLE_PLUGINS is disabled, skipping tool and function dependencies.')
+        return
+
     function_list = await Functions.get_functions(active_only=True)
     tool_list = await Tools.get_tools()
 
@@ -443,6 +478,7 @@ async def install_tool_and_function_dependencies():
                 if dependencies := frontmatter.get('requirements'):
                     all_dependencies += f'{dependencies}, '
 
-        install_frontmatter_requirements(all_dependencies.strip(', '))
+        # `pip install` via subprocess can block for a long time; offload it.
+        await asyncio.to_thread(install_frontmatter_requirements, all_dependencies.strip(', '))
     except Exception as e:
         log.error(f'Error installing requirements: {e}')

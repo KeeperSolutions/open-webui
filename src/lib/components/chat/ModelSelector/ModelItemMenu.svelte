@@ -3,12 +3,14 @@
 	import { goto } from '$app/navigation';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
-	import { config, settings, user } from '$lib/stores';
+	import Check from '$lib/components/icons/Check.svelte';
+	import { config, settings, showSettings, user } from '$lib/stores';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
 	const i18n = getContext('i18n');
@@ -17,6 +19,8 @@
 	export let model;
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
+	export let setDefaultHandler: (modelId: string) => void = () => {};
+	export let isDefault = false;
 	export let copyLinkHandler: Function = () => {};
 	export let deleteModelHandler: Function = () => {};
 
@@ -43,26 +47,49 @@
 	</Tooltip>
 
 	<div slot="content">
-		<div
-			class="min-w-[210px] text-sm rounded-2xl p-1 z-[9999999] bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
-		>
+		<DropdownMenu className="min-w-[210px] z-[9999999]">
+			<button
+				type="button"
+				aria-pressed={isDefault}
+				class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
+				on:click={(e) => {
+					e.stopPropagation();
+					e.preventDefault();
+
+					setDefaultHandler(model?.id);
+					show = false;
+				}}
+			>
+				<Check className="size-3.5 {isDefault ? '' : 'opacity-0'}" />
+
+				<div class="flex items-center">
+					{#if isDefault}
+						{$i18n.t('Unset as default')}
+					{:else}
+						{$i18n.t('Set as default')}
+					{/if}
+				</div>
+			</button>
+
+			<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
+
 			{#if model?.preset || model?.info?.base_model_id ? model?.info?.user_id === $user?.id : $user?.role === 'admin'}
 				<button
 					type="button"
-					class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+					class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
 					on:click={(e) => {
 						e.stopPropagation();
 						e.preventDefault();
 
-						goto(
-							model?.preset || model?.info?.base_model_id
-								? `/workspace/models/edit?id=${encodeURIComponent(model?.id ?? '')}`
-								: `/admin/settings/models?id=${encodeURIComponent(model?.id ?? '')}`
-						);
+						if (model?.preset || model?.info?.base_model_id) {
+							goto(`/workspace/models/edit?id=${encodeURIComponent(model?.id ?? '')}`);
+						} else {
+							showSettings.set({ tab: 'admin:models', state: { id: model?.id ?? null } });
+						}
 						show = false;
 					}}
 				>
-					<Pencil className="size-4" />
+					<Pencil className="size-3.5" />
 
 					<div class="flex items-center">{$i18n.t('Edit')}</div>
 				</button>
@@ -70,7 +97,7 @@
 				{#if $user?.role === 'admin' && model?.owned_by === 'ollama'}
 					<button
 						type="button"
-						class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+						class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
 						on:click={(e) => {
 							e.stopPropagation();
 							e.preventDefault();
@@ -85,7 +112,7 @@
 							viewBox="0 0 24 24"
 							stroke-width="1.5"
 							stroke="currentColor"
-							class="size-4"
+							class="size-3.5"
 						>
 							<path
 								stroke-linecap="round"
@@ -98,13 +125,13 @@
 					</button>
 				{/if}
 
-				<hr class="border-gray-50 dark:border-gray-800/30 my-1" />
+				<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
 			{/if}
 
 			<button
 				type="button"
 				aria-pressed={($settings?.pinnedModels ?? []).includes(model?.id)}
-				class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+				class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
 				on:click={(e) => {
 					e.stopPropagation();
 					e.preventDefault();
@@ -114,9 +141,9 @@
 				}}
 			>
 				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-					<PinSlash />
+					<PinSlash className="size-3.5" />
 				{:else}
-					<Pin />
+					<Pin className="size-3.5" />
 				{/if}
 
 				<div class="flex items-center">
@@ -128,44 +155,48 @@
 				</div>
 			</button>
 
-			<button
-				type="button"
-				class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
-				on:click={(e) => {
-					e.stopPropagation();
-					e.preventDefault();
-
-					copyLinkHandler();
-					show = false;
-				}}
-			>
-				<Link />
-
-				<div class="flex items-center">{$i18n.t('Copy Link')}</div>
-			</button>
-
-			{#if $config?.features.enable_community_sharing}
-				<hr class="border-gray-50 dark:border-gray-800/30 my-1" />
-
+			<!-- TRAU-542: "Copy Link" and "Community Reviews" hidden pending a decision on
+				 whether we want them at all. Kept in code; flip `false` to restore. -->
+			{#if false}
 				<button
 					type="button"
-					class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+					class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
 					on:click={(e) => {
 						e.stopPropagation();
 						e.preventDefault();
 
-						window.open(
-							`https://openwebui.com/models?q=${encodeURIComponent(model?.id ?? '')}`,
-							'_blank'
-						);
+						copyLinkHandler();
 						show = false;
 					}}
 				>
-					<GlobeAlt className="size-4" />
+					<Link className="size-3.5" />
 
-					<div class="flex items-center">{$i18n.t('Community Reviews')}</div>
+					<div class="flex items-center">{$i18n.t('Copy Link')}</div>
 				</button>
+
+				{#if $config?.features.enable_community_sharing}
+					<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
+
+					<button
+						type="button"
+						class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
+						on:click={(e) => {
+							e.stopPropagation();
+							e.preventDefault();
+
+							window.open(
+								`https://openwebui.com/models?q=${encodeURIComponent(model?.id ?? '')}`,
+								'_blank'
+							);
+							show = false;
+						}}
+					>
+						<GlobeAlt className="size-3.5" />
+
+						<div class="flex items-center">{$i18n.t('Community Reviews')}</div>
+					</button>
+				{/if}
 			{/if}
-		</div>
+		</DropdownMenu>
 	</div>
 </Dropdown>

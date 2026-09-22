@@ -1,11 +1,14 @@
 <script lang="ts">
-	import dayjs from 'dayjs';
 	import { toast } from 'svelte-sonner';
 	import { tick, getContext, onMount } from 'svelte';
 
 	import { models, settings } from '$lib/stores';
 	import { user as _user } from '$lib/stores';
-	import { copyToClipboard as _copyToClipboard, formatDate } from '$lib/utils';
+	import {
+		copyToClipboard as _copyToClipboard,
+		formatMessageTimestamp,
+		formatMessageTimestampFull
+	} from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
@@ -17,17 +20,23 @@
 	import Image from '$lib/components/common/Image.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import PiiMaskedCard from './PiiMaskedCard.svelte';
+	import { getFileDataContentById } from '$lib/apis/files';
+	import {
+		scopeCardDetections,
+		ingestCoveredFileIds as computeIngestCoveredFileIds,
+		piiIngestScanEnabled
+	} from '$lib/utils/pii';
+	import SubagentResultRow from './SubagentResultRow.svelte';
 
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 
 	const i18n = getContext('i18n');
-	dayjs.extend(localizedFormat);
-
 	export let user;
 
 	export let chatId;
 	export let history;
 	export let messageId;
+	export let piiMaskingEnabled = true;
 
 	export let siblings;
 
@@ -40,6 +49,8 @@
 
 	export let isFirstMessage: boolean;
 	export let readOnly: boolean;
+	export let allowDelete = true;
+	export let compactPreview = false;
 	export let editCodeBlock = true;
 	export let topPadding = false;
 
@@ -55,6 +66,7 @@
 	let editScrollContainer: HTMLDivElement;
 
 	let message = structuredClone(history.messages[messageId]);
+	let timerExpanded = false;
 	$: if (history.messages) {
 		const source = history.messages[messageId];
 		if (source) {
@@ -66,9 +78,17 @@
 		}
 	}
 
+	type PiiCardDetection = {
+		type: string;
+		start: number;
+		end: number;
+		fileId?: string;
+		fileName?: string;
+		docIdx?: number;
+	};
 	// Keeper PII card: detections live on the child (assistant) message; read them
 	// from live history so the card sits on the user message it describes.
-	$: piiDetections = (() => {
+	$: piiDetections = ((): PiiCardDetection[] => {
 		// Iterate newest-first: childrenIds grow with regenerations / multi-model
 		// responses, so the latest child holds the freshest detections.
 		const children = history?.messages?.[messageId]?.childrenIds ?? [];
@@ -82,6 +102,141 @@
 		history?.messages?.[messageId]?.originalContent ??
 		history?.messages?.[messageId]?.content ??
 		'';
+
+	// Citation sources of the child message whose detections are used. File-sourced
+	// detections index into these chunks.
+	$: piiSources = (() => {
+		const children = history?.messages?.[messageId]?.childrenIds ?? [];
+		for (let i = children.length - 1; i >= 0; i--) {
+			const child = history?.messages?.[children[i]];
+			if ((child?.piiDetections ?? []).length > 0) return child?.sources ?? [];
+		}
+		return [];
+	})();
+
+	let fileItems: { key: string; type: string; value: string; source?: string }[] = [];
+	let _piiFetchKey = '';
+	let piiScanInProgress = false;
+	// File ids whose card list comes from the ingest scan (see ingestCoveredFileIds
+	// in $lib/utils/pii). Other attached files show their send-time detections,
+	// which match what was masked for the LLM. Starts with every attached file
+	// covered so send-time detections do not flash before the first poll.
+	let ingestCoveredFileIds = new Set<string>();
+	$: {
+		const files = history?.messages?.[messageId]?.files ?? [];
+		const ids = files
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id));
+		const key = ids.join(',');
+		// When masking is disabled, clear any stale card state and skip polling.
+		// The fetch key is cleared rather than set to `key`, so re-enabling masking
+		// with the same attachments refetches instead of leaving the card empty.
+		if (!piiMaskingEnabled) {
+			_piiFetchKey = '';
+			piiScanInProgress = false;
+			fileItems = [];
+			ingestCoveredFileIds = new Set();
+		} else if (key !== _piiFetchKey) {
+			_piiFetchKey = key;
+			piiScanInProgress = false;
+			ingestCoveredFileIds = new Set(ids); // optimistic until first poll narrows it
+			(async () => {
+				const capturedKey = key;
+				let out: typeof fileItems = [];
+				// Poll each file's pii_scan_status.
+				// "running": show the indicator and retry after 3 seconds.
+				// null: no scan has written yet, for example a file uploaded before scan
+				//   status was recorded. Retried below only when the ingest scan is on.
+				// Any other status: stop polling.
+				for (let attempt = 0; attempt < 100; attempt++) {
+					if (_piiFetchKey !== capturedKey) return;
+					if (!piiMaskingEnabled) {
+						piiScanInProgress = false;
+						fileItems = [];
+						return;
+					}
+					type FetchedFile = {
+						id: string;
+						name: string | undefined;
+						content: string;
+						pii_detections: Array<{ type: string; start: number; end: number }>;
+						pii_scan_status: string | null;
+						pii_scan_truncated?: boolean;
+					};
+					const fetched: FetchedFile[] = [];
+					for (const f of files) {
+						const id = f?.id ?? f?.file?.id;
+						if (!id) continue;
+						const name = f?.name ?? f?.file?.filename ?? f?.file?.meta?.name;
+						const { content, pii_detections, pii_scan_status, pii_scan_truncated } =
+							await getFileDataContentById(localStorage.token, id);
+						fetched.push({
+							id,
+							name,
+							content,
+							pii_detections,
+							pii_scan_status,
+							pii_scan_truncated
+						});
+					}
+					// Skipped, failed and truncated scans fall back to send-time detections,
+					// which can cover text past the scan's character limit.
+					if (_piiFetchKey === capturedKey) {
+						ingestCoveredFileIds = computeIngestCoveredFileIds(fetched);
+					}
+					const anyRunning = fetched.some((f) => f.pii_scan_status === 'running');
+					out = fetched.flatMap((f) =>
+						(f.pii_detections ?? [])
+							.map((d) => {
+								const value = (f.content ?? '').slice(d.start, d.end);
+								return value
+									? {
+											key: JSON.stringify([d.type, value, f.name ?? null]),
+											type: d.type,
+											value,
+											source: f.name
+										}
+									: null;
+							})
+							.filter((x): x is NonNullable<typeof x> => x !== null)
+					);
+					if (anyRunning) {
+						if (_piiFetchKey === capturedKey) piiScanInProgress = true;
+						await new Promise((r) => setTimeout(r, 3000));
+						continue;
+					}
+					// A null status means no scan has written yet. Retry up to 5 times only
+					// when the ingest scan is on, because each attempt re-fetches the whole
+					// file content.
+					const awaitingScan =
+						piiIngestScanEnabled() && fetched.some((f) => f.pii_scan_status == null);
+					if (awaitingScan && out.length === 0 && attempt < 5) {
+						await new Promise((r) => setTimeout(r, 2500));
+						continue;
+					}
+					break;
+				}
+				if (_piiFetchKey === capturedKey) {
+					piiScanInProgress = false;
+					fileItems = out;
+				}
+			})();
+		}
+	}
+	// Ids of files attached to this user message. Send-time file detections can
+	// cover any file sent in the turn, so the card keeps only these files.
+	$: messageFileIds = new Set<string>(
+		(history?.messages?.[messageId]?.files ?? [])
+			.map((f: { id?: string; file?: { id?: string } }) => f?.id ?? f?.file?.id)
+			.filter((id: string | undefined): id is string => Boolean(id))
+	);
+	// Message PII plus send-time file PII for files the ingest scan does not cover.
+	// Covered files are shown from fileItems. See scopeCardDetections.
+	$: piiDetectionsScoped = scopeCardDetections(
+		piiDetections ?? [],
+		ingestCoveredFileIds,
+		messageFileIds
+	);
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -151,73 +306,39 @@
 	id="message-{message.id}"
 	style="scroll-margin-top: 3rem;"
 >
-	{#if !($settings?.chatBubble ?? true)}
-		<div class={`shrink-0 ltr:mr-3 rtl:ml-3 mt-1`}>
+	{#if !($settings?.chatBubble ?? true) && !(message?.meta?.internal === true && message?.meta?.type === 'subagent') && !(message?.meta?.internal === true && message?.meta?.type === 'timer')}
+		<div class={`shrink-0 ltr:mr-2 rtl:ml-2 hidden @lg:flex mt-0.5`}>
 			<ProfileImage
 				src={user?.id
 					? `${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`
 					: `${WEBUI_BASE_URL}/static/favicon.png`}
-				className={'size-8 user-message-profile-image'}
+				className={'size-7 user-message-profile-image'}
 			/>
 		</div>
 	{/if}
-	<div class="flex-auto w-0 max-w-full pl-1">
-		{#if !($settings?.chatBubble ?? true)}
+	<div
+		class="flex-auto w-0 max-w-full {(message?.meta?.internal === true &&
+			message?.meta?.type === 'subagent') ||
+		(message?.meta?.internal === true && message?.meta?.type === 'timer')
+			? ''
+			: 'pl-1'}"
+	>
+		{#if !($settings?.chatBubble ?? true) && !(message?.meta?.internal === true && message?.meta?.type === 'subagent') && !(message?.meta?.internal === true && message?.meta?.type === 'timer')}
 			<div>
 				<Name>
 					{#if message.user}
 						{$i18n.t('You')}
-						<span class=" text-gray-500 text-sm font-medium">{message?.user ?? ''}</span>
+						<span class=" text-gray-500 text-[0.9375rem] font-normal">{message?.user ?? ''}</span>
 					{:else if $settings.showUsername || $_user?.name !== user?.name}
 						{user?.name ?? $i18n.t('You')}
 					{:else}
 						{$i18n.t('You')}
 					{/if}
-
-					{#if message.timestamp}
-						<div
-							class="self-center text-xs font-medium first-letter:capitalize ml-0.5 translate-y-[1px] {($settings?.highContrastMode ??
-							false)
-								? 'dark:text-gray-100 text-gray-900'
-								: 'invisible group-hover:visible transition'}"
-						>
-							<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
-								<!-- $i18n.t('Today at {{LOCALIZED_TIME}}') -->
-								<!-- $i18n.t('Yesterday at {{LOCALIZED_TIME}}') -->
-								<!-- $i18n.t('{{LOCALIZED_DATE}} at {{LOCALIZED_TIME}}') -->
-
-								<span class="line-clamp-1"
-									>{$i18n.t(formatDate(message.timestamp * 1000), {
-										LOCALIZED_TIME: dayjs(message.timestamp * 1000).format('LT'),
-										LOCALIZED_DATE: dayjs(message.timestamp * 1000).format('L')
-									})}</span
-								>
-							</Tooltip>
-						</div>
-					{/if}
 				</Name>
-			</div>
-		{:else if message.timestamp}
-			<div class="flex justify-end pr-2 text-xs">
-				<div
-					class="text-[0.65rem] font-medium first-letter:capitalize mb-0.5 {($settings?.highContrastMode ??
-					false)
-						? 'dark:text-gray-100 text-gray-900'
-						: 'invisible group-hover:visible transition text-gray-400'}"
-				>
-					<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
-						<span class="line-clamp-1"
-							>{$i18n.t(formatDate(message.timestamp * 1000), {
-								LOCALIZED_TIME: dayjs(message.timestamp * 1000).format('LT'),
-								LOCALIZED_DATE: dayjs(message.timestamp * 1000).format('L')
-							})}</span
-						>
-					</Tooltip>
-				</div>
 			</div>
 		{/if}
 
-		<div class="chat-{message.role} w-full min-w-full markdown-prose">
+		<div class="chat-{message.role} w-full min-w-full">
 			{#if edit !== true}
 				{#if message.files}
 					<div
@@ -249,7 +370,7 @@
 			{/if}
 
 			{#if edit === true}
-				<div class=" w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-5 py-3 mb-2">
+				<div class=" w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-4 py-3 mb-2">
 					{#if (editedFiles ?? []).length > 0}
 						<div class="flex items-center flex-wrap gap-2 -mx-2 mb-1">
 							{#each editedFiles as file, fileIdx}
@@ -268,12 +389,12 @@
 										</div>
 										<div class=" absolute -top-1 -right-1">
 											<button
+												aria-label={$i18n.t('Remove file')}
 												class=" bg-white text-black border border-white rounded-full {($settings?.highContrastMode ??
 												false)
 													? ''
 													: 'group-hover:visible invisible transition'}"
 												type="button"
-												aria-label={$i18n.t('Remove')}
 												on:click={() => {
 													editedFiles.splice(fileIdx, 1);
 
@@ -320,7 +441,7 @@
 						<textarea
 							id="message-edit-{message.id}"
 							bind:this={messageEditTextAreaElement}
-							class=" bg-transparent outline-hidden w-full resize-none"
+							class=" bg-transparent outline-hidden w-full resize-none text-[0.9375rem]"
 							bind:value={editedContent}
 							on:input={(e) => {
 								const messagesContainer = document.getElementById('messages-container');
@@ -348,11 +469,11 @@
 						></textarea>
 					</div>
 
-					<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
+					<div class=" mt-2 -mx-1 flex justify-between text-sm font-normal">
 						<div>
 							<button
 								id="save-edit-message-button"
-								class="px-3.5 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl"
+								class="px-2.5 py-1 bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition rounded-3xl"
 								on:click={() => {
 									editMessageConfirmHandler(false);
 								}}
@@ -364,7 +485,7 @@
 						<div class="flex space-x-1.5">
 							<button
 								id="close-edit-message-button"
-								class="px-3.5 py-1.5 bg-white dark:bg-gray-900 hover:bg-gray-100 text-gray-800 dark:text-gray-100 transition rounded-3xl"
+								class="px-2.5 py-1 bg-white dark:bg-gray-900 hover:bg-gray-100 text-gray-800 dark:text-gray-100 transition rounded-3xl"
 								on:click={() => {
 									cancelEditMessage();
 								}}
@@ -374,7 +495,7 @@
 
 							<button
 								id="confirm-edit-message-button"
-								class="px-3.5 py-1.5 bg-gray-900 dark:bg-white hover:bg-gray-850 text-gray-100 dark:text-gray-800 transition rounded-3xl"
+								class="px-2.5 py-1 bg-gray-900 dark:bg-white hover:bg-gray-850 text-gray-100 dark:text-gray-800 transition rounded-3xl"
 								on:click={() => {
 									editMessageConfirmHandler();
 								}}
@@ -384,6 +505,42 @@
 						</div>
 					</div>
 				</div>
+			{:else if message?.meta?.internal === true && message?.meta?.type === 'timer'}
+				<div class="w-full min-w-0">
+					<button
+						type="button"
+						class="flex w-full min-w-0 items-center gap-2 text-left text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+						aria-expanded={timerExpanded}
+						on:click={() => {
+							timerExpanded = !timerExpanded;
+						}}
+					>
+						<span class="shrink-0 text-[0.75rem] font-medium">{$i18n.t('Timer')}</span>
+						<span class="min-w-0 flex-1 truncate text-[0.75rem]">{message.content}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+							stroke="currentColor"
+							class="size-3 shrink-0 text-gray-400 transition-transform duration-150 dark:text-gray-600 {timerExpanded
+								? 'rotate-180'
+								: ''}"
+						>
+							<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+						</svg>
+					</button>
+					{#if timerExpanded}
+						<div
+							class="mt-2 ml-3 whitespace-pre-wrap break-words border-l border-gray-100 pl-3 text-[0.78125rem] leading-relaxed text-gray-600 dark:border-white/10 dark:text-gray-400"
+							dir={$settings?.chatDirection ?? 'auto'}
+						>
+							{message.content}
+						</div>
+					{/if}
+				</div>
+			{:else if message?.meta?.internal === true && message?.meta?.type === 'subagent'}
+				<SubagentResultRow content={message.content} result={message.meta} />
 			{:else if message.content !== ''}
 				<div class="w-full">
 					<div class="flex {($settings?.chatBubble ?? true) ? 'justify-end pb-1' : 'w-full'}">
@@ -396,14 +553,19 @@
 						>
 							{#if message.content}
 								{#if $settings?.renderMarkdownInUserMessages ?? true}
-									<Markdown
-										id={`${chatId}-${message.id}`}
-										content={message.content}
-										{editCodeBlock}
-										{topPadding}
-									/>
+									<div class="markdown-prose">
+										<Markdown
+											id={`${chatId}-${message.id}`}
+											content={message.content}
+											{editCodeBlock}
+											{topPadding}
+										/>
+									</div>
 								{:else}
-									<div class="whitespace-pre-wrap" dir={$settings?.chatDirection ?? 'auto'}>
+									<div
+										class="whitespace-pre-wrap text-[0.9375rem]"
+										dir={$settings?.chatDirection ?? 'auto'}
+									>
 										{message.content}
 									</div>
 								{/if}
@@ -413,18 +575,37 @@
 				</div>
 			{/if}
 
-			{#if edit !== true}
+			{#if edit !== true && !(message?.meta?.internal === true && message?.meta?.type === 'subagent') && !(message?.meta?.internal === true && message?.meta?.type === 'timer')}
 				<div
 					class=" flex {($settings?.chatBubble ?? true)
 						? 'justify-end'
-						: ''}  text-gray-600 dark:text-gray-500"
+						: 'items-center'}  text-gray-600 dark:text-gray-500"
 				>
-					{#if !($settings?.chatBubble ?? true)}
+					{#if message.timestamp}
+						<Tooltip
+							className="flex self-center {($settings?.chatBubble ?? true) ? 'mr-1' : 'order-last'}"
+							content={formatMessageTimestampFull(message.timestamp * 1000)}
+							placement="bottom"
+						>
+							<time
+								datetime={new Date(message.timestamp * 1000).toISOString()}
+								class="{compactPreview
+									? ''
+									: 'invisible group-hover:visible'} {($settings?.chatBubble ?? true)
+									? 'mr-1'
+									: 'ml-1 shrink-0 whitespace-nowrap'} text-[0.6875rem] tabular-nums text-gray-400 dark:text-gray-600 select-none"
+							>
+								{formatMessageTimestamp(message.timestamp * 1000)}
+							</time>
+						</Tooltip>
+					{/if}
+
+					{#if !compactPreview && !($settings?.chatBubble ?? true)}
 						{#if siblings.length > 1}
 							<div class="flex self-center" dir="ltr">
 								<button
+									aria-label={$i18n.t('Previous message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -447,7 +628,7 @@
 
 								{#if messageIndexEdit}
 									<div
-										class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+										class="text-sm flex justify-center font-normal self-center dark:text-gray-100 min-w-fit"
 									>
 										<input
 											id="message-index-input-{message.id}"
@@ -468,13 +649,13 @@
 													messageIndexEdit = false;
 												}
 											}}
-											class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+											class="bg-transparent font-normal self-center dark:text-gray-100 min-w-fit outline-hidden"
 										/>/{siblings.length}
 									</div>
 								{:else}
 									<!-- svelte-ignore a11y-no-static-element-interactions -->
 									<div
-										class="text-sm tracking-widest font-semibold self-center dark:text-gray-100 min-w-fit"
+										class="text-sm tracking-widest font-normal self-center dark:text-gray-100 min-w-fit"
 										on:dblclick={async () => {
 											messageIndexEdit = true;
 
@@ -491,8 +672,8 @@
 								{/if}
 
 								<button
+									aria-label={$i18n.t('Next message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}
@@ -515,7 +696,7 @@
 							</div>
 						{/if}
 					{/if}
-					{#if !readOnly}
+					{#if !compactPreview && !readOnly}
 						<Tooltip content={$i18n.t('Edit')} placement="bottom">
 							<button
 								class="{($settings?.highContrastMode ?? false)
@@ -544,7 +725,7 @@
 						</Tooltip>
 					{/if}
 
-					{#if message?.content}
+					{#if !compactPreview && message?.content}
 						<Tooltip content={$i18n.t('Copy')} placement="bottom">
 							<button
 								class="{($settings?.highContrastMode ?? false)
@@ -574,13 +755,13 @@
 					{/if}
 
 					{#if $_user?.role === 'admin' || ($_user?.permissions?.chat?.delete_message ?? false)}
-						{#if !readOnly && (!isFirstMessage || siblings.length > 1)}
+						{#if !compactPreview && !readOnly && allowDelete && (!isFirstMessage || siblings.length > 1)}
 							<Tooltip content={$i18n.t('Delete')} placement="bottom">
 								<button
+									aria-label={$i18n.t('Delete')}
 									class="{($settings?.highContrastMode ?? false)
 										? ''
 										: 'invisible group-hover:visible'} p-1 rounded-sm dark:hover:text-white hover:text-black transition"
-									aria-label={$i18n.t('Delete')}
 									on:click={(e) => {
 										if (e.shiftKey) {
 											deleteMessageHandler();
@@ -608,14 +789,20 @@
 						{/if}
 					{/if}
 
-					<PiiMaskedCard detections={piiDetections} originalText={piiOriginalText} />
+					<PiiMaskedCard
+						detections={piiDetectionsScoped}
+						originalText={piiOriginalText}
+						sources={piiSources}
+						{fileItems}
+						scanning={piiScanInProgress}
+					/>
 
-					{#if $settings?.chatBubble ?? true}
+					{#if !compactPreview && ($settings?.chatBubble ?? true)}
 						{#if siblings.length > 1}
 							<div class="flex self-center" dir="ltr">
 								<button
+									aria-label={$i18n.t('Previous message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Previous')}
 									on:click={() => {
 										showPreviousMessage(message);
 									}}
@@ -638,7 +825,7 @@
 
 								{#if messageIndexEdit}
 									<div
-										class="text-sm flex justify-center font-semibold self-center dark:text-gray-100 min-w-fit"
+										class="text-sm flex justify-center font-normal self-center dark:text-gray-100 min-w-fit"
 									>
 										<input
 											id="message-index-input-{message.id}"
@@ -659,13 +846,13 @@
 													messageIndexEdit = false;
 												}
 											}}
-											class="bg-transparent font-semibold self-center dark:text-gray-100 min-w-fit outline-hidden"
+											class="bg-transparent font-normal self-center dark:text-gray-100 min-w-fit outline-hidden"
 										/>/{siblings.length}
 									</div>
 								{:else}
 									<!-- svelte-ignore a11y-no-static-element-interactions -->
 									<div
-										class="text-sm tracking-widest font-semibold self-center dark:text-gray-100 min-w-fit"
+										class="text-sm tracking-widest font-normal self-center dark:text-gray-100 min-w-fit"
 										on:dblclick={async () => {
 											messageIndexEdit = true;
 
@@ -682,8 +869,8 @@
 								{/if}
 
 								<button
+									aria-label={$i18n.t('Next message')}
 									class="self-center p-1 hover:bg-black/5 dark:hover:bg-white/5 dark:hover:text-white hover:text-black rounded-md transition"
-									aria-label={$i18n.t('Next')}
 									on:click={() => {
 										showNextMessage(message);
 									}}

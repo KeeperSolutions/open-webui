@@ -1,0 +1,128 @@
+import { WEBUI_API_BASE_URL } from '$lib/constants';
+
+const isMobile = () => /android|iphone|ipad|ipod/i.test(navigator?.userAgent ?? '');
+
+export const connectConnector = (connectUrl: string): Promise<void> => {
+	return new Promise((resolve) => {
+		// Mobile browsers commonly ignore window.open size hints or block popups outright,
+		// so go straight to the full-page redirect fallback instead of a fixed-size popup.
+		if (isMobile()) {
+			window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+			resolve();
+			return;
+		}
+
+		const width = 520;
+		const height = 680;
+		const left = window.screenX + (window.outerWidth - width) / 2;
+		const top = window.screenY + (window.outerHeight - height) / 2;
+
+		const popup = window.open(
+			`${WEBUI_API_BASE_URL}${connectUrl}`,
+			'connector-oauth',
+			`width=${width},height=${height},left=${left},top=${top}`
+		);
+
+		if (!popup) {
+			// Popup blocked - fall back to a full-page redirect
+			window.location.href = `${WEBUI_API_BASE_URL}${connectUrl}`;
+			resolve();
+			return;
+		}
+
+		const interval = setInterval(() => {
+			if (popup.closed) {
+				clearInterval(interval);
+				resolve();
+			}
+		}, 500);
+	});
+};
+
+export const getGoogleDriveStatus = async (token: string) => {
+	let error = null;
+	const res = await fetch(`${WEBUI_API_BASE_URL}/connectors/google-drive/status`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const downloadGoogleDriveDocument = async (
+	token: string,
+	fileId: string,
+	format: string | null | undefined,
+	filename: string
+) => {
+	const params = new URLSearchParams({ filename });
+	if (format) {
+		params.set('format', format);
+	}
+
+	const result = await fetch(
+		`${WEBUI_API_BASE_URL}/connectors/google-drive/download/${fileId}?${params}`,
+		{
+			method: 'GET',
+			headers: {
+				Authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+
+			const disposition = res.headers.get('Content-Disposition') ?? '';
+			const match = disposition.match(/filename="?([^";]+)"?/);
+
+			return { blob: await res.blob(), filename: match ? match[1] : null };
+		})
+		.catch((err) => {
+			console.error(err);
+			return null;
+		});
+
+	return result;
+};
+
+export const disconnectGoogleDrive = async (token: string) => {
+	let error = null;
+	const res = await fetch(`${WEBUI_API_BASE_URL}/connectors/google-drive/disconnect`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
