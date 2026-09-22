@@ -1430,6 +1430,15 @@ try:
 except ValueError:
     LEDGER_BOOTSTRAP_DAYS = 30
 
+# Minimum time between repeat admin alert emails for the same model/condition
+# (unpriced model, ECB unreachable, etc). Persisted in billing_alert_state so it's
+# enforced across process restarts and multiple concurrent instances, not just in-process.
+# Default 28800 = 8 hours.
+try:
+    BILLING_ALERT_COOLDOWN_SECONDS = int(os.getenv('BILLING_ALERT_COOLDOWN_SECONDS', '28800'))
+except ValueError:
+    BILLING_ALERT_COOLDOWN_SECONDS = 28800
+
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
 SMTP_HOST: str = os.getenv('SMTP_HOST', '')
