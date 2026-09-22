@@ -543,7 +543,7 @@
 				if ($settings?.notificationEnabled ?? false) {
 					new Notification(`${data.title} / Open WebUI`, {
 						body: timeStr,
-						icon: `${WEBUI_BASE_URL}/static/favicon.png`
+						icon: `${WEBUI_BASE_URL}/favicon.png`
 					});
 				}
 			}
@@ -678,7 +678,7 @@
 						if ($settings?.notificationEnabled ?? false) {
 							new Notification(`${displayTitle} / Open WebUI`, {
 								body: contentPreview,
-								icon: `${WEBUI_BASE_URL}/static/favicon.png`
+								icon: `${WEBUI_BASE_URL}/favicon.png`
 							});
 						}
 					}
