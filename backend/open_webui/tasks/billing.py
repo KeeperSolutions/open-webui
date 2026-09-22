@@ -63,6 +63,10 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     rows = []
     unpriced_models: Set[str] = set()
     priced_models: Set[str] = set()
+    # Model keys that came from the "neither field present" fallback below, not from a real
+    # (if oddly-named) model/name value that happens to equal "unknown" - display-labeling
+    # logic must check membership here, not string-match the key against "unknown" itself.
+    models_missing_field: Set[str] = set()
 
     # Fetch rate once per sync batch — stable for up to 4h, consistent across all rows.
     batch_rate = get_eur_usd_rate()
@@ -74,6 +78,8 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
 
         user_id = obs.get("userId") or ""
         model = obs.get("model") or obs.get("name") or "unknown"
+        if not obs.get("model") and not obs.get("name"):
+            models_missing_field.add(model)
         usage = obs.get("usage") or {}
         tokens_input = int(usage.get("input") or 0)
         tokens_output = int(usage.get("output") or 0)
@@ -166,28 +172,41 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     )
 
     def _display_model_name(model: str) -> str:
-        # "unknown" is the fallback in this file when a Langfuse observation has neither a
-        # model nor a name field - clarify in the email that it's a missing-data case, not a
-        # real (if oddly-named) model, without changing the underlying dedup/ledger key.
-        return 'unknown (missing model field)' if model == 'unknown' else model
+        # Checks provenance (models_missing_field, populated above from the actual observation
+        # fields), not model == "unknown" - a real observation can independently report its
+        # own model/name as the literal string "unknown", and that must not be relabeled as a
+        # missing-data case. Display-only either way; the underlying dedup/ledger key is
+        # unchanged.
+        return 'unknown (missing model field)' if model in models_missing_field else model
 
-    due_unpriced = {m for m in unpriced_models if BillingAlertStateDB.should_alert(ALERT_TYPE_UNPRICED_MODEL, m)}
-    if due_unpriced:
+    # Claim first, send second: try_claim_alert() atomically reserves each model before the
+    # email goes out, so two instances racing on the same due model can't both claim it (only
+    # one INSERT/conditional-UPDATE wins). should_alert() alone would be a check-then-send
+    # race - both instances could see "due" before either records anything.
+    claimed_unpriced = {m for m in unpriced_models if BillingAlertStateDB.try_claim_alert(ALERT_TYPE_UNPRICED_MODEL, m)}
+    if claimed_unpriced:
         try:
             from open_webui.utils.email import send_unpriced_models_email
             admin = asyncio.run(Users.get_super_admin_user())
             if admin and admin.email:
                 sent = send_unpriced_models_email(
                     to=admin.email,
-                    model_names=[_display_model_name(m) for m in sorted(due_unpriced)],
+                    model_names=[_display_model_name(m) for m in sorted(claimed_unpriced)],
                 )
                 if sent:
-                    for model in due_unpriced:
-                        BillingAlertStateDB.record_alerted(ALERT_TYPE_UNPRICED_MODEL, model)
-                    log.warning("[ledger-poller] Alerted admin about unpriced models: %s", due_unpriced)
+                    log.warning("[ledger-poller] Alerted admin about unpriced models: %s", claimed_unpriced)
                 else:
+                    # Claim already recorded even though the send failed - release it so the
+                    # next poll can retry immediately instead of waiting out the cooldown.
+                    for model in claimed_unpriced:
+                        BillingAlertStateDB.release_claim(ALERT_TYPE_UNPRICED_MODEL, model)
                     log.error("[ledger-poller] Failed to send unpriced-model alert (will retry next poll)")
+            else:
+                for model in claimed_unpriced:
+                    BillingAlertStateDB.release_claim(ALERT_TYPE_UNPRICED_MODEL, model)
         except Exception as exc:
+            for model in claimed_unpriced:
+                BillingAlertStateDB.release_claim(ALERT_TYPE_UNPRICED_MODEL, model)
             log.error("[ledger-poller] Failed to send unpriced-model alert: %s", exc)
 
     # Alert admin when a previously unpriced model starts producing priced observations.
@@ -201,23 +220,35 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
         ledger_recovered = set(UsageLedgerDB.get_models_with_recent_priced_rows(
             list(alerted_models), since_24h
         ))
-    newly_recovered = (priced_models | ledger_recovered) & alerted_models
-    if newly_recovered:
+    candidate_recovered = (priced_models | ledger_recovered) & alerted_models
+    # Claim first, send second - same reasoning as the unpriced-model block above: computing
+    # candidate_recovered and sending the email are separate from the DB write, so without an
+    # atomic claim two instances could both compute the same set and both email before either
+    # records the transition.
+    claimed_recovered = {
+        m for m in candidate_recovered if BillingAlertStateDB.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, m)
+    }
+    if claimed_recovered:
         try:
             from open_webui.utils.email import send_model_pricing_recovered_email
             admin = asyncio.run(Users.get_super_admin_user())
             if admin and admin.email:
                 sent = send_model_pricing_recovered_email(
                     to=admin.email,
-                    model_names=[_display_model_name(m) for m in sorted(newly_recovered)],
+                    model_names=[_display_model_name(m) for m in sorted(claimed_recovered)],
                 )
                 if sent:
-                    for model in newly_recovered:
-                        BillingAlertStateDB.record_recovered(ALERT_TYPE_UNPRICED_MODEL, model)
-                    log.info("[ledger-poller] Alerted admin about recovered model pricing: %s", newly_recovered)
+                    log.info("[ledger-poller] Alerted admin about recovered model pricing: %s", claimed_recovered)
                 else:
+                    for model in claimed_recovered:
+                        BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
                     log.error("[ledger-poller] Failed to send pricing-recovered alert (will retry next poll)")
+            else:
+                for model in claimed_recovered:
+                    BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
         except Exception as exc:
+            for model in claimed_recovered:
+                BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
             log.error("[ledger-poller] Failed to send model pricing recovered alert: %s", exc)
 
     # Alert admin if ECB has been unreachable since startup
@@ -229,8 +260,9 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
             ECB_ALERT_KEY,
             BillingAlertStateDB,
         )
-        if _ecb_module._last_known_rate is None and BillingAlertStateDB.should_alert(
-            ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY
+        if (
+            _ecb_module._last_known_rate is None
+            and BillingAlertStateDB.try_claim_alert(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
         ):
             try:
                 from open_webui.models.users import Users
@@ -248,11 +280,14 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
                         error_detail=error_detail,
                     )
                     if sent:
-                        BillingAlertStateDB.record_alerted(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
                         log.error("[ledger-poller] Sent ECB unreachable alert to admin.")
                     else:
+                        BillingAlertStateDB.release_claim(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
                         log.error("[ledger-poller] Failed to send ECB alert (will retry next poll).")
+                else:
+                    BillingAlertStateDB.release_claim(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
             except Exception as exc:
+                BillingAlertStateDB.release_claim(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
                 log.error("[ledger-poller] Failed to send ECB alert: %s", exc)
 
     return inserted

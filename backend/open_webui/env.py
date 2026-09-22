@@ -1433,11 +1433,10 @@ except ValueError:
 # Minimum time between repeat admin alert emails for the same model/condition
 # (unpriced model, ECB unreachable, etc). Persisted in billing_alert_state so it's
 # enforced across process restarts and multiple concurrent instances, not just in-process.
-# Default 28800 = 8 hours.
-try:
-    BILLING_ALERT_COOLDOWN_SECONDS = int(os.getenv('BILLING_ALERT_COOLDOWN_SECONDS', '28800'))
-except ValueError:
-    BILLING_ALERT_COOLDOWN_SECONDS = 28800
+# Default 28800 = 8 hours. Uses _int_env (defined above), which clamps to a minimum of 1 -
+# a plain int(os.getenv(...)) would accept 0 or negative values, making every cooldown
+# check immediately true.
+BILLING_ALERT_COOLDOWN_SECONDS = _int_env('BILLING_ALERT_COOLDOWN_SECONDS', 28800)
 
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)

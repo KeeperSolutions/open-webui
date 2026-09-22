@@ -120,6 +120,32 @@ class TestUnpricedModelAlertDispatch:
         mock_send_unpriced2, _ = _run_sync([obs2], alert_state_db)
         mock_send_unpriced2.assert_not_called()
 
+    def test_genuine_model_named_unknown_is_not_relabeled(self, alert_state_db):
+        """Copilot review finding: _display_model_name() used to string-match model=="unknown",
+        which would also relabel a real observation whose model/name field is literally the
+        string "unknown" (not missing) as if it were a missing-data case. The label must be
+        driven by provenance (was the field actually absent), not the resulting value."""
+        obs = _obs("o1", "unknown", None)  # model field IS present, its value happens to be "unknown"
+        assert obs.get("model") == "unknown"
+        mock_send_unpriced, _ = _run_sync([obs], alert_state_db)
+        mock_send_unpriced.assert_called_once()
+        assert mock_send_unpriced.call_args.kwargs["model_names"] == ["unknown"]
+
+    def test_concurrent_claim_race_only_one_instance_sends(self, alert_state_db):
+        """Copilot review finding: the old should_alert() -> send -> record_alerted()
+        sequence was check-then-act, so two instances could both see should_alert()==True
+        for the same newly-unpriced model before either recorded anything, and both would
+        email. try_claim_alert() is meant to close that by making the claim atomic. Simulate
+        two instances racing on the exact same due model by calling try_claim_alert directly,
+        as _sync_observations does internally, and assert only one of them wins."""
+        from open_webui.models.billing_alert_state import ALERT_TYPE_UNPRICED_MODEL
+
+        instance_a_claimed = alert_state_db.try_claim_alert(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+        instance_b_claimed = alert_state_db.try_claim_alert(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        assert instance_a_claimed is True
+        assert instance_b_claimed is False
+
 
 class TestPricingRecoveredAlertDispatch:
     def test_sends_recovery_alert_once_model_is_priced_again(self, alert_state_db):
@@ -146,3 +172,16 @@ class TestPricingRecoveredAlertDispatch:
         with patch("open_webui.models.billing_alert_state.BILLING_ALERT_COOLDOWN_SECONDS", -1):
             mock_send_unpriced2, _ = _run_sync([_obs("o4", "grok-4.6", None)], alert_state_db)
             mock_send_unpriced2.assert_called_once()
+
+    def test_concurrent_recovery_claim_race_only_one_instance_sends(self, alert_state_db):
+        """Same race as the unpriced-model claim, but for the recovered transition: two
+        instances could both compute the same newly-recovered model and both email before
+        either recorded it. try_claim_recovery() makes the alerted->recovered flip atomic."""
+        _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
+        assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        instance_a_claimed = alert_state_db.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+        instance_b_claimed = alert_state_db.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        assert instance_a_claimed is True
+        assert instance_b_claimed is False
