@@ -206,7 +206,7 @@
 	let longPressHintAttemptInProgress = false;
 
 	const maybeShowLongPressHint = async () => {
-		if (longPressHintAttemptInProgress || hasSeenWizard(LONG_PRESS_WIZARD_ID)) {
+		if (longPressHintAttemptInProgress || showLongPressHint || hasSeenWizard(LONG_PRESS_WIZARD_ID)) {
 			if (hasSeenWizard(LONG_PRESS_WIZARD_ID)) maybeShowSettingsHint();
 			return;
 		}
@@ -233,7 +233,7 @@
 	let settingsHintAttemptInProgress = false;
 
 	const maybeShowSettingsHint = async () => {
-		if (settingsHintAttemptInProgress || hasSeenWizard(SETTINGS_WIZARD_ID)) return;
+		if (settingsHintAttemptInProgress || showSettingsHint || hasSeenWizard(SETTINGS_WIZARD_ID)) return;
 		settingsHintAttemptInProgress = true;
 
 		try {
