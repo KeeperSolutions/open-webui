@@ -194,6 +194,8 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
                     model_names=[_display_model_name(m) for m in sorted(claimed_unpriced)],
                 )
                 if sent:
+                    for model in claimed_unpriced:
+                        BillingAlertStateDB.confirm_alert(ALERT_TYPE_UNPRICED_MODEL, model)
                     log.warning("[ledger-poller] Alerted admin about unpriced models: %s", claimed_unpriced)
                 else:
                     # Claim already recorded even though the send failed - release it so the
@@ -224,10 +226,16 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     # Claim first, send second - same reasoning as the unpriced-model block above: computing
     # candidate_recovered and sending the email are separate from the DB write, so without an
     # atomic claim two instances could both compute the same set and both email before either
-    # records the transition.
-    claimed_recovered = {
-        m for m in candidate_recovered if BillingAlertStateDB.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, m)
-    }
+    # records the transition. try_claim_recovery() returns the model's prior last_alerted_at
+    # on a win (None on a loss) so a failed send can fully restore it via
+    # release_recovery_claim() - not just status, or the failed claim's timestamp bump would
+    # silently extend this model's unpriced-model cooldown despite no email ever going out.
+    claimed_recovered: dict[str, int] = {}
+    for m in candidate_recovered:
+        previous_last_alerted_at = BillingAlertStateDB.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, m)
+        if previous_last_alerted_at is not None:
+            claimed_recovered[m] = previous_last_alerted_at
+
     if claimed_recovered:
         try:
             from open_webui.utils.email import send_model_pricing_recovered_email
@@ -238,17 +246,25 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
                     model_names=[_display_model_name(m) for m in sorted(claimed_recovered)],
                 )
                 if sent:
-                    log.info("[ledger-poller] Alerted admin about recovered model pricing: %s", claimed_recovered)
-                else:
                     for model in claimed_recovered:
-                        BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
+                        BillingAlertStateDB.confirm_recovery(ALERT_TYPE_UNPRICED_MODEL, model)
+                    log.info("[ledger-poller] Alerted admin about recovered model pricing: %s", set(claimed_recovered))
+                else:
+                    for model, previous_last_alerted_at in claimed_recovered.items():
+                        BillingAlertStateDB.release_recovery_claim(
+                            ALERT_TYPE_UNPRICED_MODEL, model, previous_last_alerted_at
+                        )
                     log.error("[ledger-poller] Failed to send pricing-recovered alert (will retry next poll)")
             else:
-                for model in claimed_recovered:
-                    BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
+                for model, previous_last_alerted_at in claimed_recovered.items():
+                    BillingAlertStateDB.release_recovery_claim(
+                        ALERT_TYPE_UNPRICED_MODEL, model, previous_last_alerted_at
+                    )
         except Exception as exc:
-            for model in claimed_recovered:
-                BillingAlertStateDB.release_recovery_claim(ALERT_TYPE_UNPRICED_MODEL, model)
+            for model, previous_last_alerted_at in claimed_recovered.items():
+                BillingAlertStateDB.release_recovery_claim(
+                    ALERT_TYPE_UNPRICED_MODEL, model, previous_last_alerted_at
+                )
             log.error("[ledger-poller] Failed to send model pricing recovered alert: %s", exc)
 
     # Alert admin if ECB has been unreachable since startup
@@ -280,6 +296,7 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
                         error_detail=error_detail,
                     )
                     if sent:
+                        BillingAlertStateDB.confirm_alert(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)
                         log.error("[ledger-poller] Sent ECB unreachable alert to admin.")
                     else:
                         BillingAlertStateDB.release_claim(ALERT_TYPE_ECB_UNREACHABLE, ECB_ALERT_KEY)

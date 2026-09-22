@@ -48,7 +48,7 @@ def _obs(obs_id: str, model: str | None, cost_usd: float | None) -> dict:
     }
 
 
-def _run_sync(obs_rows, alert_state_db):
+def _run_sync(obs_rows, alert_state_db, *, unpriced_send_succeeds=True, recovered_send_succeeds=True):
     """Run _sync_observations with Langfuse/ledger/users mocked, but the real
     (in-memory) BillingAlertStateDB so cooldown gating is genuinely exercised."""
     import open_webui.models.billing_alert_state as alert_state_mod
@@ -67,8 +67,8 @@ def _run_sync(obs_rows, alert_state_db):
          patch("open_webui.langfuse.observations.fetch_observations_since", return_value=iter(obs_rows)), \
          patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=1.1), \
          patch("open_webui.models.users.Users.get_super_admin_user", return_value=mock_admin), \
-         patch("open_webui.utils.email.send_unpriced_models_email", return_value=True) as mock_send_unpriced, \
-         patch("open_webui.utils.email.send_model_pricing_recovered_email", return_value=True) as mock_send_recovered:
+         patch("open_webui.utils.email.send_unpriced_models_email", return_value=unpriced_send_succeeds) as mock_send_unpriced, \
+         patch("open_webui.utils.email.send_model_pricing_recovered_email", return_value=recovered_send_succeeds) as mock_send_recovered:
         tasks_mod._sync_observations(datetime.datetime(2024, 1, 1))
 
     return mock_send_unpriced, mock_send_recovered
@@ -146,6 +146,44 @@ class TestUnpricedModelAlertDispatch:
         assert instance_a_claimed is True
         assert instance_b_claimed is False
 
+    def test_crashed_instance_orphaned_claim_does_not_block_alert_forever(self, alert_state_db):
+        """Review finding: try_claim_alert() writes status=claiming before the email is sent.
+        If the process crashes/restarts between the claim and the send, no exception runs, so
+        release_claim() never fires - simulated here by calling try_claim_alert() directly
+        (as a "crashed instance" would have) and never following up with confirm_alert() or
+        release_claim(), exactly what a hard kill leaves behind. A subsequent poll must still
+        be able to alert once BILLING_ALERT_CLAIM_TTL_SECONDS passes, rather than being stuck
+        for the full (much longer) BILLING_ALERT_COOLDOWN_SECONDS."""
+        from open_webui.models.billing_alert_state import ALERT_TYPE_UNPRICED_MODEL
+
+        # "Crashed instance": claims but never confirms or releases.
+        assert alert_state_db.try_claim_alert(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6") is True
+
+        # A poll immediately after must not be able to send - the claim is still fresh, and
+        # for all this poll knows the crashed instance might still be mid-send.
+        mock_send_unpriced, _ = _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
+        mock_send_unpriced.assert_not_called()
+
+        # Once the claim TTL (much shorter than the alert cooldown) has passed, a later poll
+        # must be able to reclaim and actually send.
+        with patch("open_webui.models.billing_alert_state.BILLING_ALERT_CLAIM_TTL_SECONDS", -1):
+            mock_send_unpriced2, _ = _run_sync([_obs("o2", "grok-4.6", None)], alert_state_db)
+            mock_send_unpriced2.assert_called_once()
+
+    def test_recovered_model_relapse_reclaimable_after_cooldown(self, alert_state_db):
+        """Bug found while fixing the above: try_claim_alert()'s reclaim WHERE clause only
+        checked status=alerted (cooldown) or status=claiming (TTL) - it never accounted for
+        status=recovered, which is what a model sits at after a confirmed recovery. A relapse
+        to unpriced on a status=recovered model could never be reclaimed by try_claim_alert()
+        at all, regardless of how much time passed, silently breaking every relapse alert."""
+        _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
+        _run_sync([_obs("o2", "grok-4.6", 1.0)], alert_state_db)  # confirmed recovered
+        assert not alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        with patch("open_webui.models.billing_alert_state.BILLING_ALERT_COOLDOWN_SECONDS", -1):
+            mock_send_unpriced, _ = _run_sync([_obs("o3", "grok-4.6", None)], alert_state_db)
+            mock_send_unpriced.assert_called_once()
+
 
 class TestPricingRecoveredAlertDispatch:
     def test_sends_recovery_alert_once_model_is_priced_again(self, alert_state_db):
@@ -183,5 +221,29 @@ class TestPricingRecoveredAlertDispatch:
         instance_a_claimed = alert_state_db.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
         instance_b_claimed = alert_state_db.try_claim_recovery(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
 
-        assert instance_a_claimed is True
-        assert instance_b_claimed is False
+        assert instance_a_claimed is not None
+        assert instance_b_claimed is None
+
+    def test_failed_recovery_send_does_not_extend_cooldown_for_later_relapse(self, alert_state_db):
+        """Review finding, exercised end-to-end: a failed recovery-email send must not leave
+        last_alerted_at bumped to "now" behind, or a later unpriced-model relapse on the same
+        key gets silently blocked by a cooldown from an alert that was never actually sent.
+        Sequence: alert on grok-4.6 -> recovery send fails (claim must be released, original
+        last_alerted_at restored) -> model relapses to unpriced immediately -> with cooldown
+        forced past, the relapse alert must go out (proves last_alerted_at wasn't left bumped
+        by the failed recovery claim)."""
+        _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
+        assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        _, mock_send_recovered = _run_sync(
+            [_obs("o2", "grok-4.6", 1.0)], alert_state_db, recovered_send_succeeds=False
+        )
+        mock_send_recovered.assert_called_once()
+        # Send failed, so the model must still show as alerted (claim was released).
+        assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        # Cooldown forced to effectively zero: if last_alerted_at were left bumped by the
+        # failed recovery claim, this would still be blocked. It must not be.
+        with patch("open_webui.models.billing_alert_state.BILLING_ALERT_COOLDOWN_SECONDS", -1):
+            mock_send_unpriced, _ = _run_sync([_obs("o3", "grok-4.6", None)], alert_state_db)
+            mock_send_unpriced.assert_called_once()
