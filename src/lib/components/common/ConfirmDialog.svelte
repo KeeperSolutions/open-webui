@@ -27,7 +27,11 @@
 	export let inputType = '';
 	export let inputOptions: ({ label?: string; value: string } | string)[] = [];
 
+	export let showRemember = false;
+	export let rememberLabel = $i18n.t("Don't ask again this session");
+
 	let _inputValue = inputValue;
+	let _remember = false;
 
 	export let show = false;
 
@@ -42,6 +46,7 @@
 
 	const init = () => {
 		_inputValue = inputValue;
+		_remember = false;
 	};
 
 	const handleKeyDown = (event: KeyboardEvent) => {
@@ -66,7 +71,7 @@
 		show = false;
 		await tick();
 		await onConfirm();
-		dispatch('confirm', _inputValue);
+		dispatch('confirm', showRemember ? { value: _inputValue, remember: _remember } : _inputValue);
 	};
 
 	const cancelHandler = () => {
@@ -140,7 +145,7 @@
 				</div>
 
 				<slot>
-					<div class=" text-sm text-gray-500 flex-1">
+					<div class="markdown-prose-sm text-gray-500 flex-1">
 						{#if message !== ''}
 							{@const html = DOMPurify.sanitize(marked.parse(message))}
 							{@html html}
@@ -180,6 +185,13 @@
 									required
 								></textarea>
 							{/if}
+						{/if}
+
+						{#if showRemember}
+							<label class="flex items-center gap-2 mt-3 text-sm dark:text-gray-300 cursor-pointer">
+								<input type="checkbox" bind:checked={_remember} class="rounded" />
+								{rememberLabel}
+							</label>
 						{/if}
 					</div>
 				</slot>

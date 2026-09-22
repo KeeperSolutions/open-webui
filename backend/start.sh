@@ -50,6 +50,11 @@ if [[ -z "${WEBUI_SECRET_KEY:-}" && -z "${WEBUI_JWT_SECRET_KEY:-}" ]]; then
   WEBUI_SECRET_KEY=$(cat "$KEY_FILE")
 fi
 
+# Must come from the environment (e.g. GCP Secret Manager) - never auto-generated into a file
+if [[ -z "${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" ]]; then
+  echo "No CONNECTOR_TOKEN_ENCRYPTION_KEY environment variable set - connector token storage will be disabled."
+fi
+
 # ── Ollama (bundled Docker image) ────────────────────────────────────────────
 
 if [[ "${USE_OLLAMA_DOCKER,,}" == "true" ]]; then
@@ -141,6 +146,7 @@ else
 fi
 
 exec env WEBUI_SECRET_KEY="${WEBUI_SECRET_KEY:-}" \
+  CONNECTOR_TOKEN_ENCRYPTION_KEY="${CONNECTOR_TOKEN_ENCRYPTION_KEY:-}" \
   "$PYTHON_CMD" -m uvicorn open_webui.main:app \
     --host "$HOST" \
     --port "$PORT" \

@@ -247,6 +247,10 @@ STATIC_DIR = Path(os.getenv('STATIC_DIR', OPEN_WEBUI_DIR / 'static'))
 
 FONTS_DIR = Path(os.getenv('FONTS_DIR', OPEN_WEBUI_DIR / 'static' / 'fonts'))
 
+PANDOC_REFERENCE_DOC = Path(
+    os.getenv('PANDOC_REFERENCE_DOC', OPEN_WEBUI_DIR / 'static' / 'pandoc' / 'reference.docx')
+)
+
 FRONTEND_BUILD_DIR = Path(os.getenv('FRONTEND_BUILD_DIR', BASE_DIR / 'build')).resolve()
 
 if FROM_INIT_PY:
@@ -821,6 +825,9 @@ ENABLE_OAUTH_ID_TOKEN_COOKIE = os.getenv('ENABLE_OAUTH_ID_TOKEN_COOKIE', 'True')
 OAUTH_CLIENT_INFO_ENCRYPTION_KEY = os.getenv('OAUTH_CLIENT_INFO_ENCRYPTION_KEY', WEBUI_SECRET_KEY)
 
 OAUTH_SESSION_TOKEN_ENCRYPTION_KEY = os.getenv('OAUTH_SESSION_TOKEN_ENCRYPTION_KEY', WEBUI_SECRET_KEY)
+
+# No hardcoded fallback by design: auto-generated/persisted by start.sh/start_windows.bat.
+CONNECTOR_TOKEN_ENCRYPTION_KEY = os.getenv('CONNECTOR_TOKEN_ENCRYPTION_KEY', '')
 
 # Maximum number of concurrent OAuth sessions per user per provider
 # This prevents unbounded session growth while allowing multi-device usage

@@ -1,0 +1,386 @@
+import asyncio
+import logging
+import mimetypes
+import re
+import time
+from datetime import timedelta
+from urllib.parse import urlencode
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from open_webui.config import (
+    GOOGLE_DRIVE_CONNECTOR_CLIENT_ID,
+    GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET,
+    GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI,
+)
+from open_webui.env import INTERNAL_EMAIL_DOMAINS
+from open_webui.models.connector_connections import ConnectorConnections
+from open_webui.utils.auth import (
+    create_token,
+    decode_token,
+    get_verified_user,
+    invalidate_token,
+    is_valid_token,
+)
+from pydantic import BaseModel
+from starlette.responses import HTMLResponse, RedirectResponse, Response
+
+log = logging.getLogger(__name__)
+
+router = APIRouter()
+
+GOOGLE_DRIVE_CONNECTOR = 'google_drive'
+
+
+def is_internal_email(email: str | None) -> bool:
+    """The Drive connector's OAuth app is unverified with Google, so access is limited to
+    internal accounts until verification clears - see INTERNAL_EMAIL_DOMAINS."""
+    domain = (email or '').rsplit('@', 1)[-1].lower()
+    return domain in INTERNAL_EMAIL_DOMAINS
+
+
+def get_internal_drive_user(user=Depends(get_verified_user)):
+    if not is_internal_email(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Google Drive connector is not available for this account yet',
+        )
+    return user
+
+
+GOOGLE_AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
+GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
+
+# Full (restricted) scope, not drive.file - lets read/move/delete act on files this connector
+# didn't create, and covers drive.readonly's access too, so that scope isn't requested separately
+GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive'
+
+# PDF has no native Google format, so it's downloaded via alt=media instead of exported
+GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
+
+# Used to pick a default export format when the caller doesn't specify one for a native Google file
+GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS = {
+    'application/vnd.google-apps.document': 'docx',
+    'application/vnd.google-apps.spreadsheet': 'xlsx',
+    'application/vnd.google-apps.presentation': 'pptx',
+}
+
+# Refresh a bit before actual expiry to avoid handing out a token that expires mid-request
+TOKEN_EXPIRY_BUFFER_SECONDS = 120
+
+_refresh_locks: dict[str, asyncio.Lock] = {}
+
+# Sweep out unheld locks once the table grows past this size
+_REFRESH_LOCKS_SWEEP_THRESHOLD = 1000
+
+
+def _get_refresh_lock(user_id: str) -> asyncio.Lock:
+    if len(_refresh_locks) > _REFRESH_LOCKS_SWEEP_THRESHOLD:
+        for uid, lock in list(_refresh_locks.items()):
+            if not lock.locked():
+                del _refresh_locks[uid]
+
+    if user_id not in _refresh_locks:
+        _refresh_locks[user_id] = asyncio.Lock()
+    return _refresh_locks[user_id]
+
+
+def _connector_popup_response(message: str = 'You can close this window.') -> HTMLResponse:
+    """The connect flow normally runs in a popup window, which this closes. When the popup was
+    blocked, the frontend falls back to a full-page redirect instead - there's no window to close
+    in that case (a normal top-level tab won't close itself), so send the user back into the app."""
+    return HTMLResponse(f"""<!doctype html>
+<html>
+<body style="font-family: sans-serif; padding: 2rem;">
+<p>{message}</p>
+<script>
+if (window.opener) {{
+    window.close();
+}} else {{
+    window.location.href = '/';
+}}
+</script>
+</body>
+</html>""")
+
+
+class ConnectorStatusResponse(BaseModel):
+    connected: bool
+    external_account: str | None = None
+    connected_at: int | None = None
+    # Whether Google confirmed the token was revoked on disconnect; None when not applicable
+    revoked: bool | None = None
+
+
+@router.get('/google-drive/status', response_model=ConnectorStatusResponse)
+async def get_google_drive_status(user=Depends(get_internal_drive_user)):
+    connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
+    if not connection:
+        return ConnectorStatusResponse(connected=False)
+
+    return ConnectorStatusResponse(
+        connected=True,
+        external_account=connection.external_account,
+        connected_at=connection.created_at,
+    )
+
+
+@router.get('/google-drive/connect')
+async def connect_google_drive(user=Depends(get_internal_drive_user)):
+    if (
+        not GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value
+        or not GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET.value
+        or not GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='Google Drive connector is not configured',
+        )
+
+    state = create_token({'purpose': 'gdrive_connect', 'user_id': user.id}, expires_delta=timedelta(minutes=10))
+
+    params = {
+        'client_id': GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value,
+        'redirect_uri': GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value,
+        'response_type': 'code',
+        'scope': f'{GOOGLE_DRIVE_WRITE_SCOPE} email',
+        'access_type': 'offline',
+        'prompt': 'consent',
+        'include_granted_scopes': 'true',
+        'state': state,
+    }
+
+    return RedirectResponse(f'{GOOGLE_AUTHORIZE_URL}?{urlencode(params)}')
+
+
+@router.get('/google-drive/callback')
+async def google_drive_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    user=Depends(get_internal_drive_user),
+):
+    if error:
+        # The user declined consent on Google's screen - not an app error, just close the popup
+        log.info(f'Google Drive connect declined by user {user.id}: {error}')
+        return _connector_popup_response()
+
+    if not code or not state:
+        return _connector_popup_response('Invalid or expired connect request.')
+
+    payload = decode_token(state)
+    if not payload or payload.get('purpose') != 'gdrive_connect' or payload.get('user_id') != user.id:
+        return _connector_popup_response('Invalid or expired connect request.')
+
+    if not await is_valid_token(payload, request.app.state.redis):
+        return _connector_popup_response('Invalid or expired connect request.')
+
+    # Burn the state now so it can't be replayed, regardless of whether the exchange below succeeds
+    await invalidate_token(request, state)
+
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                'code': code,
+                'client_id': GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value,
+                'client_secret': GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET.value,
+                'redirect_uri': GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI.value,
+                'grant_type': 'authorization_code',
+            },
+        )
+
+        if token_response.status_code != 200:
+            log.error(f'Google Drive token exchange failed: {token_response.status_code} {token_response.text}')
+            return _connector_popup_response('Failed to connect Google Drive.')
+
+        token_data = token_response.json()
+
+        userinfo_response = await client.get(
+            GOOGLE_USERINFO_URL,
+            headers={'Authorization': f'Bearer {token_data["access_token"]}'},
+        )
+        external_account = None
+        if userinfo_response.status_code == 200:
+            external_account = userinfo_response.json().get('email')
+        else:
+            log.warning(f'Failed to fetch Google Drive userinfo: {userinfo_response.status_code} {userinfo_response.text}')
+
+    connection = await ConnectorConnections.upsert(
+        user_id=user.id,
+        connector=GOOGLE_DRIVE_CONNECTOR,
+        token={
+            'access_token': token_data['access_token'],
+            'refresh_token': token_data.get('refresh_token'),
+            'token_type': token_data.get('token_type', 'Bearer'),
+        },
+        expires_at=int(time.time()) + token_data.get('expires_in', 3600),
+        external_account=external_account,
+        scopes=token_data.get('scope'),
+    )
+
+    if not connection:
+        log.error(f'Failed to persist Google Drive connection for user {user.id}')
+        return _connector_popup_response('Failed to connect Google Drive.')
+
+    return _connector_popup_response('Google Drive connected. This window will close automatically.')
+
+
+@router.post('/google-drive/disconnect', response_model=ConnectorStatusResponse)
+async def disconnect_google_drive(user=Depends(get_internal_drive_user)):
+    connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
+
+    revoked = None
+    if connection:
+        revoke_token = connection.token.get('refresh_token') or connection.token.get('access_token')
+        revoked = False
+        try:
+            async with httpx.AsyncClient() as client:
+                revoke_response = await client.post(GOOGLE_REVOKE_URL, params={'token': revoke_token})
+            revoked = revoke_response.status_code == 200
+            if not revoked:
+                log.warning(
+                    f'Google Drive revoke returned {revoke_response.status_code} for user {user.id}: {revoke_response.text}'
+                )
+        except Exception as e:
+            log.warning(f'Failed to revoke Google Drive token for user {user.id}: {e}')
+
+        await ConnectorConnections.delete_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
+
+    return ConnectorStatusResponse(connected=False, revoked=revoked)
+
+
+@router.get('/google-drive/download/{file_id}')
+async def download_google_drive_document(
+    file_id: str,
+    format: str | None = None,
+    filename: str = 'document',
+    user=Depends(get_internal_drive_user),
+):
+    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
+
+    access_token = await get_valid_access_token(user.id)
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google Drive isn't connected")
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+
+    async with httpx.AsyncClient() as client:
+        # No format given - look up the real mimeType so a native Google file still exports correctly
+        if format is None:
+            metadata_response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}',
+                headers=headers,
+                params={'fields': 'mimeType', 'supportsAllDrives': 'true'},
+            )
+            if metadata_response.status_code != 200:
+                log.error(
+                    f'Google Drive metadata fetch failed: {metadata_response.status_code} {metadata_response.text}'
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to look up this file in Google Drive.'
+                )
+            format = GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS.get(metadata_response.json().get('mimeType', ''))
+
+        export_mime_type = GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES.get(format)
+
+        if export_mime_type:
+            response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}/export',
+                headers=headers,
+                params={'mimeType': export_mime_type},
+            )
+        else:
+            response = await client.get(
+                f'https://www.googleapis.com/drive/v3/files/{file_id}',
+                headers=headers,
+                params={'alt': 'media', 'supportsAllDrives': 'true'},
+            )
+
+    if response.status_code != 200:
+        log.error(f'Google Drive document download failed: {response.status_code} {response.text}')
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail='Failed to download this document from Google Drive.'
+        )
+
+    content_type = export_mime_type or response.headers.get('Content-Type', 'application/octet-stream')
+    if not format:
+        format = (mimetypes.guess_extension(content_type.split(';')[0].strip()) or '.bin').lstrip('.')
+
+    safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
+    if safe_filename.lower().endswith(f'.{format.lower()}'):
+        safe_filename = safe_filename[: -(len(format) + 1)]
+    return Response(
+        content=response.content,
+        media_type=content_type,
+        headers={'Content-Disposition': f'attachment; filename="{safe_filename}.{format}"'},
+    )
+
+
+async def get_valid_access_token(user_id: str) -> str | None:
+    """Return a valid Google Drive access token for the user, refreshing it if needed."""
+    connection = await ConnectorConnections.get_by_user_and_connector(user_id, GOOGLE_DRIVE_CONNECTOR)
+    if not connection:
+        return None
+
+    if connection.expires_at - int(time.time()) > TOKEN_EXPIRY_BUFFER_SECONDS:
+        return connection.token['access_token']
+
+    async with _get_refresh_lock(user_id):
+        # re-fetch in case another request already refreshed it while we waited for the lock
+        connection = await ConnectorConnections.get_by_user_and_connector(user_id, GOOGLE_DRIVE_CONNECTOR)
+        if not connection:
+            return None
+        if connection.expires_at - int(time.time()) > TOKEN_EXPIRY_BUFFER_SECONDS:
+            return connection.token['access_token']
+
+        refresh_token = connection.token.get('refresh_token')
+        if not refresh_token:
+            return connection.token['access_token']
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    'refresh_token': refresh_token,
+                    'client_id': GOOGLE_DRIVE_CONNECTOR_CLIENT_ID.value,
+                    'client_secret': GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET.value,
+                    'grant_type': 'refresh_token',
+                },
+            )
+
+        if response.status_code != 200:
+            error = response.json().get('error') if response.content else None
+            if error == 'invalid_grant':
+                log.info(f'Google Drive refresh token invalid for user {user_id}, clearing connection')
+                await ConnectorConnections.delete_by_user_and_connector(user_id, GOOGLE_DRIVE_CONNECTOR)
+                return None
+            log.error(f'Google Drive token refresh failed: {response.status_code} {response.text}')
+            return None
+
+        token_data = response.json()
+        new_token = {
+            'access_token': token_data['access_token'],
+            # Google only returns a new refresh_token if it rotated it - keep the old one otherwise
+            'refresh_token': token_data.get('refresh_token', refresh_token),
+            'token_type': token_data.get('token_type', 'Bearer'),
+        }
+
+        await ConnectorConnections.upsert(
+            user_id=user_id,
+            connector=GOOGLE_DRIVE_CONNECTOR,
+            token=new_token,
+            expires_at=int(time.time()) + token_data.get('expires_in', 3600),
+            external_account=connection.external_account,
+            scopes=connection.scopes,
+        )
+
+        return new_token['access_token']

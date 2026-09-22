@@ -47,8 +47,14 @@ IF "%WEBUI_SECRET_KEY% %WEBUI_JWT_SECRET_KEY%" == " " (
     SET /p WEBUI_SECRET_KEY=<%KEY_FILE%
 )
 
+:: Must come from the environment - never auto-generated into a file
+IF "%CONNECTOR_TOKEN_ENCRYPTION_KEY%" == "" (
+    echo No CONNECTOR_TOKEN_ENCRYPTION_KEY environment variable set - connector token storage will be disabled.
+)
+
 :: Execute uvicorn
 SET "WEBUI_SECRET_KEY=%WEBUI_SECRET_KEY%"
+SET "CONNECTOR_TOKEN_ENCRYPTION_KEY=%CONNECTOR_TOKEN_ENCRYPTION_KEY%"
 IF "%UVICORN_WORKERS%"=="" SET UVICORN_WORKERS=1
 uvicorn open_webui.main:app --host "%HOST%" --port "%PORT%" --forwarded-allow-ips %FORWARDED_ALLOW_IPS% --workers %UVICORN_WORKERS% --ws auto
 :: For ssl user uvicorn open_webui.main:app --host "%HOST%" --port "%PORT%" --forwarded-allow-ips '*' --ssl-keyfile "key.pem" --ssl-certfile "cert.pem" --ws auto

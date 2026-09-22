@@ -172,7 +172,38 @@
 	let eventConfirmationInputValue = '';
 	let eventConfirmationInputType = '';
 	let eventConfirmationInputOptions: ({ label?: string; value: string } | string)[] = [];
+	let eventConfirmationAction = '';
+	let eventConfirmationShowRemember = false;
 	let eventCallback = null;
+
+	// Actions the user opted to skip confirmation for, across every chat - survives a page
+	// refresh and up to SKIPPED_CONFIRMATIONS_TTL_MS after the tab is closed, then expires.
+	const SKIPPED_CONFIRMATIONS_STORAGE_KEY = 'skippedConfirmationActions';
+	const SKIPPED_CONFIRMATIONS_TTL_MS = 10 * 60 * 1000;
+
+	const loadSkippedConfirmations = (): Set<string> => {
+		try {
+			const raw = localStorage.getItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY);
+			if (!raw) return new Set();
+			const { userId, actions, savedAt } = JSON.parse(raw);
+			if (userId !== $user?.id) return new Set();
+			if (Date.now() - savedAt > SKIPPED_CONFIRMATIONS_TTL_MS) return new Set();
+			return new Set(actions);
+		} catch {
+			return new Set();
+		}
+	};
+
+	const saveSkippedConfirmations = (actions: Set<string>) => {
+		try {
+			const payload = { userId: $user?.id, actions: [...actions], savedAt: Date.now() };
+			localStorage.setItem(SKIPPED_CONFIRMATIONS_STORAGE_KEY, JSON.stringify(payload));
+		} catch {
+			// best-effort only (e.g. private browsing) - stays remembered for this load either way
+		}
+	};
+
+	const skippedConfirmationActions: Set<string> = loadSkippedConfirmations();
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -1115,6 +1146,21 @@
 							message.sources = [data];
 						}
 					}
+				} else if (type === 'chat:message:connector_suggestion') {
+					if (message?.connectorSuggestions) {
+						message.connectorSuggestions.push(data);
+					} else {
+						message.connectorSuggestions = [data];
+					}
+				} else if (type === 'chat:message:drive_document_created') {
+					if (message?.driveDocuments) {
+						message.driveDocuments = [
+							...message.driveDocuments.filter((doc) => doc.id !== data.id),
+							data
+						];
+					} else {
+						message.driveDocuments = [data];
+					}
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
 					const toastContent = data?.content ?? '';
@@ -1129,6 +1175,11 @@
 						toast.info(toastContent);
 					}
 				} else if (type === 'confirmation') {
+					if (data.action && skippedConfirmationActions.has(data.action)) {
+						cb(true);
+						return;
+					}
+
 					eventCallback = cb;
 
 					eventConfirmationInput = false;
@@ -1137,6 +1188,8 @@
 
 					eventConfirmationTitle = data.title;
 					eventConfirmationMessage = data.message;
+					eventConfirmationAction = data.action ?? '';
+					eventConfirmationShowRemember = !!data.allow_remember;
 				} else if (type === 'execute') {
 					eventCallback = cb;
 
@@ -1155,6 +1208,7 @@
 					eventCallback = cb;
 
 					eventConfirmationInput = true;
+					eventConfirmationShowRemember = false;
 					showEventConfirmation = true;
 
 					eventConfirmationTitle = data.title;
@@ -1209,6 +1263,7 @@
 					submitHandler(prompt);
 				} else {
 					eventConfirmationInput = false;
+					eventConfirmationShowRemember = false;
 					eventConfirmationTitle = $i18n.t('Confirm Prompt from Embed');
 					eventConfirmationMessage = prompt;
 					eventCallback = async (confirmed: boolean) => {
@@ -1239,6 +1294,7 @@
 					submitHandler(event.data.text);
 				} else {
 					eventConfirmationInput = false;
+					eventConfirmationShowRemember = false;
 					eventConfirmationTitle = $i18n.t('Confirm Prompt from Embed');
 					eventConfirmationMessage = event.data.text;
 					eventCallback = async (confirmed: boolean) => {
@@ -3811,9 +3867,16 @@
 	inputValue={eventConfirmationInputValue}
 	inputType={eventConfirmationInputType}
 	inputOptions={eventConfirmationInputOptions}
+	showRemember={eventConfirmationShowRemember}
 	on:confirm={(e) => {
 		if (eventConfirmationInput) {
 			eventCallback(e.detail);
+		} else if (eventConfirmationShowRemember) {
+			if (e.detail?.remember && eventConfirmationAction) {
+				skippedConfirmationActions.add(eventConfirmationAction);
+				saveSkippedConfirmations(skippedConfirmationActions);
+			}
+			eventCallback(true);
 		} else if (e.detail) {
 			eventCallback(e.detail);
 		} else {

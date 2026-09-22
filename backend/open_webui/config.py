@@ -3913,6 +3913,26 @@ if _google_oauth_authorize_params:
     except (json.JSONDecodeError, TypeError):
         log.warning('GOOGLE_OAUTH_AUTHORIZE_PARAMS is not valid JSON, ignoring')
 
+# Separate OAuth client from GOOGLE_CLIENT_ID (SSO login) and GOOGLE_DRIVE_CLIENT_ID (file picker upload) -
+# this one is for the per-user Google Drive connector.
+GOOGLE_DRIVE_CONNECTOR_CLIENT_ID = ConfigVar(
+    'GOOGLE_DRIVE_CONNECTOR_CLIENT_ID',
+    'connectors.google_drive.client_id',
+    os.getenv('GOOGLE_DRIVE_CONNECTOR_CLIENT_ID', ''),
+)
+
+GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET = ConfigVar(
+    'GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET',
+    'connectors.google_drive.client_secret',
+    os.getenv('GOOGLE_DRIVE_CONNECTOR_CLIENT_SECRET', ''),
+)
+
+GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI = ConfigVar(
+    'GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI',
+    'connectors.google_drive.redirect_uri',
+    os.getenv('GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI', ''),
+)
+
 MICROSOFT_CLIENT_ID = ConfigVar(
     'MICROSOFT_CLIENT_ID',
     'oauth.microsoft.client_id',

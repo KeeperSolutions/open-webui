@@ -56,6 +56,8 @@
 	import Error from './Error.svelte';
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
+	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
+	import DriveDocumentCard from './DriveDocumentCard.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -103,6 +105,19 @@
 				output?: string;
 				files?: { name: string; url: string }[];
 			};
+		}[];
+		connectorSuggestions?: {
+			connector: string;
+			name: string;
+			description: string;
+			icon: string;
+			connect_url: string;
+		}[];
+		driveDocuments?: {
+			id: string;
+			name: string;
+			format: string;
+			web_link?: string;
 		}[];
 		info?: {
 			openai?: boolean;
@@ -190,6 +205,11 @@
 	$: visibleResponseContent =
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
+
+	// The Drive card already links out, so strip any Drive link the model added in its own text
+	const stripDriveLinks = (content: string) =>
+		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
+	$: displayContent = message.driveDocuments ? stripDriveLinks(message.content ?? '') : message.content;
 
 	let edit = false;
 	let editedContent = '';
@@ -834,7 +854,7 @@
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
-									content={message.content}
+									content={displayContent}
 									output={message.output}
 									sources={message.sources}
 									floatingButtons={message?.done &&
@@ -913,6 +933,14 @@
 
 							{#if message.code_executions}
 								<CodeExecutions codeExecutions={message.code_executions} />
+							{/if}
+
+							{#if message.connectorSuggestions}
+								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
+							{/if}
+
+							{#if message.driveDocuments}
+								<DriveDocumentCard driveDocuments={message.driveDocuments} />
 							{/if}
 						</div>
 					</div>

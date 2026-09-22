@@ -495,6 +495,7 @@ from open_webui.routers import (
     channels,
     chats,
     configs,
+    connectors,
     evaluations,
     files,
     folders,
@@ -1591,6 +1592,7 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(providers.router, prefix='/api/v1/providers', tags=['providers'])
+app.include_router(connectors.router, prefix='/api/v1/connectors', tags=['connectors'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
@@ -2926,6 +2928,7 @@ async def get_app_config(request: Request):
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    'enable_google_drive_connector': connectors.is_internal_email(user.email if user else None),
                     'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': app.state.config.ENABLE_FOLDERS,
                     'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
