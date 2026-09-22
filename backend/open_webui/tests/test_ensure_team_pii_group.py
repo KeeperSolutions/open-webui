@@ -1,16 +1,10 @@
-"""G-B4 — the team's PII group, created lazily and exactly once.
+"""Tests for `ensure_team_pii_group`: the team's PII group is created lazily and once.
 
-⚠️ Lazy creation is a concession to N-6, not a design. `create_team` cannot make
-the team and the group atomically, so the group is created on first use instead.
-The cost of that concession is that a READ can write, and the thing that keeps it
-affordable is that `ensure_team_pii_group` reads first: once the group exists it
-issues one SELECT and no write at all.
-
-The dashboard calls three routes per screen and all three resolve the same scope,
-so "one write, then none" is not a nicety — a create-then-check shape would
-attempt three writes per page load, for every viewer, including an admin looking
-at someone else's team. `test_three_calls_write_once` measures that with a
-statement counter rather than trusting the shape of the code.
+`create_team` cannot create the team and its group atomically, so the group is
+created on first use, which means read paths can write. Once the group exists,
+`ensure_team_pii_group` must issue only reads. The dashboard resolves the same
+scope on three routes per page load, and `test_three_calls_write_once` checks
+this with a statement counter.
 """
 
 import ast
@@ -39,11 +33,10 @@ from open_webui.utils.team_groups import (
 
 
 class WriteCounter:
-    """Counts the INSERT/UPDATE/DELETE statements the engine actually issues.
+    """Counts the INSERT/UPDATE/DELETE and SELECT statements the engine issues.
 
-    ⚠️ Counted at the cursor, not by patching a model method. A shape that calls
-    `insert_new_group` and lets it fail on the unique index would look idempotent
-    from above while writing every time.
+    Counting at the cursor also catches writes that fail, such as an insert
+    rejected by a unique index, which a patched model method would miss.
     """
 
     def __init__(self):
@@ -139,21 +132,11 @@ async def test_permissions_carry_exactly_one_key(env):
 
 @pytest.mark.asyncio
 async def test_the_loser_of_a_race_deletes_its_group_and_returns_the_winner(env):
-    """⚠️ The `UNIQUE` index does NOT decide this race, and an earlier shape
-    believed it did.
+    """A caller that loses the race returns the winner's id and leaves no orphan group.
 
-    `uq_teams_group_id` is unique ACROSS rows. Two callers racing here write the
-    SAME team row with DIFFERENT group ids, which violates nothing: the second
-    `UPDATE` simply overwrites the first, no `IntegrityError` is ever raised, and
-    the loser's group survives as an orphan.
-
-    An orphan is not cosmetic. It carries the masking permission and nothing
-    else, and nothing points at it — so `team_group_kind` calls it an ordinary
-    group and the administrator's `Enforce` list offers it as a destination,
-    reopening the door that list was narrowed to close.
-
-    The competitor here commits between this call's read and its write, which is
-    exactly the window three concurrent dashboard routes open on a first load.
+    `uq_teams_group_id` does not catch this race, because both callers write the
+    same team row. An orphan would carry the masking permission and appear in the
+    admin's Enforce list. The competitor commits between this call's read and write.
     """
     session, _ = env
     from open_webui.models.groups import Groups
@@ -184,9 +167,7 @@ async def test_the_loser_of_a_race_deletes_its_group_and_returns_the_winner(env)
         gid = await ensure_team_pii_group(TEAM)
 
     assert gid == "winner"
-    # ⚠️ The load-bearing assertion. Returning the winner's id was already true
-    # of the shape this replaced; what was NOT true is that the loser's group
-    # stops existing.
+    # The loser's group must be deleted.
     remaining = (await session.execute(select(Group.id))).scalars().all()
     assert remaining == ["winner"]
 
@@ -203,11 +184,7 @@ async def test_second_call_returns_the_same_group(env):
 
 @pytest.mark.asyncio
 async def test_three_calls_write_once(env):
-    """⚠️ The measurement the gate exists for: one write, then none.
-
-    Three calls model one dashboard load, whose three routes all resolve the same
-    scope. Counted at the cursor — see `WriteCounter`.
-    """
+    """Only the first of three calls writes; three calls model one dashboard load."""
     _, counter = env
 
     await ensure_team_pii_group(TEAM)
@@ -225,7 +202,7 @@ async def test_three_calls_write_once(env):
 
 @pytest.mark.asyncio
 async def test_later_calls_still_read(env):
-    """The complement of the above: "no writes" must not mean "does nothing"."""
+    """Later calls still read the database rather than doing nothing."""
     _, counter = env
     await ensure_team_pii_group(TEAM)
     reads_before = counter.reads
@@ -235,7 +212,7 @@ async def test_later_calls_still_read(env):
 
 @pytest.mark.asyncio
 async def test_two_teams_with_the_same_name_get_different_group_names(env):
-    """`"My Team"` is auto-generated by the Stripe portal path, so this collides."""
+    """Same-named teams get distinct group names; the Stripe webhook names every team "My Team"."""
     session, _ = env
     a = await ensure_team_pii_group(TEAM)
     b = await ensure_team_pii_group(TWIN)
@@ -259,7 +236,7 @@ async def test_a_missing_team_is_none_not_an_error(env):
 
 @pytest.mark.asyncio
 async def test_a_dangling_reference_is_replaced(env):
-    """`PRAGMA foreign_keys` is 0, so a deleted group leaves the link dangling."""
+    """A link to a deleted group is replaced; SQLite's `PRAGMA foreign_keys` is off."""
     from sqlalchemy import delete
 
     session, _ = env
@@ -287,21 +264,20 @@ async def test_renaming_the_team_renames_the_group(env):
 
 @pytest.mark.asyncio
 async def test_renaming_a_team_without_a_group_is_not_an_error(env):
-    """Under path B a team without a group is normal, not broken."""
+    """A team without a group is a normal state, so renaming it returns `None`."""
     assert await rename_team_pii_group(TEAM, "Whatever") is None
 
 
 # ---------------------------------------------------------------------------
-# Where it is called from — one test per call site, so one removal kills one test
+# Call sites, one test each
 # ---------------------------------------------------------------------------
 
 
 def _calls_within(function_name: str, module_path: str) -> set:
     """Names called inside one function, read from the source tree.
 
-    Structural rather than behavioural because the alternative is standing up
-    Stripe, a webhook payload and four tables to prove a single line is present.
-    The property is "this call site exists"; an AST is a direct measurement of it.
+    Checked structurally because a behavioural test would need Stripe, a webhook
+    payload and four tables.
     """
     root = pathlib.Path(__file__).resolve().parents[1]
     tree = ast.parse((root / module_path).read_text(encoding="utf-8"))
@@ -320,12 +296,7 @@ def test_create_team_ensures_the_group():
 
 
 def test_the_stripe_portal_path_ensures_the_group():
-    """⚠️ Separate from `create_team`, and not covered by it.
-
-    A team upgraded through the Stripe billing portal never touches
-    `create_team` (`routers/billing.py:1921`). Without its own call site such a
-    team has no policy group and nothing says so.
-    """
+    """The Stripe webhook creates the group itself, since teams made there bypass `create_team`."""
     assert "ensure_team_pii_group" in _calls_within("_handle_stripe_event", "routers/billing.py")
 
 
@@ -334,18 +305,16 @@ def test_the_rename_route_renames_the_group():
 
 
 # ---------------------------------------------------------------------------
-# Level A must not have changed
+# Dashboard scope resolution
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_the_instance_wide_dashboard_creates_nothing():
-    """⚠️ G-B4 edits `resolve_dashboard_scope`, which was delivered in level A.
+    """The unscoped admin dashboard never calls `ensure_team_pii_group`.
 
-    The unscoped, admin-only path returns before anything about groups happens.
-    If `ensure_team_pii_group` ever moves above that early return, an admin
-    opening `/admin/pii-dashboard` starts creating groups for teams they were only
-    counting — and every other test in this file still passes.
+    Otherwise opening `/admin/pii-dashboard` would create groups for every team
+    it counts.
     """
     from open_webui.utils.team_scope import resolve_dashboard_scope
 
@@ -364,7 +333,7 @@ async def test_the_instance_wide_dashboard_creates_nothing():
 
 
 def test_resolve_dashboard_scope_still_returns_team_identities():
-    """The three level-A routers destructure this; the field is additive only."""
+    """`TeamIdentities` keeps its field order and `group_id` defaults to `None`, since three routers destructure it."""
     from open_webui.utils.team_scope import TeamIdentities
 
     assert TeamIdentities._fields == ("ids", "keys", "group_id")
@@ -373,17 +342,10 @@ def test_resolve_dashboard_scope_still_returns_team_identities():
 
 @pytest.mark.asyncio
 async def test_the_dashboard_survives_a_failed_group_creation():
-    """⚠️ Found by running `test_team_scope.py` ALONE, not by the full suite.
+    """A failure in `ensure_team_pii_group` yields a scope with `group_id=None` instead of an error.
 
-    The first version of this gate made `resolve_dashboard_scope` propagate any
-    failure from `ensure_team_pii_group` — turning a read path into something that
-    depends on a write succeeding. Two level-A tests failed in isolation and
-    passed in the full run, because another module happened to have created the
-    `teams` table first. The green full suite was hiding it.
-
-    The group is a LABEL: it lets section 4 say "team policy" instead of "outside
-    the team". `teamGroupId: null` is already a supported state, so there is a
-    correct thing to fall back to and no reason to take the screen down.
+    The group only labels dashboard rows as "team policy", and a null
+    `teamGroupId` is already supported, so a read path must not depend on it.
     """
     from open_webui.utils.team_scope import TeamIdentities, resolve_dashboard_scope
 

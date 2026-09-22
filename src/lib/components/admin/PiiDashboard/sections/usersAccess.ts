@@ -24,14 +24,12 @@ export type AccessUser = {
 	 */
 	pii_policy_group_ids?: string[];
 	/**
-	 * Would this person still be masked with the addressed team's policy group
-	 * taken away. Server-side, and for a non-admin it is the ONLY answer to that.
+	 * Whether this person stays masked without the addressed team's policy group.
+	 * Computed server-side over every group and the instance-wide default.
 	 *
-	 * ⚠️ `pii_policy_group_ids` is narrowed for a non-admin to the addressed
-	 * team's own group, because a group id is one call to
-	 * `GET /groups/id/{id}/info` away from that group's NAME. So the owner's
-	 * "masked somewhere else" cannot be derived from the ids any more — the
-	 * server derives it instead, over every group AND the instance-wide default.
+	 * For a non-admin this is the only source of that answer. Their
+	 * `pii_policy_group_ids` is narrowed to the team's own group, because any
+	 * other group id reveals that group's name via `GET /groups/id/{id}/info`.
 	 */
 	masked_by_other_policy?: boolean;
 };
@@ -39,15 +37,14 @@ export type AccessUser = {
 /**
  * A group that carries `chat.pii_masking_enforced`.
  *
- * `name` is `null` for a group a row claims to be enforced by that the group
- * list does not contain — see `namedGroup`. It is a state nobody designed, so it
- * is representable rather than papered over with the id.
+ * `name` is `null` when a row references a group id that the group list does
+ * not contain (see `namedGroup`), so the UI never shows the raw id as a name.
  */
 export type PolicyGroup = { id: string; name: string | null; isTeamGroup: boolean };
 
 /**
- * One group's permission tree, as stored. Arbitrarily nested, values may be
- * anything — only `true` is read, and only as "this group grants that".
+ * One group's permission tree, as stored. Arbitrarily nested; a truthy leaf
+ * means the group grants that permission (see `granted`).
  */
 export type PermissionTree = { [key: string]: unknown };
 
@@ -57,33 +54,25 @@ export type GroupRecord = {
 	name?: string;
 	permissions?: PermissionTree | null;
 	/**
-	 * A team's own policy group, per `GET /groups/`.
-	 *
-	 * ⚠️ A flag, not a team id: the only question here is "may this be an enforce
-	 * destination". Optional so an older payload reads as `false` rather than
-	 * throwing — the wrong direction to fail would be hiding every destination.
+	 * True for a team's own policy group, per `GET /groups/`. Used only to decide
+	 * whether the group may be an enforce destination. Optional so an older
+	 * payload reads as `false` instead of hiding every destination.
 	 */
 	is_team_group?: boolean;
 };
 
-/** The one key that carries the policy. Spelled once. */
+/** The permission key that carries the policy. */
 const MASKING_PATH = ['chat', 'pii_masking_enforced'] as const;
 
 /**
- * Is a stored permission leaf switched ON.
+ * Whether a stored permission leaf is switched on.
  *
- * ⚠️ TRUTHY, not `=== true`, and that is a deliberate match to the server rather
- * than looseness. The one implementation that decides a permission is
- * `has_permission_for_groups`, which ends in `bool(permissions)`
- * (`utils/access_control/__init__.py:94`), and `group_enforces_pii_masking` ends
- * the same way (`utils/pii_policy.py:34`). `GroupForm.permissions` is a bare
- * `Optional[dict]` with no validation of its leaves, so a group carrying `1` or
- * a non-empty string is a state the API accepts and the server acts on.
- *
- * Reading it more strictly here does not make the screen safer, it makes it
- * WRONG in the dangerous direction: such a group would grant a capability while
- * being counted as granting nothing, and `Enforce` — an action worded as
- * protection — would hand that capability over.
+ * Truthy, not `=== true`, to match the server: `has_permission_for_groups`
+ * (`utils/access_control/__init__.py`) and `group_enforces_pii_masking`
+ * (`utils/pii_policy.py`) both end in `bool(...)`, and `GroupForm.permissions`
+ * does not validate leaves, so `1` or a non-empty string is a real grant.
+ * A stricter check would count such a group as granting nothing, and `Enforce`
+ * would then hand its capability to the person being enforced.
  */
 function granted(value: unknown): boolean {
 	return Boolean(value);
@@ -97,7 +86,7 @@ export function enforcesMasking(permissions: GroupRecord['permissions']): boolea
 	);
 }
 
-/** Every permission this group switches ON, as dotted paths. */
+/** Every permission this group switches on, as dotted paths. */
 function grantedPaths(permissions: GroupRecord['permissions'], prefix = ''): string[] {
 	const out: string[] = [];
 	for (const [key, value] of Object.entries(permissions ?? {})) {
@@ -111,37 +100,25 @@ function grantedPaths(permissions: GroupRecord['permissions'], prefix = ''): str
 }
 
 /**
- * Does this group grant masking AND NOTHING ELSE.
+ * Whether this group grants masking and nothing else.
  *
- * ⚠️ Group permissions merge with OR, so joining a group hands over everything
- * it switches on. `Enforce` is worded as protection — "this person can no longer
- * turn masking off" — and must not also be a door for handing out web search,
- * the code interpreter or anyone else's data. A group that grants more is still
- * a perfectly good group; it is just the wrong destination for THIS action.
- *
- * Anything TRUTHY counts, matching the server — see `granted`. A permission set
- * to `false` grants nothing, and the stored tree is full of them; one set to `1`
- * grants everything `true` would.
+ * Group permissions merge with OR, so joining a group hands over everything it
+ * switches on. `Enforce` must only stop a person turning masking off; it must
+ * not also grant web search, the code interpreter or other data access.
+ * Leaves count when truthy (see `granted`); `false` leaves grant nothing.
  */
 export function grantsOnlyMasking(permissions: GroupRecord['permissions']): boolean {
-	// Named `paths`, not `granted`: the module now has a `granted()` predicate and
-	// a local of the same name would shadow it inside this function.
+	// Named `paths`, not `granted`, so it does not shadow the `granted()` predicate.
 	const paths = grantedPaths(permissions);
 	return paths.length === 1 && paths[0] === MASKING_PATH.join('.');
 }
 
 /**
- * Every group that enforces masking — the list used to NAME a source.
+ * Every group that enforces masking: the list used to name a source.
  *
- * ⚠️ This and `enforceTargetsOf` are two different questions about the same
- * groups, and they were one list until a team group could not be a destination.
- * Conflating them is what produced the defect this split exists to fix: the
- * destination filter was applied to the naming list too, so an admin looking at
- * a team member saw a `Remove` button whose dialog printed a raw UUID, for a
- * group belonging to somebody else's team, with nothing saying so.
- *
- * "May I send someone here?" is a policy question. "What is this called?" is
- * not. Keep them apart.
+ * Kept separate from `enforceTargetsOf`. If the destination filter were applied
+ * here, a team member's enforcing team group would be missing from this list
+ * and the `Remove` dialog would show a raw group id instead of its name.
  *
  * Derived, never stored: "the policy group" is not a configured thing, it is
  * whichever groups happen to carry the key right now. Deriving it means the
@@ -159,19 +136,13 @@ export function policyGroupsOf(groups: GroupRecord[]): PolicyGroup[] {
 }
 
 /**
- * The groups an admin can enforce THROUGH — destinations, not names.
+ * The groups an admin can enforce through: destinations, not names.
  *
- * Two exclusions, for two different reasons:
- *
- *   * **a team's own group** — it belongs to that team, its membership follows
- *     the team, and sending an unrelated person into it would make the team's
- *     own policy mean something else
- *   * **a group that grants anything besides masking** — see `grantsOnlyMasking`
- *
- * ⚠️ Neither exclusion touches `policyGroupsOf`. A group that is a bad
- * destination is still the honest ANSWER to "what is masking this person", and
- * conflating the two lists is exactly the defect that once printed a raw UUID in
- * front of an admin deciding whether to act.
+ * Excludes a team's own group, because its membership follows the team and
+ * adding an unrelated person would change what the team's policy covers. Also
+ * excludes any group that grants more than masking (see `grantsOnlyMasking`).
+ * Neither exclusion applies to `policyGroupsOf`, which still names such groups
+ * as the source of a person's masking.
  */
 export function enforceTargetsOf(groups: GroupRecord[]): PolicyGroup[] {
 	const byId = new Map(groups.map((g) => [g.id, g]));
@@ -181,16 +152,11 @@ export function enforceTargetsOf(groups: GroupRecord[]): PolicyGroup[] {
 }
 
 /**
- * The group behind one id, named — or explicitly unnamed.
+ * The group behind one id, or an explicitly unnamed group.
  *
- * ⚠️ Replaces `?? { id, name: id }`, which put a raw UUID where a group name
- * goes. That fallback was written for a race — a group the directory knows about
- * that the group list has not caught up with — and the team-group filter quietly
- * turned it into the ordinary path, firing for every team member on every load.
- *
- * Now it fires only in the state it was written for, says so in the console, and
- * hands back `name: null` so the component prints a sentence instead of an id. A
- * fallback nobody can see is a fallback nobody fixes.
+ * An unknown id happens when the directory references a group the group list
+ * has not caught up with. That case logs a console warning and returns
+ * `name: null`, so the component shows a sentence instead of a raw id.
  */
 function namedGroup(id: string, byId: Map<string, PolicyGroup>): PolicyGroup {
 	const known = byId.get(id);
@@ -203,11 +169,8 @@ function namedGroup(id: string, byId: Map<string, PolicyGroup>): PolicyGroup {
 /**
  * How many enforcing groups were excluded for belonging to a team.
  *
- * ⚠️ Exists so the empty state can tell its two causes apart. "No destinations"
- * because nothing enforces masking and "no destinations because the only things
- * that enforce it are team groups" need opposite advice, and the count is the
- * only thing that distinguishes them. Without it the screen tells an admin to
- * turn on something they already turned on.
+ * Lets the empty state tell "nothing enforces masking" apart from "only team
+ * groups enforce it", which need different advice to the admin.
  */
 export function teamOnlyPolicyGroupCount(groups: GroupRecord[]): number {
 	return groups.filter((g) => enforcesMasking(g?.permissions) && g?.is_team_group === true).length;
@@ -216,9 +179,8 @@ export function teamOnlyPolicyGroupCount(groups: GroupRecord[]): number {
 /**
  * Enforcing groups kept out of the destination list for granting other things.
  *
- * The third cause of an empty destination list, and the only one an admin can
- * mistake for the feature being broken: the group is right there in Groups, it
- * carries the policy, and it is not offered.
+ * Lets the empty state explain why a group that carries the policy is visible
+ * in Groups but not offered as a destination.
  */
 export function broadPolicyGroupCount(groups: GroupRecord[]): number {
 	return groups.filter(
@@ -256,6 +218,17 @@ export type UserRow = {
 };
 
 /**
+ * Whether a viewer may act on a row, from their role alone.
+ *
+ * Takes only the role so the decision cannot depend on the address the viewer
+ * arrived at: an address selects a scope, not a permission. Display only; the
+ * membership routes are admin-only server-side.
+ */
+export function mayActFor(role: string | undefined | null): boolean {
+	return role === 'admin';
+}
+
+/**
  * What, if anything, the row may do about this user's policy.
  *
  * `enforce.targets` puts the choice of destination in the data rather than in the
@@ -266,48 +239,28 @@ export type UserRow = {
  * `none.via` is the middle case — the one that matters. An empty `via` means the
  * instance-wide default, not "unknown".
  */
-/**
- * Whether a viewer may act on a row, from their role alone.
- *
- * ⚠️ A function of the ROLE and nothing else, and that is the point of extracting
- * it: an address selects a scope, not a permission, so the decision must not be
- * able to see the address. Written as `mayActFor(role)` rather than as a line in
- * the component, the team id is not in scope to be consulted even by mistake —
- * the same reasoning that keeps `masked-elsewhere` empty.
- *
- * Display only. The membership routes are admin-only server-side.
- */
-export function mayActFor(role: string | undefined | null): boolean {
-	return role === 'admin';
-}
-
 export type RowAction =
 	| { kind: 'enforce'; targets: PolicyGroup[] }
 	| { kind: 'remove'; group: PolicyGroup }
 	| { kind: 'none'; via: PolicyGroup[] }
-	// A viewer who may not act. Carries nothing, deliberately — see `rowActionFor`.
+	// A viewer who may not act. Carries no data (see `rowActionFor`).
 	| { kind: 'readonly' }
 	/**
-	 * Masked by the viewer's OWN team's policy.
-	 *
-	 * ⚠️ Carries one id, and it is the id the viewer already addressed. That is
-	 * what keeps decision 5 intact: no group outside their reach is named, or even
-	 * present, so none can be leaked by an incautious template.
+	 * Masked by the viewer's own team's policy. Carries only the group id the
+	 * viewer already addressed, so no group outside their reach can be shown.
 	 */
 	| { kind: 'masked-team'; teamGroupId: string }
 	| { kind: 'masked-elsewhere' }
 	/**
-	 * The two actions a team owner has, and the only ones.
+	 * The two actions a team owner has.
 	 *
-	 * ⚠️ Named for MEMBERSHIP of the team's policy group, never for anyone's
-	 * masking — decision 9. Framed as masking they would both sometimes lie,
-	 * because masking can come from elsewhere; framed as membership they are true
-	 * in every state, which is why the action is always offered.
+	 * Named for membership of the team's policy group, not for masking: masking
+	 * can also come from other groups, so "unmask" would sometimes be false while
+	 * "remove from team policy" is always true. For the same reason both are
+	 * always offered.
 	 *
-	 * ⚠️ `maskedElsewhere` is a BOOLEAN, derived from how many groups enforce the
-	 * person, and it is the only thing either action carries. No id, no name, no
-	 * count. An object without the name cannot leak the name — the same reasoning
-	 * that keeps `masked-elsewhere` empty.
+	 * `maskedElsewhere` is the only data carried: no group id, name or count, so
+	 * nothing about groups outside the team can leak.
 	 */
 	| { kind: 'team-add'; maskedElsewhere: boolean }
 	| { kind: 'team-remove'; maskedElsewhere: boolean };
@@ -315,27 +268,22 @@ export type RowAction =
 /**
  * Everything about the person looking at the row, in one place.
  *
- * ⚠️ An object rather than three positional arguments, and that is not tidiness.
- * `mayAct` and `mayManagePolicy` are both booleans about permission and they mean
- * very different things — the first also unlocks the link to the admin user
- * screen. Positionally they can be swapped; named, they cannot. The same hazard
- * caught in the shell once before, where swapping two lists survived 241 tests.
+ * An object rather than positional arguments so `mayAct` and `mayManagePolicy`,
+ * two permission booleans with different meanings, cannot be swapped silently.
  */
 export type Viewer = {
-	/** ⚠️ The ADMINISTRATOR flag. Governs the admin branch AND the Manage link. */
+	/** The administrator flag. Governs the admin branch and the Manage link. */
 	mayAct: boolean;
 	/** The addressed team's own policy group, or `null`. */
 	teamGroupId: string | null;
 	/**
-	 * Whether this viewer may change who is in that group.
-	 *
-	 * Computed on the SERVER (`may_manage_team_policy`) and reported, never
-	 * derived from the address here: an address selects a scope, not a permission.
+	 * Whether this viewer may change who is in that group. Reported by the server
+	 * (`may_manage_team_policy`), never derived from the address here.
 	 */
 	mayManagePolicy: boolean;
 };
 
-/** An administrator on the instance-wide view: today's default for every caller. */
+/** An administrator on the instance-wide view: the default viewer. */
 const INSTANCE_ADMIN: Viewer = { mayAct: true, teamGroupId: null, mayManagePolicy: false };
 
 /**
@@ -354,53 +302,36 @@ const INSTANCE_ADMIN: Viewer = { mayAct: true, teamGroupId: null, mayManagePolic
  * Membership is the only thing this touches — the value of the policy still
  * lives on the group and is edited only in `Permissions.svelte`.
  *
- * `mayAct` is the viewer's ROLE, never the address they arrived at: an address
- * selects a scope, not a permission. It governs what is DISPLAYED and is not a
- * security boundary — the membership routes are admin-only server-side, and this
- * ticket does not touch them.
+ * `mayAct` comes from the viewer's role, never from the address they arrived at.
+ * It governs what is displayed and is not a security boundary: the membership
+ * routes are admin-only server-side.
  */
 export function rowActionFor(
 	row: Pick<UserRow, 'enforced' | 'policyGroupIds'> & Partial<Pick<UserRow, 'maskedByOtherPolicy'>>,
 	/**
-	 * ⚠️ Two lists, named, rather than one used for both. `naming` is every
-	 * enforcing group; `targets` is the subset a person may be sent to. Passing
-	 * an object rather than two positional arrays is deliberate: a caller has to
-	 * say which is which, and the bug this replaced was exactly a caller handing
-	 * the destination list to the naming code without noticing.
+	 * `naming` is every enforcing group; `targets` is the subset a person may be
+	 * sent to. Named fields so a caller cannot pass the destination list where
+	 * the naming list belongs.
 	 */
 	groups: { naming: PolicyGroup[]; targets: PolicyGroup[] },
 	viewer: Viewer = INSTANCE_ADMIN
 ): RowAction {
 	const { mayAct, teamGroupId, mayManagePolicy } = viewer;
 
-	// ⚠️ The team owner: may not reach the admin screen, may govern this one
-	// group. Checked BEFORE the read-only branch, and never entered by an
-	// administrator — `mayAct` sends them to their own branch below, the one
-	// that names the team.
-	//
-	// ⚠️ `teamGroupId` is required, not incidental. A team whose policy group was
-	// never created has nothing to add anyone to, and the server says so too by
-	// reporting `may_manage_team_policy: false`. Without this the row would offer
-	// an action with no destination.
+	// Team owner: cannot reach the admin screen but may manage this one group.
+	// Checked before the read-only branch; administrators take their own branch
+	// below. Requires `teamGroupId`: a team without a policy group has nothing
+	// to add anyone to, and the server reports `may_manage_team_policy: false`.
 	if (!mayAct && mayManagePolicy && teamGroupId) {
-		// ⚠️ MEMBERSHIP of that one group decides which button appears — never
-		// `row.enforced`. Someone masked only through an administrator's group is
-		// not in the team policy, so what they are offered is Add. Offering Remove
-		// would name an action with nothing to remove, which is the lie the
-		// membership model was adopted to end.
+		// Membership of the team group picks the button, not `row.enforced`.
+		// Someone masked only through another group is offered Add, because
+		// Remove would have nothing to remove.
 		const inTeamPolicy = row.policyGroupIds.includes(teamGroupId);
-		// Masked by something OTHER than this team's policy.
-		//
-		// ⚠️ The server's answer first, and it is the only complete one: a
-		// non-admin's `policyGroupIds` is narrowed to this team's own group, so
-		// the id scan below can no longer see anything else — and the server's
-		// version also counts the instance-wide default, which no group carries.
-		//
-		// The id scan is kept as a second term rather than deleted. It costs
-		// nothing, it is what an admin's fuller list answers with, and if the
-		// field ever went missing the failure would be OR-ed towards "yes, still
-		// masked" — an over-cautious sentence rather than a false promise that
-		// somebody may turn masking off.
+		// Masked by something other than this team's policy. The server field is
+		// the complete answer: a non-admin's `policyGroupIds` holds only the team
+		// group, and the instance-wide default belongs to no group. The id scan
+		// covers an admin's full list; if the server field is missing, the OR
+		// errs towards "still masked" rather than implying masking can be turned off.
 		const maskedElsewhere =
 			row.maskedByOtherPolicy === true || row.policyGroupIds.some((id) => id !== teamGroupId);
 
@@ -410,47 +341,32 @@ export function rowActionFor(
 	}
 
 	if (!mayAct) {
-		// Not enforced: an em dash. NOT `{ kind: 'none', via: [] }` — the component
-		// renders an empty `via` as "Enforced instance-wide", so reusing it here
-		// would tell an unmasked person they are masked instance-wide.
+		// Not enforced: renders an em dash. Not `{ kind: 'none', via: [] }`, which
+		// the component renders as "Enforced instance-wide".
 		if (!row.enforced) return { kind: 'readonly' };
 
-		// Enforced with no group behind it IS the instance default, and saying so
-		// names no group. Unchanged, and outside level A to revisit.
+		// Enforced with no group behind it is the instance default, which names no group.
 		if (row.policyGroupIds.length === 0) return { kind: 'none', via: [] };
 
-		// Masked by this team's own policy. Named, because the viewer owns it and
-		// "somewhere outside the team" would be false.
-		//
-		// ⚠️ Checked BEFORE the outside case, so someone masked by both reads as
-		// team policy and the other source is not mentioned at all. Saying "and
-		// also elsewhere" would disclose that a source outside their reach exists,
-		// which is the thing decision 5 withholds.
+		// Masked by this team's own policy, which the viewer owns. Checked before
+		// the outside case, so someone masked by both is shown as team policy only
+		// and the existence of a source outside the viewer's reach is not disclosed.
 		if (teamGroupId && row.policyGroupIds.includes(teamGroupId)) {
 			return { kind: 'masked-team', teamGroupId };
 		}
 
-		// Enforced through a group the viewer does not administer. The row says a
-		// source exists and that it is outside the team, and stops there.
-		//
-		// ⚠️ This value carries NO fields — not the group's name, not its id, not
-		// even how many there are. That is the protection, not the markup: an
-		// object without the name cannot leak the name, whereas a `via` array plus
-		// a careful template is one incautious edit away from printing it.
+		// Enforced through a group the viewer does not administer. The value has
+		// no fields (no group name, id or count), so no template can leak them.
 		return { kind: 'masked-elsewhere' };
 	}
 
 	if (!row.enforced) return { kind: 'enforce', targets: groups.targets };
 
-	// ⚠️ Named from `naming`, which includes team groups. An admin MAY take
-	// someone out of their team's policy — they are not bound by the seat limit,
-	// not exempt from the policy, and a team's group is not untouchable to them.
-	// What they may not have is an action that does something other than what it
-	// says, which is what a destination-filtered naming list produced.
+	// Named from `naming`, which includes team groups: an admin may take someone
+	// out of their team's policy, and the dialog must name that group correctly.
 	const byId = new Map(groups.naming.map((g) => [g.id, g]));
-	// Total by construction: a group missing from the list is still counted, so a
-	// two-source user does not become a one-source user and gain a `Remove`
-	// button that would not actually unlock anything.
+	// A group missing from the list is still counted, so a two-source user never
+	// gets a `Remove` button that would not actually unlock anything.
 	const via = row.policyGroupIds.map((id) => namedGroup(id, byId));
 
 	if (via.length === 1) return { kind: 'remove', group: via[0] };

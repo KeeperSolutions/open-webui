@@ -150,7 +150,7 @@ export const getUsers = async (
 	direction?: string,
 	page = 1,
 	signal?: AbortSignal,
-	// Last, and optional: existing callers pass positionally and stop before it.
+	// Optional team scope. Last, so positional callers that omit it are unaffected.
 	teamId?: string | null
 ) => {
 	let error = null;
@@ -290,7 +290,7 @@ export const searchUsers = async (
 export const getAllUsers = async (
 	token: string,
 	signal?: AbortSignal,
-	// Last, and optional: existing callers pass positionally and stop before it.
+	// Optional team scope. Last, so positional callers that omit it are unaffected.
 	teamId?: string | null
 ) => {
 	let error = null;

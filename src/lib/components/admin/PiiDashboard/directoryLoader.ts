@@ -30,7 +30,7 @@ const INITIAL: DirectoryState = {
 	errorDetail: null
 };
 
-/** ⚠️ `teamId` last, default fetcher built here - see `metricsLoader.ts`. */
+/** Creates the directory loader. `teamId` handling matches `createMetricsLoader`. */
 export function createDirectoryLoader(
 	fetcher?: DirectoryFetcher,
 	teamId: string | null = null

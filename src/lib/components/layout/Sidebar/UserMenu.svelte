@@ -100,10 +100,9 @@
 			getUsageInfo();
 		}
 
-		// ⚠️ On OPEN, not on mount. The menu is in the sidebar of every page, so a
-		// mount-time fetch would put a request on every navigation for a question
-		// only this menu asks. `loadOwnedTeamId` answers once per session, so
-		// reopening the menu costs nothing.
+		// Fetched on open, not on mount: the menu is mounted on every page, so a
+		// mount-time fetch would add a request to every navigation.
+		// `loadOwnedTeamId` fetches once per session, so reopening costs nothing.
 		if (state && ($config?.features?.enable_billing ?? false)) {
 			loadOwnedTeamId(localStorage.token);
 		}
@@ -319,10 +318,8 @@
 			{/if}
 
 			<!--
-				The team owner's entry to their own PII dashboard.
-				⚠️ Gated on owning a team, not on being in one: the page refuses a
-				member (`resolve_dashboard_scope`), so showing it to members would
-				lead to a refusal.
+				The team owner's link to their team's PII dashboard. Shown only to
+				owners, because the page refuses plain members (`resolve_dashboard_scope`).
 			-->
 			{#if $ownedTeamId}
 				<button

@@ -1,13 +1,11 @@
-"""G-A3 - scoping `GET /api/v1/langfuse/metrics` to one team.
+"""Tests that `GET /api/v1/langfuse/metrics` is scoped to one team.
 
-⚠️ This route changed from `get_admin_user` to `get_verified_user`. Everything
-that used to be enforced by the dependency is now enforced by the first line of
-the body, so these tests exercise that line from every side: no `team_id`, wrong
-`team_id`, empty team, and the admin path that must stay bit-identical.
+The route depends on `get_verified_user` and authorises on the first line of
+its body. The tests cover a missing `team_id`, a wrong `team_id`, an empty team,
+and the admin path, which must stay unchanged.
 
-`asyncio.run` rather than `@pytest.mark.asyncio`, matching `test_team_scope.py`
-and the other PII test files: no plugin in the path, so the file cannot start
-reporting green because a dependency went missing.
+Uses `asyncio.run` rather than `@pytest.mark.asyncio`, so a missing
+`pytest-asyncio` plugin cannot make tests pass without running.
 """
 
 import asyncio
@@ -61,8 +59,7 @@ TEAM_USERS = [_user("u1", ANA), _user("u2", BOJAN)]
 def _call(caller, team_id=None, rows=None, team=None, members=None, users=None):
     """Invoke the route handler directly and report what each model was asked.
 
-    Returns `(response, counts)` where counts are await counts per model read, so
-    the query cost is measured rather than estimated.
+    Returns `(response, counts)`, where counts are the call counts per mocked read.
     """
     window = MagicMock(return_value=("FROM", "TO", list(DEFAULT_ROWS if rows is None else rows)))
     teams = AsyncMock(return_value=team)
@@ -107,7 +104,7 @@ def collected_warnings():
 
 
 # ---------------------------------------------------------------------------
-# The gate that moved from the dependency into the body
+# Authorisation in the route body
 # ---------------------------------------------------------------------------
 
 
@@ -134,11 +131,10 @@ def test_non_admin_without_team_id_is_refused():
 
 
 def test_non_admin_without_team_id_never_reaches_langfuse():
-    """The refusal happens before the window is fetched, not after.
+    """The refusal happens before the Langfuse window is fetched.
 
-    ⚠️ Asserting on the mock, not merely re-raising: a test whose only statement is
-    `pytest.raises` around a call that already raises cannot fail for the reason it
-    claims, and would keep passing with the guard moved after the fetch.
+    The mock assertion catches a guard moved after the fetch, which
+    `pytest.raises` alone would not.
     """
     window = MagicMock(return_value=("FROM", "TO", list(DEFAULT_ROWS)))
     with patch(WINDOW, window):
@@ -186,7 +182,7 @@ def test_owner_sees_only_their_teams_rows():
 
 
 def test_owner_costs_three_model_reads_and_one_langfuse_call():
-    """Measured, not estimated: the route used to touch no table at all."""
+    """A scoped request costs three model reads and one Langfuse call."""
     _, counts = _call(_caller("user", "u1"), team_id="T1", team=_team("u1"))
     assert counts == {"teams": 1, "members": 1, "users": 1, "langfuse": 1}
 
@@ -227,10 +223,10 @@ def test_a_key_differing_only_in_case_and_edge_space_is_kept():
 
 
 def test_a_row_matching_only_under_the_loose_key_is_dropped_and_counted(caplog):
-    """Internal whitespace: `trim` keeps it, so this is NOT the same identity.
+    """A key differing only in internal whitespace is dropped and logged as a near miss.
 
-    It is the shape a drifted normalisation produces, and the only signal that the
-    two sides have stopped agreeing.
+    `trim` keeps internal whitespace, so it is a different identity; the warning
+    is the signal that the two normalisations have drifted apart.
     """
     with caplog.at_level("WARNING"):
         response, _ = _call(

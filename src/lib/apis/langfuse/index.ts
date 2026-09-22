@@ -27,8 +27,7 @@ export const getLangfuseMetrics = async (
 	period: string = 'week',
 	days?: number,
 	signal?: AbortSignal,
-	// Last, and optional: every existing caller passes positionally and stops
-	// before this, so adding it cannot silently shift an argument.
+	// Optional team scope. Last, so positional callers that omit it are unaffected.
 	teamId?: string | null
 ): Promise<MetricsResponse> => {
 	let error = null;

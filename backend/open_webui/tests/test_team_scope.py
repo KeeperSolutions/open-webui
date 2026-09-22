@@ -1,28 +1,15 @@
-"""Tests for team identity resolution — TRAU-D1 level A, gate G-A1.
+"""Tests for the team scoping helpers in `utils/team_scope.py` (no routes).
 
-Scope: `normalize_user_key` and `resolve_team_identities`. NO routes, no
-`Depends`, no shared preamble — those are G-A2b, G-A3 and G-A4.
+The normalisation tests use two corpora. Hand-written literals carry the
+discriminating power, one case per class of difference. The real key set from
+the development database only checks shape: it would pass even without
+lower-casing, so it surfaces unmodelled key classes rather than regressions.
 
-⚠️ The normalisation tests use TWO corpora with DIFFERENT jobs, and they are not
-interchangeable:
+The frontend side is pinned by its own literals in `costAnalytics.test.ts` and
+`usersAccess.test.ts`. The cases below mirror them, so both sides are tested
+against the same expected answers rather than against each other.
 
-  * **literals** carry the discriminating power. Every class of difference is
-    represented by one hand-written expectation.
-  * **the real key set** carries shape only. Measured on the development
-    database: 34 distinct keys, of which **0** change under normalisation — so an
-    implementation with no lower-casing at all passes that corpus green. It is
-    here to surface a class the literals do not model, not to catch a regression.
-
-The other side of the equivalence is pinned by its own literals, in vitest:
-`costAnalytics.test.ts:57-58` (case + edge whitespace fold into one bar),
-`costAnalytics.test.ts:186-187` (case-insensitive match),
-`usersAccess.test.ts:72` (folds case and whitespace variants into one key),
-`usersAccess.test.ts:106-107` (`'  ANA@X.COM '` attributes to `ana@x.com`).
-Those cases are mirrored below on purpose: neither side is tested against the
-other, so both are tested against the same stated answers.
-
-Exotic code points are written as `chr(...)`, never as literals: a raw U+001F in
-a source file is invisible to every reviewer who would need to see it.
+Unusual code points are written as `chr(...)` so they stay visible in review.
 """
 
 import asyncio
@@ -35,9 +22,8 @@ from fastapi import HTTPException
 
 from open_webui.utils.team_scope import TeamIdentities, normalize_user_key
 
-# `resolve_team_identities` reaches the models, and importing those initialises
-# the async engine. Probed once here so a broken environment produces a LOUD skip
-# naming the missing package, never a quiet pass.
+# Importing the models initialises the async engine. Probed once so a broken
+# environment skips with the import error instead of passing silently.
 try:  # pragma: no cover - environment probe
     import open_webui.models.billing  # noqa: F401
     import open_webui.models.users  # noqa: F401
@@ -58,7 +44,7 @@ NEL = chr(0x0085)       # str.strip() removes it; trim does not
 
 
 # ---------------------------------------------------------------------------
-# Corpus 1 - literals. All of the discriminating power lives here.
+# Corpus 1: hand-written literals
 # ---------------------------------------------------------------------------
 
 
@@ -91,7 +77,7 @@ def test_normalize_user_key_is_idempotent():
 
 
 # ---------------------------------------------------------------------------
-# Corpus 2 - the real key set. Shape only.
+# Corpus 2: the real key set (shape only)
 # ---------------------------------------------------------------------------
 
 _DEV_DB = Path(__file__).resolve().parents[2] / "data" / "webui.db"
@@ -124,10 +110,10 @@ def _looks_like_uuid(value: str) -> bool:
 
 
 def test_real_key_set_holds_no_class_the_literals_miss():
-    """A key shaped unlike anything above is a finding, not a pass.
+    """Real keys fall only into classes the literals model.
 
-    Values are never asserted on, printed, or committed: a Langfuse key is an
-    email, which is personal data. Only counts and classes leave this test.
+    Key values are never asserted on or printed, because a Langfuse key is an
+    email. Only counts and classes leave this test.
     """
     keys = _distinct_ledger_keys()
     if keys is None:
@@ -172,13 +158,10 @@ def _user(user_id, email):
 
 
 def _resolve(team_id, members, users):
-    """Run the resolver and hand back the two mocks it was given.
+    """Run the resolver with mocked models; return its result and both mocks.
 
-    ⚠️ `asyncio.run`, not `@pytest.mark.asyncio`. That marker needs the
-    `pytest-asyncio` plugin, and when the plugin is absent pytest does not fail —
-    it warns, never awaits the coroutine, and reports the test as PASSED. Every
-    other PII test file here uses the same helper shape for the same reason
-    (`test_pii_toggle.py:84`, `test_pii_fail_closed.py:45`).
+    Uses `asyncio.run`, not `@pytest.mark.asyncio`: without the `pytest-asyncio`
+    plugin that marker never awaits the coroutine and the test reports as passed.
     """
     from open_webui.utils.team_scope import resolve_team_identities
 
@@ -201,7 +184,7 @@ def test_three_members_yield_ids_and_both_key_kinds():
 
 @needs_models
 def test_duplicate_membership_row_counts_once():
-    """A set, not a list. Twice in `team_members` must not mean twice in the filter."""
+    """A duplicate `team_members` row yields the id once."""
     out, _, users_mock = _resolve(
         "T1", [_member("u1"), _member("u1")], [_user("u1", "a@x.com")]
     )
@@ -257,7 +240,7 @@ def test_both_fields_are_sets():
 
 
 # ---------------------------------------------------------------------------
-# G-A2 - `_may_read_team_dashboard`
+# `_may_read_team_dashboard`
 # ---------------------------------------------------------------------------
 
 TEAMS = "open_webui.models.billing.Teams.get_by_id"
@@ -272,13 +255,10 @@ def _team(owner_user_id, team_id="T1"):
 
 
 def _may(caller, team_id, team):
-    """Run the guard with the caller present in `team_members` of the team asked for.
+    """Run the guard with the caller listed in the requested team's `team_members`.
 
-    ⚠️ The membership mock is the point, not scaffolding. The guard must refuse a
-    member who does not own the team, and a test where no membership exists cannot
-    tell "membership was ignored" from "there was nothing to ignore". Patching it
-    also stops a mutated guard from reaching the real database and dying of that
-    instead of of the assertion.
+    The membership mock lets the tests show that membership alone grants nothing,
+    and keeps a broken guard from reaching the real database.
     """
     from open_webui.utils.team_scope import _may_read_team_dashboard
 
@@ -336,7 +316,7 @@ def test_admin_is_allowed_even_when_the_team_does_not_exist():
 
 
 # ---------------------------------------------------------------------------
-# G-A2b - `resolve_dashboard_scope` and `team_directory_filter`
+# `resolve_dashboard_scope` and `team_directory_filter`
 # ---------------------------------------------------------------------------
 
 
@@ -360,7 +340,7 @@ def test_no_team_id_and_admin_means_no_scoping():
 
 @needs_models
 def test_no_team_id_and_not_admin_is_refused():
-    """The `get_admin_user` dependency did not disappear; it moved here."""
+    """Without `team_id` the view is instance-wide, which only admins may read."""
     with pytest.raises(HTTPException) as e:
         _scope(_caller("user", "u1"), None)
     assert e.value.status_code == 401
@@ -368,12 +348,10 @@ def test_no_team_id_and_not_admin_is_refused():
 
 @needs_models
 def test_someone_elses_team_is_refused_before_any_member_is_read():
-    """⚠️ The other team must have MEMBERS, or this test proves nothing.
+    """The ownership check alone refuses another owner's team.
 
-    With an empty team, removing the authorisation check entirely still produces a
-    401 — the empty-scope barrier catches it, and the test passes for a reason it
-    never meant to assert. Populating T2 leaves the guard as the only thing that
-    can refuse, and `assert_not_awaited` pins that it refuses BEFORE reading them.
+    The other team has members, so the empty-scope check cannot produce the 401
+    and hide a missing ownership check.
     """
     with pytest.raises(HTTPException) as e:
         _scope(
@@ -446,22 +424,17 @@ def test_directory_filter_carries_both_keys():
 
 
 # ---------------------------------------------------------------------------
-# The fail-open this ticket does not own
+# Upstream `Users.get_users` behaviour that `team_directory_filter` relies on
 # ---------------------------------------------------------------------------
 
 
 @needs_models
 def test_users_get_users_still_returns_the_whole_instance_for_an_empty_user_ids():
-    """⚠️ A test of SOMEONE ELSE'S behaviour, on purpose.
+    """An empty `user_ids` returns every user unless `group_ids` is also a list.
 
-    `Users.get_users` reads `if user_ids:` (`models/users.py:453`), so an empty
-    list filters nothing and the call returns every account on the instance. The
-    guard that would catch it (`:448-451`) arms only when `user_ids` AND
-    `group_ids` are both lists.
-
-    This exists so `team_directory_filter`'s `group_ids: []` is never removed as
-    padding. **When this test starts failing, someone has fixed
-    `models/users.py`** — that is a finding to report, not a break to repair here.
+    This is why `team_directory_filter` sends `group_ids: []`. If this test fails,
+    `models/users.py` has changed and that key may be redundant; report it rather
+    than editing this test.
     """
     import time
     from contextlib import asynccontextmanager
@@ -487,10 +460,9 @@ def test_users_get_users_still_returns_the_whole_instance_for_an_empty_user_ids(
         async def _ctx(db=None):
             yield session
 
-        # ⚠️ Patching the context manager is required, not cosmetic:
-        # `DATABASE_ENABLE_SESSION_SHARING` is off, so `get_async_db_context`
-        # ignores the session it is handed and opens a real one. The same trap is
-        # documented at `tests/models/test_user_locate.py:74-79`.
+        # Required: with `DATABASE_ENABLE_SESSION_SHARING` off,
+        # `get_async_db_context` ignores the session passed in and opens a real
+        # one (see also `tests/models/test_user_locate.py`).
         with patch("open_webui.models.users.get_async_db_context", _ctx):
             table = UsersTable()
             unguarded = await table.get_users(filter={"user_ids": []}, db=session)

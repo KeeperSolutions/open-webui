@@ -1,20 +1,13 @@
-"""Team scoping for the PII dashboard — level A, read only.
+"""Team scoping for the PII dashboard (read-only).
 
-Two routers (`langfuse.py` and `users.py`) need the same answers, so neither can
-own them. Deliberately NOT in `utils/access_control/` — that module is upstream
-(`tim@openwebui.com`), and this follows the precedent `utils/pii_policy.py` sets
-for helpers of our own.
+Shared by `routers/langfuse.py` and `routers/users.py`. Kept out of
+`utils/access_control/`, which is upstream code, following the example of
+`utils/pii_policy.py`.
 
-Names without a leading underscore are the module\'s surface, imported by both
-routers. A leading underscore here means "only this module calls it", which is
-why `_may_read_team_dashboard` will keep one and `resolve_team_identities` does
-not.
-
-⚠️ Nothing here resolves a USER to a team, and nothing here should. Level A never
-asks that question: every entry point starts from a `team_id` that arrived in the
-address. The `.first()` readers that would answer it — `TeamMembers.get_by_user_id`
-and `Teams.get_by_owner_user_id` — are deliberately left untouched, because under
-`.first()` a duplicate and a unique hit are indistinguishable.
+Nothing here resolves a user to a team. Every entry point starts from a
+`team_id` in the request. `TeamMembers.get_by_user_id` and
+`Teams.get_by_owner_user_id` return `.first()`, which cannot tell a duplicate
+from a unique hit, so they must not be used for authorisation.
 """
 
 import logging
@@ -27,15 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 log = logging.getLogger(__name__)
 
 
-#: Exactly the code points `String.prototype.trim` removes: the WhiteSpace and
-#: LineTerminator productions, U+FEFF included.
+#: The code points JavaScript `String.prototype.trim` removes: the WhiteSpace and
+#: LineTerminator productions, including U+FEFF.
 #:
-#: ⚠️ Spelled out rather than left to `str.strip()`, which disagrees with `trim`
-#: in five places — measured, not assumed. Python does not strip U+FEFF, and it
-#: DOES strip U+001C-U+001F and U+0085, none of which `trim` touches. Each of those
-#: is a key the two sides would normalise differently, and a difference here does
-#: not fail — it silently drops a row. Listed as code points so the set is
-#: reviewable; a literal string here would be a run of invisible characters.
+#: `str.strip()` differs: it keeps U+FEFF and strips U+001C-U+001F and U+0085.
+#: A mismatch does not fail, it silently drops metrics rows. Listed as code
+#: points because a literal string would be a run of invisible characters.
 _JS_TRIM_CHARS = ''.join(
     chr(c)
     for c in (
@@ -52,77 +42,51 @@ _JS_TRIM_CHARS = ''.join(
 def normalize_user_key(user: Optional[str]) -> str:
     """Identity key for a Langfuse `user` value.
 
-    Behaviour must stay identical to `normalizeUserKey`
-    (`src/lib/components/admin/PiiDashboard/sections/costAnalytics.ts:14-16`),
-    which is `(user ?? \'\').trim().toLowerCase()`.
+    Must match `normalizeUserKey` in
+    `src/lib/components/admin/PiiDashboard/sections/costAnalytics.ts`, which is
+    `(user ?? '').trim().toLowerCase()`. A divergence raises nothing: the backend
+    silently drops rows the frontend would attribute. Both sides are pinned by
+    literal expectations, in `tests/test_team_scope.py` and the matching vitest
+    files, rather than by each other.
 
-    ⚠️ A divergence between the two does NOT raise and does NOT fail a request.
-    The backend simply drops rows the frontend would have attributed, on a screen
-    that claims to be exhaustive — and in the owner\'s scoped view the missing row
-    disappears from both sides of the reconciliation, so the arithmetic stays
-    green. That is why the two sides are pinned by literal expectations rather
-    than by each other; the Python literals live in `tests/test_team_scope.py` and
-    name the JS tests that pin the other side.
-
-    Leading and trailing whitespace only. **Internal whitespace is preserved**,
-    because `trim` preserves it, and a stricter rule here would fold two keys the
-    frontend keeps apart.
+    Only leading and trailing whitespace is removed. Internal whitespace is kept,
+    as `trim` keeps it.
     """
     return (user or '').strip(_JS_TRIM_CHARS).lower()
 
 
 class TeamIdentities(NamedTuple):
-    """Who a team is, in the two vocabularies the dashboard needs.
+    """A team's members as OWUI user ids and as normalised Langfuse keys.
 
-    `ids` are OWUI user ids, for the directory filter. `keys` are normalised
-    Langfuse identity keys, for the metrics row filter.
+    `ids` feed the directory filter; `keys` feed the metrics row filter. Both are
+    sets, so a duplicate `team_members` row counts once.
 
-    ⚠️ Both are **sets**. A duplicate row in `team_members` would otherwise put the
-    same person in twice: the directory filter would carry the id twice and the
-    returned `total` would disagree with the number of rows rendered.
-
-    ⚠️ And because `ids` is a set, a caller building the directory filter must pass
-    `list(ids)`. `models/users.py:448` arms its "both empty means no users" guard
-    only for values that are `isinstance(..., list)` — a set skips that guard
-    exactly like a missing key does, and an unfiltered read returns the whole
-    instance. That is the second barrier\'s problem to solve, not this one\'s, but
-    it is recorded here because this is where the type is chosen.
+    Pass `list(ids)`, not the set, to `Users.get_users`: its "both empty means no
+    users" guard applies only to lists, and a set skips it and returns every user.
     """
 
     ids: frozenset
     keys: frozenset
-    #: The team's own PII policy group, or `None` when the team has none yet.
-    #:
-    #: ⚠️ Defaulted, and populated only by `resolve_dashboard_scope`.
-    #: `resolve_team_identities` answers "who is in this team" and must stay
-    #: answerable without touching groups at all — the migration and the tests
-    #: both call it that way.
+    #: The team's PII policy group, or `None` when it has none yet. Set only by
+    #: `resolve_dashboard_scope`; `resolve_team_identities` must not touch groups.
     group_id: Optional[str] = None
 
 
 async def resolve_team_identities(
     team_id: str, db: Optional[AsyncSession] = None
 ) -> TeamIdentities:
-    """Every identity belonging to one team, starting from the team.
+    """Every identity belonging to one team.
 
-    `keys` covers **both** the members\' emails and their ids, because the frontend
-    claims a Langfuse row under either
-    (`src/lib/components/admin/PiiDashboard/sections/usersAccess.ts:169-179`). A
-    narrower filter here would drop rows the frontend knows how to attribute.
+    `keys` holds both the members' emails and their ids, because the frontend
+    attributes a Langfuse row under either (`claimKeys` in `usersAccess.ts`). The
+    empty key is excluded, as in `claimKeys`; otherwise a member with an empty
+    email would claim every unattributed row.
 
-    The empty key is excluded, mirroring `claimKeys`\' `if (key && ...)` guard on
-    `usersAccess.ts:174`. Without it a member whose email is empty would claim
-    every row Langfuse recorded against no one.
-
-    Returns empty sets for a team with no members, and for a team that does not
-    exist — the two are indistinguishable here on purpose, because both mean the
-    same thing to the caller. Deciding what an empty scope means is the caller\'s
-    job: a 401 before any further query, never an unfiltered read.
+    A team with no members and a team that does not exist both return empty sets.
+    The caller must treat an empty scope as a refusal, never as an unfiltered read.
     """
-    # Imported here rather than at module scope so `normalize_user_key` — a pure
-    # string function with no database in it — can be imported and tested without
-    # initialising the async engine. `models/users.py:565` and
-    # `routers/billing.py:1134` import models function-locally for the same reason.
+    # Imported here so `normalize_user_key` can be imported and tested without
+    # initialising the async database engine.
     from open_webui.models.billing import TeamMembers
     from open_webui.models.users import Users
 
@@ -133,10 +97,9 @@ async def resolve_team_identities(
 
     users = await Users.get_users_by_user_ids(list(ids), db=db)
 
-    # Built from the users actually found, not from the membership rows: a member
-    # row pointing at a deleted account contributes no key, and its id is dropped
-    # with it. Keeping such an id would filter the directory on a user the
-    # directory cannot return, which reads on screen as a silently short list.
+    # Built from the users found, not the membership rows: a member row pointing
+    # at a deleted account is dropped, so the directory is never filtered on a
+    # user it cannot return.
     found_ids = {u.id for u in users}
     missing = ids - found_ids
     if missing:
@@ -160,29 +123,17 @@ async def resolve_team_identities(
 async def _may_read_team_dashboard(
     user, team_id: str, db: Optional[AsyncSession] = None
 ) -> bool:
-    """Who may read one team's dashboard.
+    """Whether this user may read one team's dashboard: an admin or the team's owner.
 
-    Modelled on the only precedent for widening an audience in place,
-    `_may_read_pii_audit` (`routers/groups.py:302-312`): one function, so the next
-    role that gains access is an `or` on a line rather than a second route.
+    Modelled on `_may_read_pii_audit` in `routers/groups.py`, so a new role that
+    gains access is one more `or` condition.
 
-    Underscored because its only caller is `resolve_dashboard_scope`, in this
-    module. Everything the routers import is named without one.
-
-    Ownership is read from `teams.owner_user_id` (`models/billing.py:192`) and
-    NEVER from `team_members.role` (`:325`). Both are written when a team is
-    created (`routers/billing.py:1056-1062`, `:1921-1927`) and nothing keeps them
-    in step afterwards, so exactly one of them has to be the answer.
-
-    ⚠️ The team is fetched by primary key, so this never searches by
-    `owner_user_id` — a column with no index at all, whose `.first()` reader
-    (`Teams.get_by_owner_user_id`) is therefore free to return an arbitrary row.
-    Reading ownership OFF a row found by id has no such freedom.
-
-    ⚠️ And it does not resolve the caller's own team. An owner whose
-    `team_members` row is missing, and an owner who somehow has two, both still
-    pass: ownership lives on `teams`, and authorisation must not fail on the state
-    of a table it does not need to ask about.
+    Ownership comes from `teams.owner_user_id`, never `team_members.role`. Both are
+    written at team creation and nothing keeps them in sync, so only one can be
+    authoritative. The team is fetched by primary key: `owner_user_id` has no
+    index, and `Teams.get_by_owner_user_id` may return an arbitrary row. The
+    caller's `team_members` rows are not consulted, so a missing or duplicate row
+    does not change the answer.
     """
     if user.role == 'admin':
         return True
@@ -194,12 +145,10 @@ async def _may_read_team_dashboard(
 
 
 def _governs(user, ownership) -> bool:
-    """Check 1, once, so the guard and the response flag cannot disagree.
+    """Whether `user` owns the team in `ownership`.
 
-    ⚠️ Shared deliberately. The route guard and `may_manage_team_policy` ask the
-    same question at different moments — before a write, and while drawing a page
-    — and two copies of "is this their team" would drift on exactly the case
-    where drift is unrecoverable.
+    Shared by `may_manage_team_policy` and the membership-change guard so the
+    response flag and the write guard cannot disagree.
     """
     return ownership is not None and ownership.owner_user_id == user.id
 
@@ -207,31 +156,19 @@ def _governs(user, ownership) -> bool:
 async def may_manage_team_policy(
     user, group_id: Optional[str], db: Optional[AsyncSession] = None
 ) -> bool:
-    """Whether this viewer may govern this team's policy at all. Check 1, alone.
+    """Whether this viewer may manage the team's policy group (ownership check only).
 
-    ⚠️ **Check 1 only, and that is not a shortcut.** The full guard also asks
-    whether every named target belongs to the team — and while a page is being
-    drawn there are no targets, because nobody has been clicked. The two share
-    `team_ownership_of_group` and `_governs`; they differ in what else they ask.
+    Used while rendering a page, when there are no targets yet. The write guard,
+    `authorise_policy_membership_change`, also checks that every target is a team
+    member and refuses a request with no targets, so it cannot be used here.
 
-    Check 2 cannot fail from the screen anyway: level A shows a team's dashboard
-    only the members of that team. It exists for requests that do not come from
-    the screen.
-
-    ⚠️ Do NOT reach for `authorise_policy_membership_change` here. That function
-    raises, and it refuses a request with no targets — which is every request
-    that has not been made yet.
-
-    ⚠️ And do NOT derive this from "is the view team-scoped". Today the two
-    coincide, because `_may_read_team_dashboard` admits only administrators and
-    the team's owner, so anyone holding a scope may already manage it. That is a
-    coincidence, not the rule: the docstring of that function anticipates the
-    audience widening by an `or` on one line, and on the day a plain member gains
-    read access, the proxy would hand them the owner's power.
+    Do not derive this from "the view is team-scoped". Today only admins and
+    owners can read a scoped dashboard, so the two agree, but once
+    `_may_read_team_dashboard` admits plain members that shortcut would give them
+    the owner's rights.
     """
     if not group_id:
-        # No group, nothing to govern — the same answer for every role, so a team
-        # whose policy group was never created reads consistently.
+        # No policy group means nothing to manage, for every role.
         return False
 
     if user.role == 'admin':
@@ -248,50 +185,33 @@ async def _may_change_policy_membership(
     target_user_ids: Optional[list],
     db: Optional[AsyncSession] = None,
 ) -> bool:
-    """Who may add someone to, or remove someone from, a team's PII policy group.
+    """Whether this user may add or remove people in a team's PII policy group.
 
-    Two checks, and **neither covers the other**. Each closes a different way for
-    a team owner to reach past their team:
+    Two independent checks; neither covers the other:
 
-      1. **the group is their own team's policy** — without it an owner writes
-         into an administrator's group, or into another team's policy, and grants
-         their people whatever that group grants
-      2. **every named target is a member of that team** — without it an owner
-         imposes masking on any account on the instance
+      1. The group is the policy group of a team the user owns. Without it an
+         owner could write into an admin's group or another team's policy.
+      2. Every target is a member of that team. Without it an owner could impose
+         masking on any account on the instance.
 
-    A guard covered by another guard looks exactly like a guard that works, so
-    the two are tested with non-overlapping cases and killed by separate
-    mutations. That is the same shape as D1/D2 in level A.
+    The tests cover each check with non-overlapping cases.
 
-    ⚠️ Ownership is read from `teams.owner_user_id`, never from
-    `team_members.role` — both are written when a team is created and nothing
-    keeps them in step afterwards, so exactly one of them has to be the answer.
-    The same choice, for the same reason, as `_may_read_team_dashboard`.
+    Ownership comes from `teams.owner_user_id`, never `team_members.role`, as in
+    `_may_read_team_dashboard`. The team is found from the group through a unique
+    index, not through `Teams.get_by_owner_user_id`, which returns an arbitrary
+    row for an owner of two teams.
 
-    ⚠️ And it does NOT use `Teams.get_by_owner_user_id`: that is a `.first()` over
-    a column with no index, so an owner of two teams gets an arbitrary row. Going
-    from the GROUP to the team travels a unique index and has no such freedom.
-
-    Display only? No — this is the boundary. `mayActFor` on the frontend decides
-    what is drawn; this decides what is allowed.
+    This is the authorisation boundary; the frontend `mayActFor` only decides
+    what is shown.
     """
     if not target_user_ids:
-        # ⚠️ Fail CLOSED on an empty request, before the role is even consulted.
-        #
-        # The natural reading — "nobody named, so nobody to refuse" — makes check
-        # 2 pass vacuously, because the set of targets that are not members of the
-        # team is also empty. That is the same shape as the filter in
-        # `models/users.py:456`, where an empty `user_ids` meant "no filter" and
-        # therefore "every user", until it was closed by returning nothing.
-        #
-        # An empty request authorises nothing, so there is no honest yes. A caller
-        # that wants an empty body to be a no-op has to say so itself, before
-        # asking this question.
+        # Fail closed on an empty request, before checking the role. With no
+        # targets, check 2 would pass vacuously. A caller that wants an empty body
+        # to be a no-op must handle that before calling this.
         return False
 
     if user.role == 'admin':
-        # Unbounded by design, and decided in level C: an administrator is not
-        # held to a team boundary. Costs no query at all.
+        # Admins are not bound by team boundaries. No query needed.
         return True
 
     from open_webui.utils.team_groups import team_ownership_of_group
@@ -303,10 +223,9 @@ async def _may_change_policy_membership(
     from open_webui.models.billing import TeamMembers
 
     members = await TeamMembers.members_among(ownership.team_id, list(target_user_ids), db=db)
-    # ALL of them, not any: a request naming one member and one stranger is one
-    # request, and it is refused whole. Authorising the part that happens to be
-    # allowed would let an owner discover who exists outside their team by
-    # watching which halves succeed.
+    # Every target must be a member; a request naming a member and a stranger is
+    # refused whole. Partial success would let an owner probe who exists outside
+    # their team.
     return not (set(target_user_ids) - members)
 
 
@@ -316,34 +235,25 @@ async def authorise_policy_membership_change(
     target_user_ids: Optional[list],
     db: Optional[AsyncSession] = None,
 ) -> None:
-    """Refuse, or return. The routers call THIS, never the boolean above.
+    """Raise 401 unless the user may change these policy group memberships.
 
-    ⚠️ Raising rather than returning is the whole point, and it is the same
-    reasoning `resolve_dashboard_scope` is written on: a caller cannot forget to
-    check a value it never receives. `if not await guard(...)` is one missing
-    `not` away from failing open, on the two routes in this feature that can
-    fail open at all.
-
-    ⚠️ It does NOT decide what an empty request means. A route that treats an
-    empty body as a no-op has to say so before it gets here — see the short
-    circuits in `routers/groups.py`. Reaching this function with nobody named is
-    a refusal, because there is nothing to authorise.
-
+    Routers call this, never `_may_change_policy_membership`: a caller cannot
+    fail open by forgetting or inverting a check on a value it never receives.
+    An empty target list is refused; routes that treat an empty body as a no-op
+    short-circuit before calling this (see `routers/groups.py`).
     `test_no_route_calls_the_guard_yet` in `tests/test_policy_membership_authz.py`
-    is what keeps the boolean out of the routers.
+    keeps the boolean out of the routers.
     """
     if not await _may_change_policy_membership(user, group_id, target_user_ids, db=db):
         raise _prohibited()
 
 
 def _prohibited() -> HTTPException:
-    """The one refusal this module makes, so all three routes refuse alike.
+    """The single refusal this module raises, so every route refuses the same way.
 
-    401 rather than 404, matching `routers/groups.py:326-329`. The case for 404 is
-    that 401 confirms another team exists — but a `team_id` is a `uuid4`
-    (`models/billing.py:240`), so it cannot be guessed or enumerated, and the
-    disclosure 404 would prevent has nothing to disclose to. If team ids ever
-    become slugs or sequential, this is the line that changes.
+    401 rather than 404, matching `routers/groups.py`. A 404 would hide that the
+    team exists, but team ids are `uuid4` values and cannot be guessed. Revisit
+    this if team ids become sequential or slugs.
     """
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -354,23 +264,19 @@ def _prohibited() -> HTTPException:
 async def resolve_dashboard_scope(
     user, team_id: Optional[str], db: Optional[AsyncSession] = None
 ) -> Optional[TeamIdentities]:
-    """The first executable line of every scoped dashboard route.
+    """Authorise a dashboard request and return its team scope.
 
-    Returns the team's identities, or `None` meaning "no scoping, behave exactly
-    as before". It never returns an empty scope: a caller therefore has no
-    "if the scope is empty" branch to get wrong, because an empty scope is a
-    refusal that happens here.
+    Must be the first executable line of every scoped dashboard route. Returns
+    `None` for the unscoped instance-wide view, which is admin-only, or the
+    team's identities. It never returns an empty scope; an empty team is refused
+    here, so callers have no empty-scope branch to get wrong.
 
-    ⚠️ This is the only place in level A that can fail **open**. Every other way
-    this feature can break yields an empty screen; this one yields other people's
-    data. That is why it is one function rather than three copies of a pattern in
-    three routers, and why it raises rather than returning a value the caller has
-    to remember to check.
+    This is the one check whose failure exposes other teams' data rather than an
+    empty screen, which is why it is a single shared function and raises instead
+    of returning a value the caller must check.
     """
     if team_id is None:
-        # The unscoped, instance-wide view. Today's behaviour, today's audience:
-        # the `get_admin_user` dependency these routes used to carry is not gone,
-        # it moved here.
+        # The instance-wide view is admin-only.
         if user.role != 'admin':
             raise _prohibited()
         return None
@@ -380,30 +286,23 @@ async def resolve_dashboard_scope(
 
     scope = await resolve_team_identities(team_id, db=db)
     if not scope.ids:
-        # A team with no members, or none whose accounts still exist. Refused
-        # BEFORE the caller queries anything, because the alternative — filtering
-        # on an empty set — is precisely the fail-open below.
+        # No members, or none whose accounts still exist. Refused before the
+        # caller queries anything, because filtering on an empty set returns
+        # everything.
         log.warning('team_scope: refusing dashboard for team %s, scope is empty', team_id)
         raise _prohibited()
 
-    # ⚠️ Reached ONLY on the scoped path. The instance-wide branch returned above
-    # without coming near this, which is the whole level-A guarantee: an admin
-    # reading the unscoped dashboard creates nothing and writes nothing.
-    #
-    # ⚠️ And this is where a read becomes a write — see `ensure_team_pii_group`.
-    # It reads first, so a team that already has its group costs one SELECT and
-    # no write, which is what makes three routes per screen affordable.
+    # Only the scoped path reaches this, so an admin reading the unscoped
+    # dashboard never writes anything. `ensure_team_pii_group` reads first, so a
+    # team that already has its group costs one SELECT and no write.
     from open_webui.utils.team_groups import ensure_team_pii_group
 
     try:
         group_id = await ensure_team_pii_group(team_id, db=db)
     except Exception as e:
-        # ⚠️ Best-effort, and the distinction matters: the group is what section 4
-        # uses to say "masked by team policy" instead of "masked somewhere else".
-        # It is a LABEL. Letting a failed write take the whole dashboard down would
-        # trade a read that works for a write that is only a convenience — and
-        # `teamGroupId: null` is already a supported state, so there is a correct
-        # thing to fall back to.
+        # Best-effort: the group only labels masking as "team policy" on the
+        # dashboard, and `teamGroupId: null` is a supported state. A failed write
+        # must not take the dashboard down.
         log.warning('team_scope: could not resolve the policy group for team %s: %s', team_id, e)
         group_id = None
 
@@ -411,29 +310,22 @@ async def resolve_dashboard_scope(
 
 
 def team_directory_filter(scope: TeamIdentities) -> dict:
-    """The `Users.get_users` filter keys that scope the directory to one team.
+    """The `Users.get_users` filter that limits the directory to one team.
 
-    ⚠️ `group_ids: []` is not padding, and removing it does not fail a test in the
-    router that uses it — it silently returns the whole instance. `Users.get_users`
-    reads `if user_ids:` (`models/users.py:453`), and an empty list is falsy, so an
-    empty scope filters NOTHING. The guard that catches that (`:448-451`) arms only
-    when `user_ids` and `group_ids` are BOTH lists; leave `group_ids` out and it is
-    `None`, `isinstance` fails, and the guard is skipped.
+    `group_ids: []` is required. `Users.get_users` treats an empty `user_ids` as
+    no filter, and its guard against that applies only when `user_ids` and
+    `group_ids` are both lists. Without `group_ids` an empty scope returns the
+    whole instance. `resolve_dashboard_scope` refusing empty scopes is the first
+    barrier; this is the second, because the guard lives in `models/users.py`
+    and can change independently.
 
-    So this is the second of two independent barriers. The first is
-    `resolve_dashboard_scope` refusing an empty scope outright. Two, because the
-    behaviour above belongs to a function in another file that this ticket does not
-    own, and one tidy-up there would take the other barrier with it.
-
-    `sorted`, not the set itself: iteration order of a set of strings varies
-    between processes, and a filter that reorders between runs makes both the SQL
-    and any failing test harder to read than they need to be.
+    `user_ids` is sorted so the filter is stable across processes.
     """
     return {'user_ids': sorted(scope.ids), 'group_ids': []}
 
 
-#: The same key, deliberately looser: case-folded and stripped of ALL whitespace,
-#: not just the edges. Used only to notice near misses - see `scope_metric_rows`.
+#: A looser key: case-folded with all whitespace removed. Used only to detect
+#: near misses in `scope_metric_rows`.
 def _loose_user_key(value: Optional[str]) -> str:
     return ''.join((value or '').split()).casefold()
 
@@ -443,26 +335,15 @@ def scope_metric_rows(
 ) -> list:
     """Keep only the Langfuse rows belonging to one team.
 
-    `scope=None` means the unscoped view and returns `rows` unchanged, so the call
-    site has no branch of its own to get wrong.
+    `scope=None` is the unscoped view and returns `rows` unchanged. A row is kept
+    when its normalised key is a member's email or id. `"(unknown)"` belongs to
+    nobody and is dropped.
 
-    A row is kept when its normalised key is one of the team's - which covers BOTH
-    member emails and member ids, because the frontend claims a row under either
-    (`usersAccess.ts:169-179`). `"(unknown)"` (`langfuse/metrics.py:132`) belongs to
-    nobody and is dropped: unattributed spend is by definition not the team's.
-
-    ⚠️ **Near misses are counted and logged.** A plain count of dropped rows would
-    be useless under scoping - most drops are legitimately other teams' - so what
-    is counted instead is rows that match a member under `_loose_user_key` but not
-    under `normalize_user_key`. Under a correct implementation that number is
-    ALWAYS zero, so any other value is an unambiguous alarm that the two
-    normalisations have drifted apart. That drift is the one failure mode which
-    does not raise: it silently drops rows on a screen claiming to be exhaustive,
-    and in the owner's scoped view it vanishes from both sides of the
-    reconciliation, leaving the arithmetic green.
-
-    ⚠️ The log carries a count and a team id, NEVER a key. A Langfuse key is an
-    email.
+    Rows that match a member under `_loose_user_key` but not under
+    `normalize_user_key` are counted and logged. That count is zero unless the
+    backend and frontend normalisations have drifted apart, which would otherwise
+    drop rows silently. The log holds a count and a team id, never a key, because
+    a Langfuse key is an email.
     """
     if scope is None:
         return rows

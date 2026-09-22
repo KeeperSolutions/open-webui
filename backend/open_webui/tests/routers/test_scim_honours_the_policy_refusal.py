@@ -1,20 +1,9 @@
-"""Directory sync must not answer a REFUSED membership change with success.
+"""SCIM group routes return an error when the model refuses a membership change.
 
-The guard that keeps SCIM from silently unmasking people lives in the model, and
-it works: `set_group_user_ids_by_id` returns `False` and `remove_users_from_group`
-returns `None` when the change would drop somebody out of a group that enforces
-PII masking without a reason.
-
-⚠️ Both return values used to be discarded by these routes. The request carried
-on and answered `200` with the group, so the identity provider recorded a
-successful sync for a change the database had refused — and kept believing it was
-in step, with nothing anywhere to say otherwise. A refusal nobody is told about
-is indistinguishable from no refusal at all.
-
-⚠️ The refusal is NARROW on purpose, and one test here exists only to prove that:
-SCIM may still add people to an enforcing group. Refusing the whole call would
-stop directory sync managing the group at all, including the direction that never
-takes protection away.
+The model refuses to drop members from a PII-enforcing group without a reason
+(`set_group_user_ids_by_id` returns `False`, `remove_users_from_group` returns
+`None`). Answering `200` would make the identity provider believe the sync
+succeeded. The refusal is narrow: SCIM may still add people to such a group.
 """
 
 import sys
@@ -77,8 +66,8 @@ async def session():
             ),
             GroupMember(id="m1", group_id=GROUP, user_id=KEEP, created_at=now, updated_at=now),
             GroupMember(id="m2", group_id=GROUP, user_id=DROP, created_at=now, updated_at=now),
-            # A team, its own policy group, and one member — so the OTHER refusal
-            # has something to fire on.
+            # A team with its own policy group and one member, for the
+            # team-membership refusal.
             Group(
                 id=TEAM_GROUP,
                 user_id="",
@@ -140,7 +129,7 @@ async def _members(db, group_id=GROUP):
 
 
 def _refused(response):
-    """A SCIM error body, not a group. Both halves matter."""
+    """True for a 400 SCIM error with `scimType` "mutability"."""
     import json
 
     if getattr(response, "status_code", None) != 400:
@@ -189,19 +178,17 @@ async def test_a_put_that_drops_a_member_is_answered_with_an_error(session):
 
 @pytest.mark.asyncio
 async def test_and_the_membership_is_unchanged(session):
-    """⚠️ The other half. A route that reported the refusal but let the write
-    through would pass the test above."""
+    """The refused write is not applied, not only reported."""
     await _put(session, [KEEP])
     assert await _members(session) == {KEEP, DROP}
 
 
 @pytest.mark.asyncio
 async def test_a_put_that_only_adds_people_still_works(session):
-    """⚠️ The refusal is narrow, and this is what proves it.
+    """A PUT that only adds members succeeds.
 
-    Adding never takes protection away, so directory sync keeps managing the
-    group in that direction. A blanket refusal would look identical to a correct
-    guard on every other test in this file.
+    Adding never removes protection. A blanket refusal would pass every other
+    test in this file.
     """
     response = await _put(session, [KEEP, DROP, "u-new"])
     assert not _refused(response)
@@ -231,12 +218,10 @@ async def test_a_patch_removing_one_member_is_answered_with_an_error(session):
 
 @pytest.mark.asyncio
 async def test_a_failure_on_a_group_with_no_policy_is_not_called_a_policy_refusal(session):
-    """⚠️ `remove_users_from_group` returns `None` for a missing group and for an
-    unhandled exception too, not only for the refusal.
+    """A `None` on a non-enforcing group is a 500, not a masking refusal.
 
-    Reporting every `None` as a policy refusal would tell an administrator that
-    masking blocked a change masking had nothing to do with — so the group's own
-    permissions decide which answer comes back.
+    `remove_users_from_group` also returns `None` for a missing group or an
+    error, so the group's permissions decide which response is returned.
     """
     import json
 
@@ -252,7 +237,7 @@ async def test_a_failure_on_a_group_with_no_policy_is_not_called_a_policy_refusa
 
 
 # ---------------------------------------------------------------------------
-# The second rule, and the message telling them apart
+# The team-membership rule, and distinct messages for each refusal
 # ---------------------------------------------------------------------------
 
 
@@ -283,9 +268,11 @@ async def test_directory_sync_cannot_put_an_outsider_in_a_team_group(session):
 
 @pytest.mark.asyncio
 async def test_the_two_refusals_do_not_borrow_each_other_s_message(session):
-    """⚠️ Both rules answer with the same falsy value, so the route has to ask
-    which one fired. Reporting the wrong one tells an administrator that masking
-    blocked a change masking had nothing to do with."""
+    """Each refusal reports its own message.
+
+    Both rules return the same falsy value, so the route must determine which
+    one fired.
+    """
     from open_webui.routers import scim
     from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
 

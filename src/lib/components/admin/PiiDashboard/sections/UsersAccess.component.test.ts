@@ -1,13 +1,9 @@
 // @vitest-environment jsdom
 /**
- * What the cell actually RENDERS for a viewer who may not act.
+ * Rendered output of the users table for each kind of viewer.
  *
- * ⚠️ `rowActionFor`'s unit tests prove the value; only this file proves the
- * markup. They are different failures: returning `{ kind: 'readonly' }` correctly
- * and then rendering it through a branch that says "Enforced instance-wide" would
- * pass every test in `usersAccess.test.ts`.
- *
- * The Manage button has no other coverage at all — it lives entirely in markup.
+ * `usersAccess.test.ts` covers the values `rowActionFor` returns; this file
+ * covers the markup that renders them, including the Manage button.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -25,8 +21,8 @@ import { toast } from 'svelte-sonner';
 import UsersAccess from './UsersAccess.svelte';
 import type { AccessUser } from './usersAccess';
 
-// Interpolates, because a stub that returns the raw key would hide exactly the
-// leak these tests look for: `Enforced via {{groups}}` renders the NAMES.
+// Interpolates, because a stub that returns the raw key would hide group names
+// rendered through placeholders such as `Enforced via {{groups}}`.
 const i18n = readable({
 	t: (k: string, vars?: Record<string, unknown>) =>
 		vars ? k.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? '')) : k
@@ -72,10 +68,7 @@ describe('UsersAccess — a viewer who may not act', () => {
 	});
 
 	it('draws no Account column at all', () => {
-		// ⚠️ The header, not only the button. `Manage` is the column's ONLY
-		// content, so hiding the button alone left a labelled 65px of empty cells
-		// — measured on the team board — naming a destination the reader cannot
-		// reach, in the one view built to show them less.
+		// The header is hidden too, because `Manage` is the column's only content.
 		const { container } = mount({ mayAct: false });
 		const headers = [...container.querySelectorAll('thead th')].map((th) => th.textContent?.trim());
 		expect(headers).not.toContain('Account');
@@ -88,9 +81,8 @@ describe('UsersAccess — a viewer who may not act', () => {
 	});
 
 	it('keeps every row as wide as the header', () => {
-		// A conditional header and an unconditional cell is the other half of the
-		// same bug, and it renders as a table that looks fine until the last
-		// column silently shifts under the wrong label.
+		// A conditional header with an unconditional cell would shift the last
+		// column under the wrong label.
 		for (const mayAct of [false, true]) {
 			const { container } = mount({ mayAct });
 			const headerCount = container.querySelectorAll('thead th').length;
@@ -102,7 +94,7 @@ describe('UsersAccess — a viewer who may not act', () => {
 
 	it('keeps the unattributed footer as wide as the header', () => {
 		// The footer is a hand-written row of <td>s, so it does not follow the
-		// header on its own — it is the cell most likely to be left behind.
+		// header automatically.
 		for (const mayAct of [false, true]) {
 			const { container } = mount({
 				mayAct,
@@ -116,11 +108,9 @@ describe('UsersAccess — a viewer who may not act', () => {
 	});
 
 	it('never lets a header or the role break mid-word', () => {
-		// ⚠️ Structural, because jsdom does no layout: the defect is that
-		// `html { word-break: break-word }` (`src/app.css:40`, app-wide) turns a
-		// squeezed column into "Rol/e", "Cos/t" and "Admi/n". Measured in a real
-		// browser on the admin board with somebody in two policy groups — which is
-		// what makes the Policy group column wide enough to squeeze the rest.
+		// Checks classes because jsdom does no layout. The app-wide
+		// `html { word-break: break-word }` in `src/app.css` splits words in a
+		// squeezed column unless the cell sets `whitespace-nowrap`.
 		const { container } = mount({ mayAct: true });
 		for (const th of container.querySelectorAll('thead th')) {
 			expect(th.className, `header "${th.textContent?.trim()}"`).toContain('whitespace-nowrap');
@@ -209,34 +199,29 @@ describe('the empty destination list explains itself', () => {
 	});
 
 	it('says the enforcing groups grant too much when they do', () => {
-		// ⚠️ Without this the screen simply drops a group the admin can see in
-		// Groups, carrying the policy, with no explanation — which reads as the
-		// feature being broken rather than as a deliberate exclusion.
+		// Otherwise a policy group visible in Groups is missing here with no reason given.
 		mountEmpty(0, 1);
 		expect(screen.getByTitle(BROAD)).toBeTruthy();
 	});
 
 	it('names the broad-group cause first when both apply', () => {
-		// Both are true at once on any instance that has a team AND a wide group.
-		// The broad one wins because it is the one an admin can act on.
+		// Both apply on any instance with a team and a broad group. The broad
+		// cause wins because an admin can act on it.
 		mountEmpty(1, 1);
 		expect(screen.getByTitle(BROAD)).toBeTruthy();
 		expect(screen.queryByTitle(NEW)).toBeNull();
 	});
 
 	it('keeps the team-group sentence when only that cause applies', () => {
-		// The mirror of the case above: the new branch must not swallow the old one.
+		// The mirror of the case above: the broad-group branch must not hide this one.
 		mountEmpty(1, 0);
 		expect(screen.getByTitle(NEW)).toBeTruthy();
 		expect(screen.queryByTitle(BROAD)).toBeNull();
 	});
 
 	it('says the enforcing groups are team groups when they are', () => {
-		/**
-		 * ⚠️ The old sentence is a lie here: groups DO enforce masking, the admin
-		 * DID turn it on, and the filter is what hides them. Following it sends
-		 * them to switch on something already switched on.
-		 */
+		// "No group enforces PII masking" would be false here: groups do enforce
+		// it, and the team-group filter is what hides them.
 		mountEmpty(2);
 		expect(screen.getByTitle(NEW)).toBeTruthy();
 		expect(screen.queryByTitle(OLD)).toBeNull();
@@ -278,11 +263,8 @@ describe('what the team-policy row actually renders', () => {
 	});
 
 	it('names no group and prints no id, in either case', () => {
-		/**
-		 * ⚠️ The markup half of decision 5. `rowActionFor` carries only the team id,
-		 * but only this test proves the template does not reach past it into
-		 * `policyGroups`, which is right there in scope and DOES hold the names.
-		 */
+		// The template must not read names from `policyGroups`, which is in scope
+		// and holds them, even though `rowActionFor` carries only the team id.
 		const { container } = mountMasked([TEAM, OTHER], TEAM);
 		const html = container.innerHTML;
 		expect(html).not.toContain('Global PII Policy');
@@ -327,19 +309,14 @@ describe('what an admin sees for somebody else’s team member', () => {
 	});
 
 	it('says nothing extra for an ordinary policy group', () => {
-		// The wording is for the surprising case only; the common one is unchanged.
+		// The group name appears under the button only for team groups.
 		const { container } = mountAdmin(['g1']);
 		expect(screen.getByText('Remove')).toBeTruthy();
 		expect(container.innerHTML).not.toContain(TEAM_NAME);
 	});
 
 	it('the confirmation says the group belongs to a team, and names it', async () => {
-		/**
-		 * ⚠️ The markup half, and the half that was actually leaking. The old
-		 * dialog line was `pending.targets[0]?.name ?? pending.groupId` — with the
-		 * fallback supplying `name: id`, it printed a raw UUID at the exact moment
-		 * an admin was deciding whether to act.
-		 */
+		// The dialog must name the team group and never fall back to its raw id.
 		mountAdmin([TEAM_ID]);
 		screen.getByText('Remove').click();
 		await new Promise((r) => setTimeout(r, 0));
@@ -358,12 +335,9 @@ describe('what a team owner sees, and what must never be in the page', () => {
 	const ELSEWHERE_NAME = 'Legal hold';
 
 	/**
-	 * ⚠️ Every viewer field spelled out, none left to a default.
-	 *
-	 * `mayAct: false` and `mayManagePolicy: true` are the whole difference between
-	 * this viewer and the read-only one, and a corpus that omitted either would
-	 * let a branch pass for the wrong reason — the failure that let M5 survive in
-	 * G-B7 and C5-M3 survive in G-C5.
+	 * Every viewer field is set explicitly. `mayAct: false` with
+	 * `mayManagePolicy: true` is what distinguishes an owner from a read-only
+	 * viewer, so relying on a default could let a branch pass for the wrong reason.
 	 */
 	const mountOwner = (policyGroupIds: string[]) =>
 		render(UsersAccess, {
@@ -373,8 +347,8 @@ describe('what a team owner sees, and what must never be in the page', () => {
 				loading: false,
 				failed: false,
 				onRetry: () => {},
-				// The naming list holds BOTH names, so a template that reached past
-				// the action into it would have something to print. That is the point.
+				// The naming list holds both names, so a template that read from it
+				// would have something to leak.
 				policyGroups: [
 					{ id: TEAM, name: TEAM_NAME, isTeamGroup: true },
 					{ id: ELSEWHERE, name: ELSEWHERE_NAME, isTeamGroup: false }
@@ -393,9 +367,8 @@ describe('what a team owner sees, and what must never be in the page', () => {
 		expect(screen.queryByText('Add to team policy')).toBeNull();
 	});
 
-	it('⚠️ offers Add to someone masked only by an administrator group', () => {
-		// Decision 9 in the markup. They ARE masked; they are not in the team
-		// policy, so what the owner is offered is Add.
+	it('offers Add to someone masked only by an administrator group', () => {
+		// They are masked, but not by the team policy, so the owner is offered Add.
 		mountOwner([ELSEWHERE]);
 		expect(screen.getByText('Add to team policy')).toBeTruthy();
 		expect(screen.getByText('Masked · source outside the team')).toBeTruthy();
@@ -407,14 +380,9 @@ describe('what a team owner sees, and what must never be in the page', () => {
 		expect(screen.getByText('Will stay masked · source outside the team')).toBeTruthy();
 	});
 
-	it('⚠️ names no group and prints no id, in every state — over outerHTML', () => {
-		/**
-		 * ⚠️ `outerHTML`, not the cell's text. Decision 5 asks that the data not be
-		 * IN the page, not merely that it be invisible — a title attribute, an aria
-		 * label or a value bound to a hidden control leaks just as well. That
-		 * difference is what caught the raw UUID in the G-B9 dialog, which the
-		 * table's text had shown nothing of.
-		 */
+	it('names no group and prints no id, in every state — over outerHTML', () => {
+		// Checks the HTML, not the text: a title, aria-label or hidden value would
+		// leak a group name or id just as visible text would.
 		for (const groups of [[], [TEAM], [ELSEWHERE], [TEAM, ELSEWHERE]]) {
 			const { container } = mountOwner(groups);
 			const html = container.innerHTML;
@@ -425,11 +393,9 @@ describe('what a team owner sees, and what must never be in the page', () => {
 		}
 	});
 
-	it('⚠️ renders no Manage button', () => {
-		// M-1 from the spec, and the only reason there are two flags: `Manage`
-		// hangs off `mayAct`, which links to the admin user screen. Widening that
-		// one flag instead of adding a second would hand the owner a page the
-		// server refuses them.
+	it('renders no Manage button', () => {
+		// `Manage` depends on `mayAct` and links to the admin user screen, which the
+		// server refuses an owner. That is why owners get a separate flag.
 		mountOwner([TEAM]);
 		expect(screen.queryByText('Manage')).toBeNull();
 	});
@@ -464,13 +430,8 @@ describe("the owner's confirmation dialog", () => {
 		return view;
 	};
 
-	it('⚠️ has no Group line at all', async () => {
-		/**
-		 * O-C5, and the omission is a CONSEQUENCE OF DECISION 5 rather than an
-		 * oversight. The admin dialog names its group; this one must not, and the
-		 * reason is written beside the branch in the component so nobody adds
-		 * `Group:` back "for consistency" and reopens what G-B9 closed.
-		 */
+	it('has no Group line at all', async () => {
+		// The owner's dialog must not name any group, unlike the admin dialog.
 		await open([TEAM], 'Remove from team policy');
 		expect(document.body.textContent).not.toContain('Group:');
 		expect(document.body.innerHTML).not.toContain(TEAM_NAME);
@@ -488,13 +449,9 @@ describe("the owner's confirmation dialog", () => {
 		expect(document.body.innerHTML).not.toContain(ELSEWHERE);
 	});
 
-	it('⚠️ keeps the confirm button really disabled until a reason is given', async () => {
-		/**
-		 * The real `disabled` attribute, not a visual state: decision 8 makes the
-		 * reason mandatory unconditionally, the model refuses a removal without
-		 * one, and a keyboard reaching a merely dimmed button would be a dead
-		 * keypress that assistive technology announced as live.
-		 */
+	it('keeps the confirm button really disabled until a reason is given', async () => {
+		// The real `disabled` attribute, not a visual state: a removal requires a
+		// reason, and a merely dimmed button would still be announced as usable.
 		await open([TEAM], 'Remove from team policy');
 		const confirm = [...document.querySelectorAll('button')].find(
 			(b) => b.textContent?.trim() === 'Remove from team policy' && b.closest('[role="dialog"]')
@@ -512,14 +469,9 @@ describe("the owner's confirmation dialog", () => {
 		expect(confirm?.hasAttribute('disabled')).toBe(false);
 	});
 
-	it('⚠️ promises no change of state to somebody another group already masks', async () => {
-		/**
-		 * The case the whole membership model exists for: they are masked, they are
-		 * not in the team's policy, so what they are offered is Add. Saying they
-		 * "will no longer be able to turn PII masking off" describes something that
-		 * has ALREADY happened, through a group the owner does not control and
-		 * cannot see — so the sentence promises a change this action does not make.
-		 */
+	it('promises no change of state to somebody another group already masks', async () => {
+		// Another group already masks them, so the dialog must not promise that
+		// adding them will stop them turning masking off.
 		await open([ELSEWHERE], 'Add to team policy');
 		expect(document.body.textContent).toContain("will be added to your team's policy");
 		expect(document.body.textContent).not.toContain('will no longer be able to turn PII masking');
@@ -563,16 +515,10 @@ describe("the owner's success message", () => {
 		await new Promise((r) => setTimeout(r, 0));
 	};
 
-	it('⚠️ never claims masking stopped when another group still enforces it', async () => {
-		/**
-		 * The defect this pins is a SELF-CONTRADICTION inside one interaction: the
-		 * dialog says "they will stay masked", the owner confirms, and the toast
-		 * announces that masking is no longer enforced.
-		 *
-		 * The admin keeps the effect wording, and correctly — they are only offered
-		 * `Remove` when exactly one group carries the policy, so for them the
-		 * effect really is what changed.
-		 */
+	it('never claims masking stopped when another group still enforces it', async () => {
+		// The toast must not contradict the dialog, which said they stay masked.
+		// Admins keep the effect wording because they are offered `Remove` only when
+		// exactly one group carries the policy.
 		vi.mocked(removeUserFromGroup).mockResolvedValue({} as never);
 		await openFor([TEAM, ELSEWHERE], 'Remove from team policy');
 		await fireEvent.input(document.querySelector('#pii-policy-reason')!, {
@@ -596,21 +542,14 @@ describe("the owner's success message", () => {
 });
 
 describe("the owner's pending action carries no group", () => {
-	it('⚠️ opens with an empty targets array, and that is the second lock', () => {
+	it('opens with an empty targets array, and that is the second lock', () => {
 		/**
-		 * Found by a mutation that SURVIVED: filling `targets` with the team's
-		 * group broke nothing, because the template's `teamPolicy` check hides the
-		 * `Group:` line anyway.
+		 * Empty `targets` is a second safeguard behind the template's `teamPolicy`
+		 * check: if that check were removed, the dialog would print "Unknown group"
+		 * instead of the team group's name.
 		 *
-		 * It matters for the case where that check is the thing that fails. With
-		 * `targets: []` the dialog would print "Unknown group"; with the group in
-		 * there it prints the NAME — which is the leak G-B9 closed, arriving by a
-		 * different door. One lock is a template condition somebody can delete; the
-		 * other is the absence of the data.
-		 *
-		 * Structural because the property is about what is HANDED to the dialog,
-		 * and a rendered page cannot show the difference while the template check
-		 * still holds. The same kind of test as the route-ordering one in G-C3.
+		 * Reads the source because the rendered page looks the same while the
+		 * template check holds.
 		 */
 		const source = readFileSync(
 			resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/sections/UsersAccess.svelte'),

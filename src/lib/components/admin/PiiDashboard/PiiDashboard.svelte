@@ -14,17 +14,14 @@
 	/**
 	 * The team whose data this screen shows, or `null` for the instance-wide view.
 	 *
-	 * Read once, at construction, and handed to the three loaders. The route keys
-	 * the component on it so a different team means a different instance rather
-	 * than a stale one — see `team/[team_id]/pii-dashboard/+page.svelte`.
+	 * Read once at construction and passed to the three loaders. The team route
+	 * keys the component on it, so a different team gets a fresh instance.
 	 */
 	export let teamId: string | null = null;
 
 	/**
 	 * Whether this viewer may act on a row, or only read it.
-	 *
-	 * ⚠️ Derived from the ROLE, never from `teamId` — see `mayActFor`, which cannot
-	 * see the address even if someone tried.
+	 * Derived from the role only, never from `teamId`.
 	 */
 	$: mayAct = mayActFor($user?.role);
 

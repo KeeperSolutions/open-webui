@@ -1,18 +1,12 @@
-"""G-B6 — the migration that moves existing teams onto their own policy group.
+"""Tests for the migration that moves existing teams onto their own policy group.
 
-⚠️ This is the only gate in the bridge that changes data an environment already
-has, so the tests are about the two things that could go wrong in a way nobody
-would notice: somebody ending up outside every enforcing group, and a decision
-being taken against a database this migration has already written to.
+The main risks are someone ending up outside every enforcing group, and a
+decision being made against rows the migration already wrote.
 
-The pattern is the one from `routers/test_billing.py:161-190`: an in-memory
-SQLite database with a hand-built minimal schema, the migration module's `op`
-patched so `get_bind()` returns that connection, and `upgrade()` called directly.
-
-The connection is wrapped in `Recorder` so the ORDER of the statements is a thing
-tests can assert. "Added to the team group before being removed from the seeded
-one" is not visible in the final state — both orders reach the same rows — and it
-is the property the whole migration is arranged around.
+Each test uses an in-memory SQLite database with a minimal schema, patches the
+migration's `op` so `get_bind()` returns that connection, and calls `upgrade()`
+directly. The connection is wrapped in `Recorder` so tests can assert statement
+order, which the final rows do not show.
 """
 
 import importlib
@@ -145,14 +139,10 @@ def _add_member(conn, group_id, user_id):
 
 @pytest.fixture
 def conn():
-    """Two teams, four people, and the shape the local database actually has.
+    """Two teams (one with two members), a team-less user, the seeded group and a custom enforcing group.
 
-    ⚠️ TWO teams, and one of them with TWO members, both on purpose. A single
-    team hides the mutation where the source group is re-derived while the
-    migration runs — the groups it creates carry the masking flag too, so the
-    second team would be processed against a set that now includes the first
-    team's group. A single member hides any per-member ordering bug, because the
-    first write has nobody left to spoil the answer for.
+    Two teams and two members per team are needed to expose order-dependent
+    bugs that a single team or member would hide.
     """
     engine = create_engine("sqlite:///:memory:")
     with engine.connect() as raw:
@@ -219,7 +209,7 @@ def _audit(conn, **where):
 
 
 # ---------------------------------------------------------------------------
-# G-1 — one group per existing team
+# One group per existing team
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +230,7 @@ def test_the_group_carries_only_the_masking_key(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-2 — a member ends up in the team group and out of the seeded one
+# Members move from the seeded group to the team group
 # ---------------------------------------------------------------------------
 
 
@@ -252,11 +242,10 @@ def test_team_members_move(conn):
 
 
 def test_nobody_is_ever_outside_both_groups(conn):
-    """⚠️ The property the migration is arranged around, read from the statement log.
+    """Each moved user is added to the team group before removal from the seeded group.
 
-    The final state cannot show it — add-then-remove and remove-then-add end in
-    exactly the same rows. Only the order distinguishes them, and the difference
-    is a window in which a person is masked by nothing.
+    Checked from the statement log, because both orders end in the same rows and
+    the wrong order leaves the user briefly unmasked.
     """
     _upgrade(conn)
     events = conn.membership_events()
@@ -276,19 +265,10 @@ def test_nobody_is_ever_outside_both_groups(conn):
 
 
 def test_the_only_group_anyone_is_removed_from_is_the_seeded_one(conn):
-    """⚠️ Every group this migration creates carries the masking flag too.
+    """Every `member_removed` audit row targets the seeded group.
 
-    So a source set derived from the FLAG rather than from the seeded id grows to
-    include this migration's own output, and starts emptying groups it has no
-    business touching. Addressing the source by id is what forecloses that, and
-    this reads the property off the audit trail rather than off the final rows —
-    a removal that left no record would pass the membership tests below.
-
-    ⚠️ An earlier version of this test claimed the two-team fixture caught the
-    flag-based variant by itself. It does not: one person belongs to at most one
-    team (`uq_team_members_user_id`), so team B's members are never in team A's
-    group and there is nothing to cross-contaminate. The variant is caught here
-    and by `test_a_team_member_who_is_also_in_a_custom_group_keeps_that_membership`.
+    Choosing sources by the masking flag would also hit custom groups and the
+    team groups this migration creates.
     """
     _add_member(conn, CUSTOM_GROUP, A1)
     conn.commit()
@@ -300,7 +280,7 @@ def test_the_only_group_anyone_is_removed_from_is_the_seeded_one(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-3 — O-5: somebody without a team is not touched
+# Users without a team are not touched
 # ---------------------------------------------------------------------------
 
 
@@ -311,15 +291,14 @@ def test_a_person_with_no_team_stays_in_the_seeded_group(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-11 — a custom enforcing group is not a source
+# A custom enforcing group is not a source
 # ---------------------------------------------------------------------------
 
 
 def test_a_custom_enforcing_group_is_untouched(conn):
-    """⚠️ The narrowing: the migration addresses the seeded group by id.
+    """A custom enforcing group keeps its members and gets no audit rows.
 
-    A group an admin flagged themselves belongs to no team and is replaced by
-    nothing, so emptying it would take masking away with nobody deciding it.
+    No team group replaces it, so emptying it would remove masking.
     """
     _upgrade(conn)
     assert _members(conn, CUSTOM_GROUP) == {LONER}
@@ -334,7 +313,7 @@ def test_a_team_member_who_is_also_in_a_custom_group_keeps_that_membership(conn)
 
 
 # ---------------------------------------------------------------------------
-# G-5 — the audit trail
+# Audit trail
 # ---------------------------------------------------------------------------
 
 
@@ -359,23 +338,14 @@ def test_every_row_is_attributed_to_the_system_and_says_why(conn):
 
 
 def test_the_removal_reason_says_masking_did_not_change(conn):
-    """A bare `member_removed` reads as protection being withdrawn.
-
-    It is the one thing this migration never does, and the trail is read by
-    people who were not here to watch it run.
-    """
+    """The `member_removed` reason states that masking is unchanged, so it does not read as protection withdrawn."""
     _upgrade(conn)
     reason = _audit(conn, event_type="member_removed", user_id=A1)[0][6]
     assert "unchanged" in reason and "team" in reason
 
 
 def test_every_audit_row_goes_through_the_model_validator(conn):
-    """⚠️ G-B5 exists for this. A raw INSERT skips every invariant otherwise.
-
-    Counted, not merely patched: the assertion is that the validator saw as many
-    calls as there are rows, so a shape that validates the first row and then
-    writes the rest directly still fails.
-    """
+    """The model validator runs once per written audit row, since raw inserts skip the model."""
     import open_webui.models.pii_policy_audit as audit_model
 
     seen = []
@@ -394,7 +364,7 @@ def test_every_audit_row_goes_through_the_model_validator(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-4 — idempotency, on all three levels
+# Idempotency
 # ---------------------------------------------------------------------------
 
 
@@ -418,17 +388,9 @@ def test_running_twice_changes_nothing(conn):
 
 
 def test_a_removal_that_happens_twice_is_recorded_twice(conn):
-    """⚠️ Found by a mutation that SURVIVED: the audit trail carried a third
-    "have I already logged this?" check that no test could kill.
+    """A user re-added to the seeded group and moved again gets a second `member_removed` row.
 
-    The one state where such a check fires is the state where it is wrong. An
-    admin puts someone back into the seeded group after the migration has run;
-    the migration runs again and takes them out again. That is a second removal,
-    and it needs a second row — a membership write with no record of it is the
-    only thing this table exists to prevent.
-
-    Idempotency is unaffected: `test_running_twice_changes_nothing` covers the
-    ordinary second run, where nothing is written and so nothing is recorded.
+    Every membership write must have an audit row.
     """
     _upgrade(conn)
     assert len(_audit(conn, event_type="member_removed", user_id=A1)) == 1
@@ -452,20 +414,14 @@ def test_a_second_run_writes_no_audit_rows_at_all(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-6 — an empty seeded group, and no seeded group at all
+# Empty or missing seeded group
 # ---------------------------------------------------------------------------
 
 
 def test_an_empty_seeded_group_still_gets_every_team_a_group(conn):
-    """⚠️ Not a hypothetical: this is what staging looks like.
+    """With an empty seeded group, every team gets a group and nobody is enrolled.
 
-    The seeded group there has no members, so the whole moving half of this
-    migration has nobody to act on and only the creating half runs.
-
-    ⚠️ And NOBODY is enrolled. This is the load-bearing half of the assertion:
-    an earlier shape added every team member to the team's group here, which on
-    exactly this instance would have newly enforced masking on every member of
-    every team — while each audit row said masking was unchanged.
+    Enrolling team members here would newly enforce masking on them.
     """
     conn.execute(text("DELETE FROM group_member WHERE group_id = :g"), {"g": SOURCE})
     conn.commit()
@@ -481,12 +437,7 @@ def test_an_empty_seeded_group_still_gets_every_team_a_group(conn):
 
 
 def test_a_team_member_the_seeded_group_does_not_mask_is_left_alone(conn):
-    """The mixed case, which is the one a real instance is actually in.
-
-    One member of the team is masked by the seeded group and one is not. The
-    first is moved; the second is not touched, and gets no audit row of any
-    kind — this table records transitions, and nothing happened to them.
-    """
+    """A team member outside the seeded group is not moved and gets no audit row; the other member is moved."""
     conn.execute(
         text("DELETE FROM group_member WHERE group_id = :g AND user_id = :u"),
         {"g": SOURCE, "u": A2},
@@ -498,16 +449,14 @@ def test_a_team_member_the_seeded_group_does_not_mask_is_left_alone(conn):
     assert _members(conn, _team_group(conn, TEAM_A)) == {A1}
     assert len(_audit(conn, event_type="member_added", user_id=A1)) == 1
     assert len(_audit(conn, event_type="member_removed", user_id=A1)) == 1
-    # ⚠️ The load-bearing half: no row of ANY kind for the member who was not
-    # masked. A test that only counted A1's rows would pass with A2 enrolled.
+    # A2 was not masked, so it must have no audit rows at all.
     assert _audit(conn, user_id=A2) == []
 
 
 def test_a_missing_seeded_group_is_not_an_error(conn):
-    """The seed migration DEFERS when an instance already had an enforcing group.
+    """Without the seeded group, teams still get groups and nobody is moved.
 
-    So an environment can legitimately have no group with that id at all. Teams
-    still need their groups; there is simply nowhere to move anyone out of.
+    The seed migration skips instances that already had an enforcing group.
     """
     conn.execute(text("DELETE FROM group_member WHERE group_id = :g"), {"g": SOURCE})
     conn.execute(text('DELETE FROM "group" WHERE id = :g'), {"g": SOURCE})
@@ -516,8 +465,7 @@ def test_a_missing_seeded_group_is_not_an_error(conn):
     _upgrade(conn)
 
     assert _team_group(conn, TEAM_A) and _team_group(conn, TEAM_B)
-    # Empty, and for the same reason as above: with no seeded group there is
-    # nobody it masks, so there is nobody to move.
+    # No seeded group means nobody to move.
     assert _members(conn, _team_group(conn, TEAM_A)) == set()
     assert _audit(conn, event_type="member_removed") == []
     assert _audit(conn, event_type="member_added") == []
@@ -531,12 +479,12 @@ def test_a_team_with_no_members_still_gets_a_group(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-9 — a reference that points at nothing
+# Dangling references
 # ---------------------------------------------------------------------------
 
 
 def test_a_dangling_group_id_is_replaced(conn):
-    """`PRAGMA foreign_keys` is 0, so deleting a group leaves the link behind."""
+    """A `group_id` pointing at a deleted group is replaced; SQLite's `PRAGMA foreign_keys` is off."""
     conn.execute(
         text("UPDATE teams SET group_id = 'gone-for-good' WHERE id = :t"), {"t": TEAM_A}
     )
@@ -558,16 +506,14 @@ def test_a_team_already_bridged_is_left_alone(conn):
 
 
 # ---------------------------------------------------------------------------
-# G-10 — the duplication, kept honest
+# Values duplicated from utils/team_groups.py
 # ---------------------------------------------------------------------------
 
 
 def test_the_name_matches_ensure_team_pii_group(conn):
-    """⚠️ The migration cannot call `ensure_team_pii_group` — it is async.
+    """The migration names groups exactly as `team_pii_group_name` does.
 
-    So the name is written twice. If the two ever disagree, a team created after
-    the migration is named differently from a team migrated by it, and nothing
-    else in the system would notice.
+    The migration cannot call the async helper, so the name logic is duplicated.
     """
     from open_webui.utils import team_groups
 
@@ -586,12 +532,10 @@ def test_the_permissions_match_ensure_team_pii_group():
 
 
 def test_the_source_group_id_is_the_one_the_seed_migration_created():
-    """⚠️ The narrowing rests on this literal, so it is checked against its origin.
+    """`SOURCE_GROUP_ID` matches the `GROUP_ID` defined in seed migration 1782400007.
 
-    Found by revision id rather than by filename: alembic identifies a migration
-    by the `revision` inside it, so the file is free to be renamed and a test that
-    pinned the path would fail for a reason that has nothing to do with the
-    property.
+    The seed file is found by its revision id, not its filename, so renaming it
+    does not break the test.
     """
     versions = pathlib.Path(bridge.__file__).parent
     seeds = [
@@ -608,7 +552,7 @@ def test_the_source_group_id_is_the_one_the_seed_migration_created():
 
 
 # ---------------------------------------------------------------------------
-# G-7, G-8 — downgrade
+# Downgrade
 # ---------------------------------------------------------------------------
 
 
@@ -633,7 +577,7 @@ def test_downgrade_is_idempotent(conn):
 
 
 def test_downgrade_refuses_a_group_somebody_joined_afterwards(conn):
-    """The precedent: a downgrade must not quietly revoke a policy an admin applied."""
+    """Downgrade leaves a team group with members it did not add untouched, so an admin's policy is not revoked."""
     _upgrade(conn)
     team_a_group = _team_group(conn, TEAM_A)
     _add_member(conn, team_a_group, "u-newcomer")
@@ -649,7 +593,7 @@ def test_downgrade_refuses_a_group_somebody_joined_afterwards(conn):
 
 
 def test_downgrade_keeps_audit_rows_written_by_a_real_admin(conn):
-    """Only `system` rows carrying this revision are its own to delete."""
+    """Downgrade deletes only `system` audit rows carrying this revision id."""
     _upgrade(conn)
     conn.execute(
         text(
@@ -667,10 +611,9 @@ def test_downgrade_keeps_audit_rows_written_by_a_real_admin(conn):
 
 
 def test_downgrade_refuses_entirely_when_the_seeded_group_is_gone(conn):
-    """⚠️ Nothing to return people to, so it does nothing rather than half of it.
+    """Downgrade does nothing if the seeded group is gone.
 
-    Deleting the team groups here would leave three people masked by no group at
-    all — the exact failure the whole migration is ordered to avoid.
+    Deleting the team groups would leave their members unmasked.
     """
     _upgrade(conn)
     team_a_group = _team_group(conn, TEAM_A)

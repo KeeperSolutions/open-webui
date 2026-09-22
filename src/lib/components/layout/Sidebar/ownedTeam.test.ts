@@ -17,9 +17,8 @@ describe('ownedTeamId', () => {
 	});
 
 	it('stays null for somebody who owns no team', async () => {
-		// ⚠️ The 404 path, which is MOST people. It has to be an answer, not an
-		// error: the endpoint is owner-only, and a rejected promise here would put
-		// a failure in front of every ordinary member who opens their own menu.
+		// The endpoint is owner-only and returns 404 for most users, so a failure
+		// must resolve to null rather than surface as an error.
 		await loadOwnedTeamId('t', async () => {
 			throw new Error('404 Not Found');
 		});
@@ -40,8 +39,7 @@ describe('ownedTeamId', () => {
 	});
 
 	it('asks once, however many callers there are', async () => {
-		// The menu is mounted twice, so this is the real shape rather than a
-		// hypothetical: both instances call on the same open.
+		// The menu is mounted twice, and both instances call on the same open.
 		const fetcher = vi.fn(async () => ({ team_id: 'team-1' }));
 		await Promise.all([
 			loadOwnedTeamId('t', fetcher),
@@ -59,8 +57,8 @@ describe('ownedTeamId', () => {
 	});
 
 	it('does not retry after a refusal either', async () => {
-		// Deliberate: a non-owner is not going to become one mid-session, and
-		// retrying would mean one wasted request per menu open, forever.
+		// A non-owner does not become one mid-session, so retrying would waste a
+		// request on every menu open.
 		const fetcher = vi.fn(async () => {
 			throw new Error('404');
 		});
@@ -78,10 +76,8 @@ describe('ownedTeamId', () => {
 
 describe('the menu entry this store exists for', () => {
 	/**
-	 * ⚠️ Structural, and load-bearing for the same reason as the dashboard's own
-	 * prop witness: the store can be perfect while the menu ignores it. The
-	 * component needs the whole sidebar, a config store, a session user and a
-	 * dropdown to mount, so a rendered test would be proving those work.
+	 * Reads the menu source, because the store can be correct while the menu
+	 * ignores it, and mounting `UserMenu` needs the whole sidebar and its stores.
 	 */
 	const source = readFileSync(
 		resolve(process.cwd(), 'src/lib/components/layout/Sidebar/UserMenu.svelte'),
@@ -93,9 +89,8 @@ describe('the menu entry this store exists for', () => {
 	});
 
 	it('sends them to their OWN team', () => {
-		// Not `/team/.../pii-dashboard` with anything else in the middle: the page
-		// refuses a team the caller does not own, so a wrong id here is a menu item
-		// that leads to a refusal.
+		// The page refuses a team the caller does not own, so any other id would
+		// lead to a refusal.
 		expect(source).toContain('goto(`/team/${$ownedTeamId}/pii-dashboard`)');
 	});
 
@@ -104,8 +99,8 @@ describe('the menu entry this store exists for', () => {
 	});
 
 	it('asks only where billing is on', () => {
-		// The endpoint is part of billing; without it the request 404s for
-		// everybody and the entry can never appear, so asking would be pure waste.
+		// The endpoint belongs to billing. Without billing it returns 404 for
+		// everyone, so the request would be wasted.
 		const hook = source.slice(source.indexOf('const handleDropdownChange'));
 		const call = hook.indexOf('loadOwnedTeamId(');
 		expect(hook.slice(0, call)).toContain('enable_billing');

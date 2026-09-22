@@ -1,17 +1,8 @@
-"""G-C9 — leaving a team takes the person out of the team's PII policy group.
+"""Leaving a team removes the person from the team's PII policy group.
 
-The last automatic move of level C, and the first one written outside a
-migration. Three things are load-bearing here and each has its own mutation:
-
-  * the **no-op cases leave no audit row** — this table records transitions, not
-    requests, and the test that catches a regression here is the one COUNTING
-    rows, not the one reading the outcome
-  * the **audit is written first and blocks** — with the failure direction named
-    in the code, because a mutation with no record is invisible while a record
-    with no mutation is not
-  * the **system actor and its reason have one home** — two literal copies exist
-    already, both inside applied migrations that cannot be edited, and this file
-    is what keeps those copies honest
+Pinned: no-op cases write no audit row, since the table records transitions;
+the audit row is written first and a failed write blocks the removal; the system
+actor constants have one definition, which the migrations' copies must match.
 """
 
 import ast
@@ -55,11 +46,10 @@ BACKEND = Path(__file__).resolve().parents[3]
 
 @pytest_asyncio.fixture
 async def env():
-    """One team with a policy group, one without — and somebody in each shape.
+    """One team with a policy group and one without, each with members.
 
-    ⚠️ `OUT_OF_POLICY` is a real member of the SAME team as `IN_POLICY`. Putting
-    the two in different teams would let a mistake in the team lookup pass for a
-    correct membership check.
+    `OUT_OF_POLICY` is in the same team as `IN_POLICY`, so a wrong team lookup
+    cannot pass for a correct membership check.
     """
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
@@ -93,8 +83,8 @@ async def env():
     session.add_all(
         [
             team(TEAM, TEAM_GROUP),
-            # ⚠️ `group_id=None`, not a missing team: under path B a team without
-            # a policy group is a normal state and must be a no-op, not an error.
+            # A team without a policy group is a normal state and must be a
+            # no-op, not an error.
             team(BARE_TEAM, None),
             member(TEAM, IN_POLICY),
             member(TEAM, OUT_OF_POLICY),
@@ -104,9 +94,8 @@ async def env():
                 user_id="u-owner",
                 name="PII — team",
                 description="",
-                # The real flag: `remove_users_from_group` refuses a removal from
-                # an ENFORCING group without a reason, and that refusal is one of
-                # the things this move has to satisfy.
+                # The real enforcing flag: `remove_users_from_group` refuses a
+                # removal from an enforcing group without a reason.
                 permissions=TEAM_PII_GROUP_PERMISSIONS,
                 created_at=now,
                 updated_at=now,
@@ -122,10 +111,8 @@ async def env():
     async def _ctx(db=None):
         yield session
 
-    # Every module that took its own module-scope reference to the context
-    # manager has to be patched by name — see the note in
-    # `test_policy_membership_authz.py`, where patching one of them sent a check
-    # to a real database.
+    # Every module holding its own module-scope reference to the context manager
+    # is patched by name; an unpatched one would query the real database.
     with patch("open_webui.internal.db.get_async_db_context", _ctx), patch(
         "open_webui.models.billing.get_async_db_context", _ctx
     ), patch("open_webui.models.groups.get_async_db_context", _ctx), patch(
@@ -185,11 +172,9 @@ async def test_the_row_carries_a_reason(env):
 
 
 def test_the_reason_names_the_cause_rather_than_the_gesture():
-    """⚠️ Not a style check.
+    """The reason says the person left the team, not just that they were removed.
 
-    `member_removed` with a reason that only restates the event reads, to someone
-    who was not here, as protection having been taken away from a person. What
-    happened is that the team stopped covering them.
+    A reason that restates `member_removed` reads as protection being taken away.
     """
     assert "no longer a member of the team" in REASON_LEFT_TEAM
     assert "team" in REASON_LEFT_TEAM.lower()
@@ -198,7 +183,7 @@ def test_the_reason_names_the_cause_rather_than_the_gesture():
 
 
 # ---------------------------------------------------------------------------
-# The two no-ops — measured by COUNTING rows, not by reading the outcome
+# The no-ops, checked by counting audit rows
 # ---------------------------------------------------------------------------
 
 
@@ -209,11 +194,10 @@ async def test_someone_outside_the_policy_is_not_acted_on(env):
 
 @pytest.mark.asyncio
 async def test_someone_outside_the_policy_leaves_no_audit_row(env):
-    """⚠️ The test that catches a regression here.
+    """A no-op writes no audit row.
 
-    Deliberately separate from the one above: an implementation that writes the
-    row and then removes nobody returns `False` all the same, and the outcome
-    assertion cannot tell the two apart.
+    Separate from the return-value test, because writing a row and removing
+    nobody also returns `False`.
     """
     await remove_from_team_policy_group(TEAM, OUT_OF_POLICY)
     assert await _audit_rows(env) == []
@@ -238,17 +222,10 @@ async def test_a_team_with_no_policy_group_leaves_no_audit_row(env):
 
 @pytest.mark.asyncio
 async def test_a_team_with_no_policy_group_never_asks_who_is_in_one(env):
-    """⚠️ Written because a mutation SURVIVED: deleting the `group_id` check
-    broke nothing.
+    """A team with no `group_id` returns before looking up group members.
 
-    It is shadowed. With no group id the membership lookup asks for the members
-    of `None`, gets an empty list back, and the second guard returns `False` for
-    it — so the two guards produce the same ANSWER and only differ in what they
-    do to get there. That makes the first one look removable while it is not: it
-    is the difference between "this team has no policy" as a fact and as an
-    accident of what a query happens to return for a NULL id.
-
-    Measured at the call, because the outcome cannot tell them apart.
+    Without that check, looking up the members of `None` returns an empty list
+    and gives the same answer by accident, so the call itself is observed.
     """
     asked = []
 
@@ -277,11 +254,10 @@ async def test_an_unknown_team_is_a_no_op(env):
 
 @pytest.mark.asyncio
 async def test_a_failed_audit_write_leaves_the_membership_alone(env):
-    """The record blocks the change, for the system actor too.
+    """A failed audit write blocks the removal, for the system actor too.
 
-    ⚠️ The direction matters: this test passes both for "audit first" and for an
-    implementation that mutates first and then rolls back. It is
-    `test_a_failed_audit_write_happens_before_the_removal` that separates them.
+    `test_a_failed_audit_write_happens_before_the_removal` separately rules out
+    removing first and rolling back.
     """
     with patch.object(
         PiiPolicyAudits, "insert_event", side_effect=RuntimeError("audit is down")
@@ -294,17 +270,11 @@ async def test_a_failed_audit_write_leaves_the_membership_alone(env):
 
 @pytest.mark.asyncio
 async def test_a_failed_removal_is_not_reported_as_a_successful_one(env):
-    """⚠️ The other half of the ordering rule, and the half that was missing.
+    """A `None` from `remove_users_from_group` raises instead of returning `True`.
 
-    The rule tolerates "a record with no mutation" only because that discrepancy
-    is VISIBLE. `remove_users_from_group` swallows database errors into a `None`
-    return, and discarding it made this function answer `True` — so the caller
-    reported a successful removal, nobody had reason to read the table, and the
-    visible discrepancy became an invisible one.
-
-    It raises rather than returning `False`: `False` is this function's word for
-    "there was nothing to do" — see `test_someone_outside_the_policy_is_not_acted_on`
-    above — and one boolean cannot carry both meanings.
+    That method turns database errors into `None`. Reporting success would hide
+    the audit row that has no matching removal. It raises rather than returning
+    `False`, because `False` means there was nothing to do.
     """
     from open_webui.models.groups import Groups
 
@@ -312,20 +282,14 @@ async def test_a_failed_removal_is_not_reported_as_a_successful_one(env):
         with pytest.raises(RuntimeError):
             await remove_from_team_policy_group(TEAM, IN_POLICY)
 
-    # The person keeps their masking — the safe direction — and the audit row
-    # that disagrees with it is exactly what somebody is now able to find.
+    # The person keeps their masking, and the unmatched audit row stays visible.
     assert await _group_members(env) == {IN_POLICY}
     assert len(await _audit_rows(env)) == 1
 
 
 @pytest.mark.asyncio
 async def test_a_failed_audit_write_happens_before_the_removal(env):
-    """Records the order at the two writers, rather than inferring it.
-
-    An implementation that removes the membership and then writes the row would
-    reach `remove_users_from_group` first; this asserts it is never reached at
-    all once the audit write fails.
-    """
+    """Once the audit write fails, `remove_users_from_group` is never called."""
     order = []
 
     async def _failing_insert(*args, **kwargs):
@@ -371,16 +335,15 @@ async def test_the_audit_row_precedes_the_removal_when_both_succeed(env):
 
 
 # ---------------------------------------------------------------------------
-# Coming back is a separate move, and this one does not make it
+# Rejoining the team does not restore policy membership
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_rejoining_the_team_does_not_put_them_back_in_the_policy(env):
-    """O-C6: the reverse move is its own ticket, deliberately not done here.
+    """Rejoining a team does not re-add the person to its policy group.
 
-    Pinned rather than left unstated so that the day it IS built, it is built on
-    purpose and not discovered as a surprise by whoever reads the audit trail.
+    Pinned so that adding that behaviour later is a deliberate change.
     """
     await remove_from_team_policy_group(TEAM, IN_POLICY)
     assert await _group_members(env) == set()
@@ -430,20 +393,18 @@ BRIDGE_MIGRATION = MIGRATIONS / "b6d1a4f0c7e2_bridge_team_pii_groups.py"
     [("SYSTEM_ACTOR_ID", SYSTEM_ACTOR_ID), ("SYSTEM_ACTOR_EMAIL", SYSTEM_ACTOR_EMAIL)],
 )
 def test_the_migrations_still_agree_with_the_home_of_the_actor(migration, name, expected):
-    """⚠️ The migrations keep their own copies BECAUSE they are history.
+    """The migrations' copies of the system actor match the model constants.
 
-    An applied revision's source cannot be edited, so the duplication is not
-    removable — only checkable. Two spellings of "system" would split the audit
-    trail into two actors that look like different things and are not.
+    Applied revisions cannot be edited, so their copies are checked instead.
+    Differing values would split the audit trail into two system actors.
     """
     assert _module_constant(migration, name) == expected
 
 
 def test_new_writers_do_not_spell_the_system_actor_themselves():
-    """The third literal copy is where drift starts, so there is not one.
+    """Non-migration code spells the system actor only via `models/pii_policy_audit.py`.
 
-    Scoped to code written from here on: migrations are excluded above, with
-    their agreement asserted instead.
+    Migrations are excluded; their copies are checked by the test above.
     """
     offenders = []
     for path in (BACKEND / "open_webui").rglob("*.py"):
@@ -469,11 +430,10 @@ def _remove_team_member_ast():
 
 
 def test_the_route_calls_the_move():
-    """Without this, the move is code nothing reaches.
+    """`remove_team_member` calls `remove_from_team_policy_group`.
 
-    Structural because the route needs Stripe, billing config and a request to
-    run at all — and a test that mounted all three would be proving those work,
-    not that this one line is there.
+    Checked from source because running the route needs Stripe, billing config
+    and a request.
     """
     called = {
         node.func.id
@@ -484,10 +444,9 @@ def test_the_route_calls_the_move():
 
 
 def test_the_route_still_takes_no_db_parameter():
-    """Pinned by the plan: the ordering decision did not widen the signature.
+    """`remove_team_member` takes no `db` parameter.
 
-    A `db` here would make the route a participant in this feature's session
-    handling, which is the thing every other caller was kept out of.
+    The policy-group removal manages its own sessions, and callers do not pass one.
     """
     node = _remove_team_member_ast()
     names = [a.arg for a in node.args.args + node.args.kwonlyargs]

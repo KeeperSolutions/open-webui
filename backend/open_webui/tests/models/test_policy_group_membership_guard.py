@@ -1,21 +1,11 @@
-"""G-B3 — membership in a group that enforces PII masking.
+"""Membership in a group that enforces PII masking: adding is always allowed,
+removing needs a reason.
 
-The rule: **adding is always allowed; removing needs a reason.**
-
-Asymmetric on purpose. Adding someone strengthens protection and asks nothing;
-removing takes protection away, so it has to say why — the same rule the group
-route already applies to turning the policy off.
-
-⚠️ The criterion is `group_enforces_pii_masking`, NOT "is this a team group".
-That is what makes this fix close the LIVE bug: an LDAP login removes the user
-from every group the directory does not list, and the global policy group is not
-something LDAP knows about. A team-scoped guard would return "not a team group"
-for the global one and let the removal through — passing every other test in this
-file while the bug stayed open. `test_ldap_sync_*` is the test that catches it.
-
-The route (`routers/groups.py:378`) already refuses a reasonless removal. These
-tests are about the MODEL, because OAuth, SCIM and LDAP never pass through that
-route — they call these methods directly.
+Removing someone stops masking them, so it must say why. The guard keys on
+`group_enforces_pii_masking`, not on whether the group belongs to a team, so it
+also protects non-team policy groups from LDAP sync, which removes the user from
+every group the directory does not list. These tests target the model because
+OAuth, SCIM and LDAP call it without the group route.
 """
 
 import sys
@@ -88,10 +78,9 @@ async def db_session():
 async def groups(db_session):
     """`GroupTable` bound to the in-memory session.
 
-    ⚠️ The patch is required, not cosmetic: `DATABASE_ENABLE_SESSION_SHARING` is
-    off by default, so `get_async_db_context` IGNORES a session passed as an
-    argument and opens a real one against the developer's own database. Measured,
-    not assumed — the same trap documented in `test_user_locate.py`.
+    The patch is required: `DATABASE_ENABLE_SESSION_SHARING` is off by default,
+    so `get_async_db_context` ignores a passed session and opens one against the
+    developer's own database.
     """
 
     @asynccontextmanager
@@ -125,7 +114,7 @@ async def test_removal_without_reason_is_refused(groups):
 
 @pytest.mark.asyncio
 async def test_removal_with_reason_goes_through(groups):
-    """The whole point of the revised criterion: removal is possible, not forbidden."""
+    """Removal with a reason is allowed, not forbidden."""
     table, session = groups
     result = await table.remove_users_from_group(
         POLICY_GROUP, [ALICE], reason="Left the company"
@@ -136,7 +125,7 @@ async def test_removal_with_reason_goes_through(groups):
 
 @pytest.mark.asyncio
 async def test_whitespace_is_not_a_reason(groups):
-    """Same `strip` rule as `routers/groups.py:378` and `pii_policy_audit.py:138`."""
+    """A whitespace-only reason is refused, matching the route and the audit model."""
     table, session = groups
     assert await table.remove_users_from_group(POLICY_GROUP, [ALICE], reason="   \n\t ") is None
     assert await _member_ids(session, POLICY_GROUP) == {ALICE, BOB}
@@ -144,13 +133,10 @@ async def test_whitespace_is_not_a_reason(groups):
 
 @pytest.mark.asyncio
 async def test_removing_a_non_member_is_not_a_removal(groups):
-    """A no-op needs no justification.
+    """Removing a non-member changes nothing, so it needs no reason.
 
-    ⚠️ Caught by the EXISTING suite, not by this file: the first version of the
-    guard refused any reasonless call against an enforcing group, which turned
-    "remove someone who was never in the group" into a 400. The route already drew
-    this distinction before writing an audit row; the model has to draw the same
-    one, or the two disagree about what counts as a removal.
+    The model must count removals the same way the route does, or a harmless
+    call would be refused.
     """
     table, session = groups
     assert await table.remove_users_from_group(POLICY_GROUP, ["u-nobody"]) is not None
@@ -186,7 +172,7 @@ async def test_set_members_dropping_someone_is_refused(groups):
 
 @pytest.mark.asyncio
 async def test_set_members_that_only_adds_goes_through(groups):
-    """SCIM must keep being able to ADD to a policy group — O-1 is asymmetric."""
+    """SCIM can always add to a policy group; only removals need a reason."""
     table, session = groups
     assert await table.set_group_user_ids_by_id(POLICY_GROUP, [ALICE, BOB, "u-carol"]) is True
     assert await _member_ids(session, POLICY_GROUP) == {ALICE, BOB, "u-carol"}
@@ -200,17 +186,15 @@ async def test_set_members_dropping_someone_with_a_reason_goes_through(groups):
 
 
 # ---------------------------------------------------------------------------
-# sync_groups_by_group_names — the LDAP path, and the live bug
+# sync_groups_by_group_names — the LDAP path
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_ldap_sync_keeps_membership_of_an_enforcing_group(groups):
-    """⚠️ THE regression this gate exists for.
+    """An LDAP login that lists only "Marketing" keeps the user in the policy group.
 
-    LDAP claims list only "Marketing". Before the guard, signing in removed the
-    user from the policy group as well — silently, with no audit row and nobody
-    deciding it.
+    Otherwise signing in would silently remove them from masking with no audit row.
     """
     table, session = groups
     assert await table.sync_groups_by_group_names(ALICE, ["Marketing"]) is True
@@ -219,7 +203,7 @@ async def test_ldap_sync_keeps_membership_of_an_enforcing_group(groups):
 
 @pytest.mark.asyncio
 async def test_ldap_sync_still_removes_from_ordinary_groups(groups):
-    """The guard must not turn into "directory sync stops working"."""
+    """Directory sync still removes the user from non-enforcing groups."""
     table, session = groups
     assert await table.sync_groups_by_group_names(ALICE, ["PII Masking Policy"]) is True
     assert ALICE not in await _member_ids(session, OTHER_GROUP)
@@ -233,17 +217,16 @@ async def test_ldap_sync_still_adds(groups):
 
 
 # ---------------------------------------------------------------------------
-# The fourth deletion site, which must stay unguarded
+# User deletion, which must stay unguarded
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_deleting_a_user_still_clears_their_policy_membership(groups):
-    """`remove_user_from_all_groups` is exempt, and the exemption is structural.
+    """`remove_user_from_all_groups` is exempt from the guard.
 
-    It is reached only from `Users.delete_user_by_id`: the account is going away,
-    so leaving the row behind would orphan it. Guarding this method would break
-    user deletion outright.
+    Its only caller is `Users.delete_user_by_id`; guarding it would break user
+    deletion and orphan the membership rows.
     """
     table, session = groups
     assert await table.remove_user_from_all_groups(ALICE) is True
@@ -251,12 +234,10 @@ async def test_deleting_a_user_still_clears_their_policy_membership(groups):
 
 
 def test_remove_user_from_all_groups_has_exactly_one_caller():
-    """⚠️ The exemption above is safe only while nothing else can reach it.
+    """The unguarded removal is safe only while user deletion is its sole caller.
 
-    Deliberately not a `force=True` flag: a flag is a bypass waiting for the first
-    caller the guard inconveniences. This test is the mechanism that keeps the
-    exemption honest — it fails the moment a second caller appears, and whoever
-    adds it has to justify it here.
+    This fails when a second caller appears, which must then be justified here.
+    A `force=True` flag is avoided because any caller could use it to bypass the guard.
     """
     import pathlib
     import re
@@ -270,9 +251,6 @@ def test_remove_user_from_all_groups_has_exactly_one_caller():
             if re.search(r"remove_user_from_all_groups\s*\(", line):
                 callers[str(path.relative_to(root))] = i
 
-    # ⚠️ Files, not line numbers. The first version pinned `models/users.py:723`
-    # and broke the moment an unrelated field was added above it — a failure that
-    # says nothing about the property under test, and the kind that teaches people
-    # to edit the assertion without reading it. The line is kept in the message so
-    # the one caller is still easy to find.
+    # Compare files, not line numbers, so unrelated edits do not break the test.
+    # The line number is kept in the failure message to locate the caller.
     assert set(callers) == {"models/users.py"}, callers

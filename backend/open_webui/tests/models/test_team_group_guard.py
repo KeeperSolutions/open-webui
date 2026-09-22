@@ -1,19 +1,13 @@
-"""G-B2 — a team's PII group is not editable and not deletable.
+"""A team's PII group cannot be renamed, have its permissions changed, or be deleted.
 
-Its permissions and its name are derived from the team, so the only honest way to
-change either is to change the team. The guard lives in the MODEL, because the
-five writers of a group do not share a route: SCIM, LDAP and OAuth all reach
-`Groups` directly, and a guard on the admin route would protect one of them.
+Its name and permissions are derived from the team. The guard lives in the model
+because SCIM, LDAP and OAuth call `Groups` directly, not through the admin route.
+The admin route and SCIM are tested separately so that a guard placed only in
+the route would fail the SCIM test.
 
-⚠️ Route and SCIM are separate tests throughout. Both end up in the same model
-method, which is exactly why one test cannot stand in for the other: a guard
-wrongly placed in the admin route passes the route test and fails nothing else.
-The non-overlap IS the proof that the guard sits where it claims to.
-
-⚠️ The guard refuses a CHANGE, never a restatement. OAuth writes a group's own
-permissions straight back to it and SCIM resends the current name on every
-membership edit; refusing those would break directory sync while protecting
-nothing.
+The guard refuses a change, never a restatement: OAuth writes a group's own
+permissions back to it and SCIM resends the current name on every membership
+edit, so refusing those would break directory sync.
 """
 
 import sys
@@ -100,9 +94,9 @@ async def groups(db_session):
     """The real `Groups` bound to the in-memory session.
 
     Both context managers are patched: `models.groups` opens its own, and
-    `team_group_kind` reaches for `internal.db`'s. Patching one leaves the other
-    talking to the developer's own database — `DATABASE_ENABLE_SESSION_SHARING`
-    is off, so a passed session is ignored.
+    `team_group_kind` uses `internal.db`'s. With `DATABASE_ENABLE_SESSION_SHARING`
+    off a passed session is ignored, so an unpatched one reads the developer's
+    database.
     """
     from open_webui.models import groups as groups_module
 
@@ -145,17 +139,13 @@ class TestUpdateGuard:
 
     @pytest.mark.asyncio
     async def test_changing_the_description_goes_through(self, groups, db_session):
-        """Only what is derived is frozen. The description is nobody's invariant."""
+        """Only derived fields are frozen; the description stays editable."""
         assert await groups.update_group_by_id(TEAM_GROUP, _form(description="New blurb")) is not None
         assert (await _stored(db_session, TEAM_GROUP)).description == "New blurb"
 
     @pytest.mark.asyncio
     async def test_restating_the_same_permissions_goes_through(self, groups, db_session):
-        """⚠️ OAuth does exactly this on every sync (`utils/oauth.py:1412`).
-
-        A guard that refused any non-None `permissions` would pass every other
-        test in this class and break directory sync for team groups.
-        """
+        """Writing back the current permissions is allowed, because OAuth does it on every sync."""
         assert await groups.update_group_by_id(TEAM_GROUP, _form(permissions=ENFORCING)) is not None
         assert (await _stored(db_session, TEAM_GROUP)).permissions == ENFORCING
 
@@ -166,7 +156,7 @@ class TestUpdateGuard:
 
     @pytest.mark.asyncio
     async def test_a_custom_policy_group_is_untouched_by_this_guard(self, groups, db_session):
-        """Enforcing, and named like a team group — but no team points at it."""
+        """A group that enforces masking and is named like a team group, but has no team, stays editable."""
         assert await groups.update_group_by_id(
             CUSTOM_GROUP,
             GroupUpdateForm(name="Renamed", description="", permissions={"chat": {}}),
@@ -175,7 +165,7 @@ class TestUpdateGuard:
 
 
 # ---------------------------------------------------------------------------
-# deletion — three doors, three tests
+# deletion is refused through the model, the admin route and SCIM
 # ---------------------------------------------------------------------------
 
 
@@ -202,11 +192,7 @@ class TestDeleteGuard:
 
     @pytest.mark.asyncio
     async def test_scim_route_refuses(self, groups, db_session):
-        """⚠️ Not covered by the route test above — SCIM has its own handler.
-
-        Same model method underneath, which is the point: if the guard ever moves
-        into the admin route, this is the test that notices.
-        """
+        """SCIM has its own delete handler, so this fails if the guard moves into the admin route."""
         from open_webui.routers import scim as scim_router
 
         with patch.object(scim_router, "Groups", groups):
@@ -225,11 +211,10 @@ class TestDeleteGuard:
 
 @pytest.mark.asyncio
 async def test_the_guard_asks_team_group_kind_rather_than_querying_itself(groups):
-    """One reader of `teams.group_id`, enforced structurally in G-B1.
+    """The guard relies on `team_group_kind`, the single reader of `teams.group_id`.
 
-    Patching the shared classifier must be enough to change this guard's mind. If
-    it ever grows its own query, this test keeps passing while the structural test
-    in `test_team_groups.py` starts failing — the two together are what pin it.
+    Patching that classifier changes the guard's answer; the structural test in
+    `test_team_groups.py` checks no other module queries the column.
     """
     async def _says_not_a_team_group(group_id, db=None):
         return None
@@ -241,9 +226,8 @@ async def test_the_guard_asks_team_group_kind_rather_than_querying_itself(groups
 class TestIsTeamGroupFlag:
     """`GET /groups/` reports which groups a team owns, so the UI can exclude them.
 
-    ⚠️ A flag rather than the team id: the only question the reader has is "may
-    this be an enforce destination". And it is REPORTED, not filtered — the admin
-    group screen must keep listing team groups.
+    A flag rather than the team id, and reported rather than filtered: the admin
+    group screen still lists team groups.
     """
 
     @pytest.mark.asyncio
@@ -258,5 +242,5 @@ class TestIsTeamGroupFlag:
 
     @pytest.mark.asyncio
     async def test_team_groups_are_still_listed(self, groups):
-        """Reported, not hidden — the group admin screen still needs them."""
+        """Team groups are reported, not hidden, because the group admin screen lists them."""
         assert TEAM_GROUP in {g.id for g in await groups.get_groups({})}

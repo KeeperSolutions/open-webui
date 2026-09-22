@@ -65,24 +65,21 @@ def scim_error(status_code: int, detail: str, scim_type: Optional[str] = None):
     return JSONResponse(status_code=status_code, content=error_body)
 
 
-# ⚠️ A refused membership change must not be answered with 200.
-#
+# A refused membership change must not be answered with 200, or the identity
+# provider records a successful sync for a change the database refused.
 # `Groups.set_group_user_ids_by_id` returns False, and `remove_users_from_group`
-# returns None, when the change would drop somebody out of a group that enforces
-# PII masking without a reason. Both used to be discarded here: the route carried
-# on and returned the group, so the identity provider recorded a successful sync
-# for a change the database had refused — and went on believing it was in step,
-# with nothing anywhere to say otherwise.
+# returns None, when the change would drop a member of a group that enforces PII
+# masking without a reason.
 #
-# ⚠️ It is `mutability`, not `invalidValue`: nothing is wrong with the members
-# the client sent. The target simply cannot be changed through this channel.
+# The SCIM type is `mutability`, not `invalidValue`: the members sent are valid,
+# but the group cannot be changed through this channel.
 PII_POLICY_REFUSED = (
     'This group enforces PII masking. Members cannot be removed from it through '
     'directory sync, because doing so silently stops masking people it protects.'
 )
 
-# The second reason a membership write is refused: a team's policy group is
-# derived from the team, and nobody outside the team belongs in it.
+# A team's policy group only holds that team's members, so writes that admit
+# anyone else are refused.
 TEAM_GROUP_REFUSED = (
     'This group belongs to a team. Only members of that team can be in it, so its '
     'membership cannot be set through directory sync.'
@@ -98,17 +95,11 @@ def _pii_policy_refused():
 
 
 async def _membership_refused(group, user_ids, db):
-    """Say WHICH rule refused the write, rather than guessing.
+    """Build the SCIM error for a failed membership write, naming the rule that refused it.
 
-    ⚠️ The model reports a refusal as `False` or `None`, and one such value cannot
-    say which of two rules produced it — nor whether it was a rule at all, since
-    `add_users_to_group` also answers `None` when the database fails. Naming the
-    wrong one tells an administrator that masking blocked a change masking had
-    nothing to do with.
-
-    So each candidate is asked in turn, and a value no rule explains is reported
-    as the failure it is rather than dressed up as a policy. One extra query, and
-    only on the failure path.
+    The model returns `False` or `None` for either rule, and `None` also for a
+    missing group or a database error. Each rule is checked in turn; a failure
+    neither rule explains is reported as a 500, not as a policy refusal.
     """
     from open_webui.utils.pii_policy import group_enforces_pii_masking
 
@@ -1090,6 +1081,7 @@ async def patch_group(
         )
 
     from open_webui.models.groups import GroupUpdateForm
+
     update_form = GroupUpdateForm(
         name=group.name,
         description=group.description,
@@ -1108,11 +1100,9 @@ async def patch_group(
             elif path == 'members':
                 # Replace all members.
                 #
-                # ⚠️ Returns from inside the loop, so operations already applied
-                # stay applied. This route has never been atomic and this change
-                # does not make it so — but a client that is told the request
-                # failed will re-send it, and a client told it succeeded never
-                # will.
+                # A refusal returns from inside the loop, so operations already
+                # applied stay applied; this route is not atomic. Reporting the
+                # failure lets the client re-send the request.
                 old_member_ids = set(await Groups.get_group_user_ids_by_id(group_id, db) or [])
                 member_ids = [member['value'] for member in value]
                 if not await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db):
@@ -1127,9 +1117,8 @@ async def patch_group(
                 if isinstance(value, list):
                     for member in value:
                         if isinstance(member, dict) and 'value' in member:
-                            # ⚠️ Refusable too, now: a team's group takes nobody from
-                            # outside the team. Same discarded-result defect as the
-                            # two sites above, and the same answer.
+                            # Refused when the group belongs to a team and the user
+                            # is not in it.
                             if await Groups.add_users_to_group(
                                 group_id, [member['value']], db=db
                             ) is None:
@@ -1141,11 +1130,9 @@ async def patch_group(
             if path and path.startswith('members[value eq'):
                 # Remove specific member
                 member_id = path.split('"')[1]
-                # ⚠️ `None` is not only the refusal here — this method also
-                # returns it for a missing group and for an unhandled exception.
-                # So the permissions decide which answer the client gets, rather
-                # than every `None` being reported as a policy refusal it may not
-                # be. `group` was read at the top of this handler.
+                # `None` means a refusal, a missing group or an exception.
+                # `_membership_refused` works out which one to report, using the
+                # `group` read at the top of this handler.
                 if await Groups.remove_users_from_group(group_id, [member_id], db=db) is None:
                     return await _membership_refused(group, [member_id], db)
                 removed_member_ids.append(member_id)

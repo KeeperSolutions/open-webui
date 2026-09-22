@@ -1,16 +1,9 @@
-"""G-C3 — the two membership routes, opened to a team owner.
+"""The group membership add/remove routes, open to team owners.
 
-⚠️ This is the only change in level C that can fail OPEN. Both routes carried
-`get_admin_user`; they now carry `get_verified_user` and an authorisation call.
-Everything that used to be enforced by the dependency is enforced by one named
-call on the first line, so these tests are about that call being there, being
-first, and being on BOTH routes.
-
-⚠️ `add` and `remove` are tested separately throughout, and no test exercises
-both. One guard on one of the two routes behaves exactly like a guard on both,
-right up until somebody calls the other one — so the gate's mutation table pairs
-each route with a mutation that kills only its own tests. Same shape as D1/D2 in
-level A.
+Both routes depend on `get_verified_user`, so authorisation rests entirely on the
+`authorise_policy_membership_change` call. These tests pin that the call exists,
+runs first, and is present on both routes. `add` and `remove` are tested
+separately so a guard missing from either route fails its own tests.
 """
 
 import sys
@@ -194,7 +187,7 @@ class TestAddIsGuarded:
 
     @pytest.mark.asyncio
     async def test_an_admin_may_still_add_anyone_anywhere(self, env):
-        """The dependency changed; the administrator's reach did not."""
+        """An administrator may add anyone to any group."""
         await _add(ADMIN_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
         assert STRANGER in await _members(env, ADMIN_GROUP)
 
@@ -206,16 +199,12 @@ class TestAddIsGuarded:
 
 
 # ---------------------------------------------------------------------------
-# /users/remove — the same tests, on the other route
+# /users/remove: the same tests on the other route
 # ---------------------------------------------------------------------------
 
 
 class TestRemoveIsGuarded:
-    """⚠️ Deliberately a parallel class rather than a parametrised one.
-
-    A parametrised suite over both routes would go green with a guard on either
-    of them, because a shared failure is indistinguishable from two.
-    """
+    """A parallel class rather than a parametrised one, so each route fails on its own."""
 
     @pytest.mark.asyncio
     async def test_an_owner_may_remove_their_own_member(self, env):
@@ -247,15 +236,11 @@ class TestRemoveIsGuarded:
 
     @pytest.mark.asyncio
     async def test_a_refused_removal_writes_no_audit_row(self, env):
-        """⚠️ The stranger has to be IN the group, and that is the whole test.
+        """A refused removal of a real group member writes no audit row.
 
-        Found by a mutation that only half died: moving the guard below the audit
-        broke the `add` version of this test and not the `remove` one, because a
-        stranger who is not a member is filtered out of the audit anyway. The
-        route would have recorded a removal it then refused — and nothing said so.
-
-        So the target here is a member of the group but not of the team: check 2
-        refuses, and there is a real row for the ordering to get wrong.
+        The stranger is in the group but not the team. A non-member is filtered out
+        of the audit anyway, so only a real member detects a guard placed after the
+        audit write.
         """
         env.add(
             GroupMember(
@@ -292,12 +277,10 @@ class TestTheReasonSurvivesTheNewCaller:
 
     @pytest.mark.asyncio
     async def test_the_model_refuses_it_too_without_the_route(self, env):
-        """⚠️ On the MODEL, not the route.
+        """`Groups.remove_users_from_group` refuses a removal without a reason.
 
-        The route has its own 400 for a missing reason, so a route test proves
-        the route. OAuth and SCIM never pass through it, and the guard that
-        actually protects them is the one in `Groups.remove_users_from_group` —
-        which is only reached here by calling it directly.
+        OAuth and SCIM bypass the route and its 400, so the model's own check is
+        what protects them.
         """
         from open_webui.models.groups import Groups
 
@@ -311,12 +294,10 @@ class TestTheReasonSurvivesTheNewCaller:
 
 
 class TestAnEmptyBodyShortCircuits:
-    """⚠️ It must not ASK. Returning 200 is not the property under test.
+    """An empty body returns without calling the guard at all.
 
-    An implementation that authorises an empty body and then ignores the answer
-    passes every "it returned 200" test while making an empty request an
-    authorisation event — one that the guard, correctly, refuses. The tripwire
-    below is what tells the two apart.
+    The guard refuses empty targets, so the route must short-circuit first. The
+    tripwire detects a route that calls the guard and ignores its answer.
     """
 
     @pytest.mark.asyncio
@@ -349,7 +330,7 @@ class TestAnEmptyBodyShortCircuits:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("call", ["add", "remove"])
     async def test_an_empty_body_is_short_circuited_even_for_a_stranger(self, env, call):
-        """Nobody named, so nobody's authorisation is consulted — not even a refusal."""
+        """With no targets, authorisation is not consulted, so even a stranger gets a no-op."""
         fn = _add if call == "add" else _remove
         assert await fn(ADMIN_GROUP, [], _user(uid=STRANGER), env) is None
 
@@ -360,11 +341,10 @@ class TestAnEmptyBodyShortCircuits:
 
 
 def test_the_guard_runs_before_anything_else_on_both_routes():
-    """⚠️ Position, not presence. A guard that runs after the audit is not a guard.
+    """The guard call precedes the audit write and member lookups in both routes.
 
-    Read from the source rather than from behaviour, because "did the audit
-    happen first" is only observable when the guard REFUSES — and the ordering
-    has to hold on the allowed path too, where nothing is left behind to inspect.
+    Checked from source because the ordering must also hold on the allowed path,
+    where behaviour leaves nothing to inspect.
     """
     import ast
     import pathlib
@@ -398,10 +378,10 @@ def test_the_guard_runs_before_anything_else_on_both_routes():
 
 
 def test_neither_route_still_carries_the_admin_dependency():
-    """The admin-only rule moved into the guard; it did not stay in both places.
+    """Both routes use `get_verified_user`, not `get_admin_user`.
 
-    Kept because a leftover `get_admin_user` would make every owner test above
-    fail for the RIGHT reason while hiding that the guard does nothing.
+    A leftover `get_admin_user` would refuse owners by itself and hide a guard
+    that does nothing.
     """
     import ast
     import pathlib
@@ -429,22 +409,16 @@ def test_neither_route_still_carries_the_admin_dependency():
 
 
 # ---------------------------------------------------------------------------
-# A team's group takes nobody from outside the team — not even from an admin
+# A team's group accepts only team members, even from an admin
 # ---------------------------------------------------------------------------
 
 
 class TestTheTeamGroupHoldsOnlyTheTeam:
-    """⚠️ The third derived property, and the one that was still open.
+    """A team's group membership is limited to team members, like its name and permissions.
 
-    A team's group already takes its NAME and its PERMISSIONS from the team and
-    refuses to have either edited. Membership did not, so an administrator could
-    add somebody who is not in the team through Groups → Add — after which the
-    owner could neither SEE that person (their dashboard lists team members) nor
-    remove them (`authorise_policy_membership_change` refuses targets outside the
-    team). A member of the policy that nobody who owns the policy can reach.
-
-    Found in use, not in review: an administrator did exactly this and then asked
-    why the person was missing from the team dashboard.
+    An outsider added by an administrator would be invisible on the owner's
+    dashboard and unremovable by the owner, since the guard refuses targets
+    outside the team.
     """
 
     @pytest.mark.asyncio
@@ -455,13 +429,10 @@ class TestTheTeamGroupHoldsOnlyTheTeam:
 
     @pytest.mark.asyncio
     async def test_and_no_audit_row_is_written_for_the_refusal(self, env):
-        """⚠️ The load-bearing half, and the reason the guard is on the ROUTE.
+        """The route refuses before auditing, so no `member_added` row is written.
 
-        `Groups.add_users_to_group` refuses this too, but it refuses after the
-        route has already recorded `member_added`. A row claiming a membership
-        that was rejected is the inverted error and the worse one: a missing
-        record says something is absent, a false one accuses somebody of a change
-        they never made. Same lesson as the team-group edit guard.
+        `Groups.add_users_to_group` also refuses, but only after the route has
+        audited, which would leave a row for a change that never happened.
         """
         with pytest.raises(HTTPException):
             await _add(TEAM_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
@@ -477,26 +448,23 @@ class TestTheTeamGroupHoldsOnlyTheTeam:
 
     @pytest.mark.asyncio
     async def test_an_ordinary_group_takes_anyone(self, env):
-        """⚠️ Non-overlap: a guard that refused every group would pass the two
-        tests above and break the instance-wide policy group."""
+        """A guard that refused every group would pass the tests above, so this pins
+        that ordinary groups still accept anyone."""
         await _add(ADMIN_GROUP, [STRANGER], _user(role="admin", uid="admin-1"), env)
         assert await _members(env, ADMIN_GROUP) == {STRANGER}
 
     @pytest.mark.asyncio
     async def test_a_mixed_request_is_refused_whole(self, env):
-        """One outsider among members refuses the request rather than admitting
-        the members and dropping them — a partially applied membership change is
-        the state nobody can reason about afterwards."""
+        """One outsider refuses the whole request, so no partial change is applied."""
         with pytest.raises(HTTPException):
             await _add(TEAM_GROUP, [OWNER, STRANGER], _user(role="admin", uid="admin-1"), env)
         assert await _members(env, TEAM_GROUP) == {MEMBER}
 
     @pytest.mark.asyncio
     async def test_the_model_refuses_it_too_for_callers_that_skip_the_route(self, env):
-        """SCIM and OAuth never reach the route, so the model keeps its own copy.
+        """SCIM and OAuth bypass the route, so the model enforces the rule too.
 
-        ⚠️ Asserted separately from the route: one guard behaves exactly like two
-        until somebody calls the other door.
+        Asserted separately so that removing either copy fails a test.
         """
         from open_webui.models.groups import Groups
 

@@ -1064,13 +1064,10 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
                 seat_limit=seat_count,
             )
             await Teams.update(team.id, stripe_customer_id=customer_id)
-            # The team's PII policy group, born empty. An empty group masks nobody,
-            # so creating a team still changes nobody's protection.
-            #
-            # ⚠️ Best-effort ON PURPOSE, and only because it is idempotent: this
-            # route cannot make the team and the group atomic, so a failure
-            # here must not lose the team. The group is created on first read
-            # instead — see `ensure_team_pii_group`.
+            # Create the team's PII policy group. It starts empty, so it masks
+            # nobody. Best-effort because it is idempotent: the team and the group
+            # cannot be created atomically, so a failure here must not lose the
+            # team. `ensure_team_pii_group` creates it on the first dashboard read.
             try:
                 await ensure_team_pii_group(team.id)
             except Exception as e:
@@ -1252,9 +1249,8 @@ async def update_team_name(body: TeamUpdateNameRequest, user=Depends(get_verifie
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update team name.")
 
-    # The group's name is derived from the team's, so renaming one renames both.
-    # This is the ONLY place a team name changes, which is what keeps the derived
-    # name honest — the model refuses any other route to it.
+    # The group's name is derived from the team's, so rename both. This is the
+    # only route that changes a team name, which keeps the two in sync.
     try:
         await rename_team_pii_group(team.id, name)
     except Exception as e:
@@ -1353,11 +1349,10 @@ async def remove_team_member(member_user_id: str, user=Depends(get_verified_user
 
     await StripeBillings.revert_to_trial(member_user_id)
 
-    # ⚠️ Last, and after the billing revert on purpose. If this raises — the audit
-    # write is blocking — the person is out of the team but still in its policy
-    # group, so they stay MASKED and the request fails loudly. The other order
-    # would leave them unmasked on the same failure, which is the direction this
-    # feature exists to prevent.
+    # Runs last, after the billing revert. If it raises (the audit write is
+    # blocking), the person has left the team but stays in its policy group, so
+    # they remain masked and the request fails. The reverse order would leave
+    # them unmasked on the same failure.
     await remove_from_team_policy_group(team.id, member_user_id)
 
     return {"removed": True}
@@ -1956,9 +1951,9 @@ async def _handle_stripe_event(event_type: str, data):
                                         seat_limit=pkg.seat_count or 5,
                                     )
                                     await Teams.update(team.id, stripe_customer_id=customer_id)
-                                    # Same as `create_team`. Not optional: without
-                                    # it a team upgraded through the Stripe portal
-                                    # has no policy group and nothing says so.
+                                    # Same as `create_team`: without it a team
+                                    # created by a Stripe portal upgrade has no
+                                    # policy group, silently.
                                     try:
                                         await ensure_team_pii_group(team.id)
                                     except Exception as e:

@@ -606,13 +606,9 @@
 							{$i18n.t("Your team is on a shared usage plan. Each member's activity is tracked individually.")}
 						</p>
 						<!--
-							The owner's way in to the team dashboard. It lives here because this
-							page already knows the answer to "am I an owner, and of which team":
-							`GET /billing/team` returns a `team_id` and 404s for everyone else, so
-							no new endpoint is needed.
-
-							⚠️ A link, not a guard. Typing the address reaches the same screen, and
-							every check that matters is on the routes it calls.
+							The owner's link to the team dashboard. `GET /billing/team` returns a
+							`team_id` only for the owner, so this page already knows which team.
+							A link, not a guard: access is checked by the routes the dashboard calls.
 						-->
 						{#if teamStatus?.team_id}
 							<a

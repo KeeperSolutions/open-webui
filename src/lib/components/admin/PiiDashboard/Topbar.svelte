@@ -10,10 +10,8 @@
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
 	/**
-	 * Names the SCOPE, not the viewer's rights — decision 2. An admin on a team
-	 * address is reading one team, so they get the team title too; calling this
-	 * off `mayAct` would put the permission back into a label that describes
-	 * which rows are on screen.
+	 * Selects the title. The title names the scope on screen, not the viewer's
+	 * rights, so an admin viewing one team also sees the team title.
 	 */
 	export let teamId: string | null = null;
 	export let windowFrom = '';

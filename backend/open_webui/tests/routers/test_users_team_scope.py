@@ -1,12 +1,9 @@
-"""G-A4 - scoping the directory routes to one team.
+"""Tests that the directory routes `GET /users/` and `GET /users/all` are scoped to one team.
 
-⚠️ The biggest stake in the ticket. `GET /users/all` passed NO filter at all, so
-the difference between correct and catastrophic is a single argument: omit it and
-every logged-in account receives every user on the instance.
-
-Both routes moved from `get_admin_user` to `get_verified_user`, so each is
-exercised SEPARATELY on every branch - a mutation that removes one guard must not
-be caught by the other route's test.
+Unscoped, `GET /users/all` passes no filter, so a missing scope hands every
+logged-in account the whole user directory. Both routes depend on
+`get_verified_user` and authorise in the body, so each route is tested
+separately on every branch.
 """
 
 import asyncio
@@ -72,9 +69,7 @@ def _run(which, caller, team_id=None, team=None, members=None, accounts=None, pa
          groups=None):
     """Call one directory route and report the filter it handed the model.
 
-    `page` is threaded through because two fields of the response are properties
-    of the SCOPE rather than of the page, and the only way to say so is to ask
-    for a second page and look.
+    `page` lets tests check that the scope fields are the same on every page.
     """
     get_users_mock = AsyncMock(return_value=dict(DIRECTORY))
     with patch(TEAMS, AsyncMock(return_value=team)), patch(
@@ -104,7 +99,7 @@ ROUTES = ("paged", "all")
 
 
 # ---------------------------------------------------------------------------
-# The gate that moved from the dependency into the body
+# Authorisation in the route body
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +122,7 @@ def test_non_admin_without_team_id_is_refused_on_each_route(which):
 
 @pytest.mark.parametrize("which", ROUTES)
 def test_refused_before_the_directory_is_ever_read(which):
-    """⚠️ Asserts on the mock: `pytest.raises` alone cannot tell WHERE it raised."""
+    """Asserts on the mock, because `pytest.raises` alone cannot show where it raised."""
     get_users_mock = AsyncMock(return_value=dict(DIRECTORY))
     with patch(GET_USERS, get_users_mock), patch(GROUPS, AsyncMock(return_value={})):
         with pytest.raises(HTTPException):
@@ -150,12 +145,7 @@ def test_owner_of_another_team_is_refused_on_each_route(which):
 
 @pytest.mark.parametrize("which", ROUTES)
 def test_empty_team_is_refused_and_the_directory_is_not_read(which):
-    """⚠️ The mock outlives the exception, so the second half of the name is asserted.
-
-    `_run` returns nothing when it raises, so the assertion has to hold the mock
-    itself - otherwise this test checks the status code and quietly promises
-    something it never looked at.
-    """
+    """Holds the directory mock itself, because `_run` returns nothing when it raises."""
     get_users_mock = AsyncMock(return_value=dict(DIRECTORY))
     with patch(TEAMS, AsyncMock(return_value=_team("u1"))), patch(
         MEMBERS, AsyncMock(return_value=[])
@@ -201,7 +191,7 @@ def test_owner_scopes_the_directory_to_their_team(which):
 
 @pytest.mark.parametrize("which", ROUTES)
 def test_both_filter_keys_are_lists(which):
-    """⚠️ `models/users.py:448` arms its guard only for `isinstance(..., list)`."""
+    """`Users.get_users` applies its empty-filter guard only when both keys are lists."""
     _, mock = _run(which, _caller("user", "u1"), team_id="T1", team=_team("u1"))
     sent = _filter_of(mock)
     assert {"user_ids", "group_ids"} <= set(sent), f"filter is missing keys: {sorted(sent)}"
@@ -243,16 +233,14 @@ def test_the_paged_route_keeps_its_ordering_filter_alongside_the_scope(which):
 
 
 # ---------------------------------------------------------------------------
-# G-B8 — the team's own policy group travels with the directory
+# `team_group_id`: the team's own policy group
 # ---------------------------------------------------------------------------
 
 
 class TestTeamGroupIdInTheResponse:
-    """Section 4 needs one id to say "team policy" instead of "somewhere else".
+    """The directory reports the addressed team's policy group id, and no other.
 
-    ⚠️ One id, and only the addressed team's. No other group identity rides along,
-    so decision 5 holds by the shape of the payload rather than by the template
-    being careful.
+    The dashboard uses it to label masking as team policy.
     """
 
     def test_the_paged_route_reports_it(self):
@@ -269,7 +257,7 @@ class TestTeamGroupIdInTheResponse:
         assert result["team_group_id"] is None
 
     def test_a_team_with_no_group_yet_reports_none(self):
-        """Normal under path B, and the fallback the frontend already renders."""
+        """A team without a policy group is a supported state with a frontend fallback."""
         with patch(
             "open_webui.utils.team_groups.ensure_team_pii_group", AsyncMock(return_value=None)
         ):
@@ -278,18 +266,15 @@ class TestTeamGroupIdInTheResponse:
 
 
 # ---------------------------------------------------------------------------
-# G-C4 — whether the viewer may govern that policy group
+# `may_manage_team_policy`: whether the viewer may manage that group
 # ---------------------------------------------------------------------------
 
 
 class TestMayManageTeamPolicyInTheResponse:
-    """The permission is worked out on the SERVER and reported.
+    """The permission is computed on the server and reported in the response.
 
-    ⚠️ Not derivable on the client. An address selects a scope; it does not
-    confer a permission, and the frontend cannot check who owns a team. Level A
-    was written so that `mayActFor` could not even see the address — reporting a
-    computed permission is what keeps that rule intact once a second kind of
-    viewer can act.
+    The client cannot derive it: a `team_id` in the address selects a scope but
+    grants nothing, and the frontend cannot check who owns a team.
     """
 
     @staticmethod
@@ -313,7 +298,7 @@ class TestMayManageTeamPolicyInTheResponse:
         assert result["may_manage_team_policy"] is True
 
     def test_an_admin_may_on_somebody_elses_team(self):
-        """Unbounded, and costing no lookup at all."""
+        """Admins may manage any team's group, without an ownership lookup."""
         ensure, ownership = self._with_owner("someone-else")
         with ensure, ownership:
             result, _ = _run("paged", _caller(role="admin"), team_id="T1", team=_team("someone-else"))
@@ -325,11 +310,7 @@ class TestMayManageTeamPolicyInTheResponse:
         assert result["may_manage_team_policy"] is False
 
     def test_a_team_with_no_group_yet_reports_false(self):
-        """⚠️ Same answer for every role — there is nothing to be in charge of.
-
-        An administrator reading `true` here would be told they may manage a
-        group that does not exist.
-        """
+        """No group means nothing to manage, for admins as well as owners."""
         with patch(
             "open_webui.utils.team_groups.ensure_team_pii_group", AsyncMock(return_value=None)
         ):
@@ -340,16 +321,10 @@ class TestMayManageTeamPolicyInTheResponse:
 
 
     def test_the_route_asks_the_permission_rather_than_inferring_it(self):
-        """⚠️ A tripwire, because agreeing with the right answer is not asking.
+        """The route calls `may_manage_team_policy` instead of inferring it from the scope.
 
-        Every case above happens to be one where "is this view team-scoped" gives
-        the same result as ownership — it has to be, since level A admits only an
-        administrator or the team's owner. So a route that replaced the call with
-        that proxy would pass them all.
-
-        It would also be wrong the moment the read audience widens, which is
-        precisely what `_may_read_team_dashboard` is written to allow. The only
-        thing that tells the two apart is watching the route ask.
+        Only admins and owners can read a scoped view today, so inferring it would
+        pass every case above but break once the read audience widens.
         """
         sentinel = AsyncMock(return_value=False)
         with patch(
@@ -363,16 +338,9 @@ class TestMayManageTeamPolicyInTheResponse:
 
 
 class TestTheScopeFieldsAreNotPageProperties:
-    """⚠️ A pin on the contract, not a repair.
+    """`team_group_id` and `may_manage_team_policy` depend on the scope, not the page.
 
-    Measured before it was written: the server computes `team_group_id` from the
-    scope, and `resolve_dashboard_scope` never looks at `page`. Nothing is broken
-    today, and the frontend collects every page before publishing anything, so
-    the failure this guards against — buttons that work on page 1 and vanish on
-    page 2, with nothing said — is not reachable through the paging control.
-
-    It is written anyway, because a SECOND scope field is exactly the moment
-    somebody computes one of them next to the slice.
+    A field computed per page would make the owner's controls vanish on later pages.
     """
 
     def test_both_scope_fields_travel_on_page_two(self):
@@ -392,25 +360,17 @@ class TestTheScopeFieldsAreNotPageProperties:
 
 
 # ---------------------------------------------------------------------------
-# A group id is a group NAME, so a non-admin gets neither
+# A group id exposes the group's name, so non-admins get none outside their team
 # ---------------------------------------------------------------------------
 
 
 class TestGroupIdsAreNotHandedToNonAdmins:
-    """⚠️ The no-group-name rule is not a property of the screen.
+    """Non-admins receive no group ids other than their team's policy group.
 
-    `GET /groups/id/{id}/info` is `get_verified_user` and checks no membership,
-    so any id in this response is one call away from that group's name,
-    description and member count. A payload that gives a team owner other
-    people's group ids has already told them the names, whatever the template
-    chooses to render.
-
-    Measured, not assumed: with the ids in the response, two `curl` calls as a
-    plain team owner returned `PII Masking Policy`, `Proba spajanja` and the id
-    of the administrator who created it.
-
-    ⚠️ Keyed on the ROLE, not on whether the request was scoped. An admin reading
-    a team's dashboard is still an admin, and their screen names groups.
+    `GET /groups/id/{id}/info` requires only a verified user and checks no
+    membership, so any group id in this response exposes that group's name,
+    description and member count. The rule depends on the viewer's role, not on
+    whether the request is scoped.
     """
 
     TEAM_GROUP = "g-team"
@@ -437,10 +397,10 @@ class TestGroupIdsAreNotHandedToNonAdmins:
         assert rows["u1"].group_ids == [] and rows["u2"].group_ids == []
 
     def test_but_they_are_still_told_THAT_something_else_masks_them(self):
-        """The narrowing must not cost the owner the answer their screen needs.
+        """Non-admins still learn that another policy masks a member.
 
-        Without this the dialog would promise that leaving the team's policy lets
-        somebody turn masking off, when an administrator's group still holds it.
+        Otherwise the dialog would suggest that removing someone from the team's
+        policy lets them turn masking off while another group still enforces it.
         """
         rows = self._rows(
             _caller("user", "u1"),
@@ -474,16 +434,11 @@ class TestGroupIdsAreNotHandedToNonAdmins:
 
 
 class TestMaskedByOtherPolicyCountsTheInstanceDefault:
-    """⚠️ The one source with no group behind it.
+    """`masked_by_other_policy` counts the instance-wide default permission.
 
-    `pii_policy_group_ids` deliberately ignores the instance-wide default — it
-    answers "which groups say yes". This field answers a different question,
-    "would they still be masked afterwards", and there the default is an answer.
-
-    Nobody could see this while the frontend derived the flag from ids: an
-    instance with `USER_PERMISSIONS_CHAT_CHAT_PII_MASKING_ENFORCED` on would tell
-    every owner that removing somebody restores their ability to turn masking
-    off, which it does not.
+    Unlike `pii_policy_group_ids`, it asks whether a user stays masked without the
+    team's group, and with `USER_PERMISSIONS_CHAT_CHAT_PII_MASKING_ENFORCED` on
+    they do.
     """
 
     def _rows(self, default_permissions, groups):

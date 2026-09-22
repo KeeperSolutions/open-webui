@@ -55,27 +55,18 @@ REASON_REQUIRED_EVENT_TYPES = frozenset({EVENT_POLICY_DISABLED, EVENT_MEMBER_REM
 # The system actor
 ####################
 
-# The product itself acting, with no person behind it. The actor columns are NOT
-# NULL, and the moves this feature makes on its own — the bridge migration, and
-# every automatic move that follows it — have nobody to name.
+# Actor for rows the application writes on its own, such as the bridge migration
+# and automatic membership changes. The actor columns are NOT NULL.
 #
-# ⚠️ Defined HERE, and here only, for anything written from now on. Two literal
-# copies already exist, both inside applied migrations, which are history and
-# cannot be edited; a third copy would be drift that nobody notices until two
-# spellings of "system" split the audit trail in half. New writers import these.
-# `test_leaving_a_team_clears_policy.py` asserts the migrations' copies still
-# agree with them.
+# New writers must import these constants. Applied migrations hold their own
+# literal copies, and `test_leaving_a_team_clears_policy.py` asserts they match;
+# a different spelling would split the audit trail.
 SYSTEM_ACTOR_ID = 'system'
 SYSTEM_ACTOR_EMAIL = 'system@open-webui'
 
-# ⚠️ Reasons for automatic moves live beside the actor that makes them, for the
-# same reason the actor does: `member_removed` REQUIRES a reason, so every
-# automatic removal needs one, and four more such moves are still to come.
-#
-# The text names the CAUSE, not the gesture. Read a year later by someone who was
-# not here, "removed from the policy group" alone reads as protection having been
-# taken away from a person; what actually happened is that the team which was
-# giving them that protection stopped covering them.
+# Reason recorded for automatic removals, since `member_removed` requires one.
+# It names the cause, so a reader does not take the row as protection having
+# been deliberately taken away from the person.
 REASON_LEFT_TEAM = (
     'Removed from the team policy group because they are no longer a member of the team. '
     'The team that was enforcing masking for them no longer covers them.'
@@ -95,17 +86,11 @@ def validate_pii_policy_event(
     user_id: Optional[str] = None,
     reason: Optional[str] = None,
 ) -> None:
-    """The invariants of one audit row. Raises `ValueError`; returns nothing.
+    """Check the invariants of one audit row. Raises `ValueError` on a violation.
 
-    Extracted from `insert_event` so that a WRITER WHICH CANNOT AWAIT can still be
-    held to them. Alembic runs synchronously, so a migration cannot call
-    `insert_event` at all — it has to issue raw `INSERT`s, and a raw insert
-    otherwise skips every check below. The bridge migration writes two rows per
-    member rather than the one row the seed migration wrote, so the exposure is an
-    order of magnitude larger than the precedent that accepted it.
-
-    ⚠️ Deliberately synchronous and database-free. Adding an `await` or a query
-    here would put it back out of reach of the one caller it was extracted for.
+    Separate from `insert_event` so writers that cannot await can use it:
+    Alembic migrations run synchronously and insert rows with raw SQL. It must
+    stay synchronous and database-free, or migrations can no longer call it.
     """
     if event_type not in EVENT_TYPES:
         raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
@@ -114,9 +99,8 @@ def validate_pii_policy_event(
         raise ValueError(f'{event_type} requires user_id')
 
     if event_type in POLICY_EVENT_TYPES and user_id:
-        # Not cosmetic: a policy row carrying a user_id reads as "this person's
-        # policy changed", which is a claim this feature never makes — the policy
-        # is per group.
+        # A policy row with a user_id would read as "this person's policy
+        # changed", but the policy is per group.
         raise ValueError(f'{event_type} must not carry user_id')
 
     if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
@@ -197,10 +181,9 @@ class PiiPolicyAuditTable:
         None; this one must not. The caller's contract is "no record → no
         mutation", which it can only honour if a failed write is visible to it.
 
-        Validation lives in `validate_pii_policy_event` rather than only in the
-        route so the invariants hold for every future caller — the membership
-        events go through this same door, and so does the bridge migration, which
-        cannot await this method and calls the validator directly.
+        Validation lives in `validate_pii_policy_event` rather than in the route,
+        so the invariants hold for every caller, including migrations that call
+        the validator directly.
         """
         validate_pii_policy_event(
             event_type=event_type,

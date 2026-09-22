@@ -206,28 +206,16 @@ async def update_group_by_id(
     # rather than gaining a 404 it never had.
     existing = await Groups.get_group_by_id(id, db=db)
 
-    # ⚠️ Refused BEFORE anything is recorded, and this ordering is the whole point.
-    #
-    # `Groups.update_group_by_id` returning None used to mean one thing — the
-    # database failed — and the audit row committed just above was accepted as a
-    # "narrow residual". The team-group guard gave that same None a SECOND
-    # meaning: a guard working correctly. The residual stopped being narrow, and
-    # every refused edit of a team group left a row saying an administrator
-    # disabled a policy they never touched.
-    #
-    # For a table whose rule is "no record → no mutation", that is the inverted
-    # error, and the worse one: a missing record says something is absent, a
-    # false record ACCUSES someone.
-    #
-    # The model keeps its own guard — SCIM and OAuth never reach this handler —
-    # so this is not the protection. It is what stops the protection from
-    # writing history.
+    # Refuse edits to a team group's derived fields before the audit write.
+    # The model refuses them too, but only after the audit row is committed,
+    # which would record a policy change that never happened. The model guard
+    # still covers SCIM and OAuth, which do not use this handler.
     if existing is not None:
         blocked = team_group_derived_changes(
             existing, form_data.model_dump(exclude_none=True, exclude={'reason'})
         )
-        # Cheap half first: the classifier costs a query, and a form that changes
-        # nothing derived cannot be refused whatever kind of group this is.
+        # Check the form first: the team lookup costs a query, and a form that
+        # changes no derived field is never refused.
         if blocked and await team_group_kind(id, db=db) is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -291,11 +279,9 @@ async def update_group_by_id(
         # into an UPDATE statement. update_group_by_id itself is unchanged.
         group = await Groups.update_group_by_id(id, GroupUpdateForm(**form_data.model_dump(exclude={'reason'})), db=db)
         if group is None and event_type is not None:
-            # Still a residual, and now genuinely narrow again: every REFUSAL is
-            # taken above, before anything is written, so what is left here is a
-            # database failure. Kept, and still logged loudly, because the
-            # alternative — auditing after the fact — is a policy change with no
-            # record at all.
+            # Refusals are handled above, so this is a database failure after the
+            # audit row was committed. Auditing after the update instead would
+            # risk a policy change with no record at all.
             log.error(
                 f'PII policy audit recorded {event_type} for group {id} but the update failed; '
                 f'the audit log now claims a change that did not happen.'
@@ -476,17 +462,13 @@ async def add_user_to_group(
 ):
     """Add people to a group. Admin-wide, or a team owner within their own team.
 
-    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule did not
-    disappear — it moved into `authorise_policy_membership_change`, which is the
-    first thing this function does. Swapping the dependency is the only change in
-    level C that can fail OPEN, so the guard is a named call on the first line
-    rather than a condition folded into something else.
+    The dependency only requires a verified user. Authorisation is done by
+    `authorise_policy_membership_change`, which must stay the first call after
+    the empty-request check; without it this route is open to every user.
     """
     if not form_data.user_ids:
-        # ⚠️ Before the guard and before the audit: no query, no audit row, no
-        # authorisation decision. A request that names nobody changes nothing, so
-        # there is nothing to authorise and nothing to record — and asking the
-        # guard anyway would make an empty body an authorisation event.
+        # A request that names nobody changes nothing: return before any
+        # authorisation decision or audit row.
         return None
 
     await authorise_policy_membership_change(user, id, form_data.user_ids, db=db)
@@ -500,16 +482,9 @@ async def add_user_to_group(
         log.exception(f'Error adding users to group {id}: {e}')
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
 
-    # ⚠️ Refused BEFORE the audit write, and that ordering is the point — the
-    # same lesson as the team-group edit guard above. `Groups.add_users_to_group`
-    # refuses this too, but it refuses AFTER this function has already recorded a
-    # `member_added` row, and a row claiming a membership that was rejected is
-    # the inverted error: a missing record says something is absent, a false one
-    # accuses somebody of a change they never made.
-    #
-    # A team's group is derived from the team. Nobody outside the team belongs in
-    # it — the owner could neither see such a person on their dashboard nor
-    # remove them, because the membership guard refuses targets outside the team.
+    # A team's group only holds that team's members. Refuse outsiders before
+    # the audit write: `Groups.add_users_to_group` refuses them too, but only
+    # after a `member_added` row would already record a change that never happened.
     outsiders = await Groups.users_outside_the_team_of_group(id, form_data.user_ids, db=db)
     if outsiders:
         raise HTTPException(
@@ -569,11 +544,9 @@ async def remove_users_from_group(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Take people out of a group. Same audience, same guard, same ordering.
+    """Take people out of a group. Same audience and guard as `add_user_to_group`.
 
-    ⚠️ Guarded separately from `/users/add`, and tested separately. One guard on
-    one of the two routes looks exactly like a guard on both — until somebody
-    calls the other one.
+    Each membership route calls the guard itself and has its own tests.
     """
     if not form_data.user_ids:
         # Before the guard and before the audit. See `add_user_to_group`.
@@ -594,10 +567,9 @@ async def remove_users_from_group(
     )
 
     try:
-        # The reason is no longer only an audit field: the model refuses a removal
-        # from an enforcing group without one. Passing it here keeps the route's own
-        # 400 above as the readable error, and the model check as the backstop for
-        # OAuth and SCIM, which never reach this handler.
+        # The model refuses a removal from an enforcing group without a reason,
+        # so the reason must be passed through. The route's own check above gives
+        # the readable 400; the model check covers OAuth and SCIM.
         group = await Groups.remove_users_from_group(id, form_data.user_ids, reason=form_data.reason, db=db)
         if group:
             await publish_event(

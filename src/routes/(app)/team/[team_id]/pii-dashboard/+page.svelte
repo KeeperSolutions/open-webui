@@ -7,27 +7,17 @@
 </script>
 
 <!--
-	⚠️ The filling wrapper this route has to supply for itself.
+	Page container. `(app)/+layout.svelte` renders only the sidebar and a bare
+	`<slot />`, and this route has no layout of its own to supply one.
 
-	`(app)/+layout.svelte` renders the sidebar and then a bare `<slot />`. Every
-	page under it brings its own container: the chat page has one, and
-	`/admin/pii-dashboard` inherits one from `admin/+layout.svelte`. This route has
-	no layout of its own, so nothing was giving it one, and the dashboard sized
-	itself to its content — capped at `max-w-[1190px]` — while the row's
-	`justify-content: flex-end` pushed that block against the right edge. The
-	surplus showed as an empty dark band between the sidebar and the screen, and it
-	grew with the window. Measured at 1200px: left edge 298 instead of 260.
+	The wrapper needs both `flex-1` and the sidebar-width `max-w` clamp on the same
+	element. Without `flex-1` the dashboard shrinks to its content and leaves an
+	empty band beside the sidebar. With `flex-1` alone it spans the viewport and
+	slides under the out-of-flow `#sidebar`. The clamps, including the 42px
+	collapsed rail, are copied from `admin/+layout.svelte`.
 
-	⚠️ `flex-1` alone is NOT the fix, and the first attempt proved it: `#sidebar` is
-	out of flow, so a stretched item spans the whole viewport and slides UNDER it —
-	measured left edge 1, with the sidebar ending at 260. The width has to be
-	reserved explicitly, which is what the `max-w` clamp below does. It is copied
-	from `admin/+layout.svelte:36-38` rather than reinvented, including the 42px
-	rail for the collapsed state.
-
-	Deliberately here rather than on `PiiDashboard`'s own root: the admin copy is
-	already inside such a container, and widening the shared component would change
-	a screen this fix has no business touching.
+	It lives here rather than on `PiiDashboard`'s root because the admin route
+	already wraps the dashboard in the same container.
 -->
 <div
 	class="flex flex-col h-screen max-h-[100dvh] flex-1 min-w-0 transition-width duration-200 ease-in-out {$showSidebar
@@ -36,14 +26,10 @@
 >
 	<div class="pb-1 flex-1 min-w-0 max-h-full overflow-y-auto overflow-x-hidden">
 		<!--
-			⚠️ Keyed on `teamId`, which the `/admin` copy of this page does not need.
-
-			SvelteKit reuses a component across a param change, so navigating from one
-			team's dashboard to another would leave the three loaders bound to the team
-			they were constructed with — the screen would say one team in the address
-			and show another's data. Keying forces a fresh instance instead.
-
-			Nothing here is a guard. Every check is on the route the loaders call.
+			Keyed on `teamId` because SvelteKit reuses the component across a param
+			change, which would leave the loaders bound to the previous team and show
+			its data under the new address. This is not a guard: access is checked by
+			the routes the loaders call.
 		-->
 		{#key teamId}
 			<PiiDashboard {teamId} />

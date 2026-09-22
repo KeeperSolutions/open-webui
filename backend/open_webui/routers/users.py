@@ -114,10 +114,9 @@ async def get_users(
 ):
     """Paginated directory listing.
 
-    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule moved into
-    `resolve_dashboard_scope`, which refuses any non-admin who omits `team_id`.
-    That call is the FIRST executable line here for a reason: without it this route
-    hands the whole directory to every logged-in account.
+    Depends on `get_verified_user`; `resolve_dashboard_scope` enforces access and
+    refuses any non-admin without `team_id`. It must stay the first executable
+    line, or every logged-in account can read the whole directory.
     """
     scope = await resolve_dashboard_scope(user, team_id, db=db)
 
@@ -128,8 +127,8 @@ async def get_users(
 
     filter = _list_filter(query=query, order_by=order_by, direction=direction)
     if scope is not None:
-        # `user_ids` AND `group_ids`, always together — see `team_directory_filter`.
-        # Dropping either does not fail; it returns the whole instance.
+        # `user_ids` and `group_ids` must be applied together; dropping either
+        # returns the whole instance. See `team_directory_filter`.
         filter.update(team_directory_filter(scope))
 
     result = await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
@@ -147,24 +146,17 @@ async def get_users(
     # enforcement path.
     default_permissions = request.app.state.config.USER_PERMISSIONS
 
-    # ⚠️ An ADMINISTRATOR may know what the instance's groups are called; nobody
-    # else may. The dashboard's no-group-name rule is not a property of the
-    # screen — a group id reaches its name through `GET /groups/id/{id}/info`,
-    # which is `get_verified_user` and checks no membership — so a response that
-    # hands a team owner other people's group ids has already told them the
-    # names, whatever the screen chooses to render.
-    #
-    # Keyed on the ROLE, not on whether the request was scoped: an admin reading
-    # a team's dashboard is still an admin, and their screen names groups.
+    # Only admins may see the instance's group ids. `GET /groups/id/{id}/info`
+    # requires only a verified user and checks no membership, so any group id in
+    # this response exposes that group's name. Keyed on the viewer's role, not on
+    # whether the request is scoped.
     viewer_is_admin = user.role == 'admin'
     team_group_id = scope.group_id if scope is not None else None
 
     def row_for(subject):
-        """One directory row, with the ids narrowed to what this viewer may know.
+        """One directory row, with group ids limited to what this viewer may see.
 
-        ⚠️ `subject`, not `user`: `user` is the VIEWER, and the comprehension this
-        replaces shadowed it with the person being listed. The two decide
-        different halves of this function.
+        `subject` is the listed user; `user` is the viewer.
         """
         groups = user_groups.get(subject.id, [])
         policy_groups = [g for g in groups if group_enforces_pii_masking(g.permissions)]
@@ -173,9 +165,9 @@ async def get_users(
             group_ids = [g.id for g in groups]
             policy_group_ids = [g.id for g in policy_groups]
         else:
-            # The owner's screen asks exactly two things of the policy list: "are
-            # they in MY team's policy" and "is something else masking them". The
-            # first survives this narrowing; the second is the boolean below.
+            # The owner's screen needs only whether the member is in this team's
+            # policy (kept here) and whether another policy masks them
+            # (`masked_by_other_policy` below).
             group_ids = []
             policy_group_ids = [g.id for g in policy_groups if g.id == team_group_id]
 
@@ -183,20 +175,17 @@ async def get_users(
             **{
                 **subject.model_dump(),
                 'group_ids': group_ids,
-                # The effective answer, over every group AND the instance
-                # defaults — the same function `has_permission` delegates to, so
-                # it cannot drift from the enforcement path.
+                # Effective answer over every group and the instance defaults,
+                # using the same function as `has_permission`.
                 'pii_masking_enforced': has_permission_for_groups(
                     groups, PII_MASKING_ENFORCED_PERMISSION, default_permissions
                 ),
-                # A different question from the flag above — "which groups say
-                # yes" rather than "is this user enforced" — so it deliberately
-                # does NOT consult the instance defaults.
+                # Which groups enforce masking. Unlike the flag above, this
+                # deliberately ignores the instance defaults.
                 'pii_policy_group_ids': policy_group_ids,
-                # ⚠️ Third question again: "would they still be masked with the
-                # team's group taken away". This one DOES consult the defaults,
-                # because a person the instance masks by default still would be,
-                # with no group anywhere to name as the reason.
+                # Whether they stay masked without the team's group. Consults the
+                # instance defaults, because a user masked by default stays masked
+                # with no group involved.
                 'masked_by_other_policy': (
                     False
                     if team_group_id is None
@@ -212,13 +201,10 @@ async def get_users(
     return {
         'users': [row_for(subject) for subject in users],
         'total': total,
-        # `scope` is None on the instance-wide view, so this is None there too —
-        # the unscoped dashboard has no team whose policy could be named.
+        # None on the instance-wide view, which has no team policy.
         'team_group_id': scope.group_id if scope is not None else None,
-        # ⚠️ Travels on EVERY page, like `team_group_id`, because neither is a
-        # property of a page. `resolve_dashboard_scope` does not look at `page`,
-        # and this must not start to — a viewer whose buttons worked on page 1
-        # and vanished on page 2 would be told nothing about why.
+        # Sent on every page, like `team_group_id`: both depend on the scope, not
+        # the page. Otherwise the owner's controls could vanish on later pages.
         'may_manage_team_policy': (
             await may_manage_team_policy(user, scope.group_id, db=db)
             if scope is not None
@@ -271,9 +257,8 @@ async def get_all_users(
 ):
     """Unpaginated directory listing.
 
-    ⚠️ This route passed NO filter at all, so the difference between correct and
-    catastrophic is one argument: omit it and every logged-in account receives
-    every user on the instance.
+    Unscoped, this route passes no filter, so `resolve_dashboard_scope` must run
+    first; without it every logged-in account receives every user.
     """
     scope = await resolve_dashboard_scope(user, team_id, db=db)
 

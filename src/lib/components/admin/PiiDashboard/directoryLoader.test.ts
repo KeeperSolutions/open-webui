@@ -180,15 +180,9 @@ describe('createDirectoryLoader', () => {
 	});
 });
 /**
- * ⚠️ The propagation test below mocks the API MODULE, not the fetcher.
- *
- * `teamId` is bound inside the DEFAULT fetcher, so a test that injects its own
- * fetcher never sees it — such a test would pass green while the id was being
- * dropped on the way to the request. That is precisely the bug worth catching, so
- * the assertion has to sit on the API wrapper itself.
- *
- * Every other test in this file supplies its own fetcher and therefore never
- * reaches the mock.
+ * These tests mock the API module, not the fetcher, because `teamId` is bound
+ * only inside the default fetcher. Every other test here injects its own fetcher
+ * and never reaches the mock.
  */
 
 describe('createDirectoryLoader — team id propagation', () => {

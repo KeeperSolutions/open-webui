@@ -65,13 +65,9 @@ describe('createUsersAccessLoader', () => {
 			truncatedUsers: null,
 			policyGroups: [],
 			enforceTargets: [],
-			// Enforcing groups excluded for belonging to a team — the empty state
-			// needs it to tell its two causes apart.
 			teamOnlyPolicyGroups: 0,
-			// Enforcing groups excluded for granting more than masking — the same
-			// question as above, asked of a different exclusion.
 			broadPolicyGroups: 0,
-			// The addressed team's own policy group; `null` until a scoped load lands.
+			// `null` until a team-scoped load completes.
 			teamGroupId: null,
 			mayManagePolicy: false,
 			loading: true,
@@ -402,14 +398,9 @@ describe('createUsersAccessLoader — policy groups', () => {
 	});
 });
 /**
- * ⚠️ The propagation tests below mock the API MODULE, not the fetcher.
- *
- * `teamId` is bound inside the DEFAULT fetcher, so a test that injects its own
- * fetcher never sees it — such a test would pass green while the id was being
- * dropped on the way to the request. That is precisely the bug worth catching, so
- * the assertion has to sit on the API wrapper itself.
- *
- * Every other test in this file supplies its own fetchers and never reaches these.
+ * These tests mock the API module, not the fetcher, because `teamId` is bound
+ * only inside the default fetcher. Every other test here injects its own fetchers
+ * and never reaches the mock.
  */
 
 vi.mock('$lib/apis/users', () => ({ getUsers: vi.fn() }));
@@ -438,8 +429,8 @@ describe('createUsersAccessLoader — team id propagation', () => {
 	});
 
 	it('does NOT hand the team id to the groups API', async () => {
-		// `GET /groups/` is not scoped by team in level A, and passing an id there
-		// would advertise a scoping that does not exist.
+		// `GET /groups/` is not scoped by team, and passing an id there would
+		// suggest scoping that does not exist.
 		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
 		expect(groupsApi).toHaveBeenCalledTimes(1);
 		expect(groupsApi.mock.calls[0].slice(1)).not.toContain('T1');
@@ -450,11 +441,8 @@ describe('createUsersAccessLoader — naming and destinations are separate lists
 	const oneUser: UsersFetcher = async () => ({ users: [mkUser(1)], total: 1 });
 
 	it('publishes a team group for naming but not as a destination', async () => {
-		/**
-		 * ⚠️ One list served both questions, and that is what put a raw UUID in
-		 * the removal dialog: the team group was filtered out of the only list
-		 * `rowActionFor` could name from, so it fell back to the id.
-		 */
+		// Team groups must stay nameable, or the removal dialog has no name to
+		// show for them, but must never be offered as a destination.
 		const groups: GroupsFetcher = async () => [
 			{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } },
 			{
@@ -482,9 +470,8 @@ const dashboardSource = readFileSync(
 );
 
 /**
- * The `<UsersAccess … />` element as written. Scoped rather than searched over
- * the whole file so an assertion about a prop cannot be met by the same text on
- * one of the neighbouring sections.
+ * The `<UsersAccess … />` element as written, so an assertion about a prop
+ * cannot be satisfied by the same text on a neighbouring section.
  */
 const usersAccessCallSite = (() => {
 	const start = dashboardSource.indexOf('<UsersAccess');
@@ -496,19 +483,13 @@ const usersAccessCallSite = (() => {
 
 describe('the dashboard hands each list to the prop of the same name', () => {
 	/**
-	 * ⚠️ Written because a mutation SURVIVED: swapping `enforceTargets` for
-	 * `policyGroups` in `PiiDashboard.svelte` broke nothing.
+	 * Other tests pass these lists to `rowActionFor` or `UsersAccess` directly,
+	 * so only this one catches a swapped binding in `PiiDashboard.svelte`, which
+	 * would put team groups in the Enforce dropdown.
 	 *
-	 * Every other test here passes the two lists to `rowActionFor` or to
-	 * `UsersAccess` directly, so all of them keep passing while the one line that
-	 * connects the loader to the component quietly puts team groups back in the
-	 * Enforce dropdown — the defect this split was made to close.
-	 *
-	 * Structural rather than behavioural because the alternative is mounting the
-	 * whole dashboard, with three loaders and four stores, to prove one binding.
-	 * Only this pair is pinned: other props are deliberately renamed on the way
-	 * through (`truncated` reads `truncatedUsers`), so a blanket rule would be
-	 * false.
+	 * Reads the source because mounting the whole dashboard would need three
+	 * loaders and four stores. Only named props are checked, because some props
+	 * are renamed on purpose (`truncated` reads `truncatedUsers`).
 	 */
 	it.each(['policyGroups', 'enforceTargets', 'broadPolicyGroups'])(
 		'passes %s from the field of that name',
@@ -524,26 +505,16 @@ describe('the dashboard hands each list to the prop of the same name', () => {
 
 describe('the dashboard hands each permission to the prop of that name', () => {
 	/**
-	 * ⚠️ The same shape as the mutation above, with a worse outcome. Swapping
-	 * `mayAct` and `mayManagePolicy` at this one line survives the whole suite:
-	 * `usersAccess.test.ts` calls `rowActionFor` with a viewer it builds itself,
-	 * and `UsersAccess.component.test.ts` sets both props by hand. A team owner
-	 * would be handed the `Manage` link — the way to the admin screen — while the
-	 * two membership buttons disappear.
+	 * Swapping `mayAct` and `mayManagePolicy` at the call site would give a team
+	 * owner the `Manage` link to the admin screen and hide the two membership
+	 * buttons. Other tests set both props by hand, so only this one catches it.
 	 *
-	 * The `viewer` object introduced in G-C5 closed the swap INSIDE the function.
-	 * This closes the swap while PASSING. They are two different places, and
-	 * neither test covers the other.
-	 *
-	 * Three props by name, never a rule over all of them: `truncated` reads
-	 * `truncatedUsers` deliberately, so "prop X takes the field of that name" is
-	 * false for the component as a whole. An allow-list is the only form that
-	 * does not fail on correct code — see the last case here.
+	 * Uses an allow-list of props, because `truncated` reads `truncatedUsers`
+	 * on purpose (see the last case).
 	 */
 	it.each([
-		// Derived from the ROLE, not from the loader — see `mayActFor`. The
-		// shorthand `{mayAct}` is also the tail of `mayAct={mayAct}`, so either
-		// spelling satisfies this.
+		// Derived from the role, not from the loader. `{mayAct}` also matches the
+		// tail of `mayAct={mayAct}`, so either spelling passes.
 		['mayAct', '{mayAct}'],
 		['mayManagePolicy', 'mayManagePolicy={$usersAccess.mayManagePolicy}'],
 		['teamGroupId', 'teamGroupId={$usersAccess.teamGroupId}']
@@ -552,9 +523,8 @@ describe('the dashboard hands each permission to the prop of that name', () => {
 	});
 
 	it('never lets the reported permission decide who may act', () => {
-		// The load-bearing half. Under a genuine swap the shorthand `{mayAct}` is
-		// still present — as the tail of `mayManagePolicy={mayAct}` — so the
-		// positive case above is satisfied BY the mutation. Only this sees it.
+		// Needed because a swap still contains `{mayAct}` as the tail of
+		// `mayManagePolicy={mayAct}`, which satisfies the positive case above.
 		expect(usersAccessCallSite).not.toMatch(/mayAct=\{\$usersAccess\./);
 	});
 
@@ -563,32 +533,22 @@ describe('the dashboard hands each permission to the prop of that name', () => {
 	});
 
 	it('never passes the addressed team where its policy group belongs', () => {
-		// `teamId` is a team id and `teamGroupId` a group id. The owner's criterion
-		// is membership of the latter, so this swap hides both buttons without
-		// erroring — and reads as "the owner has no policy" rather than as a bug.
+		// `teamId` is a team id and `teamGroupId` a group id. This swap would
+		// silently hide both owner buttons.
 		expect(usersAccessCallSite).not.toContain('teamGroupId={teamId}');
 	});
 
 	it('does not claim that prop and field always share a name', () => {
-		// The counter-example that forces the allow-list, pinned so the reason
-		// given above cannot quietly stop being true.
+		// The counter-example that requires the allow-list above.
 		expect(usersAccessCallSite).toContain('truncated={$usersAccess.truncatedUsers}');
 	});
 });
 
 describe('createUsersAccessLoader — the permission the server reports', () => {
 	/**
-	 * ⚠️ Written because a mutation SURVIVED: reading the field as `!== false`
-	 * broke nothing, since every payload on file carried it.
-	 *
-	 * A payload that OMITS it is the case that matters, and it is reachable — an
-	 * older backend, or any response built before this field existed. The two
-	 * readings differ only there, and they differ in the dangerous direction:
-	 * absent would become permitted, and a viewer with no right to act would be
-	 * shown buttons the server then refuses.
-	 *
-	 * Same failure as M5 in G-B7, where the corpus lacked the explicit `false`
-	 * the backend always sends.
+	 * Only a literal `true` grants the permission. An older backend omits the
+	 * field, and treating absence as permitted would show buttons the server
+	 * then refuses.
 	 */
 	const page =
 		(over: Record<string, unknown>): UsersFetcher =>
@@ -610,14 +570,14 @@ describe('createUsersAccessLoader — the permission the server reports', () => 
 		expect(get(loader).mayManagePolicy).toBe(false);
 	});
 
-	it('⚠️ reports no permission when the field is absent', async () => {
+	it('reports no permission when the field is absent', async () => {
 		// Absent is not "yes". A permission has to be granted to exist.
 		const loader = createUsersAccessLoader(page({}));
 		await loader.load();
 		expect(get(loader).mayManagePolicy).toBe(false);
 	});
 
-	it('⚠️ reports no permission for any value that is not literally true', async () => {
+	it('reports no permission for any value that is not literally true', async () => {
 		// `'true'`, `1` and `null` are all things a payload can carry and none of
 		// them is a grant.
 		for (const value of ['true', 1, null, undefined]) {

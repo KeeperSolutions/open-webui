@@ -42,16 +42,12 @@ const INITIAL: MetricsState = {
 };
 
 /**
- * ⚠️ `teamId` is the LAST parameter, behind the fetcher, and the default fetcher is
- * built here rather than at module scope so it can close over it.
+ * Creates the metrics loader, optionally scoped to one team.
  *
- * Behind the fetcher because every existing call passes one positionally
- * (`createMetricsLoader(vi.fn())`); a leading `teamId` would shift all of them
- * silently. The fetcher TYPE is unchanged for the same reason.
- *
- * A consequence worth naming: an INJECTED fetcher never sees `teamId`, so a test
- * that supplies its own fetcher cannot prove the id reaches the API. That proof
- * has to mock the API module instead - see the propagation test below this file.
+ * `teamId` comes after the fetcher so callers that pass only a fetcher
+ * (`createMetricsLoader(vi.fn())`) are unaffected. The default fetcher is built
+ * here so it can close over `teamId`. An injected fetcher never receives
+ * `teamId`, so tests of team scoping must mock the API module instead.
  */
 export function createMetricsLoader(
 	fetcher?: MetricsFetcher,

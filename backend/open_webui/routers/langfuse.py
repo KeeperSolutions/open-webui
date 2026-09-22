@@ -61,15 +61,12 @@ async def get_langfuse_metrics(
     days: required when period=custom
     team_id: scope the rows to one team; omit for the instance-wide view
 
-    ⚠️ `get_verified_user`, not `get_admin_user`. The admin-only rule did not go
-    away — it moved into `resolve_dashboard_scope`, which refuses any non-admin who
-    omits `team_id`. That makes the FIRST executable line below the only thing
-    standing between a logged-in user and the whole instance's spend, which is why
-    it is a named function called before anything else rather than an inline
-    condition somewhere in the body.
+    Depends on `get_verified_user`. `resolve_dashboard_scope`, the first line of
+    the body, refuses any non-admin who omits `team_id`; without it any logged-in
+    user could read the whole instance's spend.
     """
-    # Before the `try`, deliberately: a guard inside it would be one refactor away
-    # from being caught by an `except` and turned into a 502.
+    # Called outside the `try` so the `except` below cannot turn a refusal into
+    # a 502.
     scope = await resolve_dashboard_scope(user, team_id, db=db)
 
     try:
@@ -95,9 +92,8 @@ async def get_langfuse_metrics(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unknown period '{period}'. Use: today, day, week, month, current_month, custom",
             )
-        # Scoping happens here, on the way out, and never on the frontend:
-        # Langfuse has no notion of a team, so the rows arrive instance-wide no
-        # matter who asked.
+        # Rows are scoped here on the server, never on the frontend: Langfuse has
+        # no notion of a team, so it always returns instance-wide rows.
         return MetricsResponse(
             **{
                 "from": from_ts,

@@ -39,13 +39,13 @@ export type UsersAccessState = {
 	 * action would land in different groups with nothing recording why.
 	 */
 	policyGroups: PolicyGroup[];
-	/** The subset that may be an enforce destination — team groups excluded. */
+	/** The subset that may be an enforce destination. Team groups are excluded. */
 	enforceTargets: PolicyGroup[];
-	/** Enforcing groups excluded because they belong to a team — see the empty state. */
+	/** Count of enforcing groups excluded because they belong to a team. */
 	teamOnlyPolicyGroups: number;
-	/** Enforcing groups excluded for granting more than masking — see the empty state. */
+	/** Count of enforcing groups excluded because they grant more than masking. */
 	broadPolicyGroups: number;
-	/** The addressed team's own policy group, or `null` — see `rowActionFor`. */
+	/** The addressed team's own policy group id, or `null`. */
 	teamGroupId: string | null;
 	/** Whether the viewer may change who is in that group. Server-computed. */
 	mayManagePolicy: boolean;
@@ -59,19 +59,15 @@ export type UsersPage = {
 	users: AccessUser[];
 	total: number;
 	/**
-	 * The addressed team's own policy group, straight from `GET /users/`.
-	 *
-	 * Snake case because it is the API's field, not ours — the same reason `users`
-	 * and `total` are named the way they are. `null`/absent on the instance-wide
-	 * view and on a team that has no group yet.
+	 * The addressed team's own policy group id, as returned by `GET /users/`.
+	 * Absent or `null` on the instance-wide view and for a team with no group.
 	 */
 	team_group_id?: string | null;
 	/**
 	 * Whether this viewer may change who is in that group, per `GET /users/`.
 	 *
-	 * ⚠️ A permission the SERVER worked out, not one derived here. The frontend
-	 * cannot check who owns a team, and level A is written so that an address
-	 * cannot be mistaken for a permission.
+	 * Computed by the server, because the frontend cannot check who owns a team.
+	 * The team id in the address is never treated as a permission.
 	 */
 	may_manage_team_policy?: boolean;
 };
@@ -111,11 +107,11 @@ const ABORTED = Symbol('aborted');
 type Collected<T> = { items: T[]; truncated: Truncation | null };
 
 /**
- * ⚠️ `teamId` last, default users fetcher built here - see `metricsLoader.ts`.
+ * Creates the users-and-access loader. `teamId` handling matches `createMetricsLoader`.
  *
- * The GROUPS fetcher deliberately does not take it: `GET /groups/` already returns
- * only the groups the caller belongs to, and level A has no team-to-group bridge to
- * scope it by. Passing a team id there would suggest a scoping that does not exist.
+ * The groups fetcher does not take `teamId`. `GET /groups/` returns the caller's
+ * groups and is not scoped by team, so passing an id would suggest scoping that
+ * does not exist.
  */
 export function createUsersAccessLoader(
 	usersFetcher?: UsersFetcher,
@@ -195,19 +191,15 @@ export function createUsersAccessLoader(
 		update((s) => ({ ...s, loading: true, failed: false, errorDetail: null }));
 
 		try {
-			// Read from the first page only. Every page of a scoped read carries the
-			// same value, and taking it from the last would mean an aborted run
-			// could leave it unset while the rows were already published.
+			// Read from the first page only. Every page carries the same values, and
+			// reading them from the last page could let an aborted run publish rows
+			// without them.
 			let teamGroupId: string | null = null;
 			let mayManagePolicy = false;
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
 					const res = await fetchUsers(page, signal);
 					if (res && page === 1) {
-						// Both are properties of the SCOPE, not of the page — the server
-						// computes them without looking at `page`, and a test on page 2
-						// pins that. Read here for the reason above: taking them from the
-						// last page would let an aborted run publish rows without them.
 						teamGroupId = res.team_group_id ?? null;
 						mayManagePolicy = res.may_manage_team_policy === true;
 					}

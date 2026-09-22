@@ -168,7 +168,7 @@ describe('buildRows', () => {
 		expect(buildRows([user({ settings: storedOff })], [])[0].masking).toBe('off');
 	});
 
-	it('⚠️ never reports off while the policy is enforced', () => {
+	it('never reports off while the policy is enforced', () => {
 		// The contradiction this column was rebuilt to remove: a governance table
 		// reporting a risk that does not exist, because masking IS on.
 		const enforcedButStoredOff = user({ settings: storedOff, pii_masking_enforced: true });
@@ -411,11 +411,8 @@ const TEAM_GROUP: PolicyGroup = {
 };
 
 /**
- * The old single-list argument, when naming and destinations are the same set.
- *
- * \u26a0\ufe0f Kept as a helper rather than inlined so the tests that DO distinguish
- * them stand out: those pass `{ naming, targets }` explicitly, and the
- * difference is the whole point of the split.
+ * Group lists where naming and destinations are the same set. Tests that need
+ * the two to differ pass `{ naming, targets }` explicitly.
  */
 const lists = (gs: PolicyGroup[]) => ({ naming: gs, targets: gs });
 
@@ -437,9 +434,8 @@ describe('policyGroupsOf', () => {
 	});
 
 	it('reports a nameless group as unnamed rather than as its id', () => {
-		// ⚠️ `name: id` was the old answer, and it is what put a raw UUID in the
-		// removal dialog. `null` is a state the component can render a sentence
-		// for; an id is one it renders verbatim.
+		// `null` lets the component render a sentence; an id would be shown verbatim
+		// as the group name in the removal dialog.
 		expect(
 			policyGroupsOf([{ id: 'g1', permissions: { chat: { pii_masking_enforced: true } } }])
 		).toEqual([{ id: 'g1', name: null, isTeamGroup: false }]);
@@ -473,14 +469,14 @@ describe('rowActionFor — more than one source', () => {
 
 	it('counts an unknown source group without printing its id', () => {
 		// Dropping it would turn a two-source user into a one-source user, and put
-		// a Remove button on a row where removal unlocks nothing. Naming it by id
-		// was the other wrong answer: see `namedGroup`.
+		// a Remove button on a row where removal unlocks nothing. It is also not
+		// named by its id: see `namedGroup`.
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]))).toEqual({
 			kind: 'none',
 			via: [POLICY, { id: 'ghost', name: null, isTeamGroup: false }]
 		});
-		// ⚠️ A fallback nobody can see is a fallback nobody fixes.
+		// The unknown group is logged so the mismatch is visible.
 		expect(warn).toHaveBeenCalledOnce();
 		warn.mockRestore();
 	});
@@ -510,18 +506,16 @@ describe('mayActFor', () => {
 	});
 
 	it('takes the role and nothing else', () => {
-		// ⚠️ The guarantee is structural: there is no second parameter, so the
-		// address this viewer arrived at cannot enter the decision. A signature that
-		// grew one would break this line, which is the point of asserting on it.
+		// With a single parameter, the address the viewer arrived at cannot enter
+		// the decision. Adding a parameter fails this assertion.
 		expect(mayActFor.length).toBe(1);
 	});
 });
 
 describe('rowActionFor — a viewer who may not act', () => {
 	it('offers an em dash, not a claim, on a row that is not enforced', () => {
-		// ⚠️ NOT `{ kind: 'none', via: [] }`. The component renders an empty `via` as
-		// "Enforced instance-wide", so reusing it here would tell an unmasked person
-		// they are masked instance-wide.
+		// Not `{ kind: 'none', via: [] }`: the component renders an empty `via` as
+		// "Enforced instance-wide", which would be false for an unmasked person.
 		expect(
 			rowActionFor(actionRow(false), lists([POLICY]), {
 				mayAct: false,
@@ -544,7 +538,7 @@ describe('rowActionFor — a viewer who may not act', () => {
 	});
 
 	it('gives the same answer for two sources as for one', () => {
-		// How many groups administration keeps is also administration's business.
+		// The number of enforcing groups is not disclosed to a non-admin either.
 		expect(
 			rowActionFor(actionRow(true, ['g1', 'g2']), lists([POLICY, OTHER]), {
 				mayAct: false,
@@ -561,9 +555,8 @@ describe('rowActionFor — a viewer who may not act', () => {
 	});
 
 	it('carries no group data at all, checked over the serialised value', () => {
-		// Checked over the whole serialisation rather than named fields: a future
-		// field that leaks the name would pass a `toEqual` on the fields we thought
-		// to list, and fail this.
+		// Checked over the whole serialisation so that any added field carrying a
+		// group name or id fails, not only the fields listed here.
 		const serialised = JSON.stringify(
 			rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]), {
 				mayAct: false,
@@ -578,7 +571,7 @@ describe('rowActionFor — a viewer who may not act', () => {
 	});
 
 	it('does not leak a group id even when the group list cannot name it', () => {
-		// The raw-uuid fallback is exactly the case where a name is out of reach.
+		// An unknown group has no name, so only its id could leak here.
 		const action = rowActionFor(actionRow(true, ['ghost']), lists([]), {
 			mayAct: false,
 			teamGroupId: null,
@@ -588,8 +581,7 @@ describe('rowActionFor — a viewer who may not act', () => {
 	});
 
 	it('leaves the instance-wide default exactly as it was', () => {
-		// It names no group, so nothing about it needs hiding — and level A does not
-		// touch it.
+		// It names no group, so nothing about it needs hiding.
 		expect(
 			rowActionFor(actionRow(true, []), lists([POLICY]), {
 				mayAct: false,
@@ -641,16 +633,11 @@ describe('rowActionFor — destinations', () => {
 });
 
 describe('buildRows — policy sources', () => {
-	it("⚠️ carries the server's masked-elsewhere answer onto the row", () => {
+	it("carries the server's masked-elsewhere answer onto the row", () => {
 		/**
-		 * Found by a mutation that SURVIVED: hard-coding this to `false` broke no
-		 * test, because every `rowActionFor` test builds its own row object and
-		 * never goes through `buildRows`.
-		 *
-		 * It is the whole owner path. With the ids narrowed server-side, a row that
-		 * loses this field tells the owner that removing somebody restores their
-		 * ability to turn masking off — while an administrator's group still holds
-		 * it.
+		 * The `rowActionFor` tests build rows directly, so only this test covers the
+		 * mapping. Without the field, a team owner would be told that removing
+		 * someone lets them turn masking off while another group still masks them.
 		 */
 		expect(buildRows([user({ masked_by_other_policy: true })], [])[0].maskedByOtherPolicy).toBe(
 			true
@@ -658,8 +645,7 @@ describe('buildRows — policy sources', () => {
 		expect(buildRows([user({ masked_by_other_policy: false })], [])[0].maskedByOtherPolicy).toBe(
 			false
 		);
-		// Absent is not "unknown" here — an older payload simply says nothing, and
-		// the id scan in `rowActionFor` is what answers instead.
+		// Absent reads as `false`; the id scan in `rowActionFor` answers instead.
 		expect(buildRows([user()], [])[0].maskedByOtherPolicy).toBe(false);
 	});
 
@@ -792,12 +778,10 @@ describe('policyGroupsOf — a team group is not an enforce destination', () => 
 		expect(out.map((g) => g.id)).toEqual(['custom']);
 	});
 
-	it('⚠️ but policyGroupsOf KEEPS them, because naming is not a destination', () => {
+	it('but policyGroupsOf keeps them, because naming is not a destination', () => {
 		/**
-		 * The two questions were one list, and that is the whole defect. An admin
-		 * looking at a team member was offered `Remove` for a group the naming
-		 * lookup could not find, so the dialog printed a raw UUID for a group
-		 * belonging to somebody else's team, with nothing saying so.
+		 * The naming list must include team groups, so an admin's `Remove` dialog
+		 * for a team member shows the group's name instead of its raw id.
 		 */
 		const out = policyGroupsOf([enforcing('custom'), enforcing('team-a', { is_team_group: true })]);
 		expect(out.map((g) => g.id)).toEqual(['custom', 'team-a']);
@@ -810,11 +794,9 @@ describe('policyGroupsOf — a team group is not an enforce destination', () => 
 
 	it('keeps a group the backend explicitly marked as not a team group', () => {
 		/**
-		 * ⚠️ The case the first version of this suite was missing, and the reason
-		 * it mattered: `GET /groups/` sends `is_team_group: false` for every
-		 * ordinary group — the field has a default, it is never omitted. A filter
-		 * written as `=== undefined` passes every other test here and drops EVERY
-		 * destination in production. Found by a surviving mutation, not by review.
+		 * `GET /groups/` sends `is_team_group: false` for every ordinary group. A
+		 * filter written as `=== undefined` would pass the other tests here and drop
+		 * every destination in production.
 		 */
 		expect(
 			policyGroupsOf([enforcing('custom', { is_team_group: false })]).map((g) => g.id)
@@ -822,8 +804,8 @@ describe('policyGroupsOf — a team group is not an enforce destination', () => 
 	});
 
 	it('treats a missing flag as "not a team group"', () => {
-		// ⚠️ The safe direction. Failing the other way would hide every destination
-		// the moment a payload predates the field.
+		// Treating it as a team group would hide every destination for a payload
+		// that predates the field.
 		expect(policyGroupsOf([enforcing('older-payload')]).map((g) => g.id)).toEqual([
 			'older-payload'
 		]);
@@ -840,8 +822,8 @@ describe('grantsOnlyMasking', () => {
 	});
 
 	it('accepts one carrying other permissions that are OFF', () => {
-		// ⚠️ The stored tree is mostly `false`. A permission set to false grants
-		// nothing, so counting keys instead of values would reject every real group.
+		// The stored tree is mostly `false` leaves, so counting keys instead of
+		// values would reject every real group.
 		expect(
 			grantsOnlyMasking({
 				chat: { pii_masking_enforced: true, file_upload: false, temporary_enforced: false },
@@ -856,7 +838,7 @@ describe('grantsOnlyMasking', () => {
 		).toBe(false);
 	});
 
-	it('rejects one that grants something else in the SAME branch', () => {
+	it('rejects one that grants something else in the same branch', () => {
 		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, file_upload: true } })).toBe(
 			false
 		);
@@ -872,21 +854,13 @@ describe('grantsOnlyMasking', () => {
 		expect(grantsOnlyMasking({ features: { web_search: true } })).toBe(false);
 	});
 
-	it('⚠️ counts a truthy non-boolean as a grant, because the server does', () => {
+	it('counts a truthy non-boolean as a grant, because the server does', () => {
 		/**
-		 * This assertion used to say the opposite, and the opposite is the
-		 * dangerous direction.
-		 *
-		 * The server ends every permission check in `bool(...)`
-		 * (`utils/access_control/__init__.py:94`), and `GroupForm.permissions` is a
-		 * bare `Optional[dict]` — no validation of its leaves — so `1` is a value
-		 * the API accepts and the server acts on. Reading it as "not a grant" here
-		 * would let `Enforce`, an action worded as protection, hand over a
-		 * capability while the screen counted the group as granting nothing.
-		 *
-		 * The cost of the strict reading is the safe failure: a group carrying a
-		 * numeric setting drops out of the destination list, the admin gets the
-		 * empty-state sentence saying why, and nobody gains a permission.
+		 * The server ends permission checks in `bool(...)`
+		 * (`utils/access_control/__init__.py`) and does not validate leaves, so `1`
+		 * is a real grant. Missing it would let `Enforce` hand over that capability.
+		 * A group with a numeric setting is therefore not a destination, and the
+		 * empty state explains why.
 		 */
 		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true }, limits: { seats: 5 } })).toBe(
 			false
@@ -896,8 +870,7 @@ describe('grantsOnlyMasking', () => {
 	});
 
 	it('still ignores every falsy leaf, whatever its type', () => {
-		// `bool(0)`, `bool("")` and `bool(None)` are all False on the server too, and
-		// the stored tree is mostly `false`.
+		// `bool(0)`, `bool("")` and `bool(None)` are all False on the server too.
 		expect(
 			grantsOnlyMasking({
 				chat: { pii_masking_enforced: true, web_search: 0, note: '', other: null }
@@ -905,10 +878,9 @@ describe('grantsOnlyMasking', () => {
 		).toBe(true);
 	});
 
-	it('⚠️ treats a truthy masking flag as enforcing, matching the server', () => {
-		// `group_enforces_pii_masking` ends in `bool(node)` (`utils/pii_policy.py:34`),
-		// so a group carrying `1` DOES mask people. Missing it here would leave the
-		// person's real source of masking unnamed in the table.
+	it('treats a truthy masking flag as enforcing, matching the server', () => {
+		// `group_enforces_pii_masking` ends in `bool(node)` (`utils/pii_policy.py`),
+		// so a group carrying `1` masks people and must be named as their source.
 		expect(enforcesMasking({ chat: { pii_masking_enforced: 1 } })).toBe(true);
 		expect(enforcesMasking({ chat: { pii_masking_enforced: 0 } })).toBe(false);
 	});
@@ -926,12 +898,10 @@ describe('enforceTargetsOf — a group that grants more is not a destination', (
 		expect(out.map((g) => g.id)).toEqual(['dedicated']);
 	});
 
-	it('⚠️ but policyGroupsOf KEEPS the broad one, because naming is not a destination', () => {
+	it('but policyGroupsOf keeps the broad one, because naming is not a destination', () => {
 		/**
-		 * Somebody masked by the wide group must still be nameable in the admin's
-		 * Remove dialog. Applying a DESTINATION filter to the NAMING list is the
-		 * defect the two-list split exists to prevent, and this is the second
-		 * exclusion arriving at the same fork.
+		 * Someone masked by the broad group must still be named in the admin's
+		 * Remove dialog, so the destination filter must not apply to naming.
 		 */
 		const out = policyGroupsOf([
 			{ id: 'dedicated', name: 'PII Masking Policy', permissions: masking },
@@ -998,8 +968,8 @@ describe('teamOnlyPolicyGroupCount — why the destination list is empty', () =>
 	});
 
 	it('does not count a team group that does not enforce', () => {
-		// A team group always enforces today, but the count answers "was a
-		// DESTINATION excluded" — a non-enforcing group was never one.
+		// The count answers "was a destination excluded", and a non-enforcing group
+		// was never a destination.
 		expect(teamOnlyPolicyGroupCount([{ id: 't', permissions: {}, is_team_group: true }])).toBe(0);
 	});
 });
@@ -1034,11 +1004,10 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 		});
 	});
 
-	it('says team policy — and nothing else — when BOTH are sources', () => {
+	it('says team policy — and nothing else — when both are sources', () => {
 		/**
-		 * ⚠️ "and also elsewhere" would disclose that a source outside the owner's
-		 * reach exists, which is the fact decision 5 withholds. The team answer is
-		 * true and complete enough.
+		 * Mentioning the other source would disclose that a source outside the
+		 * owner's reach exists.
 		 */
 		expect(
 			rowActionFor(enforced([TEAM, OTHER]), lists([]), {
@@ -1053,7 +1022,7 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 	});
 
 	it('falls back to "outside the team" when the team has no group yet', () => {
-		// The normal state until the bridge migration runs — see path B.
+		// A team whose policy group has not been created yet.
 		expect(
 			rowActionFor(enforced([OTHER]), lists([]), {
 				mayAct: false,
@@ -1087,7 +1056,7 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 	});
 
 	it('changes nothing for a viewer who may act', () => {
-		// `mayAct` is the role; the team id must not reach that branch at all.
+		// `mayAct` comes from the role; the team id must not affect the admin branch.
 		expect(
 			rowActionFor({ enforced: false, policyGroupIds: [] }, lists([]), {
 				mayAct: true,
@@ -1100,10 +1069,8 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 		});
 	});
 
-	// ⚠️ No arity assertion here, unlike `mayActFor`. There it proved the address
-	// could not be consulted; here the team id IS an input by design, so counting
-	// parameters would assert nothing. What matters is the PAYLOAD — covered by
-	// "carries the team id and nothing else".
+	// No arity assertion here, unlike `mayActFor`: the team id is an input by
+	// design. The payload is covered by "carries the team id and nothing else".
 });
 
 // ---------------------------------------------------------------------------
@@ -1112,15 +1079,13 @@ describe('rowActionFor — masking that comes from the viewer’s own team', () 
 
 describe('rowActionFor — naming is not a destination', () => {
 	const teamMember = { enforced: true, policyGroupIds: ['g-team'] };
-	// What the loader actually produces: the team group is nameable, not targetable.
+	// What the loader produces: the team group can be named but not targeted.
 	const split = { naming: [POLICY, TEAM_GROUP], targets: [POLICY] };
 
 	it('names the team group instead of falling back to its id', () => {
 		/**
-		 * ⚠️ The defect, in one assertion. With one list serving both questions the
-		 * team group was absent from the lookup, so the action carried
-		 * `{ id, name: id }` — and the removal dialog printed that id, a raw UUID,
-		 * for a group belonging to somebody else's team.
+		 * The team group is only in `naming`, not `targets`. The action must still
+		 * carry its name, or the removal dialog would show a raw id.
 		 */
 		expect(rowActionFor(teamMember, split)).toEqual({
 			kind: 'remove',
@@ -1129,9 +1094,8 @@ describe('rowActionFor — naming is not a destination', () => {
 	});
 
 	it('still offers Remove — an admin is not barred from a team policy', () => {
-		// Decided, not inherited: an admin is not bound by the seat limit, not
-		// exempt from the policy, and a team's group is not untouchable to them.
-		// The button had to say what it does, not stop existing.
+		// An admin may take someone out of a team's policy group; the button only
+		// has to name the group correctly.
 		expect(rowActionFor(teamMember, split).kind).toBe('remove');
 	});
 
@@ -1153,11 +1117,10 @@ describe('rowActionFor — naming is not a destination', () => {
 		});
 	});
 
-	it('⚠️ changes nothing for a viewer who may not act — decision 5', () => {
+	it('changes nothing for a viewer who may not act', () => {
 		/**
-		 * The owner branch must not learn any of this. It is reached before the
-		 * naming lookup and carries no group, so widening `naming` cannot reach it
-		 * — and this is the test that fails if the two branches are ever merged.
+		 * The non-admin branch runs before the naming lookup and carries no group
+		 * name, so a wider `naming` list cannot reach it. Fails if the branches merge.
 		 */
 		expect(
 			rowActionFor(teamMember, split, {
@@ -1176,7 +1139,7 @@ describe('rowActionFor — naming is not a destination', () => {
 });
 
 // ---------------------------------------------------------------------------
-// G-C5 — the team owner, who may govern one group and nothing else
+// A team owner, who may manage membership of one group and nothing else
 // ---------------------------------------------------------------------------
 
 describe('rowActionFor — a team owner with the power to act', () => {
@@ -1184,12 +1147,9 @@ describe('rowActionFor — a team owner with the power to act', () => {
 	const ELSEWHERE = 'g-admins';
 
 	/**
-	 * ⚠️ Every field spelled out, none left to a default.
-	 *
-	 * M5 in G-B7 survived precisely because a corpus omitted a field the backend
-	 * always sends. `mayManagePolicy: false` and `mayAct: false` are two different
-	 * falses here, and a viewer built from partial data would let a branch pass
-	 * for the wrong reason.
+	 * Every viewer field is set explicitly. `mayAct: false` and
+	 * `mayManagePolicy: false` mean different things, and a partial viewer could
+	 * let a branch pass for the wrong reason.
 	 */
 	const owner = (teamGroupId: string | null = TEAM) => ({
 		mayAct: false,
@@ -1203,16 +1163,10 @@ describe('rowActionFor — a team owner with the power to act', () => {
 	});
 	const admin = { mayAct: true, teamGroupId: null, mayManagePolicy: true };
 	/**
-	 * ⚠️ An administrator ON A TEAM DASHBOARD — every field set, none null.
-	 *
-	 * This is the state the server actually produces there: `mayAct` from the
-	 * role, `teamGroupId` from the address, and `may_manage_team_policy` true
-	 * because an administrator is unbounded. A corpus without it let a mutation
-	 * survive that dropped `!mayAct` from the branch condition, because the only
-	 * administrator on file had no team group and fell through anyway.
-	 *
-	 * Same failure as M5 in G-B7: the corpus was missing the shape production
-	 * sends.
+	 * An administrator on a team dashboard, as the server reports it: `mayAct`
+	 * from the role, `teamGroupId` from the address, and `may_manage_team_policy`
+	 * true. Without this viewer, dropping `!mayAct` from the owner-branch
+	 * condition would pass every test.
 	 */
 	const adminOnTeamDashboard = { mayAct: true, teamGroupId: TEAM, mayManagePolicy: true };
 
@@ -1239,13 +1193,11 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		});
 	});
 
-	it('⚠️ offers Add to someone masked only by an administrator group', () => {
+	it('offers Add to someone masked only by an administrator group', () => {
 		/**
-		 * Decision 9, and the single most load-bearing case in this branch.
-		 *
-		 * The person IS masked, so a criterion keyed on `enforced` would offer
-		 * Remove — an action naming something with nothing to remove. Membership of
-		 * that one group is what decides, and they are not in it.
+		 * The person is masked, so keying on `enforced` would offer Remove with
+		 * nothing to remove. Membership of the team group decides, and they are not
+		 * in it.
 		 */
 		expect(rowActionFor(row([ELSEWHERE]), anyGroups, owner())).toEqual({
 			kind: 'team-add',
@@ -1253,9 +1205,9 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		});
 	});
 
-	it('⚠️ offers Add to someone masked by the instance default', () => {
-		// Enforced with no group behind it. Still not in the team policy, so still
-		// Add — and nothing else is claimed, because no other GROUP enforces them.
+	it('offers Add to someone masked by the instance default', () => {
+		// Enforced with no group behind it: not in the team policy, so Add. No
+		// other group enforces them, so `maskedElsewhere` is false.
 		expect(rowActionFor(row([], true), anyGroups, owner())).toEqual({
 			kind: 'team-add',
 			maskedElsewhere: false
@@ -1284,11 +1236,10 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		});
 	});
 
-	it('⚠️ carries a boolean and no identity, in every state', () => {
+	it('carries a boolean and no identity, in every state', () => {
 		/**
-		 * Decision 5 in the shape of the value. `maskedElsewhere` is reduced from a
-		 * list to a yes/no BEFORE it leaves this function, so nothing downstream has
-		 * a name or an id to print even by accident.
+		 * `maskedElsewhere` is reduced to a boolean inside `rowActionFor`, so
+		 * nothing downstream has a group name or id to print.
 		 */
 		for (const groups of [[], [TEAM], [ELSEWHERE], [TEAM, ELSEWHERE]]) {
 			const action = rowActionFor(row(groups), anyGroups, owner());
@@ -1301,14 +1252,10 @@ describe('rowActionFor — a team owner with the power to act', () => {
 	// -- the narrowed payload a non-admin actually receives -------------------
 
 	/**
-	 * ⚠️ The shape above is the ADMIN's. A team owner no longer gets other
-	 * people's group ids at all: `pii_policy_group_ids` is narrowed server-side to
-	 * this team's own group, because a group id is one call to
-	 * `GET /groups/id/{id}/info` — `get_verified_user`, no membership check — away
-	 * from that group's NAME.
-	 *
-	 * So for the owner the id scan can no longer see anything else, and
-	 * `masked_by_other_policy` is the whole answer. These tests use that shape.
+	 * The payload a team owner receives. `pii_policy_group_ids` is narrowed
+	 * server-side to the team's own group, because `GET /groups/id/{id}/info`
+	 * returns any group's name to any verified user. The id scan sees nothing
+	 * else, so `masked_by_other_policy` is the whole answer.
 	 */
 	const narrowed = (inTeamPolicy: boolean, maskedByOtherPolicy: boolean) => ({
 		enforced: inTeamPolicy || maskedByOtherPolicy,
@@ -1316,10 +1263,9 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		maskedByOtherPolicy
 	});
 
-	it('⚠️ believes the server when the ids can no longer say', () => {
-		// The exact regression the narrowing would otherwise cause: an empty list
-		// scanned for "any other id" says no, and the dialog would promise that
-		// leaving the team policy lets them turn masking off.
+	it('believes the server when the ids can no longer say', () => {
+		// The narrowed list holds no other id, so without the server flag the
+		// dialog would promise that leaving the team policy lets them unmask.
 		expect(rowActionFor(narrowed(true, true), anyGroups, owner())).toEqual({
 			kind: 'team-remove',
 			maskedElsewhere: true
@@ -1344,7 +1290,7 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		});
 	});
 
-	it('⚠️ still carries no identity once the flag is what answers', () => {
+	it('still carries no identity once the flag is what answers', () => {
 		for (const shape of [narrowed(true, true), narrowed(false, true)]) {
 			const action = rowActionFor(shape, anyGroups, owner());
 			expect(Object.keys(action).sort()).toEqual(['kind', 'maskedElsewhere']);
@@ -1354,9 +1300,8 @@ describe('rowActionFor — a team owner with the power to act', () => {
 	});
 
 	it('keeps the id scan as a second term, for a fuller list', () => {
-		// An admin's row reaches this branch in no supported state today, but the
-		// scan costs nothing and the OR fails towards "still masked" — an
-		// over-cautious sentence rather than a false promise.
+		// No supported state sends a full list to this branch, but the OR errs
+		// towards "still masked" rather than a false promise.
 		expect(
 			rowActionFor({ ...row([TEAM, ELSEWHERE]), maskedByOtherPolicy: false }, anyGroups, owner())
 		).toEqual({ kind: 'team-remove', maskedElsewhere: true });
@@ -1364,11 +1309,10 @@ describe('rowActionFor — a team owner with the power to act', () => {
 
 	// -- the boundaries of the branch ----------------------------------------
 
-	it('⚠️ falls back to the read-only branch when the team has no group', () => {
+	it('falls back to the read-only branch when the team has no group', () => {
 		/**
-		 * Nothing to add anyone to. The server says the same by reporting
-		 * `may_manage_team_policy: false` for a team whose group was never created;
-		 * this is the client half of the same rule, so the two cannot disagree.
+		 * There is no group to add anyone to. Matches the server, which reports
+		 * `may_manage_team_policy: false` for a team whose group was never created.
 		 */
 		expect(rowActionFor(row([ELSEWHERE]), anyGroups, owner(null))).toEqual({
 			kind: 'masked-elsewhere'
@@ -1386,11 +1330,11 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		expect(rowActionFor(row([], false), anyGroups, readOnlyOwner())).toEqual({ kind: 'readonly' });
 	});
 
-	it('⚠️ keeps an administrator out of the owner branch even on a team dashboard', () => {
+	it('keeps an administrator out of the owner branch even on a team dashboard', () => {
 		/**
-		 * The case the corpus was missing. An administrator here holds all three
-		 * viewer fields, so only `mayAct` separates the two branches — and the
-		 * difference is visible: theirs NAMES the team, the owner's names nothing.
+		 * An administrator here holds all three viewer fields, so only `mayAct`
+		 * separates the branches. The admin action names the team group; the
+		 * owner's names nothing.
 		 */
 		expect(
 			rowActionFor(
@@ -1401,11 +1345,10 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		).toEqual({ kind: 'remove', group: { id: TEAM, name: 'PII — Acme · t1', isTeamGroup: true } });
 	});
 
-	it('⚠️ leaves the administrator branch untouched, naming the team as G-B9 does', () => {
+	it('leaves the administrator branch untouched, naming the team', () => {
 		/**
-		 * An administrator holds `mayManagePolicy` too, and must not fall into the
-		 * owner branch: they may reach every group, and their action NAMES the team.
-		 * Owner and administrator are two different powers over the same group.
+		 * An administrator also holds `mayManagePolicy` but must not take the owner
+		 * branch: they may reach every group, and their action names the team group.
 		 */
 		expect(
 			rowActionFor(row([TEAM_GROUP.id]), { naming: [TEAM_GROUP], targets: [] }, admin)

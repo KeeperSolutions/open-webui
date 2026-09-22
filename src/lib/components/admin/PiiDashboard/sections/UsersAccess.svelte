@@ -46,44 +46,35 @@
 	/** Spend on screen belongs to the previous window; a newer one is in flight. */
 	export let costStale = false;
 	/**
-	 * Every group that carries the policy — used to NAME a source.
-	 *
-	 * ⚠️ Includes team groups. Not a destination list: see `enforceTargets`. The
-	 * two were one prop, and that is precisely what let a team member's `Remove`
-	 * dialog print a raw group id.
+	 * Every group that carries the policy, used to name a source.
+	 * Includes team groups, so it is not a destination list; see `enforceTargets`.
 	 */
 	export let policyGroups: PolicyGroup[] = [];
-	/** The subset a person may be SENT to. A team's own group is never one. */
+	/** The subset a person may be added to. A team's own group is never one. */
 	export let enforceTargets: PolicyGroup[] = [];
 	/**
-	 * Enforcing groups that were excluded for belonging to a team.
-	 *
-	 * ⚠️ Only the empty state reads it, and only to choose which sentence is
-	 * true. A zero here means "nothing enforces masking"; a non-zero means
-	 * "things do, but none of them can be a destination" — opposite advice.
+	 * Count of enforcing groups excluded because they belong to a team.
+	 * Only the empty state reads it, to tell "nothing enforces masking" apart
+	 * from "groups enforce it but none can be a destination".
 	 */
 	export let teamOnlyPolicyGroups = 0;
 	/**
-	 * Enforcing groups kept out of the destination list for granting more than
-	 * masking. The third cause of an empty list, and the one most likely to be
-	 * read as a broken screen — the group is visible in Groups and carries the
-	 * policy, and is still not offered.
+	 * Count of enforcing groups excluded from destinations because they grant
+	 * more than masking. Read by the empty state, which explains why a visible
+	 * policy group is not offered.
 	 */
 	export let broadPolicyGroups = 0;
 	/**
-	 * The addressed team's own policy group, or `null`.
-	 *
-	 * ⚠️ One id, and it is the team the viewer already opened. Decision 5 forbids
-	 * naming groups OUTSIDE their reach; it does not forbid knowing which group
-	 * is theirs. No other group id is in scope here to be printed by mistake.
+	 * The addressed team's own policy group id, or `null`.
+	 * This is the only group id the owner's view uses, and it is never rendered.
 	 */
 	export let teamGroupId: string | null = null;
 	/**
 	 * Whether this viewer may change who is in the team's policy group.
 	 *
-	 * ⚠️ NOT `mayAct`. That one is the administrator flag and also unlocks the
-	 * link to the admin user screen; this one unlocks two buttons on this table
-	 * and nothing else. Computed on the server — see `may_manage_team_policy`.
+	 * Separate from `mayAct`, which is the administrator flag and also shows the
+	 * link to the admin user screen. This one only shows the two team-policy
+	 * buttons. Computed on the server (`may_manage_team_policy`).
 	 */
 	export let mayManagePolicy = false;
 	/** Reload the section after a membership change. */
@@ -92,10 +83,8 @@
 	/**
 	 * Whether this viewer may change membership from here.
 	 *
-	 * ⚠️ Display only. The membership routes are admin-only on the server and this
-	 * ticket does not touch them, so a viewer who somehow reached a button would
-	 * still be refused. Hiding it keeps the screen truthful; it does not make it
-	 * safe, and nothing here should ever be read as if it did.
+	 * Display only. The server enforces access on the membership routes, so
+	 * hiding the controls is not a security boundary.
 	 */
 	export let mayAct: boolean = true;
 
@@ -115,15 +104,10 @@
 		groupId: string;
 		reason: string;
 		/**
-		 * The viewer's OWN team policy, so the group is never named.
+		 * The action targets the viewer's own team policy.
 		 *
-		 * ⚠️ The dialog's `Group:` line is omitted entirely when this is true, and
-		 * that omission is a CONSEQUENCE OF DECISION 5, not an oversight. An owner
-		 * has no business knowing what administration keeps in its groups, and the
-		 * group they are acting on is their team's — which they already know by
-		 * being here. Adding the line back "for consistency with the admin dialog"
-		 * reopens exactly the leak that was closed once already, where the fallback
-		 * put a raw UUID in front of somebody deciding whether to act.
+		 * When true the dialog omits its `Group:` line on purpose. A team owner must
+		 * not see group names or ids, and already knows which team they act on.
 		 */
 		teamPolicy: boolean;
 		/** Another group also enforces them, so this removal will not unlock. */
@@ -158,12 +142,11 @@
 	};
 
 	/**
-	 * The team owner's two actions. One destination, and it is never named.
+	 * Opens the team owner's add or remove dialog for the team's policy group.
 	 *
-	 * ⚠️ `targets` is deliberately EMPTY. The admin dialog names its group out of
-	 * that array; leaving it empty means the owner's dialog has nothing to print
-	 * even if a future template forgets the `teamPolicy` check. The destination
-	 * travels in `groupId`, which no template renders.
+	 * `targets` stays empty because the admin dialog names its group from that
+	 * array. The destination travels in `groupId`, which no template renders, so
+	 * the group name cannot leak even if the `teamPolicy` check is lost.
 	 */
 	const openTeamAction = (row: UserRow, adding: boolean, maskedElsewhere: boolean) => {
 		if (!teamGroupId) return;
@@ -198,13 +181,10 @@
 
 		if (res) {
 			toast.success(
-				// ⚠️ The owner's message is about MEMBERSHIP, never about the effect.
-				// "no longer enforced" is false whenever another group still masks
-				// the person — and the dialog they just confirmed said so in those
-				// words, so the instance-wide copy would contradict it in the same
-				// interaction. The admin keeps the effect wording: they are only
-				// offered `Remove` when exactly one group carries the policy, so for
-				// them the effect IS what changed.
+				// The owner's message describes membership, not the masking effect,
+				// because another group may still mask the person. The admin keeps the
+				// effect wording: they are offered `Remove` only when exactly one group
+				// carries the policy, so the effect is what changed.
 				teamPolicy
 					? mode === 'enforce'
 						? $i18n.t("{{name}} is now in your team's policy.", { name: row.name })
@@ -485,13 +465,8 @@
 							>
 								{$i18n.t('Policy group')}
 							</th>
-							<!--
-								⚠️ The whole column, not only the button inside it. `Manage` is the
-								column's only content, so for a viewer who may not act the header
-								stood over 65px of empty cells — a column that names something the
-								reader has no way to reach, in the one view built to show them less.
-								Measured on the team board before it was made conditional.
-							-->
+							<!-- The whole column is hidden, not only the button: `Manage` is its only
+							     content, so a viewer who may not act would see an empty column. -->
 							{#if mayAct}
 								<th
 									scope="col"
@@ -521,14 +496,10 @@
 										>
 									</div>
 								</td>
-								<!-- ⚠️ `whitespace-nowrap` here and on every header above, because
-								     `html { word-break: break-word }` (`src/app.css:40`) is app-wide:
-								     once a long value in Policy group squeezes this column, "Admin"
-								     breaks as "Admi/n" and the headers as "Rol/e" and "Cos/t".
-								     Measured on the admin board with somebody in two policy groups.
-								     The global rule is left alone — it is there for long URLs in
-								     chat — and `overflow-x-auto` on the wrapper is what absorbs the
-								     extra width on a narrow screen. -->
+								<!-- `whitespace-nowrap` here and on every header, because the app-wide
+								     `html { word-break: break-word }` in `src/app.css` splits words
+								     such as "Admin" when a wide Policy group column squeezes the rest.
+								     The wrapper's `overflow-x-auto` absorbs the extra width. -->
 								<td class="px-2.5 py-2.5 align-middle whitespace-nowrap text-pii-ink">
 									{$i18n.t(ROLE_LABELS[row.role] ?? row.role)}
 								</td>
@@ -591,36 +562,24 @@
 									{#if action.kind === 'readonly'}
 										<span class="text-pii-muted">—</span>
 									{:else if action.kind === 'masked-team'}
-										<!--
-											The team's own policy. Named as such because the owner owns
-											it — and still without printing the group, because the label
-											is about WHERE the policy comes from, not what it is called.
-										-->
+										<!-- Masked by the team's own policy. The label names the source,
+										     never the group. -->
 										<span class="text-[12px] text-pii-muted">
 											{$i18n.t('Masked · team policy')}
 										</span>
 									{:else if action.kind === 'masked-elsewhere'}
-										<!--
-											Says a source exists and that it is outside the team, and
-											names nothing. The owner has no business knowing what
-											administration keeps in its own groups, and `action` does
-											not carry the name for this template to print even by
-											accident.
-										-->
+										<!-- Masked by a group outside the team. Names nothing: the owner
+										     may not see other groups, and `action` carries no name. -->
 										<span class="text-[12px] text-pii-muted">
 											{$i18n.t('Masked · source outside the team')}
 										</span>
 									{:else if action.kind === 'remove'}
 										<!--
-											⚠️ When the source is a team's own group the button NAMES it.
-											An admin may take someone out of a team's policy — they are
-											not bound by the seat limit and a team's group is not
-											untouchable to them — but the action must not read as an
-											ordinary policy removal when it is not one.
-
-											`name` is null only for a group the list does not contain,
-											which `namedGroup` has already logged. A sentence, never
-											the id.
+											When the source is a team's own group, its name is shown under
+											the button so an admin can tell this apart from an ordinary
+											policy removal. `name` is null only for a group missing from
+											the list (already logged by `namedGroup`); the fallback is a
+											label, never the id.
 										-->
 										<div class="flex flex-col items-start gap-0.5">
 											<Button on:click={() => openRemove(row, action.group)}>
@@ -635,14 +594,9 @@
 									{:else if action.kind === 'enforce'}
 										{#if action.targets.length === 0}
 											<!--
-												Three causes, three sentences. Once every team carries its own
-												policy group, "nothing enforces masking" stops being the
-												reason the list is empty — and the old sentence starts
-												telling an admin to switch on something they already did.
-
-												⚠️ The broad-group cause is named FIRST when both apply: it
-												is the one the admin can act on, and the one that otherwise
-												reads as the screen having lost a group it can plainly see.
+												One explanation per cause of an empty destination list. When
+												both exclusions apply, the broad-group cause wins because the
+												admin can act on it.
 											-->
 											<span
 												class="text-[12px] text-pii-muted"
@@ -667,16 +621,10 @@
 										{/if}
 									{:else if action.kind === 'team-add' || action.kind === 'team-remove'}
 										<!--
-											The team owner's two actions, and the whole of their power.
-
-											⚠️ Labelled for MEMBERSHIP of the team's policy, never for
-											anyone's masking — decision 9. Which one appears is decided by
-											`rowActionFor` from membership of that one group, so someone
-											masked only by an administrator's group is offered Add.
-
-											⚠️ Nothing here names a group. `action` carries a kind and a
-											boolean, and no id or name is in scope for this markup to print
-											by accident.
+											The team owner's two actions. They are labelled for membership of
+											the team's policy, not for masking: `rowActionFor` picks one from
+											membership of that group, so someone masked only by another group
+											is offered Add. `action` carries no group id or name.
 										-->
 										<div class="flex flex-col items-start gap-0.5">
 											<Button
@@ -689,7 +637,7 @@
 											</Button>
 											{#if action.maskedElsewhere}
 												<!-- Says the removal will not unlock, or that the addition is
-												     not the current source — and names neither. -->
+												     not the current source. Names neither group. -->
 												<span class="text-[11px] leading-tight text-pii-muted">
 													{action.kind === 'team-remove'
 														? $i18n.t('Will stay masked · source outside the team')
@@ -717,9 +665,8 @@
 								{#if mayAct}
 									<td class="px-2.5 py-2.5 text-right align-middle">
 										<!--
-										⚠️ Only for a viewer who may act. The destination lives under
-										`/admin`, whose layout redirects anyone without the role — so
-										for everyone else this button leads out of the app.
+										Only for a viewer who may act. The destination is under `/admin`,
+										whose layout redirects anyone without the admin role.
 
 										The full users tab, not a deep link to this row. There is no
 										per-user admin route — editing happens in a modal held in
@@ -770,8 +717,7 @@
 								</td>
 								<!-- No policy action and no Manage button: there is no account
 								     here to put in a group, let alone to manage. The second cell
-								     follows the header: a column that is not drawn must not be
-								     padded for here either, or the footer runs one cell wide. -->
+								     follows the Account header so the footer matches its width. -->
 								<td class="px-2.5 py-2.5"></td>
 								{#if mayAct}
 									<td class="px-2.5 py-2.5"></td>
@@ -848,17 +794,11 @@
 
 				<p class="mt-1.5 text-[12.5px] leading-[1.55] text-pii-muted">
 					{#if pending.teamPolicy}
-						<!--
-							⚠️ The owner's sentences name the TEAM'S POLICY and no group. The
-							omission is decision 5 — see `pending.teamPolicy`.
-						-->
+						<!-- The owner's sentences name the team's policy, never a group. -->
 						{pending.mode === 'enforce'
 							? pending.maskedElsewhere
-								? // ⚠️ Already masked by a group outside the team, so "will no
-									// longer be able to turn masking off" promises a change that
-									// has already happened. The sentence is about MEMBERSHIP
-									// instead — which is the only thing this action changes for
-									// them, and the reason `Add` is offered at all.
+								? // Already masked by a group outside the team, so the sentence
+									// describes the membership change only.
 									$i18n.t("{{name}} will be added to your team's policy.", {
 										name: pending.row.name
 									})
@@ -895,16 +835,8 @@
 				</p>
 
 				{#if pending.teamPolicy}
-					<!--
-						⚠️ NO `Group:` line here, and that is deliberate.
-
-						The admin dialog names its group; this one must not. The owner is acting
-						on their own team's policy — which they know by being here — and naming
-						any group to them is what decision 5 forbids. Adding the line back "for
-						consistency with the admin dialog" reopens the leak that was closed once
-						already, where a fallback printed a raw UUID in front of somebody deciding
-						whether to act.
-					-->
+					<!-- No `Group:` line on purpose: a team owner must not see group names or
+					     ids. See `pending.teamPolicy`. -->
 				{:else if pending.mode === 'enforce' && pending.targets.length > 1}
 					<!-- More than one group carries the policy, so the destination is
 					     asked for on every call and remembered on none. -->
@@ -924,8 +856,8 @@
 				{:else}
 					<div class="mt-3 text-[12px] text-pii-muted">
 						{$i18n.t('Group')}:
-						<!-- ⚠️ Never `?? pending.groupId`. That printed a raw UUID at exactly
-						     the moment an admin was deciding whether to act. -->
+						<!-- Never fall back to `pending.groupId`: a raw id means nothing to the
+						     person deciding whether to act. -->
 						<span class="text-pii-ink">{pending.targets[0]?.name ?? $i18n.t('Unknown group')}</span>
 					</div>
 				{/if}
@@ -958,12 +890,9 @@
 							(pending.mode === 'remove' && !pending.reason.trim())}
 						on:click={submitAction}
 					>
-						<!--
-							⚠️ The owner's confirm button repeats the membership wording rather
-							than saying "Enforce" or "Remove". Decision 9 applies to the button
-							that commits, not only to the one that opens: "Remove" alone would
-							not say remove from WHAT, and the answer is never a group name.
-						-->
+						<!-- The owner's confirm button repeats the membership wording, because
+						     "Remove" alone would not say from what, and a group name is not
+						     allowed here. -->
 						{pending.teamPolicy
 							? dialogTitle
 							: pending.mode === 'enforce'

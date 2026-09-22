@@ -1,13 +1,8 @@
-"""G-B1 — `team_group_kind`, and the column it reads.
+"""Tests for `team_group_kind` and the `teams.group_id` column it reads.
 
-The property under test is that the classification comes from ONE place and from
-ONE fact: the back-reference `teams.group_id`. Every other candidate — the
-masking flag, the name prefix — is something a group can carry without belonging
-to a team, and each has its own test here proving it is not consulted.
-
-⚠️ `test_group_id_is_read_in_exactly_one_module` is the structural half. It is
-not proved by deleting it; it is proved by ADDING a second reader and watching it
-fail — see the reverse check recorded in the gate report.
+The classification must come only from `teams.group_id`. The masking flag and the
+name prefix can appear on groups that belong to no team, and tests here show
+neither is consulted.
 """
 
 import sys
@@ -86,11 +81,10 @@ async def db_session():
 
 @pytest_asyncio.fixture
 async def bound(db_session):
-    """`team_group_kind` bound to the in-memory session.
+    """Route every DB context to the in-memory session.
 
-    ⚠️ Required, not cosmetic: `DATABASE_ENABLE_SESSION_SHARING` is off by
-    default, so a session passed as an argument is IGNORED and a real one is
-    opened against the developer's own database.
+    With `DATABASE_ENABLE_SESSION_SHARING` off by default, a passed session is
+    ignored and the code would open the developer's real database.
     """
 
     @asynccontextmanager
@@ -108,11 +102,9 @@ async def test_the_group_a_team_points_at_is_team_pii(bound):
 
 @pytest.mark.asyncio
 async def test_a_group_nothing_points_at_is_not_a_team_group(bound):
-    """⚠️ Enforcing AND named like a team group — and still `None`.
+    """An enforcing group named like a team group is still `None` without a back-reference.
 
-    This is the test that dies if the classification is ever taken from the
-    masking flag or the name instead of the back-reference. Both are true of this
-    group; only the back-reference is absent.
+    Fails if the classification is taken from the masking flag or the name.
     """
     assert await team_group_kind(CUSTOM_GROUP) is None
 
@@ -135,11 +127,9 @@ async def test_empty_group_id_is_none_not_an_error(bound):
 
 @pytest.mark.asyncio
 async def test_a_dangling_back_reference_does_not_crash(bound, db_session):
-    """`teams.group_id` can outlive the group: SQLite does not enforce the FK.
+    """A reference to a deleted group still classifies as `team_pii` without raising.
 
-    Measured: `PRAGMA foreign_keys` is 0 on the live database, so deleting a group
-    leaves the reference pointing at nothing. The classifier answers from the
-    reference, so it still says `team_pii` — and must not raise on the way there.
+    SQLite runs with `PRAGMA foreign_keys` off, so `teams.group_id` can dangle.
     """
     from sqlalchemy import delete
 
@@ -150,7 +140,7 @@ async def test_a_dangling_back_reference_does_not_crash(bound, db_session):
 
 @pytest.mark.asyncio
 async def test_two_teams_may_both_have_no_group(bound, db_session):
-    """A UNIQUE index does not constrain NULL — many teams may await their group."""
+    """The unique index allows many teams with no group, since NULLs are not constrained."""
     now = int(time.time())
     db_session.add(
         Team(
@@ -169,7 +159,7 @@ async def test_two_teams_may_both_have_no_group(bound, db_session):
 
 @pytest.mark.asyncio
 async def test_two_teams_cannot_share_a_group(bound, db_session):
-    """The UNIQUE index is what makes "the team's own group" a single answer."""
+    """The unique index keeps the answer to "which team owns this group" to one team."""
     now = int(time.time())
     db_session.add(
         Team(
@@ -189,7 +179,7 @@ async def test_two_teams_cannot_share_a_group(bound, db_session):
 
 
 def test_the_team_branch_exists_even_though_nothing_returns_it():
-    """Reserved now so the second kind is added HERE, not as a new `if` elsewhere."""
+    """`TeamGroupKind` already includes `'team'`, so a new kind is added to the classifier."""
     import typing
 
     from open_webui.utils.team_groups import TeamGroupKind
@@ -201,11 +191,9 @@ def test_the_team_branch_exists_even_though_nothing_returns_it():
 
 
 def test_group_id_is_read_in_exactly_one_module():
-    """The mechanism behind "one place", not a comment asking for it.
+    """`Team.group_id` is accessed only in `utils/team_groups.py`, outside migrations and tests.
 
-    ⚠️ Proved by ADDING a second reader, never by deleting this test. A second
-    `if` over `teams.group_id` anywhere outside `migrations/` makes this fail, and
-    whoever wrote it has to come here and say why.
+    A second reader anywhere else fails this test.
     """
     import ast
     import pathlib
@@ -213,13 +201,8 @@ def test_group_id_is_read_in_exactly_one_module():
     root = pathlib.Path(__file__).resolve().parents[1]
     readers = set()
 
-    # ⚠️ Parsed, not grepped, and both refinements were forced by a false
-    # positive:
-    #   * a bare `group_id` also names `group_member.group_id` and
-    #     `stripe_billing.group_id` — that reported four innocent modules
-    #   * a qualified TEXT match then reported `models/groups.py`, because its
-    #     docstring MENTIONS `teams.group_id` while reading nothing
-    # An attribute access is the only form that is actually a read.
+    # Matches `Team.group_id` attribute access in the AST. A text search would
+    # also hit other tables' `group_id` columns and docstrings that mention it.
     for path in root.rglob("*.py"):
         if "migrations" in path.parts or "tests" in path.parts:
             continue
@@ -240,18 +223,13 @@ def test_group_id_is_read_in_exactly_one_module():
 
 
 # ---------------------------------------------------------------------------
-# G-C1 — the lookup underneath the classification
+# The owner lookup underneath the classification
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_the_owner_lookup_returns_the_team(bound):
-    """The guard in `utils/team_scope.py` needs the TEAM, not a classification.
-
-    `team_group_kind` throws the id away — deliberately, because its callers only
-    ask "is this a team's group". Authorisation asks "which team", and then
-    "whose", so it needs the value the classifier discards.
-    """
+    """The lookup returns the owning team's id, which the guard in `utils/team_scope.py` needs."""
     assert await team_owning_group_id(TEAM_GROUP) == "t1"
 
 
@@ -265,12 +243,9 @@ async def test_the_owner_lookup_is_none_when_no_team_claims_the_group(bound):
 
 @pytest.mark.asyncio
 async def test_an_empty_group_id_costs_no_query():
-    """⚠️ Not "returns None" — that is the test above. This is "opens no session".
+    """An empty or `None` id returns `None` without opening a session.
 
-    The authorisation guard calls this before refusing, and a refusal should not
-    pay for a round trip to learn that an empty id matches nothing. Proved by
-    making the session context explode: if it is ever entered, the test fails
-    rather than quietly passing on the right answer for the wrong reason.
+    The session context raises if entered.
     """
 
     @asynccontextmanager
@@ -289,22 +264,16 @@ async def test_an_empty_group_id_costs_no_query():
     [(TEAM_GROUP, "team_pii"), (CUSTOM_GROUP, None), (GLOBAL_GROUP, None), ("", None)],
 )
 async def test_the_classification_is_unchanged_by_the_extraction(bound, group_id, expected):
-    """G-C1 is a refactor. Every answer `team_group_kind` gave before, it still gives."""
+    """`team_group_kind` gives the expected kind for team, custom, global and empty ids."""
     assert await team_group_kind(group_id) == expected
 
 
 @pytest.mark.asyncio
 async def test_team_group_kind_asks_the_owner_lookup(bound):
-    """⚠️ Both directions, because one direction is not enough.
+    """`team_group_kind` follows a patched `team_owning_group_id` in both directions.
 
-    The structural test cannot see this: `team_group_kind` and
-    `team_owning_group_id` live in the SAME module, so a second query written
-    inside the classifier reads `Team.group_id` from a module that is already
-    allowed to. Patching the lookup is the only thing that distinguishes "asks"
-    from "happens to agree".
-
-    Checking only the None direction would pass for a classifier that had grown
-    its own query and returned None for everything.
+    The structural test cannot catch a second query in the same module. Checking
+    both directions rules out a classifier that returns `None` for everything.
     """
 
     async def _claims_everything(group_id, db=None):

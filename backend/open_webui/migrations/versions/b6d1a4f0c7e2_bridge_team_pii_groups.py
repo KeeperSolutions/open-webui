@@ -1,53 +1,25 @@
 """Bridge existing teams to their own PII policy group
 
-Every team that exists on the day this lands gets the group `teams.group_id`
-points at, and every member of such a team **that the seeded instance-wide group
-already masks** is moved into it — added to the team's group FIRST, then taken
-out of the seeded one. Nobody's masking changes, in either direction: at every
-instant between the two writes the person is in both groups, and a member the
-seeded group does not mask is not touched at all.
+Every team gets the group `teams.group_id` points at. Each team member who is
+already in the seeded instance-wide policy group is moved into the team's group:
+added to the team group first, then removed from the seeded one. Nobody's
+masking changes. Team members outside the seeded group are not touched, so no
+one gets masking nobody decided on. People in the seeded group but in no team
+stay there.
 
-⚠️ A MOVE, not an enrolment. See the loop in `upgrade` for why: enrolling every
-member would newly enforce masking on people nobody decided to enforce, and it
-would make a team that existed the day before behave differently from one
-created the day after.
+Guarantees:
 
-⚠️ **This is the one migration in this feature that changes existing data.**
-Three properties are what make that acceptable:
+  * Nobody is unmasked at any point. All additions are written before any
+    removal; `test_bridge_migration.py` checks the order in the statement log.
+  * All decisions are made against a snapshot read before the first write, so
+    none of them depends on this migration's own output.
+  * The seeded group is addressed by id, not by "has the masking flag". Admins
+    can enable masking on their own groups, and the team groups created here
+    carry the flag too; neither must be emptied.
 
-  * **Nobody is unmasked, at any point.** Add-then-remove is not a preference; the
-    reverse order opens a window in which the person is in neither group. The
-    order is asserted by a test that reads the statement log, not by reading this
-    comment.
-
-  * **The whole prior state is read into Python before the first write.** Every
-    decision is taken against that snapshot, so no decision can see this
-    migration's own output.
-
-    ⚠️ Measured, and worth stating precisely: with the source addressed by id
-    (below), a variant that re-reads everything from the database mid-run
-    produces the SAME result on every test in `test_bridge_migration.py`. The
-    snapshot is not what fixes an observed bug here — the narrow criterion is.
-    It is kept because it makes the whole class of order-dependence
-    unreachable rather than merely absent, and the failure it forecloses is one
-    that is invisible on a two-row database and unreproducible on a real one.
-
-  * **It targets the seeded group by id, not "any group carrying the flag".**
-    Today those are the same set. They stop being the same set on the first
-    instance where an admin turns masking on for a group of their own — and there
-    this migration would take people out of a group no team created and no team
-    replaces. The narrow criterion cannot make that mistake, and it is what makes
-    the point above safe as well: the groups this migration creates all carry the
-    flag, so a flag-based criterion would start eating its own output.
-
-People who are in the seeded group and in NO team stay exactly where they are.
-The seeded group keeps its meaning — it is the policy for people a team does not
-cover.
-
-⚠️ The name and the permissions written here are DUPLICATED from
-`utils/team_groups.py`. Alembic is synchronous and `ensure_team_pii_group` is
-`async`, so the migration cannot call it. `test_bridge_migration.py` asserts the
-two agree; that test is the only thing keeping the duplication honest.
+The group name and permissions duplicate `utils/team_groups.py`, because Alembic
+is synchronous and `ensure_team_pii_group` is async. `test_bridge_migration.py`
+asserts the two agree.
 
 Revision ID: b6d1a4f0c7e2
 Revises: a7c3f1b9e204
@@ -72,52 +44,42 @@ depends_on: Union[str, Sequence[str], None] = None
 log = logging.getLogger("alembic.runtime.migration")
 
 
-# ⚠️ The seeded instance-wide policy group, addressed by the id migration
-# 1782400007 gives it — a literal in an applied migration, which is history and
-# therefore cannot change. NOT "whichever group carries the flag": see the module
-# docstring. `test_bridge_migration.py` reads the seed migration's source and
-# asserts this literal still matches it.
+# Id of the seeded instance-wide policy group, as created by migration
+# 1782400007. `test_bridge_migration.py` asserts it matches the seed migration.
 SOURCE_GROUP_ID = "pii-masking-policy"
 
-# Same actor the seed migration used, for the same reason: the audit table's
-# actor columns are NOT NULL and the thing acting here is the product.
+# Same system actor as the seed migration; the audit actor columns are NOT NULL.
 SYSTEM_ACTOR_ID = "system"
 SYSTEM_ACTOR_EMAIL = "system@open-webui"
 
-# ⚠️ Must equal `utils.team_groups.TEAM_PII_GROUP_PERMISSIONS`. One key, because
-# group permissions merge with OR and a fuller dict would silently make this
-# group an opinion about everything else.
+# Must equal `utils.team_groups.TEAM_PII_GROUP_PERMISSIONS`. Group permissions
+# merge with OR, so any extra key would grant that permission to every member.
 TEAM_PII_GROUP_PERMISSIONS = {"chat": {"pii_masking_enforced": True}}
 
-# ⚠️ Must equal `utils.team_groups.TEAM_ID_DISCRIMINATOR_LENGTH`.
+# Must equal `utils.team_groups.TEAM_ID_DISCRIMINATOR_LENGTH`.
 TEAM_ID_DISCRIMINATOR_LENGTH = 8
 
-# The reason text names the CAUSE rather than the gesture. `member_removed`
-# otherwise reads as protection being taken away, which is the one thing this
-# migration never does — and the audit trail is read by people who were not here.
+# States the cause, so the `member_removed` rows do not read as masking being
+# taken away.
 MOVE_REASON = (
     f"Moved to the team policy group by migration {revision}; "
     "masking is unchanged and now comes from the team."
 )
 
-# ⚠️ Written for every group this migration CREATES, and the spec's audit table
-# does not list it. It is here because `downgrade` has no other way to see a team
-# group with no members: the spec says downgrade recognises its own work "only
-# through its own audit trail", and a group whose team is empty leaves no
-# member_* rows at all. Same shape and same wording style as the row migration
-# 1782400007 writes for the seeded group.
+# Recorded for every group this migration creates. `downgrade` finds its own
+# work only through the audit trail, and a group for an empty team has no
+# member_* rows. Matches the row migration 1782400007 writes for the seeded group.
 CREATE_REASON = (
     f"Created by migration {revision} so the team's masking policy has a destination."
 )
 
-# Rows are written with `executemany` in slices of this size rather than one
-# statement per member, so an instance with hundreds of members does not issue
-# hundreds of round trips.
+# Rows per `executemany` call, so large instances do not issue one statement
+# per member.
 BATCH = 500
 
 
 def _team_pii_group_name(team_name: str, team_id: str) -> str:
-    """⚠️ Must equal `utils.team_groups.team_pii_group_name`."""
+    """Must equal `utils.team_groups.team_pii_group_name`."""
     return f"PII — {team_name} · {team_id[:TEAM_ID_DISCRIMINATOR_LENGTH]}"
 
 
@@ -127,11 +89,7 @@ def _chunked(rows, size=BATCH):
 
 
 def _audit_row(event_type, group_id, user_id, reason, now):
-    # Every raw insert goes through the model's own validator first. A raw
-    # `INSERT` otherwise skips the invariants entirely, and this migration writes
-    # two rows per member where the precedent wrote one — the exposure is an
-    # order of magnitude larger, which is why the validator was extracted
-    # rather than left inline in the model.
+    # Raw inserts skip the model, so run the model's validator on each row.
     from open_webui.models.pii_policy_audit import validate_pii_policy_event
 
     validate_pii_policy_event(
@@ -168,15 +126,11 @@ def _insert_audit(bind, rows):
 
 
 def _snapshot(bind):
-    """The entire prior state, as plain Python. Nothing here runs again later.
+    """Read the whole prior state into plain Python before any write.
 
-    ⚠️ Read in full before the first write, and never refreshed. See the module
-    docstring for why a mid-run re-read is a correctness bug rather than a style
-    preference.
-
-    `permissions` is not consulted at all — the source group is addressed by id —
-    which also removes the last place this migration would have had to reach into
-    a JSON column, an operation whose syntax differs between SQLite and Postgres.
+    It is never refreshed, so no decision depends on this migration's own writes.
+    `permissions` is not read, which avoids JSON queries whose syntax differs
+    between SQLite and Postgres.
     """
     teams = [
         (team_id, name, group_id)
@@ -196,19 +150,16 @@ def _snapshot(bind):
         ).fetchall()
     }
 
-    # `uq_team_members_user_id` makes this a partition, not an overlap: one person
-    # belongs to at most one team, so "the team's group" is never ambiguous.
+    # `uq_team_members_user_id` means each person is in at most one team.
     members_by_team = {}
     for team_id, user_id in bind.execute(
         sa.text("SELECT team_id, user_id FROM team_members ORDER BY team_id, user_id")
     ).fetchall():
         members_by_team.setdefault(team_id, []).append(user_id)
 
-    # ⚠️ The audit table is deliberately NOT read here. Idempotency for the trail
-    # rides on idempotency for the writes: a row is recorded exactly when a write
-    # happens, and a second run performs no writes. An extra "have I already
-    # logged this?" check looks like a third safeguard and is worse than nothing —
-    # measured, see the note in `upgrade`.
+    # The audit table is not read. A row is recorded exactly when a write
+    # happens, and a second run writes nothing, so the trail is idempotent too.
+    # See the note on `member_removed` in `upgrade`.
     return teams, group_ids, memberships, members_by_team
 
 
@@ -220,11 +171,9 @@ def upgrade():
 
     source_present = SOURCE_GROUP_ID in group_ids
     if not source_present:
-        # The seed migration defers when an instance already had an enforcing
-        # group of its own, so its group genuinely may not exist. Team groups are
-        # still created — the bridge has to work for every team — but there is
-        # nowhere to move anyone out of, and inventing one is not this migration's
-        # decision to take.
+        # The seed migration skips instances that already had an enforcing
+        # group, so the seeded group may not exist. Team groups are still
+        # created, but nobody is moved.
         log.info(
             "bridge_team_pii_groups: %s is not present; creating team groups only",
             SOURCE_GROUP_ID,
@@ -237,10 +186,8 @@ def upgrade():
     audit_rows = []
 
     for team_id, team_name, existing_group_id in teams:
-        # ⚠️ Both halves are required. A non-null `group_id` alone is not proof:
-        # `PRAGMA foreign_keys` is 0 on SQLite, so a deleted group leaves the
-        # reference pointing at nothing, and trusting it would link the team to a
-        # group that does not exist.
+        # SQLite runs with `PRAGMA foreign_keys` off, so a non-null `group_id`
+        # can point at a deleted group. Only reuse it if the group exists.
         if existing_group_id and existing_group_id in group_ids:
             team_group_id = existing_group_id
         else:
@@ -255,8 +202,7 @@ def upgrade():
             new_groups.append(
                 {
                     "id": team_group_id,
-                    # Nobody made this; the product did. Same choice, and the same
-                    # reasoning, as migration 1782400007 and `insert_new_group`.
+                    # No user created this group; same as migration 1782400007.
                     "user_id": "",
                     "name": _team_pii_group_name(team_name, team_id),
                     "description": "",
@@ -273,21 +219,10 @@ def upgrade():
             )
 
         for user_id in members_by_team.get(team_id, []):
-            # ⚠️ ONLY people the seeded group already masks are moved. A team
-            # member who is not in it is left exactly as they are.
-            #
-            # This is a MOVE, not an enrolment. Adding every member would newly
-            # enforce masking on people nobody decided to enforce, and it would
-            # make an existing team behave differently from a new one: a team
-            # created after this lands gets an EMPTY policy group
-            # (`routers/billing.py:create_team`) and joining it enrols nobody.
-            # There is no reason a team that existed the day before should have
-            # its members enrolled automatically, and every reason a policy
-            # change should be somebody's decision.
-            #
-            # It also makes the module docstring's claim true rather than nearly
-            # true: with this check, no one's masking changes in EITHER
-            # direction.
+            # Only move people the seeded group already masks. Enrolling every
+            # member would enforce masking nobody decided on, and would treat
+            # existing teams differently from new ones, whose policy group
+            # starts empty (`create_team` in `routers/billing.py`).
             if not (source_present and (SOURCE_GROUP_ID, user_id) in memberships):
                 continue
 
@@ -306,19 +241,10 @@ def upgrade():
                 )
 
             removals.append(user_id)
-            # ⚠️ One row per removal, never "one row per person, ever".
-            #
-            # An earlier draft suppressed this when a `system` row already
-            # existed for the same (event_type, group_id, user_id). No test
-            # could kill that check, which is how it was found — and the one
-            # state where it fires is the state where it is WRONG: an admin
-            # puts someone back into the seeded group after the migration ran,
-            # the migration runs again, takes them out again, and the check
-            # swallows the record of it. A membership write with no audit row is
-            # the single thing this table exists to prevent.
-            #
-            # Idempotency does not need it: a second run finds the person
-            # already out of the seeded group and writes nothing at all.
+            # One audit row per removal, even if an earlier run already logged
+            # one for this person. If an admin put them back and the migration
+            # runs again, the second removal must be recorded too. A rerun with
+            # nothing to do reaches no removal, so this stays idempotent.
             audit_rows.append(
                 _audit_row("member_removed", SOURCE_GROUP_ID, user_id, MOVE_REASON, now)
             )
@@ -339,10 +265,9 @@ def upgrade():
         for batch in _chunked(links):
             bind.execute(link_update, batch)
 
-    # ⚠️ Every addition is issued before any removal. Not per member and then the
-    # next member: in the window between these two blocks every person being moved
-    # is in BOTH groups, which is the strongest form of "nobody is ever outside
-    # both". `test_bridge_migration.py` asserts it from the statement log.
+    # All additions are issued before any removal, so between these two blocks
+    # everyone being moved is in both groups. `test_bridge_migration.py` checks
+    # the order from the statement log.
     if additions:
         member_insert = sa.text(
             "INSERT INTO group_member (id, group_id, user_id, created_at, updated_at) "
@@ -364,23 +289,20 @@ def upgrade():
 
 
 def downgrade():
-    """Undo exactly what this revision wrote, and nothing that resembles it.
+    """Undo exactly what this revision wrote.
 
-    Its own work is identified through its own audit trail: rows whose actor is
-    `system` and whose reason carries this revision id. An admin's rows are never
-    matched and never deleted.
+    Its work is found through audit rows whose actor is `system` and whose reason
+    contains this revision id; admin rows are never matched.
 
-    ⚠️ What this cannot restore, said plainly:
+    Limits:
 
-      1. **Membership somebody changed afterwards.** If an admin took a person out
-         of the team group, they are not put back into the seeded one — there is
-         no way to tell that apart from someone who was never moved.
-      2. **Timestamps and ordering.** Restored membership gets a new `created_at`.
-      3. **Audit rows the application wrote in the meantime.** They stay, and they
-         must.
-      4. **Anything at all, if the seeded group is gone.** The destination no
-         longer exists, so undoing the move would leave people masked by nothing.
-         It refuses rather than doing half of it.
+      1. A person an admin removed from the team group afterwards is not put back
+         into the seeded group; that case cannot be told apart from someone never
+         moved.
+      2. Restored memberships get a new `created_at`.
+      3. Audit rows the application wrote since the upgrade are kept.
+      4. If the seeded group no longer exists, nothing is undone, because
+         undoing the move would leave people unmasked.
     """
     bind = op.get_bind()
     marker = f"%{revision}%"
@@ -430,10 +352,9 @@ def downgrade():
         }
         mine = added_by_group.get(group_id, set())
         if current - mine:
-            # Somebody joined after the migration ran, or the group already had
-            # members before it. Either way this group is no longer only this
-            # migration's doing, so it is left completely alone — membership,
-            # group and audit rows — and a later attempt can still act on it.
+            # The group has members this migration did not add. Leave its
+            # membership, the group and its audit rows untouched, so a later
+            # downgrade can still act on it.
             log.warning(
                 "bridge_team_pii_groups: group %s has members this revision did not add; "
                 "leaving it untouched",

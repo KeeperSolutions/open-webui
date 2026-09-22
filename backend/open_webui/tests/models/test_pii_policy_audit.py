@@ -55,10 +55,8 @@ async def db_engine():
         await conn.run_sync(Group.__table__.create, checkfirst=True)
         # The route's success path counts members before responding.
         await conn.run_sync(GroupMember.__table__.create, checkfirst=True)
-        # ⚠️ Required since the route refuses a team group's derived edits before
-        # writing anything: `team_group_kind` reads `teams`. Deliberately NOT
-        # made tolerant of a missing table — a route that cannot tell whether a
-        # group belongs to a team must fail loudly, not guess.
+        # The route's team-group check reads `teams`. A missing table is an
+        # error, not "not a team group", so it must exist.
         await conn.run_sync(Team.__table__.create, checkfirst=True)
     yield engine
     async with engine.begin() as conn:
@@ -99,13 +97,10 @@ async def audits(db_session):
 async def groups_bound(db_session):
     """`Groups` (the real GroupTable) bound to the in-memory session.
 
-    ⚠️ BOTH context managers are patched. `models.groups` opens its own, and
-    `team_group_kind` reaches for `internal.db`'s. Patching only the first leaves
-    the classifier talking to the developer's own database — it answers "not a
-    team group" for everything, and every guard that depends on it silently stops
-    guarding while the tests still pass. Measured here: the team-group tests
-    below failed on exactly that, in the direction that looks like the guard is
-    missing rather than the fixture.
+    Both context managers are patched: `models.groups` opens its own, and
+    `team_group_kind` uses `internal.db`'s. Without the second patch the
+    classifier reads the developer's database and every team-group guard is
+    silently bypassed.
     """
     from open_webui.models import groups as groups_module
 
@@ -434,13 +429,8 @@ async def _call_membership(action, group_id, user_ids, db_session, audits, group
             request=_make_request(),
             id=group_id,
             form_data=GroupMembershipForm(user_ids=user_ids, reason=reason),
-            # ⚠️ `role` is load-bearing now, and was not when this was written.
-            #
-            # Both membership routes used to carry `get_admin_user`, so calling
-            # the handler directly skipped the check entirely and the fake user
-            # never needed a role. Level C moved the rule inside the function,
-            # where `admin-1` has to actually BE an admin. The tests below are
-            # unchanged; only the actor they always meant is now spelled out.
+            # The membership routes authorise inside the handler, so the fake
+            # user needs an explicit admin role.
             user=MagicMock(id="admin-1", role="admin", email="admin@example.com"),
             db=db_session,
         )
@@ -485,21 +475,10 @@ def _team_form(name="PII \u2014 Acme \u00b7 t1", enforced=True, description="", 
 
 
 class TestRefusalIsNotRecorded:
-    """\u26a0\ufe0f A refused edit must leave NOTHING in the audit log.
+    """A refused edit of a team group leaves nothing in the audit log.
 
-    The route writes the audit row before the mutation, on purpose: the model
-    commits on its own session, so there is no shared transaction to roll back,
-    and "no record \u2192 no mutation" only holds in that order (D-6). That ordering
-    was chosen when `update_group_by_id` returning None meant one thing \u2014 the
-    database failed \u2014 and the already-committed row was accepted as a narrow
-    residual.
-
-    The team-group guard gave the same None a second meaning: a guard working
-    correctly. From then on EVERY refused edit of a team group wrote a row
-    claiming an administrator disabled a policy they never touched. Measured in
-    the browser against the running application, not deduced.
-
-    A missing audit row says something is absent. A false one accuses somebody.
+    The route writes the audit row before the mutation, so a refusal must be
+    raised before that write; otherwise the log records a change that never happened.
     """
 
     @pytest.mark.asyncio
@@ -533,7 +512,7 @@ class TestRefusalIsNotRecorded:
 
     @pytest.mark.asyncio
     async def test_the_refusal_says_the_group_belongs_to_a_team(self, db_session, audits, groups_bound):
-        """Not the generic "Error updating group" the model's None produced."""
+        """The error names the team rather than a generic "Error updating group"."""
         await _make_team_group(db_session)
 
         with pytest.raises(HTTPException) as exc:
@@ -556,12 +535,10 @@ class TestRefusalIsNotRecorded:
     async def test_restating_a_team_groups_own_values_still_goes_through(
         self, db_session, audits, groups_bound
     ):
-        """\u26a0\ufe0f The route refuses a CHANGE, never a restatement.
+        """The route refuses a change, never a restatement of current values.
 
-        Same rule as the model guard, and the same reason: SCIM resends the
-        current name on every membership edit and OAuth writes a group's own
-        permissions straight back to it. A route check that refused any non-None
-        `name` would pass every other test here and break directory sync.
+        SCIM resends the current name and OAuth rewrites the current permissions,
+        so refusing those would break directory sync.
         """
         await _make_team_group(db_session)
 
@@ -572,12 +549,10 @@ class TestRefusalIsNotRecorded:
 
     @pytest.mark.asyncio
     async def test_the_model_guard_is_still_the_backstop(self, db_session, groups_bound):
-        """\u26a0\ufe0f The route is NOT the protection, and must not become it.
+        """The model refuses a team group's derived edits on its own.
 
-        SCIM and OAuth reach `Groups.update_group_by_id` without passing through
-        this handler. Moving the refusal into the route would leave them
-        unguarded while every route test above still passed \u2014 so the model keeps
-        its own guard, and this is the test that notices if it is removed.
+        SCIM and OAuth call `Groups.update_group_by_id` without the route, so the
+        model guard must stay.
         """
         await _make_team_group(db_session)
 
@@ -851,21 +826,15 @@ class TestAuditReader:
 
 
 # ---------------------------------------------------------------------------
-# G-B5 — the validator, reachable without a database and without awaiting
+# The validator, usable without a database and without awaiting
 # ---------------------------------------------------------------------------
 
 
 class TestValidatorIsUsableByAMigration:
-    """⚠️ These tests exist for a caller that does not exist yet.
+    """The validator is synchronous and needs no database session.
 
-    The bridge migration cannot call `insert_event`: Alembic runs synchronously
-    and `insert_event` is a coroutine that commits. It has to issue raw `INSERT`s
-    instead — which skip every invariant unless the checks are reachable on their
-    own. This class pins the two properties that make them reachable: the
-    validator is SYNCHRONOUS, and it touches NO database.
-
-    A future refactor that adds an `await` or a query here would pass every other
-    test in this file and quietly put the migration back outside the rules.
+    Alembic migrations run synchronously and insert raw rows, so they can only
+    enforce the audit invariants through this function.
     """
 
     def test_is_not_a_coroutine_function(self):
@@ -874,7 +843,7 @@ class TestValidatorIsUsableByAMigration:
         assert not inspect.iscoroutinefunction(validate_pii_policy_event)
 
     def test_runs_with_no_session_and_no_event_loop(self):
-        """Called bare — no fixture, no `await`, no patched session."""
+        """Runs without a fixture, an `await` or a patched session."""
         assert validate_pii_policy_event(EVENT_POLICY_ENABLED, "g1", "admin-1", "a@x.com") is None
 
     def test_takes_no_db_argument(self):
@@ -884,10 +853,8 @@ class TestValidatorIsUsableByAMigration:
 
 
 class TestValidatorRules:
-    """Each invariant, exercised through the extracted function directly.
-
-    The same rules are already covered through `insert_event`; these assert them
-    on the seam the migration will use, so the two cannot drift apart.
+    """Each audit invariant holds when called through the validator directly,
+    as migrations do, and not only through `insert_event`.
     """
 
     def test_unknown_event_type(self):
@@ -931,7 +898,7 @@ class TestValidatorRules:
             validate_pii_policy_event(EVENT_POLICY_ENABLED, "g1", "admin-1", "")
 
     def test_member_added_needs_no_reason(self):
-        """Adding exposes nobody, so it asks nothing — the asymmetry, on this seam too."""
+        """Adding a member exposes nobody, so it needs no reason."""
         assert (
             validate_pii_policy_event(EVENT_MEMBER_ADDED, "g1", "admin-1", "a@x.com", user_id="u1")
             is None

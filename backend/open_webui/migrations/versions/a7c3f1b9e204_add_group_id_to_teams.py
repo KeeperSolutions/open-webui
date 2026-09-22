@@ -1,29 +1,18 @@
-"""Add teams.group_id — the back-reference a team's PII policy group is found by
+"""Add teams.group_id, the reference to a team's PII policy group
 
 Revision ID: a7c3f1b9e204
 Revises: ce5cc6fe333b
 Create Date: 2026-08-20 19:05:00.000000
 
-⚠️ This migration adds a COLUMN and nothing else. It creates no group, links no
-team and moves nobody between groups — that is the bridge migration, and it is a
-separate revision on purpose: rolling back a column is not the same operation as
-rolling back somebody's membership of a policy group, and bundling them would
-mean the cheap half could not be undone without the dangerous half.
+Only adds the column. Creating groups and moving members is done by the bridge
+migration (b6d1a4f0c7e2), kept separate so the column can be rolled back without
+touching anyone's group membership.
 
-The column is `UNIQUE`, and that is the load-bearing part rather than tidiness:
-without it two teams can point at the same group and "the team's own group"
-stops being a single answer — which is the one thing `team_group_kind` has to be
-able to give.
-
-Implemented as a unique INDEX rather than a table constraint because SQLite
-cannot add a constraint to an existing table without rebuilding it, and a
-rebuild is exactly the kind of operation this revision is trying not to be. The
-index is equivalent for every purpose here, and it is how `team_members` already
-expresses the same idea (`uq_team_members_user_id`).
-
-NULL is not constrained by a unique index on either SQLite or Postgres, so any
-number of teams may have no group — which is the normal state until the bridge
-migration runs.
+The column must be unique: otherwise two teams could point at one group and
+`team_group_kind` could not return a single team. It is a unique index rather
+than a constraint because SQLite cannot add a constraint without rebuilding the
+table; `uq_team_members_user_id` does the same. Unique indexes allow any number
+of NULLs on SQLite and Postgres, so teams without a group are fine.
 """
 
 from typing import Sequence, Union

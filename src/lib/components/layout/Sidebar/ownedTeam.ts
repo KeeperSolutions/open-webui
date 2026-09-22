@@ -1,14 +1,11 @@
 /**
- * Does the person using this session OWN a team, and which one.
+ * The id of the team the session user owns, or `null`.
  *
- * Answered once per session and shared, because the profile menu is mounted
- * TWICE (`Sidebar.svelte:962` and `:1598`) and both instances ask. Two mounts
- * asking independently would double a request that is already not cheap:
- * `GET /billing/team` builds the whole team page — members, invites, the usage
- * ledger and credit balances — and resolves the team through
- * `Teams.get_by_owner_user_id`, a `.first()` over an UNINDEXED column. It is the
- * only endpoint that answers this question today; asking it once is the cost of
- * not adding another one.
+ * Fetched once per session and shared, because `Sidebar.svelte` mounts the
+ * profile menu twice and both instances ask. `GET /billing/team` is the only
+ * endpoint that answers this, and it is expensive: it builds the whole team
+ * page (members, invites, usage ledger, credit balances) and looks the team up
+ * by an unindexed owner column.
  */
 import { writable, type Readable } from 'svelte/store';
 import { getTeamStatus } from '$lib/apis/billing';
@@ -33,10 +30,9 @@ export function loadOwnedTeamId(
 
 	inFlight = fetcher(token)
 		.then((status) => (typeof status?.team_id === 'string' ? status.team_id : null))
-		// ⚠️ A failure here is the ANSWER, not an error to report. `GET /billing/team`
-		// is owner-only and 404s for everybody else, which is most people — surfacing
-		// that would put a toast in front of a user who did nothing wrong. The menu
-		// entry simply does not appear.
+		// A failure means "owns no team", not an error. `GET /billing/team` is
+		// owner-only and returns 404 for everyone else, so no toast is shown and
+		// the menu entry stays hidden.
 		.catch(() => null)
 		.then((id) => {
 			store.set(id);
@@ -46,7 +42,7 @@ export function loadOwnedTeamId(
 	return inFlight;
 }
 
-/** Test seam. Nothing in the app clears this — a session cannot change owner. */
+/** Test seam. The app never clears this, because a session cannot change owner. */
 export function resetOwnedTeamId(): void {
 	inFlight = null;
 	store.set(null);
