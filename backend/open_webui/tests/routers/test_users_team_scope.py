@@ -7,6 +7,7 @@ separately on every branch.
 """
 
 import asyncio
+import datetime
 import sys
 import time
 from types import SimpleNamespace
@@ -17,7 +18,7 @@ from fastapi import HTTPException
 
 sys.modules.setdefault("stripe", MagicMock())
 
-from open_webui.models.users import UserModel
+from open_webui.models.users import UserModel, UserSettings
 from open_webui.utils.team_groups import TeamOwnership
 from open_webui.routers import users as route_mod
 from open_webui.routers.users import get_all_users, get_users
@@ -66,12 +67,13 @@ def _group(group_id, masking=True):
 
 
 def _run(which, caller, team_id=None, team=None, members=None, accounts=None, page=1,
-         groups=None):
+         groups=None, directory=None):
     """Call one directory route and report the filter it handed the model.
 
     `page` lets tests check that the scope fields are the same on every page.
+    `directory` replaces the listed accounts, for tests about the rows themselves.
     """
-    get_users_mock = AsyncMock(return_value=dict(DIRECTORY))
+    get_users_mock = AsyncMock(return_value=dict(directory if directory is not None else DIRECTORY))
     with patch(TEAMS, AsyncMock(return_value=team)), patch(
         MEMBERS, AsyncMock(return_value=list(TEAM_MEMBERS if members is None else members))
     ), patch(
@@ -476,3 +478,191 @@ class TestMaskedByOtherPolicyCountsTheInstanceDefault:
             {"chat": {"pii_masking_enforced": False}}, {"u1": [_group("g-team")]}
         )
         assert rows["u1"].masked_by_other_policy is False
+
+
+class TestANonAdminReceivesOnlyTheDashboardFields:
+    """A team owner's rows carry the dashboard's fields and nothing else.
+
+    The route is open to any verified user, so an unprojected row would hand a
+    team owner every profile and authentication field the account model holds.
+    """
+
+    TEAM_GROUP = "g-team"
+
+    @staticmethod
+    def _profile(user_id, email):
+        """An account with every field the projection must drop populated."""
+        account = _account(user_id, email)
+        account.date_of_birth = datetime.date(1990, 1, 1)
+        account.gender = "female"
+        account.bio = "private"
+        account.timezone = "Europe/Zagreb"
+        account.info = {"note": "private"}
+        account.oauth = {"oidc": {"sub": "sub-123"}}
+        account.scim = {"externalId": "x-1"}
+        account.settings = UserSettings(
+            ui={
+                "system_prompt": "private",
+                "pipelines": {
+                    "valves": {
+                        "pii_filter": {"pii_masking_enabled": False, "note": "private"},
+                        "other_pipeline": {"secret": "private"},
+                    }
+                },
+            }
+        )
+        return account
+
+    def _rows(self, caller):
+        accounts = [self._profile("u1", "ana@x.com"), self._profile("u2", "bojan@x.com")]
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group",
+            AsyncMock(return_value=self.TEAM_GROUP),
+        ):
+            result, _ = _run(
+                "paged",
+                caller,
+                team_id="T1",
+                team=_team("u1"),
+                accounts=accounts,
+                directory={"users": accounts, "total": 2},
+                groups={"u1": [_group(self.TEAM_GROUP)]},
+            )
+        return {u.id: u for u in result["users"]}
+
+    DROPPED = [
+        "date_of_birth",
+        "gender",
+        "bio",
+        "timezone",
+        "info",
+        "oauth",
+        "scim",
+        "username",
+        "profile_image_url",
+        "presence_state",
+        "status_message",
+        "last_active_at",
+        "created_at",
+        "updated_at",
+    ]
+
+    @pytest.mark.parametrize("field", DROPPED)
+    def test_the_row_carries_no_profile_or_authentication_field(self, field):
+        row = self._rows(_caller("user", "u1"))["u2"]
+        assert not hasattr(row, field), f"{field} reached a non-admin viewer"
+
+    def test_it_still_carries_what_the_dashboard_renders(self):
+        row = self._rows(_caller("user", "u1"))["u1"]
+        assert (row.id, row.name, row.email, row.role) == ("u1", "u1", "ana@x.com", "user")
+        assert row.pii_policy_group_ids == [self.TEAM_GROUP]
+        assert row.pii_masking_enforced is True
+        assert row.masked_by_other_policy is False
+
+    def test_the_stored_masking_preference_survives_the_projection(self):
+        """The masking column reads the user's own stored preference."""
+        valves = self._rows(_caller("user", "u1"))["u1"].settings["ui"]["pipelines"]["valves"]
+        assert valves == {"pii_filter": {"pii_masking_enabled": False}}
+
+    def test_but_nothing_else_stored_under_settings(self):
+        settings = self._rows(_caller("user", "u1"))["u1"].settings
+        assert set(settings["ui"]) == {"pipelines"}
+        assert "other_pipeline" not in settings["ui"]["pipelines"]["valves"]
+
+    def test_a_user_who_stored_no_preference_gets_an_empty_valve_map(self):
+        accounts = [_account("u1", "ana@x.com"), _account("u2", "bojan@x.com")]
+        with patch(
+            "open_webui.utils.team_groups.ensure_team_pii_group",
+            AsyncMock(return_value=self.TEAM_GROUP),
+        ):
+            result, _ = _run(
+                "paged", _caller("user", "u1"), team_id="T1", team=_team("u1"),
+                accounts=accounts, directory={"users": accounts, "total": 2}, groups={},
+            )
+        assert result["users"][0].settings["ui"]["pipelines"]["valves"] == {}
+
+    @pytest.mark.parametrize("field", ["date_of_birth", "oauth", "scim", "last_active_at"])
+    def test_an_admin_still_receives_the_whole_account(self, field):
+        row = self._rows(_caller("admin", "adm"))["u2"]
+        assert hasattr(row, field)
+
+
+class TestSettingsThatAreNotShapedLikeSettings:
+    """Odd stored settings yield no preference instead of failing the page.
+
+    `POST /users/user/settings/update` stores `ui` as a free-form dict, so any
+    user can put a string where the masking valves are expected. Raising here
+    would answer their team owner's whole directory page with a 500.
+    """
+
+    @staticmethod
+    def _subject(ui):
+        account = _account("u1", "ana@x.com")
+        account.settings = UserSettings(ui=ui)
+        return account
+
+    @pytest.mark.parametrize(
+        "ui",
+        [
+            {"pipelines": "not-a-dict"},
+            {"pipelines": {"valves": "not-a-dict"}},
+            {"pipelines": {"valves": [1, 2]}},
+            {"pipelines": {"valves": {"pii_filter": "yes"}}},
+            {"pipelines": {"valves": {"pii_filter": {"pii_masking_enabled": "yes"}}}},
+            {"pipelines": None},
+            {},
+        ],
+    )
+    def test_no_preference_is_read_and_nothing_raises(self, ui):
+        assert route_mod._masking_valves(self._subject(ui)) == {}
+
+    def test_a_well_formed_preference_is_still_read(self):
+        subject = self._subject(
+            {"pipelines": {"valves": {"pii_filter": {"pii_masking_enabled": False}}}}
+        )
+        assert route_mod._masking_valves(subject) == {
+            "pii_filter": {"pii_masking_enabled": False}
+        }
+
+
+class TestTheResponseModelKeepsTheTwoRowsApart:
+    """The route's response model holds both row types, so it must not mix them.
+
+    A narrowed row validated as the admin model would be a serialisation that
+    re-admits the fields the narrow row exists to withhold.
+    """
+
+    @staticmethod
+    def _admin_row():
+        from open_webui.models.users import UserGroupIdsModel
+
+        now = int(time.time())
+        return UserGroupIdsModel(
+            id="u1", email="ana@x.com", name="Ana", role="user",
+            created_at=now, updated_at=now, last_active_at=now,
+            date_of_birth=datetime.date(1990, 1, 1), oauth={"oidc": {"sub": "s"}},
+        )
+
+    @staticmethod
+    def _narrow_row():
+        from open_webui.models.users import TeamDirectoryUserModel
+
+        return TeamDirectoryUserModel(id="u2", name="Bojan", email="b@x.com", role="user")
+
+    def _validated(self):
+        from open_webui.models.users import UserGroupIdsListResponse
+
+        response = UserGroupIdsListResponse(
+            users=[self._admin_row(), self._narrow_row()], total=2
+        )
+        # Round-tripped through dicts, as FastAPI validates the returned body.
+        return UserGroupIdsListResponse(**response.model_dump()).model_dump()['users']
+
+    def test_the_admin_row_keeps_the_whole_account(self):
+        assert {'date_of_birth', 'oauth', 'last_active_at'} <= set(self._validated()[0])
+
+    def test_the_narrow_row_gains_no_field(self):
+        assert set(self._validated()[1]) == {
+            'id', 'name', 'email', 'role', 'group_ids', 'settings',
+            'pii_masking_enforced', 'pii_policy_group_ids', 'masked_by_other_policy',
+        }

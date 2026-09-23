@@ -26,6 +26,7 @@ GROUP = "g-policy"
 PLAIN = "g-plain"
 TEAM, TEAM_GROUP = "t1", "g-team"
 KEEP, DROP = "u-keep", "u-drop"
+SECOND = "u-second"
 ENFORCING = {"chat": {"pii_masking_enforced": True}}
 
 
@@ -90,10 +91,13 @@ async def session():
                 updated_at=now,
             ),
             TeamMember(id="tm1", team_id=TEAM, user_id=KEEP, role="owner", created_at=now),
+            # In the team but not in its group, so a PUT that adds them is a
+            # membership change the team rule allows.
+            TeamMember(id="tm2", team_id=TEAM, user_id=SECOND, role="member", created_at=now),
             GroupMember(id="m3", group_id=TEAM_GROUP, user_id=KEEP, created_at=now, updated_at=now),
         ]
     )
-    for uid in (KEEP, DROP):
+    for uid in (KEEP, DROP, SECOND):
         db.add(
             User(
                 id=uid,
@@ -303,3 +307,159 @@ async def test_a_patch_that_adds_an_outsider_to_a_team_group_is_refused(session)
     )
     assert _refused_because(response, "belongs to a team")
     assert await _members(session, TEAM_GROUP) == {KEEP}
+
+
+# ---------------------------------------------------------------------------
+# A team group's name is derived from the team, so directory sync cannot set it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_put_that_renames_a_team_group_is_answered_with_a_scim_error(session):
+    """A rename is refused with 400 `mutability`, not a 500.
+
+    The model refuses the rename whatever the route does. Reported as a server
+    error, the provisioning client cannot tell a policy refusal from an outage
+    and retries the same request forever.
+    """
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(displayName="Renamed By IdP"),
+        db=session,
+    )
+    assert _refused(response)
+    assert _refused_because(response, "belongs to a team")
+
+
+@pytest.mark.asyncio
+async def test_and_the_membership_it_carried_is_not_applied(session):
+    """The refusal comes before the membership write, so nothing is committed."""
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(
+            displayName="Renamed By IdP",
+            members=[SCIMGroupMember(value=KEEP), SCIMGroupMember(value=SECOND)],
+        ),
+        db=session,
+    )
+    assert _refused(response)
+    assert await _members(session, TEAM_GROUP) == {KEEP}
+
+
+@pytest.mark.asyncio
+async def test_resending_the_current_name_is_not_a_rename(session):
+    """Directory sync sends the current name on every membership edit."""
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(
+            displayName="PII — Acme · t1", members=[SCIMGroupMember(value=KEEP)]
+        ),
+        db=session,
+    )
+    assert not _refused(response)
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_group_can_still_be_renamed(session):
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=PLAIN,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(displayName="Marketing EMEA"),
+        db=session,
+    )
+    assert not _refused(response)
+    assert response.displayName == "Marketing EMEA"
+
+
+@pytest.mark.asyncio
+async def test_a_patch_that_renames_a_team_group_is_answered_with_a_scim_error(session):
+    response = await _patch(
+        session,
+        [{"op": "replace", "path": "displayName", "value": "Renamed By IdP"}],
+        group_id=TEAM_GROUP,
+    )
+    assert _refused(response)
+    assert _refused_because(response, "belongs to a team")
+
+
+@pytest.mark.asyncio
+async def test_and_a_patch_applies_no_membership_operation_it_carried(session):
+    """The whole request is refused before any operation runs."""
+    response = await _patch(
+        session,
+        [
+            {"op": "add", "path": "members", "value": [{"value": SECOND}]},
+            {"op": "replace", "path": "displayName", "value": "Renamed By IdP"},
+        ],
+        group_id=TEAM_GROUP,
+    )
+    assert _refused(response)
+    assert await _members(session, TEAM_GROUP) == {KEEP}
+
+
+@pytest.mark.asyncio
+async def test_the_last_rename_in_a_patch_is_the_one_checked(session):
+    """The check reads the name the request would end with.
+
+    Operations are applied in order and the last `displayName` wins, so reading
+    the first one lets a rename through behind a restatement of the current name.
+    """
+    response = await _patch(
+        session,
+        [
+            {"op": "replace", "path": "displayName", "value": "PII — Acme · t1"},
+            {"op": "add", "path": "members", "value": [{"value": SECOND}]},
+            {"op": "replace", "path": "displayName", "value": "Renamed By IdP"},
+        ],
+        group_id=TEAM_GROUP,
+    )
+    assert _refused(response)
+    assert await _members(session, TEAM_GROUP) == {KEEP}
+
+
+@pytest.mark.asyncio
+async def test_a_rename_carrying_no_value_is_not_a_rename(session):
+    """`update_group_by_id` drops a `None` name, so such a request changes nothing.
+
+    Refusing it would answer a team group with an error where every other group
+    is answered with a success.
+    """
+    response = await _patch(
+        session,
+        [{"op": "replace", "path": "displayName"}],
+        group_id=TEAM_GROUP,
+    )
+    assert not _refused(response)
+
+
+@pytest.mark.asyncio
+async def test_a_membership_sync_that_sends_no_name_is_not_a_rename(session):
+    """The usual sync shape: members only, no `displayName`."""
+    from open_webui.routers import scim
+    from open_webui.routers.scim import SCIMGroupMember, SCIMGroupUpdateRequest
+
+    response = await scim.update_group(
+        group_id=TEAM_GROUP,
+        request=MagicMock(),
+        group_data=SCIMGroupUpdateRequest(
+            members=[SCIMGroupMember(value=KEEP), SCIMGroupMember(value=SECOND)]
+        ),
+        db=session,
+    )
+    assert not _refused(response)
+    assert await _members(session, TEAM_GROUP) == {KEEP, SECOND}

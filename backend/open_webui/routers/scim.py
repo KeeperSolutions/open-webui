@@ -86,10 +86,41 @@ TEAM_GROUP_REFUSED = (
 )
 
 
+# A team's policy group takes its name from the team, so directory sync cannot
+# set it.
+TEAM_GROUP_RENAME_REFUSED = (
+    'This group belongs to a team. Its name follows the team, so it cannot be '
+    'changed through directory sync.'
+)
+
+
 def _pii_policy_refused():
     return scim_error(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=PII_POLICY_REFUSED,
+        scim_type='mutability',
+    )
+
+
+async def _derived_field_refusal(group, changes: dict, db):
+    """The SCIM error for changing a team group's derived fields, or `None`.
+
+    Runs before any write. The model refuses such a change by returning `None`,
+    which the routes can only report as a 500, leaving the client unable to tell
+    a refusal from an outage. Resending the current name is not a change, so
+    ordinary membership sync is unaffected.
+    """
+    from open_webui.utils.team_groups import team_group_derived_changes, team_group_kind
+
+    # The form is checked first: the team lookup costs a query, and a request
+    # that changes no derived field is never refused.
+    if not team_group_derived_changes(group, changes):
+        return None
+    if await team_group_kind(group.id, db=db) is None:
+        return None
+    return scim_error(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=TEAM_GROUP_RENAME_REFUSED,
         scim_type='mutability',
     )
 
@@ -1017,6 +1048,10 @@ async def update_group(
         description=group.description,
     )
 
+    refusal = await _derived_field_refusal(group, {'name': update_form.name}, db)
+    if refusal is not None:
+        return refusal
+
     # Handle members if provided
     added_member_ids = []
     removed_member_ids = []
@@ -1088,6 +1123,22 @@ async def patch_group(
     )
     added_member_ids = []
     removed_member_ids = []
+
+    # Checked over the whole request, before the loop applies anything: a rename
+    # refused halfway through would leave the membership operations before it
+    # applied and report them as a server error.
+    #
+    # The operations are applied in order, so the last `displayName` is the name
+    # the request ends with. A `None` value is dropped by `update_group_by_id`
+    # and changes nothing, so it is not a rename.
+    requested_name = group.name
+    for operation in patch_data.Operations:
+        if operation.op.lower() == 'replace' and operation.path == 'displayName':
+            if operation.value is not None:
+                requested_name = operation.value
+    refusal = await _derived_field_refusal(group, {'name': requested_name}, db)
+    if refusal is not None:
+        return refusal
 
     for operation in patch_data.Operations:
         op = operation.op.lower()

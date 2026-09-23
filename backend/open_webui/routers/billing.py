@@ -1347,13 +1347,24 @@ async def remove_team_member(member_user_id: str, user=Depends(get_verified_user
     if not removed:
         raise HTTPException(status_code=404, detail="Member not found.")
 
-    await StripeBillings.revert_to_trial(member_user_id)
-
-    # Runs last, after the billing revert. If it raises (the audit write is
-    # blocking), the person has left the team but stays in its policy group, so
-    # they remain masked and the request fails. The reverse order would leave
-    # them unmasked on the same failure.
-    await remove_from_team_policy_group(team.id, member_user_id)
+    try:
+        await StripeBillings.revert_to_trial(member_user_id)
+    except Exception:
+        # Logged here because the cleanup below runs next and may raise in turn,
+        # and the later exception is the one the caller sees.
+        log.exception('Reverting %s to trial failed after they left the team', member_user_id)
+        raise
+    finally:
+        # Runs last, after the billing revert, and also when that revert raises.
+        # The membership row is already committed, and only a team member may be
+        # taken out of the team's policy group, so a skipped removal leaves
+        # someone in it whom the owner can no longer remove.
+        #
+        # If this raises (the audit write is blocking), the person has left the
+        # team but stays in its policy group, so they remain masked and the
+        # request fails. The reverse order would leave them unmasked on the same
+        # failure.
+        await remove_from_team_policy_group(team.id, member_user_id)
 
     return {"removed": True}
 

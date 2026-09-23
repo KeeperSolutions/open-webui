@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
-from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.env import (
+    ENABLE_PROFILE_IMAGE_URL_FORWARDING,
+    PII_FILTER_IDS,
+    PROFILE_IMAGE_ALLOWED_MIME_TYPES,
+    STATIC_DIR,
+)
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
 from open_webui.models.chat_messages import ChatMessages
@@ -20,6 +25,7 @@ from open_webui.models.chats import Chats
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
+    TeamDirectoryUserModel,
     UserGroupIdsListResponse,
     UserGroupIdsModel,
     UserInfoListResponse,
@@ -71,6 +77,32 @@ router = APIRouter()
 
 
 PAGE_ITEM_COUNT = 30
+
+
+def _masking_valves(subject) -> dict:
+    """The subject's stored PII masking preference, and nothing else.
+
+    The dashboard's masking column reads `pii_masking_enabled` for the configured
+    filter ids. A valve dict may hold any other pipeline's settings, so only those
+    ids, and only that key, are copied.
+    """
+    def mapping(value):
+        """`value` when it is a dict, an empty one otherwise.
+
+        Settings are stored as a free-form dict, so any user can put a string
+        where a mapping is expected. Traversing that blindly would answer their
+        team owner's whole page with a 500.
+        """
+        return value if isinstance(value, dict) else {}
+
+    ui = mapping(subject.settings.ui if subject.settings else None)
+    stored = mapping(mapping(ui.get('pipelines')).get('valves'))
+    valves = {}
+    for filter_id in PII_FILTER_IDS:
+        value = mapping(stored.get(filter_id)).get('pii_masking_enabled')
+        if isinstance(value, bool):
+            valves[filter_id] = {'pii_masking_enabled': value}
+    return valves
 
 
 def _list_filter(
@@ -154,9 +186,11 @@ async def get_users(
     team_group_id = scope.group_id if scope is not None else None
 
     def row_for(subject):
-        """One directory row, with group ids limited to what this viewer may see.
+        """One directory row, holding what this viewer may see.
 
-        `subject` is the listed user; `user` is the viewer.
+        `subject` is the listed user; `user` is the viewer. An admin receives the
+        whole account; everyone else receives `TeamDirectoryUserModel`, which
+        carries the dashboard's fields alone.
         """
         groups = user_groups.get(subject.id, [])
         policy_groups = [g for g in groups if group_enforces_pii_masking(g.permissions)]
@@ -164,17 +198,26 @@ async def get_users(
         if viewer_is_admin:
             group_ids = [g.id for g in groups]
             policy_group_ids = [g.id for g in policy_groups]
+            account = {**subject.model_dump(), 'group_ids': group_ids}
+            row = UserGroupIdsModel
         else:
             # The owner's screen needs only whether the member is in this team's
             # policy (kept here) and whether another policy masks them
             # (`masked_by_other_policy` below).
-            group_ids = []
             policy_group_ids = [g.id for g in policy_groups if g.id == team_group_id]
+            account = {
+                'id': subject.id,
+                'name': subject.name,
+                'email': subject.email,
+                'role': subject.role,
+                'group_ids': [],
+                'settings': {'ui': {'pipelines': {'valves': _masking_valves(subject)}}},
+            }
+            row = TeamDirectoryUserModel
 
-        return UserGroupIdsModel(
+        return row(
             **{
-                **subject.model_dump(),
-                'group_ids': group_ids,
+                **account,
                 # Effective answer over every group and the instance defaults,
                 # using the same function as `has_permission`.
                 'pii_masking_enforced': has_permission_for_groups(

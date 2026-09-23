@@ -10,7 +10,8 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -451,3 +452,92 @@ def test_the_route_still_takes_no_db_parameter():
     node = _remove_team_member_ast()
     names = [a.arg for a in node.args.args + node.args.kwonlyargs]
     assert "db" not in names, names
+
+
+# ---------------------------------------------------------------------------
+# The move survives a failure of the billing revert
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _removal_route(revert_raises=False):
+    """`remove_team_member` with its collaborators replaced.
+
+    Yields the mock standing in for the policy-group removal, so a test can ask
+    whether the route reached it.
+    """
+    from open_webui.routers import billing as route_mod
+
+    team = SimpleNamespace(id="T1", owner_user_id="owner")
+    move = AsyncMock()
+    revert = AsyncMock(side_effect=RuntimeError("billing is down") if revert_raises else None)
+    with patch.object(route_mod, "require_billing_enabled", MagicMock()), patch.object(
+        route_mod.Teams, "get_by_owner_user_id", AsyncMock(return_value=team)
+    ), patch.object(
+        route_mod.TeamMembers, "remove", AsyncMock(return_value=True)
+    ), patch.object(
+        route_mod.StripeBillings, "revert_to_trial", revert
+    ), patch.object(
+        route_mod, "remove_from_team_policy_group", move
+    ):
+        yield move
+
+
+@pytest.mark.asyncio
+async def test_the_member_is_taken_out_of_the_policy_when_the_revert_fails():
+    """The membership row is already committed when the billing revert runs.
+
+    Skipping the policy removal would leave someone in the team's policy group
+    who is no longer in the team, and only team members may be taken out of it,
+    so the owner could not remove them afterwards.
+    """
+    from open_webui.routers.billing import remove_team_member
+
+    async with _removal_route(revert_raises=True) as move:
+        with pytest.raises(RuntimeError):
+            await remove_team_member("u-member", user=SimpleNamespace(id="owner"))
+        move.assert_awaited_once_with("T1", "u-member")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_revert_is_still_reported_as_a_failure():
+    """The request fails; the caller is not told the member was removed."""
+    from open_webui.routers.billing import remove_team_member
+
+    async with _removal_route(revert_raises=True):
+        with pytest.raises(RuntimeError):
+            await remove_team_member("u-member", user=SimpleNamespace(id="owner"))
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_removal_still_reports_success():
+    from open_webui.routers.billing import remove_team_member
+
+    async with _removal_route() as move:
+        assert await remove_team_member("u-member", user=SimpleNamespace(id="owner")) == {
+            "removed": True
+        }
+        move.assert_awaited_once_with("T1", "u-member")
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_member_never_reaches_the_policy_group():
+    """A 404 answers before the removal, so nothing is written for a stranger."""
+    from open_webui.routers import billing as route_mod
+    from open_webui.routers.billing import remove_team_member
+    from fastapi import HTTPException
+
+    move = AsyncMock()
+    with patch.object(route_mod, "require_billing_enabled", MagicMock()), patch.object(
+        route_mod.Teams, "get_by_owner_user_id",
+        AsyncMock(return_value=SimpleNamespace(id="T1", owner_user_id="owner")),
+    ), patch.object(
+        route_mod.TeamMembers, "remove", AsyncMock(return_value=False)
+    ), patch.object(
+        route_mod.StripeBillings, "revert_to_trial", AsyncMock()
+    ), patch.object(route_mod, "remove_from_team_policy_group", move):
+        with pytest.raises(HTTPException) as raised:
+            await remove_team_member("u-stranger", user=SimpleNamespace(id="owner"))
+
+    assert raised.value.status_code == 404
+    move.assert_not_awaited()

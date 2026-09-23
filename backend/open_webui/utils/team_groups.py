@@ -177,8 +177,12 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
     methods commit internally.
 
     It reads before it writes. The dashboard resolves the same scope on three
-    routes per page load, so once the group exists this costs one SELECT and no
-    write. There is no cache, because a cached "it exists" can outlive the group.
+    routes per page load, so once the group exists and carries the right name
+    this costs one SELECT and no write. There is no cache, because a cached "it
+    exists" can outlive the group.
+
+    Also brings the group's name back in step with the team's when the two have
+    drifted apart.
 
     Safe under concurrent calls. A conditional update picks the winner; the loser
     deletes the group it made and returns the winner's id instead of raising.
@@ -200,8 +204,32 @@ async def ensure_team_pii_group(team_id: str, db: Optional[AsyncSession] = None)
         observed_group_id = team.group_id
 
         if team.group_id:
-            existing = await session.execute(select(Group.id).filter(Group.id == team.group_id))
-            if existing.scalars().first() is not None:
+            existing = await session.execute(
+                select(Group.name).filter(Group.id == team.group_id)
+            )
+            stored_name = existing.scalars().first()
+            if stored_name is not None:
+                # The group's name follows the team's. `update_team_name` renames
+                # the team first and the group after, and a failure of that second
+                # half only logs, so the two can drift apart. Nothing else repairs
+                # it: `Groups.update_group_by_id` refuses derived fields. Written
+                # only when they differ, so the usual read path stays read-only.
+                expected_name = team_pii_group_name(team.name, team_id)
+                if stored_name != expected_name:
+                    log.info(
+                        'team_groups: bringing the name of group %s back in step with team %s',
+                        team.group_id,
+                        team_id,
+                    )
+                    # Conditional on the name just read: a reader that loaded the
+                    # team before a rename committed must not write the old name
+                    # back over the new one.
+                    await session.execute(
+                        update(Group)
+                        .where(Group.id == team.group_id, Group.name == stored_name)
+                        .values(name=expected_name, updated_at=int(time.time()))
+                    )
+                    await session.commit()
                 return team.group_id
             # SQLite runs with `PRAGMA foreign_keys` off, so deleting a group can
             # leave `teams.group_id` dangling. Create a replacement.

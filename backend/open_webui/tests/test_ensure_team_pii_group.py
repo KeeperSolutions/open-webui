@@ -365,3 +365,37 @@ async def test_the_dashboard_survives_a_failed_group_creation():
 
     assert scope.ids == frozenset({"u1"})
     assert scope.group_id is None
+
+
+# ---------------------------------------------------------------------------
+# A name that drifted from the team's is repaired on the next read
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_stale_group_name_is_brought_back_in_step(env):
+    """The group's name follows the team, so a drifted name is repaired.
+
+    `update_team_name` renames the team first and the group after, and logs a
+    failure of the second half rather than failing the request. Nothing else
+    writes this name: `Groups.update_group_by_id` refuses derived fields.
+    """
+    session, _ = env
+    gid = await ensure_team_pii_group(TEAM)
+    await session.execute(update(Team).filter_by(id=TEAM).values(name="Acme Holdings"))
+    await session.commit()
+
+    assert await ensure_team_pii_group(TEAM) == gid
+    assert (await _group(session, gid)).name == team_pii_group_name("Acme Holdings", TEAM)
+
+
+@pytest.mark.asyncio
+async def test_a_name_that_is_already_in_step_is_not_rewritten(env):
+    """The repair costs a write only when the names differ."""
+    _, counter = env
+    await ensure_team_pii_group(TEAM)
+    counter.writes = 0
+
+    await ensure_team_pii_group(TEAM)
+
+    assert counter.writes == 0
