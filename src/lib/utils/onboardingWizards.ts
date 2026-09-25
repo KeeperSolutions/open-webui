@@ -1,13 +1,23 @@
 import { get } from 'svelte/store';
-import { settings } from '$lib/stores';
+import { settings, user } from '$lib/stores';
 import { updateUserSettings } from '$lib/apis/users';
 
 const LOCAL_SEEN_WIZARDS_KEY = 'seenWizards';
 
+// Scoped per account, so switching users in the same browser doesn't carry over dismissals
+const getLocalSeenWizardsKey = (): string => {
+	try {
+		const userId = get(user)?.id;
+		return userId ? `${LOCAL_SEEN_WIZARDS_KEY}:${userId}` : LOCAL_SEEN_WIZARDS_KEY;
+	} catch {
+		return LOCAL_SEEN_WIZARDS_KEY;
+	}
+};
+
 // Fallback for users whose server-side save is permission-gated
 const getLocalSeenWizards = (): Record<string, boolean> => {
 	try {
-		return JSON.parse(localStorage.getItem(LOCAL_SEEN_WIZARDS_KEY) ?? '{}');
+		return JSON.parse(localStorage.getItem(getLocalSeenWizardsKey()) ?? '{}');
 	} catch {
 		return {};
 	}
@@ -26,7 +36,7 @@ export const markWizardSeen = async (id: string): Promise<void> => {
 	settings.set({ ...current, seenWizards });
 
 	try {
-		localStorage.setItem(LOCAL_SEEN_WIZARDS_KEY, JSON.stringify(seenWizards));
+		localStorage.setItem(getLocalSeenWizardsKey(), JSON.stringify(seenWizards));
 	} catch {}
 
 	try {

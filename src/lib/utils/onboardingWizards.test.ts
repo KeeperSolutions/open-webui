@@ -3,10 +3,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('$lib/apis/users', () => ({ updateUserSettings: vi.fn().mockResolvedValue({}) }));
 vi.mock('$lib/stores', async () => {
 	const { writable } = await import('svelte/store');
-	return { settings: writable({}) };
+	return { settings: writable({}), user: writable(undefined) };
 });
 
-import { settings } from '$lib/stores';
+import { settings, user } from '$lib/stores';
 import { updateUserSettings } from '$lib/apis/users';
 import { hasSeenWizard, markWizardSeen } from './onboardingWizards';
 
@@ -14,6 +14,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	localStorage.clear();
 	settings.set({});
+	user.set(undefined);
 	localStorage.setItem('token', 'test-token');
 });
 
@@ -34,6 +35,17 @@ describe('hasSeenWizard', () => {
 
 	it('is true via the localStorage fallback even when the settings store has no record', () => {
 		localStorage.setItem('seenWizards', JSON.stringify({ 'long-press-hint': true }));
+		expect(hasSeenWizard('long-press-hint')).toBe(true);
+	});
+
+	it('does not leak one account\'s localStorage dismissal into another account', () => {
+		user.set({ id: 'user-a' } as any);
+		localStorage.setItem('seenWizards:user-a', JSON.stringify({ 'long-press-hint': true }));
+
+		user.set({ id: 'user-b' } as any);
+		expect(hasSeenWizard('long-press-hint')).toBe(false);
+
+		user.set({ id: 'user-a' } as any);
 		expect(hasSeenWizard('long-press-hint')).toBe(true);
 	});
 });
@@ -81,6 +93,17 @@ describe('markWizardSeen', () => {
 		await expect(markWizardSeen('long-press-hint')).resolves.toBeUndefined();
 
 		expect(JSON.parse(localStorage.getItem('seenWizards') ?? '{}')).toEqual({
+			'long-press-hint': true
+		});
+	});
+
+	it('writes to a per-account localStorage key when a user is set', async () => {
+		user.set({ id: 'user-a' } as any);
+
+		await markWizardSeen('long-press-hint');
+
+		expect(localStorage.getItem('seenWizards')).toBeNull();
+		expect(JSON.parse(localStorage.getItem('seenWizards:user-a') ?? '{}')).toEqual({
 			'long-press-hint': true
 		});
 	});
