@@ -3,7 +3,7 @@
 
 	import { onDestroy, onMount, tick } from 'svelte';
 
-	import { chatId, config, mobile, models, settings, showSidebar } from '$lib/stores';
+	import { chatId, config, isTouchDevice, mobile, models, settings, showSidebar } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { updateUserSettings } from '$lib/apis/users';
 	import PinnedModelItem from './PinnedModelItem.svelte';
@@ -17,12 +17,12 @@
 		if (pinnedModelsList) {
 			new Sortable(pinnedModelsList, {
 				animation: 150,
-				delay: $mobile ? 400 : 0,
+				delay: $isTouchDevice ? 400 : 0,
 				delayOnTouchOnly: true,
 				touchStartThreshold: 5,
-				forceFallback: $mobile,
+				forceFallback: $isTouchDevice,
 				fallbackTolerance: 3,
-				ghostClass: $mobile ? 'opacity-0' : 'opacity-30',
+				ghostClass: $isTouchDevice ? 'opacity-0' : 'opacity-30',
 				fallbackClass: 'opacity-90 shadow-lg',
 				chosenClass: 'opacity-100',
 				setData: function (dataTransfer, dragEl) {

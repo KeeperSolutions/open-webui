@@ -44,7 +44,7 @@
 	export let help = false;
 
 	export let className = 'w-[240px]';
-	export let align = 'end';
+	export let align = 'start';
 
 	export let showActiveUsers = true;
 	export let myUsage: { year: number; month: number; total_tokens: number } | null = null;

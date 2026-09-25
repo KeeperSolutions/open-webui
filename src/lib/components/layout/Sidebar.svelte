@@ -15,6 +15,7 @@
 		showSidebar,
 		showSearch,
 		mobile,
+		isTouchDevice,
 		pinnedChats,
 		pinnedNotes,
 		temporaryChatEnabled,
@@ -80,6 +81,8 @@
 	import SearchModal from './SearchModal.svelte';
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
+	import Spotlight from '../common/Spotlight.svelte';
+	import { hasSeenWizard, markWizardSeen } from '$lib/utils/onboardingWizards';
 	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
 	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
 	import ClockIcon from './Sidebar/icons/Clock.svelte';
@@ -155,6 +158,106 @@
 	let showCreateFolderModal = false;
 
 	let pinnedModels = [];
+
+	// Touch onboarding wizard, two steps shown once each in order (see $lib/utils/onboardingWizards for the shared "seen" persistence)
+	const LONG_PRESS_WIZARD_ID = 'long-press-hint';
+	const SETTINGS_WIZARD_ID = 'settings-tap-hint';
+
+	let longPressHintTarget: HTMLElement | null = null;
+	let showLongPressHint = false;
+
+	let settingsHintTarget: HTMLElement | null = null;
+	let showSettingsHint = false;
+
+	// Polls until two consecutive reads of el's position agree, so a step only shows once nearby layout has settled
+	const waitForStableRect = async (el: HTMLElement, maxAttempts = 20, intervalMs = 100) => {
+		let previous: DOMRect | null = null;
+		for (let i = 0; i < maxAttempts; i++) {
+			const current = el.getBoundingClientRect();
+			if (
+				previous &&
+				current.top === previous.top &&
+				current.left === previous.left &&
+				current.width === previous.width &&
+				current.height === previous.height
+			) {
+				return;
+			}
+			previous = current;
+			await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		}
+	};
+
+	// Finds the element tagged for a step, scrolls it into view, and waits for it to settle - retries since it may not have mounted yet
+	const findSpotlightTarget = async (spotlightId: string): Promise<HTMLElement | null> => {
+		let el: Element | null = null;
+		for (let attempt = 0; attempt < 10 && !el; attempt++) {
+			el = document.querySelector(`[data-spotlight-id="${spotlightId}"]`);
+			if (!el) await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		if (!(el instanceof HTMLElement)) return null;
+
+		// No `behavior` here - 'auto' is the real non-smooth default; 'instant' isn't a valid ScrollBehavior value
+		el.scrollIntoView({ block: 'center' });
+		await waitForStableRect(el);
+		return el;
+	};
+
+	let longPressHintAttemptInProgress = false;
+
+	const maybeShowLongPressHint = async () => {
+		if (longPressHintAttemptInProgress || showLongPressHint || hasSeenWizard(LONG_PRESS_WIZARD_ID)) {
+			if (hasSeenWizard(LONG_PRESS_WIZARD_ID)) maybeShowSettingsHint();
+			return;
+		}
+		longPressHintAttemptInProgress = true;
+
+		try {
+			await tick();
+			const el = await findSpotlightTarget('chat-row');
+			if (!el) return;
+
+			longPressHintTarget = el;
+			showLongPressHint = true;
+		} finally {
+			longPressHintAttemptInProgress = false;
+		}
+	};
+
+	const dismissLongPressHint = async () => {
+		showLongPressHint = false;
+		try {
+			await markWizardSeen(LONG_PRESS_WIZARD_ID);
+		} finally {
+			maybeShowSettingsHint();
+		}
+	};
+
+	let settingsHintAttemptInProgress = false;
+
+	const maybeShowSettingsHint = async () => {
+		if (settingsHintAttemptInProgress || showSettingsHint || hasSeenWizard(SETTINGS_WIZARD_ID)) return;
+		settingsHintAttemptInProgress = true;
+
+		try {
+			const el = await findSpotlightTarget('sidebar-user-menu');
+			if (!el) return;
+
+			settingsHintTarget = el;
+			showSettingsHint = true;
+		} finally {
+			settingsHintAttemptInProgress = false;
+		}
+	};
+
+	const dismissSettingsHint = () => {
+		showSettingsHint = false;
+		markWizardSeen(SETTINGS_WIZARD_ID);
+	};
+
+	$: if ($isTouchDevice && $showSidebar && ($chats?.length ?? 0) > 0) {
+		maybeShowLongPressHint();
+	}
 
 	let showPinnedModels = false;
 	let showPinnedNotes = false;
@@ -932,6 +1035,23 @@
 	}}
 />
 
+<Spotlight
+	bind:show={showLongPressHint}
+	target={longPressHintTarget}
+	message={$i18n.t('Touch and <strong>hold</strong> a chat, folder, or model to open its menu.')}
+	dismissLabel={$i18n.t('Next')}
+	onDismiss={dismissLongPressHint}
+/>
+
+<Spotlight
+	bind:show={showSettingsHint}
+	target={settingsHintTarget}
+	message={$i18n.t('<strong>Tap</strong> here to open Settings.')}
+	dismissLabel={$i18n.t('Got it')}
+	onDismiss={dismissSettingsHint}
+	padding={2}
+/>
+
 <button
 	id="sidebar-new-chat-button"
 	class="hidden"
@@ -1676,6 +1796,7 @@
 										lastReadAt={chat.last_read_at}
 										active={chat.active ?? false}
 										selected={selectedChatId === chat.id}
+										spotlightTarget={idx === 0}
 										on:select={() => {
 											selectedChatId = chat.id;
 										}}
@@ -1736,6 +1857,7 @@
 						>
 							<button
 								type="button"
+								data-spotlight-id="sidebar-user-menu"
 								class=" flex items-center rounded-xl py-1.5 px-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-900 transition"
 								aria-label={$i18n.t('User menu')}
 							>
