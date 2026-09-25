@@ -3,8 +3,11 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from open_webui.internal.db import get_async_session
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.team_scope import resolve_dashboard_scope, scope_metric_rows
 from open_webui.langfuse.metrics import (
     get_today_so_far,
     get_last_day,
@@ -47,14 +50,25 @@ class MyUsage(BaseModel):
 async def get_langfuse_metrics(
     period: str = "week",
     days: Optional[int] = None,
-    user=Depends(get_admin_user),
+    team_id: Optional[str] = None,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Fetch Langfuse token/cost metrics per user, plus the exact UTC window used.
 
     period: today | day | week | month | current_month | custom
     days: required when period=custom
+    team_id: scope the rows to one team; omit for the instance-wide view
+
+    Depends on `get_verified_user`. `resolve_dashboard_scope`, the first line of
+    the body, refuses any non-admin who omits `team_id`; without it any logged-in
+    user could read the whole instance's spend.
     """
+    # Called outside the `try` so the `except` below cannot turn a refusal into
+    # a 502.
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
     try:
         if period == "today":
             from_ts, to_ts, rows = get_today_so_far()
@@ -78,7 +92,15 @@ async def get_langfuse_metrics(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Unknown period '{period}'. Use: today, day, week, month, current_month, custom",
             )
-        return MetricsResponse(**{"from": from_ts, "to": to_ts, "rows": rows})
+        # Rows are scoped here on the server, never on the frontend: Langfuse has
+        # no notion of a team, so it always returns instance-wide rows.
+        return MetricsResponse(
+            **{
+                "from": from_ts,
+                "to": to_ts,
+                "rows": scope_metric_rows(rows, scope, team_id),
+            }
+        )
     except HTTPException:
         raise
     except Exception as e:

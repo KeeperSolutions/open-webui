@@ -4,6 +4,9 @@ import { getGroups } from '$lib/apis/groups';
 import { describeLoadError } from './sections/costAnalytics';
 import {
 	policyGroupsOf,
+	enforceTargetsOf,
+	broadPolicyGroupCount,
+	teamOnlyPolicyGroupCount,
 	type AccessUser,
 	type GroupRecord,
 	type PolicyGroup
@@ -36,13 +39,38 @@ export type UsersAccessState = {
 	 * action would land in different groups with nothing recording why.
 	 */
 	policyGroups: PolicyGroup[];
+	/** The subset that may be an enforce destination. Team groups are excluded. */
+	enforceTargets: PolicyGroup[];
+	/** Count of enforcing groups excluded because they belong to a team. */
+	teamOnlyPolicyGroups: number;
+	/** Count of enforcing groups excluded because they grant more than masking. */
+	broadPolicyGroups: number;
+	/** The addressed team's own policy group id, or `null`. */
+	teamGroupId: string | null;
+	/** Whether the viewer may change who is in that group. Server-computed. */
+	mayManagePolicy: boolean;
 	truncatedUsers: Truncation | null;
 	loading: boolean;
 	failed: boolean;
 	errorDetail: string | null;
 };
 
-export type UsersPage = { users: AccessUser[]; total: number };
+export type UsersPage = {
+	users: AccessUser[];
+	total: number;
+	/**
+	 * The addressed team's own policy group id, as returned by `GET /users/`.
+	 * Absent or `null` on the instance-wide view and for a team with no group.
+	 */
+	team_group_id?: string | null;
+	/**
+	 * Whether this viewer may change who is in that group, per `GET /users/`.
+	 *
+	 * Computed by the server, because the frontend cannot check who owns a team.
+	 * The team id in the address is never treated as a permission.
+	 */
+	may_manage_team_policy?: boolean;
+};
 
 /**
  * One page each. Injectable so pagination, truncation and abort can be driven
@@ -60,14 +88,16 @@ export type UsersAccessLoader = Readable<UsersAccessState> & {
 const INITIAL: UsersAccessState = {
 	users: [],
 	policyGroups: [],
+	enforceTargets: [],
+	teamOnlyPolicyGroups: 0,
+	broadPolicyGroups: 0,
+	teamGroupId: null,
+	mayManagePolicy: false,
 	truncatedUsers: null,
 	loading: true,
 	failed: false,
 	errorDetail: null
 };
-
-const defaultUsersFetcher: UsersFetcher = (page, signal) =>
-	getUsers(localStorage.token, undefined, undefined, undefined, page, signal);
 
 const defaultGroupsFetcher: GroupsFetcher = () => getGroups(localStorage.token);
 
@@ -76,10 +106,23 @@ const ABORTED = Symbol('aborted');
 
 type Collected<T> = { items: T[]; truncated: Truncation | null };
 
+/**
+ * Creates the users-and-access loader. `teamId` handling matches `createMetricsLoader`.
+ *
+ * The groups fetcher does not take `teamId`. `GET /groups/` returns the caller's
+ * groups and is not scoped by team, so passing an id would suggest scoping that
+ * does not exist.
+ */
 export function createUsersAccessLoader(
-	usersFetcher: UsersFetcher = defaultUsersFetcher,
-	groupsFetcher: GroupsFetcher = defaultGroupsFetcher
+	usersFetcher?: UsersFetcher,
+	groupsFetcher: GroupsFetcher = defaultGroupsFetcher,
+	teamId: string | null = null
 ): UsersAccessLoader {
+	const fetchUsers: UsersFetcher =
+		usersFetcher ??
+		((page, signal) =>
+			getUsers(localStorage.token, undefined, undefined, undefined, page, signal, teamId));
+
 	const { subscribe, update } = writable<UsersAccessState>({ ...INITIAL });
 
 	let inFlight: AbortController | null = null;
@@ -93,6 +136,11 @@ export function createUsersAccessLoader(
 			// compliance table silently listing 3 of 7 pages asserts something untrue.
 			users: [],
 			policyGroups: [],
+			enforceTargets: [],
+			teamOnlyPolicyGroups: 0,
+			broadPolicyGroups: 0,
+			teamGroupId: null,
+			mayManagePolicy: false,
 			truncatedUsers: null
 		}));
 
@@ -143,9 +191,18 @@ export function createUsersAccessLoader(
 		update((s) => ({ ...s, loading: true, failed: false, errorDetail: null }));
 
 		try {
+			// Read from the first page only. Every page carries the same values, and
+			// reading them from the last page could let an aborted run publish rows
+			// without them.
+			let teamGroupId: string | null = null;
+			let mayManagePolicy = false;
 			const usersResult = await collect<AccessUser>(
 				async (page, signal) => {
-					const res = await usersFetcher(page, signal);
+					const res = await fetchUsers(page, signal);
+					if (res && page === 1) {
+						teamGroupId = res.team_group_id ?? null;
+						mayManagePolicy = res.may_manage_team_policy === true;
+					}
 					return res ? { items: res.users, total: res.total } : null;
 				},
 				USERS_MAX,
@@ -172,6 +229,11 @@ export function createUsersAccessLoader(
 				...s,
 				users: usersResult.items,
 				policyGroups: policyGroupsOf(groups),
+				enforceTargets: enforceTargetsOf(groups),
+				teamOnlyPolicyGroups: teamOnlyPolicyGroupCount(groups),
+				broadPolicyGroups: broadPolicyGroupCount(groups),
+				teamGroupId,
+				mayManagePolicy,
 				truncatedUsers: usersResult.truncated,
 				failed: false,
 				errorDetail: null

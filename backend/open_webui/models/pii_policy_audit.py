@@ -52,6 +52,68 @@ REASON_REQUIRED_EVENT_TYPES = frozenset({EVENT_POLICY_DISABLED, EVENT_MEMBER_REM
 
 
 ####################
+# The system actor
+####################
+
+# Actor for rows the application writes on its own, such as the bridge migration
+# and automatic membership changes. The actor columns are NOT NULL.
+#
+# New writers must import these constants. Applied migrations hold their own
+# literal copies, and `test_leaving_a_team_clears_policy.py` asserts they match;
+# a different spelling would split the audit trail.
+SYSTEM_ACTOR_ID = 'system'
+SYSTEM_ACTOR_EMAIL = 'system@open-webui'
+
+# Reason recorded for automatic removals, since `member_removed` requires one.
+# It names the cause, so a reader does not take the row as protection having
+# been deliberately taken away from the person.
+REASON_LEFT_TEAM = (
+    'Removed from the team policy group because they are no longer a member of the team. '
+    'The team that was enforcing masking for them no longer covers them.'
+)
+
+
+####################
+# Validation
+####################
+
+
+def validate_pii_policy_event(
+    event_type: str,
+    group_id: str,
+    actor_user_id: str,
+    actor_email: str,
+    user_id: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> None:
+    """Check the invariants of one audit row. Raises `ValueError` on a violation.
+
+    Separate from `insert_event` so writers that cannot await can use it:
+    Alembic migrations run synchronously and insert rows with raw SQL. It must
+    stay synchronous and database-free, or migrations can no longer call it.
+    """
+    if event_type not in EVENT_TYPES:
+        raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
+
+    if event_type in MEMBER_EVENT_TYPES and not user_id:
+        raise ValueError(f'{event_type} requires user_id')
+
+    if event_type in POLICY_EVENT_TYPES and user_id:
+        # A policy row with a user_id would read as "this person's policy
+        # changed", but the policy is per group.
+        raise ValueError(f'{event_type} must not carry user_id')
+
+    if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
+        raise ValueError(f'{event_type} requires a reason')
+
+    if not group_id:
+        raise ValueError('group_id is required')
+
+    if not actor_user_id or not actor_email:
+        raise ValueError('actor_user_id and actor_email are required')
+
+
+####################
 # DB Schema
 ####################
 
@@ -119,30 +181,18 @@ class PiiPolicyAuditTable:
         None; this one must not. The caller's contract is "no record → no
         mutation", which it can only honour if a failed write is visible to it.
 
-        Validation lives here rather than only in the route so the invariants
-        hold for every future caller — the membership events go through this same
-        door.
+        Validation lives in `validate_pii_policy_event` rather than in the route,
+        so the invariants hold for every caller, including migrations that call
+        the validator directly.
         """
-        if event_type not in EVENT_TYPES:
-            raise ValueError(f'unknown pii policy audit event_type: {event_type!r}')
-
-        if event_type in MEMBER_EVENT_TYPES and not user_id:
-            raise ValueError(f'{event_type} requires user_id')
-
-        if event_type in POLICY_EVENT_TYPES and user_id:
-            # Not cosmetic: a policy row carrying a user_id reads as "this
-            # person's policy changed", which is a claim this feature never
-            # makes — the policy is per group.
-            raise ValueError(f'{event_type} must not carry user_id')
-
-        if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
-            raise ValueError(f'{event_type} requires a reason')
-
-        if not group_id:
-            raise ValueError('group_id is required')
-
-        if not actor_user_id or not actor_email:
-            raise ValueError('actor_user_id and actor_email are required')
+        validate_pii_policy_event(
+            event_type=event_type,
+            group_id=group_id,
+            actor_user_id=actor_user_id,
+            actor_email=actor_email,
+            user_id=user_id,
+            reason=reason,
+        )
 
         row = PiiPolicyAudit(
             id=str(uuid.uuid4()),

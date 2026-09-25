@@ -19,6 +19,11 @@ from open_webui.env import (
 )
 from open_webui.internal.db import get_db
 from open_webui.models.billing import StripeBillings, TeamInvites, TeamMembers, Teams
+from open_webui.utils.team_groups import (
+    ensure_team_pii_group,
+    remove_from_team_policy_group,
+    rename_team_pii_group,
+)
 from open_webui.models.billing_plans import (
     CREDITS_TIERS,
     PLAN_TIER_INTERNAL,
@@ -1059,6 +1064,14 @@ async def create_team(body: TeamCreateRequest, request: Request, user=Depends(ge
                 seat_limit=seat_count,
             )
             await Teams.update(team.id, stripe_customer_id=customer_id)
+            # Create the team's PII policy group. It starts empty, so it masks
+            # nobody. Best-effort because it is idempotent: the team and the group
+            # cannot be created atomically, so a failure here must not lose the
+            # team. `ensure_team_pii_group` creates it on the first dashboard read.
+            try:
+                await ensure_team_pii_group(team.id)
+            except Exception as e:
+                log.warning("[billing] Team PII group not created yet for %s: %s", team.id, e)
             await TeamMembers.add(team.id, user.id, role="owner")
         except Exception as e:
             log.error(f"[billing] Team DB create failed: {e}")
@@ -1235,6 +1248,14 @@ async def update_team_name(body: TeamUpdateNameRequest, user=Depends(get_verifie
     updated = await Teams.update(team.id, name=name)
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update team name.")
+
+    # The group's name is derived from the team's, so rename both. This is the
+    # only route that changes a team name, which keeps the two in sync.
+    try:
+        await rename_team_pii_group(team.id, name)
+    except Exception as e:
+        log.warning("[billing] Team PII group not renamed for %s: %s", team.id, e)
+
     return {"name": updated.name}
 
 
@@ -1326,7 +1347,24 @@ async def remove_team_member(member_user_id: str, user=Depends(get_verified_user
     if not removed:
         raise HTTPException(status_code=404, detail="Member not found.")
 
-    await StripeBillings.revert_to_trial(member_user_id)
+    try:
+        await StripeBillings.revert_to_trial(member_user_id)
+    except Exception:
+        # Logged here because the cleanup below runs next and may raise in turn,
+        # and the later exception is the one the caller sees.
+        log.exception('Reverting %s to trial failed after they left the team', member_user_id)
+        raise
+    finally:
+        # Runs last, after the billing revert, and also when that revert raises.
+        # The membership row is already committed, and only a team member may be
+        # taken out of the team's policy group, so a skipped removal leaves
+        # someone in it whom the owner can no longer remove.
+        #
+        # If this raises (the audit write is blocking), the person has left the
+        # team but stays in its policy group, so they remain masked and the
+        # request fails. The reverse order would leave them unmasked on the same
+        # failure.
+        await remove_from_team_policy_group(team.id, member_user_id)
 
     return {"removed": True}
 
@@ -1924,6 +1962,16 @@ async def _handle_stripe_event(event_type: str, data):
                                         seat_limit=pkg.seat_count or 5,
                                     )
                                     await Teams.update(team.id, stripe_customer_id=customer_id)
+                                    # Same as `create_team`: without it a team
+                                    # created by a Stripe portal upgrade has no
+                                    # policy group, silently.
+                                    try:
+                                        await ensure_team_pii_group(team.id)
+                                    except Exception as e:
+                                        log.warning(
+                                            "[billing] Team PII group not created yet for %s: %s",
+                                            team.id, e,
+                                        )
                                     await TeamMembers.add(team.id, rec.user_id, role="owner")
                                     log.info(
                                         "[billing] Auto-created team on portal upgrade: team=%s user=%s",

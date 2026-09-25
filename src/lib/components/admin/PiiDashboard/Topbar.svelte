@@ -9,6 +9,11 @@
 
 	export let period: PeriodKey = 'week';
 	export let customDays = 7;
+	/**
+	 * Selects the title. The title names the scope on screen, not the viewer's
+	 * rights, so an admin viewing one team also sees the team title.
+	 */
+	export let teamId: string | null = null;
 	export let windowFrom = '';
 	export let windowTo = '';
 	/** The shown window belongs to the previous fetch; a newer one is in flight. */
@@ -19,7 +24,9 @@
 
 <div class="flex flex-wrap items-center justify-between gap-3 font-['Inter']">
 	<div class="text-lg font-bold leading-[1.55] text-pii-ink">
-		{$i18n.t('PII Protection — Admin Dashboard')}
+		{teamId
+			? $i18n.t('PII Protection — Team Dashboard')
+			: $i18n.t('PII Protection — Admin Dashboard')}
 	</div>
 
 	<div class="flex flex-wrap items-center justify-end gap-2">

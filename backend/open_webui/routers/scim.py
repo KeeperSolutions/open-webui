@@ -65,6 +65,89 @@ def scim_error(status_code: int, detail: str, scim_type: Optional[str] = None):
     return JSONResponse(status_code=status_code, content=error_body)
 
 
+# A refused membership change must not be answered with 200, or the identity
+# provider records a successful sync for a change the database refused.
+# `Groups.set_group_user_ids_by_id` returns False, and `remove_users_from_group`
+# returns None, when the change would drop a member of a group that enforces PII
+# masking without a reason.
+#
+# The SCIM type is `mutability`, not `invalidValue`: the members sent are valid,
+# but the group cannot be changed through this channel.
+PII_POLICY_REFUSED = (
+    'This group enforces PII masking. Members cannot be removed from it through '
+    'directory sync, because doing so silently stops masking people it protects.'
+)
+
+# A team's policy group only holds that team's members, so writes that admit
+# anyone else are refused.
+TEAM_GROUP_REFUSED = (
+    'This group belongs to a team. Only members of that team can be in it, so its '
+    'membership cannot be set through directory sync.'
+)
+
+
+# A team's policy group takes its name from the team, so directory sync cannot
+# set it.
+TEAM_GROUP_RENAME_REFUSED = (
+    'This group belongs to a team. Its name follows the team, so it cannot be '
+    'changed through directory sync.'
+)
+
+
+def _pii_policy_refused():
+    return scim_error(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=PII_POLICY_REFUSED,
+        scim_type='mutability',
+    )
+
+
+async def _derived_field_refusal(group, changes: dict, db):
+    """The SCIM error for changing a team group's derived fields, or `None`.
+
+    Runs before any write. The model refuses such a change by returning `None`,
+    which the routes can only report as a 500, leaving the client unable to tell
+    a refusal from an outage. Resending the current name is not a change, so
+    ordinary membership sync is unaffected.
+    """
+    from open_webui.utils.team_groups import team_group_derived_changes, team_group_kind
+
+    # The form is checked first: the team lookup costs a query, and a request
+    # that changes no derived field is never refused.
+    if not team_group_derived_changes(group, changes):
+        return None
+    if await team_group_kind(group.id, db=db) is None:
+        return None
+    return scim_error(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=TEAM_GROUP_RENAME_REFUSED,
+        scim_type='mutability',
+    )
+
+
+async def _membership_refused(group, user_ids, db):
+    """Build the SCIM error for a failed membership write, naming the rule that refused it.
+
+    The model returns `False` or `None` for either rule, and `None` also for a
+    missing group or a database error. Each rule is checked in turn; a failure
+    neither rule explains is reported as a 500, not as a policy refusal.
+    """
+    from open_webui.utils.pii_policy import group_enforces_pii_masking
+
+    if await Groups.users_outside_the_team_of_group(group.id, user_ids, db=db):
+        return scim_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=TEAM_GROUP_REFUSED,
+            scim_type='mutability',
+        )
+    if group_enforces_pii_masking(group.permissions):
+        return _pii_policy_refused()
+    return scim_error(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f'Failed to update the membership of group {group.id}',
+    )
+
+
 class SCIMError(BaseModel):
     """SCIM Error Response"""
 
@@ -965,13 +1048,18 @@ async def update_group(
         description=group.description,
     )
 
+    refusal = await _derived_field_refusal(group, {'name': update_form.name}, db)
+    if refusal is not None:
+        return refusal
+
     # Handle members if provided
     added_member_ids = []
     removed_member_ids = []
     if group_data.members is not None:
         old_member_ids = set(await Groups.get_group_user_ids_by_id(group_id, db) or [])
         member_ids = [member.value for member in group_data.members]
-        await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db)
+        if not await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db):
+            return await _membership_refused(group, member_ids, db)
         new_member_ids = set(member_ids)
         added_member_ids = sorted(new_member_ids - old_member_ids)
         removed_member_ids = sorted(old_member_ids - new_member_ids)
@@ -1036,6 +1124,22 @@ async def patch_group(
     added_member_ids = []
     removed_member_ids = []
 
+    # Checked over the whole request, before the loop applies anything: a rename
+    # refused halfway through would leave the membership operations before it
+    # applied and report them as a server error.
+    #
+    # The operations are applied in order, so the last `displayName` is the name
+    # the request ends with. A `None` value is dropped by `update_group_by_id`
+    # and changes nothing, so it is not a rename.
+    requested_name = group.name
+    for operation in patch_data.Operations:
+        if operation.op.lower() == 'replace' and operation.path == 'displayName':
+            if operation.value is not None:
+                requested_name = operation.value
+    refusal = await _derived_field_refusal(group, {'name': requested_name}, db)
+    if refusal is not None:
+        return refusal
+
     for operation in patch_data.Operations:
         op = operation.op.lower()
         path = operation.path
@@ -1045,11 +1149,16 @@ async def patch_group(
             if path == 'displayName':
                 update_form.name = value
             elif path == 'members':
-                # Replace all members
+                # Replace all members.
+                #
+                # A refusal returns from inside the loop, so operations already
+                # applied stay applied; this route is not atomic. Reporting the
+                # failure lets the client re-send the request.
                 old_member_ids = set(await Groups.get_group_user_ids_by_id(group_id, db) or [])
-                new_member_ids = [member['value'] for member in value]
-                await Groups.set_group_user_ids_by_id(group_id, new_member_ids, db=db)
-                new_member_ids_set = set(new_member_ids)
+                member_ids = [member['value'] for member in value]
+                if not await Groups.set_group_user_ids_by_id(group_id, member_ids, db=db):
+                    return await _membership_refused(group, member_ids, db)
+                new_member_ids_set = set(member_ids)
                 added_member_ids.extend(sorted(new_member_ids_set - old_member_ids))
                 removed_member_ids.extend(sorted(old_member_ids - new_member_ids_set))
 
@@ -1059,13 +1168,24 @@ async def patch_group(
                 if isinstance(value, list):
                     for member in value:
                         if isinstance(member, dict) and 'value' in member:
-                            await Groups.add_users_to_group(group_id, [member['value']], db=db)
+                            # Refused when the group belongs to a team and the user
+                            # is not in it.
+                            if await Groups.add_users_to_group(
+                                group_id, [member['value']], db=db
+                            ) is None:
+                                return await _membership_refused(
+                                    group, [member['value']], db
+                                )
                             added_member_ids.append(member['value'])
         elif op == 'remove':
             if path and path.startswith('members[value eq'):
                 # Remove specific member
                 member_id = path.split('"')[1]
-                await Groups.remove_users_from_group(group_id, [member_id], db=db)
+                # `None` means a refusal, a missing group or an exception.
+                # `_membership_refused` works out which one to report, using the
+                # `group` read at the top of this handler.
+                if await Groups.remove_users_from_group(group_id, [member_id], db=db) is None:
+                    return await _membership_refused(group, [member_id], db)
                 removed_member_ids.append(member_id)
 
     # Update group

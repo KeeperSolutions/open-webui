@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
-from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.env import (
+    ENABLE_PROFILE_IMAGE_URL_FORWARDING,
+    PII_FILTER_IDS,
+    PROFILE_IMAGE_ALLOWED_MIME_TYPES,
+    STATIC_DIR,
+)
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
 from open_webui.models.chat_messages import ChatMessages
@@ -20,6 +25,7 @@ from open_webui.models.chats import Chats
 from open_webui.models.groups import Groups
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import (
+    TeamDirectoryUserModel,
     UserGroupIdsListResponse,
     UserGroupIdsModel,
     UserInfoListResponse,
@@ -50,6 +56,11 @@ from open_webui.utils.auth import (
     validate_password,
 )
 from open_webui.utils.chat_variables import ChatVariablesError, normalize_user_variables, validate_user_variables
+from open_webui.utils.team_scope import (
+    may_manage_team_policy,
+    resolve_dashboard_scope,
+    team_directory_filter,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +77,32 @@ router = APIRouter()
 
 
 PAGE_ITEM_COUNT = 30
+
+
+def _masking_valves(subject) -> dict:
+    """The subject's stored PII masking preference, and nothing else.
+
+    The dashboard's masking column reads `pii_masking_enabled` for the configured
+    filter ids. A valve dict may hold any other pipeline's settings, so only those
+    ids, and only that key, are copied.
+    """
+    def mapping(value):
+        """`value` when it is a dict, an empty one otherwise.
+
+        Settings are stored as a free-form dict, so any user can put a string
+        where a mapping is expected. Traversing that blindly would answer their
+        team owner's whole page with a 500.
+        """
+        return value if isinstance(value, dict) else {}
+
+    ui = mapping(subject.settings.ui if subject.settings else None)
+    stored = mapping(mapping(ui.get('pipelines')).get('valves'))
+    valves = {}
+    for filter_id in PII_FILTER_IDS:
+        value = mapping(stored.get(filter_id)).get('pii_masking_enabled')
+        if isinstance(value, bool):
+            valves[filter_id] = {'pii_masking_enabled': value}
+    return valves
 
 
 def _list_filter(
@@ -103,15 +140,28 @@ async def get_users(
     order_by: str | None = None,
     direction: str | None = None,
     page: int | None = 1,
-    user=Depends(get_admin_user),
+    team_id: str | None = None,
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Paginated directory listing.
+
+    Depends on `get_verified_user`; `resolve_dashboard_scope` enforces access and
+    refuses any non-admin without `team_id`. It must stay the first executable
+    line, or every logged-in account can read the whole directory.
+    """
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
     limit = PAGE_ITEM_COUNT
 
     page = max(1, page)
     skip = (page - 1) * limit
 
     filter = _list_filter(query=query, order_by=order_by, direction=direction)
+    if scope is not None:
+        # `user_ids` and `group_ids` must be applied together; dropping either
+        # returns the whole instance. See `team_directory_filter`.
+        filter.update(team_directory_filter(scope))
 
     result = await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
@@ -128,31 +178,81 @@ async def get_users(
     # enforcement path.
     default_permissions = request.app.state.config.USER_PERMISSIONS
 
-    return {
-        'users': [
-            UserGroupIdsModel(
-                **{
-                    **user.model_dump(),
-                    'group_ids': [group.id for group in user_groups.get(user.id, [])],
-                    'pii_masking_enforced': has_permission_for_groups(
-                        user_groups.get(user.id, []),
+    # Only admins may see the instance's group ids. `GET /groups/id/{id}/info`
+    # requires only a verified user and checks no membership, so any group id in
+    # this response exposes that group's name. Keyed on the viewer's role, not on
+    # whether the request is scoped.
+    viewer_is_admin = user.role == 'admin'
+    team_group_id = scope.group_id if scope is not None else None
+
+    def row_for(subject):
+        """One directory row, holding what this viewer may see.
+
+        `subject` is the listed user; `user` is the viewer. An admin receives the
+        whole account; everyone else receives `TeamDirectoryUserModel`, which
+        carries the dashboard's fields alone.
+        """
+        groups = user_groups.get(subject.id, [])
+        policy_groups = [g for g in groups if group_enforces_pii_masking(g.permissions)]
+
+        if viewer_is_admin:
+            group_ids = [g.id for g in groups]
+            policy_group_ids = [g.id for g in policy_groups]
+            account = {**subject.model_dump(), 'group_ids': group_ids}
+            row = UserGroupIdsModel
+        else:
+            # The owner's screen needs only whether the member is in this team's
+            # policy (kept here) and whether another policy masks them
+            # (`masked_by_other_policy` below).
+            policy_group_ids = [g.id for g in policy_groups if g.id == team_group_id]
+            account = {
+                'id': subject.id,
+                'name': subject.name,
+                'email': subject.email,
+                'role': subject.role,
+                'group_ids': [],
+                'settings': {'ui': {'pipelines': {'valves': _masking_valves(subject)}}},
+            }
+            row = TeamDirectoryUserModel
+
+        return row(
+            **{
+                **account,
+                # Effective answer over every group and the instance defaults,
+                # using the same function as `has_permission`.
+                'pii_masking_enforced': has_permission_for_groups(
+                    groups, PII_MASKING_ENFORCED_PERMISSION, default_permissions
+                ),
+                # Which groups enforce masking. Unlike the flag above, this
+                # deliberately ignores the instance defaults.
+                'pii_policy_group_ids': policy_group_ids,
+                # Whether they stay masked without the team's group. Consults the
+                # instance defaults, because a user masked by default stays masked
+                # with no group involved.
+                'masked_by_other_policy': (
+                    False
+                    if team_group_id is None
+                    else has_permission_for_groups(
+                        [g for g in groups if g.id != team_group_id],
                         PII_MASKING_ENFORCED_PERMISSION,
                         default_permissions,
-                    ),
-                    # Same already-fetched groups, still zero extra queries. This
-                    # asks a different question from the flag above — "which
-                    # groups say yes" rather than "is this user enforced" — so it
-                    # deliberately does NOT consult the instance defaults.
-                    'pii_policy_group_ids': [
-                        group.id
-                        for group in user_groups.get(user.id, [])
-                        if group_enforces_pii_masking(group.permissions)
-                    ],
-                }
-            )
-            for user in users
-        ],
+                    )
+                ),
+            }
+        )
+
+    return {
+        'users': [row_for(subject) for subject in users],
         'total': total,
+        # None on the instance-wide view, which has no team policy.
+        'team_group_id': scope.group_id if scope is not None else None,
+        # Sent on every page, like `team_group_id`: both depend on the scope, not
+        # the page. Otherwise the owner's controls could vanish on later pages.
+        'may_manage_team_policy': (
+            await may_manage_team_policy(user, scope.group_id, db=db)
+            if scope is not None
+            else False
+        ),
     }
 
 
@@ -194,10 +294,20 @@ async def locate_user(
 
 @router.get('/all', response_model=UserInfoListResponse)
 async def get_all_users(
-    user=Depends(get_admin_user),
+    team_id: str | None = None,
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    return await Users.get_users(db=db)
+    """Unpaginated directory listing.
+
+    Unscoped, this route passes no filter, so `resolve_dashboard_scope` must run
+    first; without it every logged-in account receives every user.
+    """
+    scope = await resolve_dashboard_scope(user, team_id, db=db)
+
+    return await Users.get_users(
+        filter=team_directory_filter(scope) if scope is not None else None, db=db
+    )
 
 
 @router.get('/search', response_model=UserInfoListResponse)

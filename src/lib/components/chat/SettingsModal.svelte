@@ -113,6 +113,7 @@
 		tools: 'Services',
 		connectors: 'Services',
 		personalization: 'Preferences',
+		privacy: 'Preferences',
 		audio: 'Preferences',
 		data_controls: 'Data',
 		usage: 'Data',
@@ -1081,6 +1082,19 @@
 							<Face className="size-3.5" strokeWidth="2" />
 							<span>{$i18n.t('Personalization')}</span>
 						</button>
+					{:else if tabId === 'privacy'}
+						<button
+							role="tab"
+							aria-controls="tab-privacy"
+							aria-selected={selectedTab === 'privacy'}
+							class={tabButtonClass(selectedTab === 'privacy')}
+							on:click={() => {
+								selectedTab = 'privacy';
+							}}
+						>
+							<LockClosed className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Privacy & PII')}</span>
+						</button>
 					{:else if tabId === 'audio'}
 						<button
 							role="tab"
@@ -1244,6 +1258,12 @@
 			{:else if selectedTab === 'personalization'}
 				<Personalization
 					{saveSettings}
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'privacy'}
+				<Privacy
 					on:save={() => {
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}

@@ -198,6 +198,40 @@ class UserGroupIdsModel(UserModel):
     # `pii_masking_enforced` is True means the instance-wide default is the
     # source, which no membership change can undo.
     pii_policy_group_ids: list[str] = []
+    #: Whether this person would still be masked without the addressed team's
+    #: policy group. Includes the instance-wide default.
+    #:
+    #: Computed on the server because non-admins do not receive the group id
+    #: lists: any verified user can resolve a group id to its name through
+    #: `GET /groups/id/{id}/info`, and the team owner's screen must not name
+    #: other groups.
+    masked_by_other_policy: bool = False
+
+
+class TeamDirectoryUserModel(BaseModel):
+    """One directory row as a non-admin viewer receives it.
+
+    `GET /users/` is open to any verified user, so a team owner reads rows about
+    their members. Built field by field rather than from `UserModel`, so a field
+    added to the account model does not reach a non-admin until it is listed
+    here. Carries what the dashboard renders and the policy answers the server
+    computes; profile, presence and authentication fields are left out.
+    """
+
+    id: str
+    name: str
+    email: str
+    role: str
+    #: Always empty for this viewer. Present so the row keeps the shape the
+    #: dashboard reads for both viewers.
+    group_ids: list[str] = []
+    #: The stored PII masking preference alone, under the `ui.pipelines.valves`
+    #: path the masking column reads. The rest of a person's settings stays out.
+    settings: dict | None = None
+    pii_masking_enforced: bool = False
+    #: Narrowed to the addressed team's own group. See `UserGroupIdsModel`.
+    pii_policy_group_ids: list[str] = []
+    masked_by_other_policy: bool = False
 
 
 class UserModelResponse(UserModel):
@@ -210,8 +244,20 @@ class UserListResponse(BaseModel):
 
 
 class UserGroupIdsListResponse(BaseModel):
-    users: list[UserGroupIdsModel]
+    #: Full accounts for an admin, narrowed rows for everyone else. The router
+    #: decides which, keyed on the viewer's role.
+    users: list[UserGroupIdsModel | TeamDirectoryUserModel]
     total: int
+    #: The addressed team's own policy group, when the request was team-scoped.
+    #: Only this one group id is returned, so no other group's identity leaks.
+    #: `None` on the instance-wide view and for a team without a group.
+    team_group_id: Optional[str] = None
+
+    #: Whether this viewer may change who is in that policy group.
+    #: Computed on the server; the client cannot check ownership, and the
+    #: requested scope does not grant permission. Not the same as the frontend's
+    #: `mayAct`, which is the administrator flag.
+    may_manage_team_policy: bool = False
 
 
 class UserStatus(BaseModel):

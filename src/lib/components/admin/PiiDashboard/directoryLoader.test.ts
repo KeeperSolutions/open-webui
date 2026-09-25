@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
+import { getAllUsers } from '$lib/apis/users';
 import { createDirectoryLoader, type DirectoryFetcher } from './directoryLoader';
+
+vi.mock('$lib/apis/users', () => ({ getAllUsers: vi.fn() }));
 
 const USERS = [
 	{ id: 'id-1', email: 'a@x.com', name: 'Ana' },
@@ -174,5 +177,30 @@ describe('createDirectoryLoader', () => {
 
 		expect(get(loader).users).toEqual([]);
 		expect(get(loader).failed).toBe(false);
+	});
+});
+/**
+ * These tests mock the API module, not the fetcher, because `teamId` is bound
+ * only inside the default fetcher. Every other test here injects its own fetcher
+ * and never reaches the mock.
+ */
+
+describe('createDirectoryLoader — team id propagation', () => {
+	const api = vi.mocked(getAllUsers);
+
+	beforeEach(() => {
+		api.mockReset();
+		api.mockResolvedValue({ users: [] });
+	});
+
+	it('hands the team id to the API', async () => {
+		await createDirectoryLoader(undefined, 'T1').load();
+		expect(api).toHaveBeenCalledTimes(1);
+		expect(api.mock.calls[0][2]).toBe('T1');
+	});
+
+	it('hands null when the screen is instance-wide', async () => {
+		await createDirectoryLoader().load();
+		expect(api.mock.calls[0][2]).toBeNull();
 	});
 });

@@ -6,16 +6,31 @@
 	import { createMetricsLoader } from './metricsLoader';
 	import { createDirectoryLoader } from './directoryLoader';
 	import { createUsersAccessLoader } from './usersAccessLoader';
+	import { mayActFor } from './sections/usersAccess';
 	import type { PeriodKey } from './periods';
-	import { settings } from '$lib/stores';
+	import { settings, user } from '$lib/stores';
 	import { getStoredPiiMasking, type StoredPiiMasking } from '$lib/utils/pii';
+
+	/**
+	 * The team whose data this screen shows, or `null` for the instance-wide view.
+	 *
+	 * Read once at construction and passed to the three loaders. The team route
+	 * keys the component on it, so a different team gets a fresh instance.
+	 */
+	export let teamId: string | null = null;
+
+	/**
+	 * Whether this viewer may act on a row, or only read it.
+	 * Derived from the role only, never from `teamId`.
+	 */
+	$: mayAct = mayActFor($user?.role);
 
 	let period: PeriodKey = 'week';
 	let customDays = 7;
 
-	const metrics = createMetricsLoader();
-	const directory = createDirectoryLoader();
-	const usersAccess = createUsersAccessLoader();
+	const metrics = createMetricsLoader(undefined, teamId);
+	const directory = createDirectoryLoader(undefined, teamId);
+	const usersAccess = createUsersAccessLoader(undefined, undefined, teamId);
 
 	// Reload whenever the period selection changes.
 	$: metrics.load(period, customDays);
@@ -107,7 +122,7 @@
 <!-- Light-lock: neutralises .dark body globals; real dark mode is out of scope. -->
 <div class="min-h-full bg-pii-bg text-pii-ink font-['Inter'] px-6 py-4">
 	<div class="mx-auto flex max-w-[1190px] flex-col gap-6">
-		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} />
+		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} {teamId} />
 		<CostAnalytics
 			{rows}
 			users={$directory.users}
@@ -121,6 +136,11 @@
 			metricRows={$metrics.rows}
 			truncated={$usersAccess.truncatedUsers}
 			policyGroups={$usersAccess.policyGroups}
+			enforceTargets={$usersAccess.enforceTargets}
+			teamOnlyPolicyGroups={$usersAccess.teamOnlyPolicyGroups}
+			broadPolicyGroups={$usersAccess.broadPolicyGroups}
+			teamGroupId={$usersAccess.teamGroupId}
+			mayManagePolicy={$usersAccess.mayManagePolicy}
 			loading={usersLoading}
 			failed={usersFailed}
 			errorDetail={$usersAccess.errorDetail}
@@ -128,6 +148,7 @@
 			{costStale}
 			onRetry={() => usersAccess.load()}
 			onPolicyChanged={() => usersAccess.load()}
+			{mayAct}
 		/>
 	</div>
 </div>

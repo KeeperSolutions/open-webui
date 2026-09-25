@@ -35,6 +35,8 @@ from open_webui.models.pii_policy_audit import (
 from open_webui.models.tools import Tools
 from open_webui.models.users import UserInfoResponse, Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.team_groups import team_group_derived_changes, team_group_kind
+from open_webui.utils.team_scope import authorise_policy_membership_change
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -204,6 +206,25 @@ async def update_group_by_id(
     # rather than gaining a 404 it never had.
     existing = await Groups.get_group_by_id(id, db=db)
 
+    # Refuse edits to a team group's derived fields before the audit write.
+    # The model refuses them too, but only after the audit row is committed,
+    # which would record a policy change that never happened. The model guard
+    # still covers SCIM and OAuth, which do not use this handler.
+    if existing is not None:
+        blocked = team_group_derived_changes(
+            existing, form_data.model_dump(exclude_none=True, exclude={'reason'})
+        )
+        # Check the form first: the team lookup costs a query, and a form that
+        # changes no derived field is never refused.
+        if blocked and await team_group_kind(id, db=db) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(
+                    'This group belongs to a team. Its name and its masking policy follow '
+                    'the team, so they cannot be changed here.'
+                ),
+            )
+
     event_type = None
     if existing is not None and form_data.permissions is not None:
         # `permissions=None` is not "clear the permissions": update_group_by_id
@@ -258,8 +279,9 @@ async def update_group_by_id(
         # into an UPDATE statement. update_group_by_id itself is unchanged.
         group = await Groups.update_group_by_id(id, GroupUpdateForm(**form_data.model_dump(exclude={'reason'})), db=db)
         if group is None and event_type is not None:
-            # Narrow residual: the audit row is already committed. Chosen over
-            # the alternative, which is a policy change with no record at all.
+            # Refusals are handled above, so this is a database failure after the
+            # audit row was committed. Auditing after the update instead would
+            # risk a policy change with no record at all.
             log.error(
                 f'PII policy audit recorded {event_type} for group {id} but the update failed; '
                 f'the audit log now claims a change that did not happen.'
@@ -435,9 +457,22 @@ async def add_user_to_group(
     request: Request,
     id: str,
     form_data: GroupMembershipForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Add people to a group. Admin-wide, or a team owner within their own team.
+
+    The dependency only requires a verified user. Authorisation is done by
+    `authorise_policy_membership_change`, which must stay the first call after
+    the empty-request check; without it this route is open to every user.
+    """
+    if not form_data.user_ids:
+        # A request that names nobody changes nothing: return before any
+        # authorisation decision or audit row.
+        return None
+
+    await authorise_policy_membership_change(user, id, form_data.user_ids, db=db)
+
     try:
         if form_data.user_ids:
             form_data.user_ids = await Users.get_valid_user_ids(form_data.user_ids, db=db)
@@ -446,6 +481,18 @@ async def add_user_to_group(
         # before the audit was inserted above it.
         log.exception(f'Error adding users to group {id}: {e}')
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.DEFAULT(e))
+
+    # A team's group only holds that team's members. Refuse outsiders before
+    # the audit write: `Groups.add_users_to_group` refuses them too, but only
+    # after a `member_added` row would already record a change that never happened.
+    outsiders = await Groups.users_outside_the_team_of_group(id, form_data.user_ids, db=db)
+    if outsiders:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(
+                'This group belongs to a team. Only members of that team can be in it.'
+            ),
+        )
 
     # Only those who are not members yet are a change. `add_users_to_group`
     # already ignores duplicates, so auditing the request rather than the
@@ -494,9 +541,19 @@ async def remove_users_from_group(
     request: Request,
     id: str,
     form_data: GroupMembershipForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    """Take people out of a group. Same audience and guard as `add_user_to_group`.
+
+    Each membership route calls the guard itself and has its own tests.
+    """
+    if not form_data.user_ids:
+        # Before the guard and before the audit. See `add_user_to_group`.
+        return None
+
+    await authorise_policy_membership_change(user, id, form_data.user_ids, db=db)
+
     # Only actual members are a change; asking to remove a non-member removes
     # nothing, and must not leave a record saying otherwise.
     members = set(await Groups.get_group_user_ids_by_id(id, db=db))
@@ -510,7 +567,10 @@ async def remove_users_from_group(
     )
 
     try:
-        group = await Groups.remove_users_from_group(id, form_data.user_ids, db=db)
+        # The model refuses a removal from an enforcing group without a reason,
+        # so the reason must be passed through. The route's own check above gives
+        # the readable 400; the model check covers OAuth and SCIM.
+        group = await Groups.remove_users_from_group(id, form_data.user_ids, reason=form_data.reason, db=db)
         if group:
             await publish_event(
                 request,
