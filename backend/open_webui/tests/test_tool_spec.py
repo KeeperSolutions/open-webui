@@ -1,4 +1,4 @@
-from open_webui.tools.built_in import drive_create_documents
+from open_webui.tools.built_in import create_documents
 from open_webui.utils.tools import get_builtin_tool_spec, parse_docstring
 
 
@@ -31,8 +31,8 @@ def test_parse_docstring_stops_a_description_at_a_blank_line():
     assert parse_docstring(docstring) == {'query': 'What to search for'}
 
 
-def test_drive_create_documents_spec_names_every_document_field():
-    files = get_builtin_tool_spec(drive_create_documents)['parameters']['properties']['files']
+def test_create_documents_spec_names_every_document_field():
+    files = get_builtin_tool_spec(create_documents)['parameters']['properties']['files']
 
     assert files['items']['required'] == ['name', 'format', 'content']
     assert files['items']['properties']['format']['enum'] == ['pdf', 'docx', 'xlsx', 'pptx']

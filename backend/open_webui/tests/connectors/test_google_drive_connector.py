@@ -1,9 +1,13 @@
 import json
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
+import open_webui.routers.connectors as connectors
 import open_webui.tools.built_in as drive
 
 USER = {'id': 'test-user-id'}
@@ -227,126 +231,151 @@ class TestDriveCreateFiles:
         assert seen_confirmation_data['title'] == 'Create 2 files?'
 
 
-# drive_create_documents - each document is validated, built and uploaded on its own
+# drive_save_documents and the save endpoint - documents made by create_documents, saved to Drive on their own
 
 
-class DocumentUploadClient(FakeClientBase):
-    def __init__(self, offline_names=()):
+def stored_file(file_id, name, user_id=USER['id'], drive=None):
+    meta = {'name': name, **({'drive': drive} if drive else {})}
+    return SimpleNamespace(id=file_id, user_id=user_id, filename=name, path=f'/store/{file_id}', meta=meta)
+
+
+class DriveSaveClient(FakeClientBase):
+    def __init__(self, offline_names=(), existing=None):
         self.uploaded_names = []
         self.offline_names = offline_names
+        self.existing = existing or {}
 
     async def request(self, method, url, headers=None, content=None, **kwargs):
+        if method == 'GET':
+            drive_id = url.rsplit('/', 1)[-1]
+            if drive_id not in self.existing:
+                return FakeResponse(404, {})
+            return FakeResponse(200, {'id': drive_id, 'trashed': self.existing[drive_id]})
         name = json.loads(content.split(b'\r\n')[3])['name']
         if name in self.offline_names:
             raise httpx.ConnectError('connection refused')
         self.uploaded_names.append(name)
-        return FakeResponse(200, {'id': f'id-{name}', 'name': name, 'mimeType': 'x', 'webViewLink': 'x'})
+        return FakeResponse(200, {'id': f'drive-{name}', 'name': name, 'webViewLink': f'https://docs/{name}'})
 
 
-def fake_build(format, name, content):
-    if name == 'Broken':
-        raise ValueError('bad content')
-    return b'bytes'
+@contextmanager
+def stored_files(tmp_path, *files):
+    by_id = {f.id: f for f in files}
+    (tmp_path / 'bytes').write_bytes(b'bytes')
+    update = AsyncMock()
+    with (
+        patch('open_webui.models.files.Files.get_file_by_id', AsyncMock(side_effect=lambda file_id: by_id.get(file_id))),
+        patch('open_webui.models.files.Files.update_file_metadata_by_id', update),
+        patch('open_webui.storage.provider.Storage.get_file', lambda path: str(tmp_path / 'bytes')),
+    ):
+        yield update
 
 
-class TestDriveCreateDocuments:
-    async def create(self, files, client, event_call=confirm, event_emitter=None):
-        with patch('httpx.AsyncClient', return_value=client), patch.object(drive, '_drive_build_document_bytes', fake_build):
+class TestDriveSaveDocuments:
+    async def save(self, file_ids, client, event_call=confirm, emitted=None, folder=''):
+        async def emit(event):
+            emitted.append(event)
+
+        with patch('httpx.AsyncClient', return_value=client):
             return json.loads(
-                await drive.drive_create_documents(
-                    files=files, __user__=USER, __event_call__=event_call, __event_emitter__=event_emitter
+                await drive.drive_save_documents(
+                    file_ids=file_ids, folder=folder, __user__=USER, __event_call__=event_call,
+                    __event_emitter__=emit if emitted is not None else None,
                 )
             )
 
     @pytest.mark.asyncio
-    async def test_all_documents_created(self):
-        emitted = []
-
-        async def emit(event):
-            emitted.append(event)
-
-        result = await self.create(
-            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Data', 'format': 'XLSX', 'content': 'a,b'}],
-            DocumentUploadClient(),
-            event_emitter=emit,
-        )
-
-        assert result['status'] == 'success'
-        assert result['failed'] == []
-        assert result['message'] == 'Created 2 documents.'
-        assert result['note'] == drive.DRIVE_CARD_NOTE
-        assert [e['data']['format'] for e in emitted] == ['docx', 'xlsx']
-
-    @pytest.mark.asyncio
-    async def test_one_failed_build_does_not_fail_the_rest_of_the_batch(self):
-        client = DocumentUploadClient()
-        result = await self.create(
-            [
-                {'name': 'Report', 'format': 'docx', 'content': '# Hi'},
-                {'name': 'Broken', 'format': 'xlsx', 'content': 'a,b'},
-                {'name': 'Deck', 'format': 'pptx', 'content': 'Title'},
-            ],
-            client,
-        )
-
-        assert result['status'] == 'partial'
-        assert client.uploaded_names == ['Report', 'Deck']
-        assert result['failed'] == [
-            {'name': 'Broken.xlsx', 'error': f"Couldn't build this xlsx file - {drive.DOCUMENT_CONTENT_HINTS['xlsx']}."}
-        ]
-        assert result['message'].startswith('Created 2 of 3 documents. Not created - Broken.xlsx:')
-        assert drive.DOCUMENT_FAILURES_NOTE in result['note']
-        assert drive.DRIVE_CARD_NOTE in result['note']
-
-    @pytest.mark.asyncio
-    async def test_invalid_document_is_left_out_of_the_confirmation_and_reported(self):
-        seen_confirmation_data = {}
+    async def test_saves_each_document_and_updates_its_card(self, tmp_path):
+        emitted, seen_confirmation_data = [], {}
 
         async def confirm_and_capture(payload):
             seen_confirmation_data.update(payload['data'])
             return True
 
-        result = await self.create(
-            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Notes', 'format': 'odt', 'content': 'x'}],
-            DocumentUploadClient(),
-            event_call=confirm_and_capture,
-        )
+        client = DriveSaveClient()
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx'), stored_file('f2', 'Data.xlsx')) as update:
+            result = await self.save(['f1', 'f2'], client, event_call=confirm_and_capture, emitted=emitted)
+
+        assert result['status'] == 'success'
+        assert result['message'] == 'Saved 2 documents.'
+        assert sorted(client.uploaded_names) == ['Data', 'Report']
+        assert seen_confirmation_data['title'] == 'Save 2 files to Google Drive?'
+        assert emitted[0] == {
+            'type': 'chat:message:document',
+            'data': {'file_id': 'f1', 'name': 'Report', 'format': 'docx', 'drive_id': 'drive-Report', 'web_link': 'https://docs/Report'},
+        }
+        update.assert_any_await('f1', {'drive': {'id': 'drive-Report', 'web_link': 'https://docs/Report'}})
+
+    @pytest.mark.asyncio
+    async def test_another_users_document_fails_without_failing_the_rest(self, tmp_path):
+        client = DriveSaveClient(offline_names={'Offline'})
+        with stored_files(
+            tmp_path,
+            stored_file('f1', 'Report.docx'),
+            stored_file('f2', 'Secret.docx', user_id='someone-else'),
+            stored_file('f3', 'Offline.pdf'),
+        ):
+            result = await self.save(['f1', 'f2', 'f3'], client)
 
         assert result['status'] == 'partial'
-        assert seen_confirmation_data['title'] == 'Create Google Drive file?'
-        assert 'Notes' not in seen_confirmation_data['message']
+        assert [s['file_id'] for s in result['saved']] == ['f1']
         assert result['failed'] == [
-            {'name': 'Notes.odt', 'error': 'Missing or unsupported "format" ("odt") - set "format" to pdf, docx, xlsx, or pptx.'}
+            {'name': 'f2', 'error': 'This document no longer exists.'},
+            {'name': 'Offline.pdf', 'error': "Couldn't reach Google Drive - try again in a moment."},
         ]
 
     @pytest.mark.asyncio
-    async def test_all_invalid_errors_without_showing_confirmation(self):
-        confirmation_shown = False
+    @pytest.mark.parametrize('trashed, uploads', [(False, []), (True, ['Report'])])
+    async def test_reuses_the_earlier_drive_copy_unless_it_was_trashed(self, tmp_path, trashed, uploads):
+        client = DriveSaveClient(existing={'drive-old': trashed})
+        drive_copy = {'id': 'drive-old', 'web_link': 'https://docs/old'}
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx', drive=drive_copy)):
+            result = await self.save(['f1'], client)
 
-        async def confirm_and_flag(payload):
-            nonlocal confirmation_shown
-            confirmation_shown = True
-            return True
-
-        result = await self.create(
-            [{'name': 'Empty', 'format': 'pdf', 'content': '  '}], DocumentUploadClient(), event_call=confirm_and_flag
-        )
-
-        assert result['status'] == 'error'
-        assert confirmation_shown is False
-        assert result['message'] == f"Couldn't create the document. Empty.pdf: Empty content - {drive.DOCUMENT_CONTENT_HINTS['pdf']}."
-        assert result['note'] == drive.DOCUMENT_FAILURES_NOTE
+        assert result['status'] == 'success'
+        assert client.uploaded_names == uploads
+        assert result['saved'][0]['drive_id'] == ('drive-Report' if trashed else 'drive-old')
 
     @pytest.mark.asyncio
-    async def test_upload_exception_fails_only_that_document(self):
-        result = await self.create(
-            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Offline', 'format': 'pdf', 'content': 'x'}],
-            DocumentUploadClient(offline_names={'Offline'}),
-        )
+    async def test_declined_confirmation_saves_nothing(self, tmp_path):
+        client = DriveSaveClient()
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx')):
+            result = await self.save(['f1'], client, event_call=decline)
 
-        assert result['status'] == 'partial'
-        assert result['created'] == [{'id': 'id-Report', 'name': 'Report'}]
-        assert result['failed'] == [{'name': 'Offline.pdf', 'error': "Couldn't reach Google Drive - try again in a moment."}]
+        assert result['status'] == 'cancelled'
+        assert client.uploaded_names == []
+
+
+class TestSaveDocumentEndpoint:
+    @pytest.mark.asyncio
+    async def test_returns_the_saved_document(self, tmp_path):
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx')), patch('httpx.AsyncClient', return_value=DriveSaveClient()):
+            result = await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+
+        assert result == {'file_id': 'f1', 'name': 'Report', 'format': 'docx', 'drive_id': 'drive-Report', 'web_link': 'https://docs/Report'}
+
+    @pytest.mark.asyncio
+    async def test_drive_not_connected_is_a_distinct_409(self):
+        with patch('open_webui.routers.connectors.get_valid_access_token', new=AsyncMock(return_value=None)):
+            with pytest.raises(HTTPException) as e:
+                await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+
+        assert e.value.status_code == 409
+        assert e.value.detail == 'drive_not_connected'
+
+    @pytest.mark.asyncio
+    async def test_another_users_document_is_not_found(self, tmp_path):
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx', user_id='someone-else')):
+            with pytest.raises(HTTPException) as e:
+                await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+
+        assert e.value.status_code == 404
+
+    def test_non_internal_accounts_are_rejected(self):
+        with pytest.raises(HTTPException) as e:
+            connectors.get_internal_drive_user(user=SimpleNamespace(email='someone@outside.com'))
+
+        assert e.value.status_code == 403
 
 
 # ---------------------------------------------------------------------------

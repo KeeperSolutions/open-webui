@@ -1071,6 +1071,25 @@ async def get_event_emitter(request_info, update_db=True):
                     touch=False,
                 )
 
+            elif event_type == 'chat:message:document':
+                document = event_data.get('data', {})
+                message = await Chats.get_message_by_id_and_message_id(
+                    request_info['chat_id'],
+                    request_info['message_id'],
+                )
+                documents = [
+                    d for d in (message or {}).get('documents', []) if d.get('file_id') != document.get('file_id')
+                ]
+
+                await Chats.upsert_message_to_chat_by_id_and_message_id(
+                    request_info['chat_id'],
+                    request_info['message_id'],
+                    {
+                        'documents': [*documents, document],
+                    },
+                    touch=False,
+                )
+
             elif event_type in ('source', 'citation'):
                 data = event_data.get('data', {})
                 if data.get('type') is None:

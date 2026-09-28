@@ -325,6 +325,43 @@ async def download_google_drive_document(
     )
 
 
+class SaveDocumentForm(BaseModel):
+    folder: str = ''
+
+
+@router.post('/google-drive/save/{file_id}')
+async def save_document_to_google_drive(
+    file_id: str,
+    form_data: SaveDocumentForm | None = None,
+    user=Depends(get_internal_drive_user),
+):
+    from open_webui.tools.built_in import (
+        _drive_load_stored_documents,
+        _drive_resolve_optional_folder,
+        _drive_save_stored_documents,
+    )
+
+    access_token = await get_valid_access_token(user.id)
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_not_connected')
+
+    documents, failed = await _drive_load_stored_documents(user.id, [file_id])
+    if failed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=failed[0]['error'])
+
+    headers = {'Authorization': f'Bearer {access_token}'}
+    folder_id = None
+    if form_data and form_data.folder:
+        folder_id, folder_error = await _drive_resolve_optional_folder(headers, form_data.folder)
+        if folder_error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=folder_error)
+
+    saved, failed = await _drive_save_stored_documents(headers, documents, folder_id)
+    if failed:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=failed[0]['error'])
+    return saved[0]
+
+
 async def get_valid_access_token(user_id: str) -> str | None:
     """Return a valid Google Drive access token for the user, refreshing it if needed."""
     connection = await ConnectorConnections.get_by_user_and_connector(user_id, GOOGLE_DRIVE_CONNECTOR)

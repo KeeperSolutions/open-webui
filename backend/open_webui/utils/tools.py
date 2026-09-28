@@ -54,13 +54,13 @@ from open_webui.tools.built_in import (
     calculate_timestamp,
     create_automation,
     create_calendar_event,
+    create_documents,
     create_tasks,
     delegate_task,
     delete_automation,
     delete_calendar_event,
     delete_memory,
     drive_copy_files,
-    drive_create_documents,
     drive_create_files,
     drive_create_folders,
     drive_delete_files,
@@ -69,6 +69,7 @@ from open_webui.tools.built_in import (
     drive_read,
     drive_rename_file,
     drive_restore_files,
+    drive_save_documents,
     drive_save_edited_copy,
     drive_search,
     edit_image,
@@ -538,7 +539,7 @@ CONNECTOR_WRITE_FUNCTIONS = {
     'google_drive': [
         drive_copy_files,
         drive_create_files,
-        drive_create_documents,
+        drive_save_documents,
         drive_create_folders,
         drive_save_edited_copy,
         drive_move_files,
@@ -674,6 +675,9 @@ async def get_builtin_tools(
     # Chats tools - search and fetch user's chat history
     if is_builtin_tool_enabled('chats'):
         builtin_functions.extend([search_chats, view_chat])
+
+    if is_builtin_tool_enabled('documents'):
+        builtin_functions.append(create_documents)
 
     if (
         is_builtin_tool_enabled('subagents')
