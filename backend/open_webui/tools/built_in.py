@@ -15,11 +15,12 @@ import logging
 import mimetypes
 import time
 from functools import lru_cache
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException, Request
+from typing_extensions import TypedDict
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader
 
 from open_webui.config import RAG_EMBEDDING_QUERY_PREFIX
@@ -4669,16 +4670,109 @@ def _build_pdf_document_bytes(title: str, content: str) -> bytes:
     return bytes(pdf.output())
 
 
+REFERENCE_DOC_TABLE_BORDER = '<w:{side} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF" />'
+
+# Whole blocks of pandoc's default reference.docx swapped by pattern - re-serialising with ElementTree would rename namespace prefixes
+REFERENCE_DOC_REPLACEMENTS = {
+    'word/styles.xml': [
+        (
+            r'<w:docDefaults>.*?</w:docDefaults>',
+            '<w:docDefaults><w:rPrDefault><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:eastAsia="Arial" w:hAnsi="Arial" w:cs="Arial" />'
+            '<w:sz w:val="22" /><w:szCs w:val="22" />'
+            '<w:lang w:val="en-US" w:eastAsia="zh-CN" w:bidi="ar-SA" />'
+            '</w:rPr></w:rPrDefault>'
+            '<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto" /></w:pPr></w:pPrDefault>'
+            '</w:docDefaults>',
+        ),
+        (
+            r'<w:style [^>]*w:styleId="BodyText".*?</w:style>',
+            '<w:style w:type="paragraph" w:styleId="BodyText"><w:name w:val="Body Text" />'
+            '<w:basedOn w:val="Normal" /><w:link w:val="BodyTextChar" /><w:qFormat />'
+            '<w:pPr><w:spacing w:before="60" w:after="120" /></w:pPr></w:style>',
+        ),
+        (
+            r'<w:style [^>]*w:styleId="Compact".*?</w:style>',
+            '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Compact"><w:name w:val="Compact" />'
+            '<w:basedOn w:val="BodyText" /><w:qFormat /><w:pPr><w:spacing w:before="0" w:after="60" /></w:pPr></w:style>',
+        ),
+        (
+            r'<w:style [^>]*w:styleId="Table".*?</w:style>',
+            '<w:style w:type="table" w:default="1" w:styleId="Table"><w:name w:val="Table" />'
+            '<w:basedOn w:val="TableNormal" /><w:qFormat /><w:tblPr><w:tblInd w:w="0" w:type="dxa" />'
+            '<w:tblBorders>'
+            + ''.join(REFERENCE_DOC_TABLE_BORDER.format(side=side) for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'))
+            + '</w:tblBorders>'
+            '<w:tblCellMar><w:top w:w="57" w:type="dxa" /><w:left w:w="108" w:type="dxa" />'
+            '<w:bottom w:w="57" w:type="dxa" /><w:right w:w="108" w:type="dxa" /></w:tblCellMar></w:tblPr>'
+            '<w:tblStylePr w:type="firstRow"><w:rPr><w:b /><w:bCs /></w:rPr>'
+            '<w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="F2F2F2" /></w:tcPr></w:tblStylePr></w:style>',
+        ),
+    ],
+    'word/theme/theme1.xml': [
+        (r'(?<=<a:majorFont>)\s*<a:latin [^>]*/>', '<a:latin typeface="Arial"/>'),
+        (r'(?<=<a:minorFont>)\s*<a:latin [^>]*/>', '<a:latin typeface="Arial"/>'),
+    ],
+}
+
+
+def _apply_reference_doc_replacements(docx_bytes: bytes) -> bytes:
+    """Restyle a reference.docx via REFERENCE_DOC_REPLACEMENTS, raising ValueError if any block to replace is missing."""
+    import io
+    import re
+    import zipfile
+
+    source = zipfile.ZipFile(io.BytesIO(docx_bytes))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as out:
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename in REFERENCE_DOC_REPLACEMENTS:
+                text = data.decode('utf-8')
+                for pattern, replacement in REFERENCE_DOC_REPLACEMENTS[item.filename]:
+                    text, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)
+                    if not count:
+                        raise ValueError(f'{pattern} not found in {item.filename}')
+                data = text.encode('utf-8')
+            out.writestr(item, data)
+    return buf.getvalue()
+
+
+@lru_cache(maxsize=1)
+def _get_pandoc_reference_doc():
+    """The reference.docx for docx output - pandoc's default restyled once per process, or None if that fails."""
+    import os
+    import subprocess
+
+    import pypandoc
+
+    from open_webui.config import CACHE_DIR
+
+    try:
+        default_doc = subprocess.run(
+            [pypandoc.get_pandoc_path(), '--print-default-data-file', 'reference.docx'], capture_output=True, check=True
+        ).stdout
+        restyled = _apply_reference_doc_replacements(default_doc)
+    except Exception as e:
+        log.warning(f'Could not build the docx reference styles, falling back to pandoc defaults: {e}')
+        return None
+
+    path = CACHE_DIR / 'pandoc' / 'reference.docx'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f'.{os.getpid()}.tmp')
+    tmp_path.write_bytes(restyled)
+    os.replace(tmp_path, path)
+    return path
+
+
 def _build_docx_document_bytes(content: str) -> bytes:
     import os
     import tempfile
 
     import pypandoc
 
-    from open_webui.env import PANDOC_REFERENCE_DOC
-
-    reference_doc = _resolve_static_asset_dir(PANDOC_REFERENCE_DOC, 'static/pandoc/reference.docx')
-    extra_args = ['--reference-doc', str(reference_doc)] if reference_doc.exists() else []
+    reference_doc = _get_pandoc_reference_doc()
+    extra_args = ['--reference-doc', str(reference_doc)] if reference_doc else []
 
     with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
         tmp_path = tmp.name
@@ -4746,6 +4840,83 @@ def _drive_build_document_bytes(format: str, name: str, content: str) -> bytes:
     elif format == 'xlsx':
         return _build_xlsx_document_bytes(content)
     return _build_pptx_document_bytes(content)
+
+
+class DocumentSpec(TypedDict):
+    name: Annotated[
+        str,
+        Field(
+            description='Document title as it should appear in Drive, in the language of the content - normal words with '
+            'spaces and diacritics (e.g. "Kratki izvještaj", not "Kratki_izvjestaj"), no file extension'
+        ),
+    ]
+    format: Literal['pdf', 'docx', 'xlsx', 'pptx']
+    content: Annotated[
+        str,
+        Field(
+            description="For pdf/docx: markdown text. For xlsx: CSV text (rows on new lines, columns comma-separated). "
+            "For pptx: slides separated by '---', the first line of each is the title, the remaining lines are bullet points"
+        ),
+    ]
+
+
+# Repeated in a failed build's error so the model can fix the content and retry
+DOCUMENT_CONTENT_HINTS = {
+    'pdf': 'content must be markdown text',
+    'docx': 'content must be markdown text',
+    'xlsx': 'content must be CSV text (rows on new lines, columns comma-separated)',
+    'pptx': "content must be slides separated by '---', each starting with a title line",
+}
+
+DOCUMENT_FAILURES_NOTE = 'Tell the user which documents were not created and why, using `message` as-is without paraphrasing it.'
+
+
+def _document_display_name(f: dict) -> str:
+    name = (f.get('name') or '').strip() or 'Untitled'
+    return f'{name}.{f["format"]}' if f.get('format') else name
+
+
+def _document_input_error(f: dict) -> str | None:
+    """Why this document can't be built from its inputs, or None if they look usable."""
+    if f['format'] not in DRIVE_DOCUMENT_SOURCE_MIME_TYPES:
+        return f'Missing or unsupported "format" ("{f["format"]}") - set "format" to pdf, docx, xlsx, or pptx.'
+    if not (f.get('name') or '').strip():
+        return 'Missing a file name.'
+    if not (f.get('content') or '').strip():
+        return f'Empty content - {DOCUMENT_CONTENT_HINTS[f["format"]]}.'
+    return None
+
+
+async def _build_document_safe(f: dict) -> tuple[bytes | None, str | None]:
+    """Build one document off the event loop as (bytes, None) or (None, error), so one bad document can't fail its batch."""
+    try:
+        return await asyncio.to_thread(_drive_build_document_bytes, f['format'], f['name'], f['content']), None
+    except Exception as e:
+        log.exception(f'Document build failed for {_document_display_name(f)}: {e}')
+        return None, f"Couldn't build this {f['format']} file - {DOCUMENT_CONTENT_HINTS[f['format']]}."
+
+
+def _documents_summary_message(created: list, failed: list) -> str:
+    total = len(created) + len(failed)
+    if not failed:
+        return f'Created {total} document{"s" if total != 1 else ""}.'
+    not_created = ' '.join(f'{f["name"]}: {f["error"]}' for f in failed)
+    if not created:
+        return f"Couldn't create {'the document' if total == 1 else f'any of the {total} documents'}. {not_created}"
+    return f'Created {len(created)} of {total} documents. Not created - {not_created}'
+
+
+def _documents_result(created: list, failed: list, created_note: str = '') -> str:
+    result = {
+        'status': _drive_batch_status(created, failed),
+        'created': created,
+        'failed': failed,
+        'message': _documents_summary_message(created, failed),
+    }
+    note = ' '.join(n for n in (DOCUMENT_FAILURES_NOTE if failed else '', created_note if created else '') if n)
+    if note:
+        result['note'] = note
+    return json.dumps(result, ensure_ascii=False)
 
 
 async def _drive_upload_document_bytes(
@@ -5936,7 +6107,7 @@ async def drive_create_files(
 
 
 async def drive_create_documents(
-    files: list[dict],
+    files: list[DocumentSpec],
     folder: str = '',
     __user__: dict = None,
     __event_call__: callable = None,
@@ -5959,21 +6130,27 @@ async def drive_create_documents(
     "Creating that document now.") - the popup this tool shows already handles asking permission,
     this is just so the user sees something instead of a blank reply while it loads.
 
-    :param files: One or more documents to create, each shaped {"name": "..." (without file
-        extension), "format": "pdf"|"docx"|"xlsx"|"pptx", "content": "For pdf/docx: markdown
-        text. For xlsx: CSV text (rows on new lines, columns comma-separated). For pptx: slides
-        separated by '---', first line of each is the title, remaining lines are bullet points"}
+    :param files: One or more documents to create, each with a name, a format, and its content
     :param folder: Name of the Drive folder to create the documents in (optional - defaults to
         the top level of My Drive if omitted)
-    :return: JSON with which documents were created (id, name) and which failed, or an error message
+    :return: JSON with which documents were created (id, name), which failed and why - each
+        document succeeds or fails on its own - and a `message` summarising it for the user
     """
     if not files:
         return json.dumps({'error': 'No documents given to create.'})
 
+    valid, failed = [], []
     for f in files:
+        f = f if isinstance(f, dict) else {}
         f['format'] = (f.get('format') or '').lower()
-        if f['format'] not in DRIVE_DOCUMENT_SOURCE_MIME_TYPES:
-            return json.dumps({'error': f'Unsupported format: {f.get("format")}. Use pdf, docx, xlsx, or pptx.'})
+        error = _document_input_error(f)
+        if error:
+            failed.append({'name': _document_display_name(f), 'error': error})
+        else:
+            valid.append(f)
+
+    if not valid:
+        return _documents_result([], failed)
 
     headers, error = await _drive_prepare_write(__user__, __event_call__)
     if error:
@@ -5984,8 +6161,8 @@ async def drive_create_documents(
         if folder_error:
             return json.dumps({'error': folder_error})
 
-    names = {i: f'{f["name"]}.{f["format"]}' for i, f in enumerate(files)}
-    title = 'Create Google Drive file?' if len(files) == 1 else f'Create {len(files)} files?'
+    names = {i: _document_display_name(f) for i, f in enumerate(valid)}
+    title = 'Create Google Drive file?' if len(valid) == 1 else f'Create {len(valid)} files?'
     message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), names)
 
     confirmed = await __event_call__(
@@ -6002,42 +6179,44 @@ async def drive_create_documents(
     if confirmed is not True:
         return _drive_cancelled('create these documents', 'Tell the user the documents were not created')
 
-    try:
-        file_bytes_list = await asyncio.gather(
-            *(asyncio.to_thread(_drive_build_document_bytes, f['format'], f['name'], f['content']) for f in files)
-        )
-    except Exception as e:
-        log.exception(f'drive_create_documents build error: {e}')
-        return json.dumps({'error': f'Failed to generate one or more documents: {e}'})
+    to_upload = []
+    for f, (file_bytes, error) in zip(valid, await asyncio.gather(*(_build_document_safe(f) for f in valid))):
+        if error:
+            failed.append({'name': _document_display_name(f), 'error': error})
+        else:
+            to_upload.append((f, file_bytes))
 
-    try:
+    created = []
+    if to_upload:
         async with httpx.AsyncClient() as client:
             upload_responses = await asyncio.gather(
                 *(
                     _drive_upload_document_bytes(client, headers, f['name'], f['format'], file_bytes, parent_id=folder_id)
-                    for f, file_bytes in zip(files, file_bytes_list)
+                    for f, file_bytes in to_upload
+                ),
+                return_exceptions=True,
+            )
+
+        for (f, _), upload_response in zip(to_upload, upload_responses):
+            if isinstance(upload_response, BaseException):
+                log.error(f'Google Drive document upload error: {upload_response}', exc_info=upload_response)
+                failed.append(
+                    {'name': _document_display_name(f), 'error': "Couldn't reach Google Drive - try again in a moment."}
                 )
-            )
-    except Exception as e:
-        log.exception(f'drive_create_documents upload error: {e}')
-        return json.dumps({'error': str(e)})
+            elif upload_response.status_code != 200:
+                log.error(f'Google Drive document upload failed: {upload_response.status_code} {upload_response.text}')
+                failed.append(
+                    {
+                        'name': _document_display_name(f),
+                        'error': _drive_error_message(upload_response, 'Failed to create this document.'),
+                    }
+                )
+            else:
+                data = upload_response.json()
+                created.append({'id': data['id'], 'name': data['name']})
+                await _drive_emit_created_card(__event_emitter__, data, format=f['format'])
 
-    created, failed = [], []
-    for f, upload_response in zip(files, upload_responses):
-        if upload_response.status_code != 200:
-            log.error(f'Google Drive document upload failed: {upload_response.status_code} {upload_response.text}')
-            failed.append(
-                {'name': f['name'], 'error': _drive_error_message(upload_response, 'Failed to create this document.')}
-            )
-        else:
-            data = upload_response.json()
-            created.append({'id': data['id'], 'name': data['name']})
-            await _drive_emit_created_card(__event_emitter__, data, format=f['format'])
-
-    result = {'status': _drive_batch_status(created, failed), 'created': created, 'failed': failed}
-    if created:
-        result['note'] = DRIVE_CARD_NOTE
-    return json.dumps(result, ensure_ascii=False)
+    return _documents_result(created, failed, created_note=DRIVE_CARD_NOTE)
 
 
 def _drive_folder_creation_levels(folders: list[dict]):

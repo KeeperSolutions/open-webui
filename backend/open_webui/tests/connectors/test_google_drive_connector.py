@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 import open_webui.tools.built_in as drive
@@ -224,6 +225,128 @@ class TestDriveCreateFiles:
         assert result['status'] == 'success'
         assert {c['name'] for c in result['created']} == {'One.txt', 'Two.txt'}
         assert seen_confirmation_data['title'] == 'Create 2 files?'
+
+
+# drive_create_documents - each document is validated, built and uploaded on its own
+
+
+class DocumentUploadClient(FakeClientBase):
+    def __init__(self, offline_names=()):
+        self.uploaded_names = []
+        self.offline_names = offline_names
+
+    async def request(self, method, url, headers=None, content=None, **kwargs):
+        name = json.loads(content.split(b'\r\n')[3])['name']
+        if name in self.offline_names:
+            raise httpx.ConnectError('connection refused')
+        self.uploaded_names.append(name)
+        return FakeResponse(200, {'id': f'id-{name}', 'name': name, 'mimeType': 'x', 'webViewLink': 'x'})
+
+
+def fake_build(format, name, content):
+    if name == 'Broken':
+        raise ValueError('bad content')
+    return b'bytes'
+
+
+class TestDriveCreateDocuments:
+    async def create(self, files, client, event_call=confirm, event_emitter=None):
+        with patch('httpx.AsyncClient', return_value=client), patch.object(drive, '_drive_build_document_bytes', fake_build):
+            return json.loads(
+                await drive.drive_create_documents(
+                    files=files, __user__=USER, __event_call__=event_call, __event_emitter__=event_emitter
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_all_documents_created(self):
+        emitted = []
+
+        async def emit(event):
+            emitted.append(event)
+
+        result = await self.create(
+            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Data', 'format': 'XLSX', 'content': 'a,b'}],
+            DocumentUploadClient(),
+            event_emitter=emit,
+        )
+
+        assert result['status'] == 'success'
+        assert result['failed'] == []
+        assert result['message'] == 'Created 2 documents.'
+        assert result['note'] == drive.DRIVE_CARD_NOTE
+        assert [e['data']['format'] for e in emitted] == ['docx', 'xlsx']
+
+    @pytest.mark.asyncio
+    async def test_one_failed_build_does_not_fail_the_rest_of_the_batch(self):
+        client = DocumentUploadClient()
+        result = await self.create(
+            [
+                {'name': 'Report', 'format': 'docx', 'content': '# Hi'},
+                {'name': 'Broken', 'format': 'xlsx', 'content': 'a,b'},
+                {'name': 'Deck', 'format': 'pptx', 'content': 'Title'},
+            ],
+            client,
+        )
+
+        assert result['status'] == 'partial'
+        assert client.uploaded_names == ['Report', 'Deck']
+        assert result['failed'] == [
+            {'name': 'Broken.xlsx', 'error': f"Couldn't build this xlsx file - {drive.DOCUMENT_CONTENT_HINTS['xlsx']}."}
+        ]
+        assert result['message'].startswith('Created 2 of 3 documents. Not created - Broken.xlsx:')
+        assert drive.DOCUMENT_FAILURES_NOTE in result['note']
+        assert drive.DRIVE_CARD_NOTE in result['note']
+
+    @pytest.mark.asyncio
+    async def test_invalid_document_is_left_out_of_the_confirmation_and_reported(self):
+        seen_confirmation_data = {}
+
+        async def confirm_and_capture(payload):
+            seen_confirmation_data.update(payload['data'])
+            return True
+
+        result = await self.create(
+            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Notes', 'format': 'odt', 'content': 'x'}],
+            DocumentUploadClient(),
+            event_call=confirm_and_capture,
+        )
+
+        assert result['status'] == 'partial'
+        assert seen_confirmation_data['title'] == 'Create Google Drive file?'
+        assert 'Notes' not in seen_confirmation_data['message']
+        assert result['failed'] == [
+            {'name': 'Notes.odt', 'error': 'Missing or unsupported "format" ("odt") - set "format" to pdf, docx, xlsx, or pptx.'}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_all_invalid_errors_without_showing_confirmation(self):
+        confirmation_shown = False
+
+        async def confirm_and_flag(payload):
+            nonlocal confirmation_shown
+            confirmation_shown = True
+            return True
+
+        result = await self.create(
+            [{'name': 'Empty', 'format': 'pdf', 'content': '  '}], DocumentUploadClient(), event_call=confirm_and_flag
+        )
+
+        assert result['status'] == 'error'
+        assert confirmation_shown is False
+        assert result['message'] == f"Couldn't create the document. Empty.pdf: Empty content - {drive.DOCUMENT_CONTENT_HINTS['pdf']}."
+        assert result['note'] == drive.DOCUMENT_FAILURES_NOTE
+
+    @pytest.mark.asyncio
+    async def test_upload_exception_fails_only_that_document(self):
+        result = await self.create(
+            [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}, {'name': 'Offline', 'format': 'pdf', 'content': 'x'}],
+            DocumentUploadClient(offline_names={'Offline'}),
+        )
+
+        assert result['status'] == 'partial'
+        assert result['created'] == [{'id': 'id-Report', 'name': 'Report'}]
+        assert result['failed'] == [{'name': 'Offline.pdf', 'error': "Couldn't reach Google Drive - try again in a moment."}]
 
 
 # ---------------------------------------------------------------------------

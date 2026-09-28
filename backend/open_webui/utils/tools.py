@@ -897,15 +897,20 @@ def parse_docstring(docstring):
     # Regex to match `:param name: description` format
     param_pattern = re.compile(r':param (\w+):\s*(.+)')
     param_descriptions = {}
+    current_param = None
 
     for line in docstring.splitlines():
-        match = param_pattern.match(line.strip())
-        if not match:
-            continue
-        param_name, param_description = match.groups()
-        if param_name.startswith('__'):
-            continue
-        param_descriptions[param_name] = param_description
+        line = line.strip()
+        match = param_pattern.match(line)
+        if match:
+            param_name, param_description = match.groups()
+            current_param = None if param_name.startswith('__') else param_name
+            if current_param:
+                param_descriptions[current_param] = param_description
+        elif not line or line.startswith(':'):
+            current_param = None
+        elif current_param:
+            param_descriptions[current_param] += f' {line}'
 
     return param_descriptions
 
