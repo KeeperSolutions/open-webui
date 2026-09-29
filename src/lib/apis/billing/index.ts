@@ -195,7 +195,10 @@ export const inviteTeamMember = (token: string, email: string) =>
 	);
 
 export const removeTeamMember = (token: string, userId: string) =>
-	request<{ removed: boolean }>(`${base}/team/members/${userId}`, token, { method: 'DELETE' });
+	request<{
+		removed: boolean;
+		member: { id: string; email: string; name: string } | null;
+	}>(`${base}/team/members/${userId}`, token, { method: 'DELETE' });
 
 export const getTeamPortalUrl = (token: string) =>
 	request<{ url: string }>(`${base}/team/portal`, token, { method: 'POST' });

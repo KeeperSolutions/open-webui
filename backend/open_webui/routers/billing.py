@@ -1366,7 +1366,16 @@ async def remove_team_member(member_user_id: str, user=Depends(get_verified_user
         # failure.
         await remove_from_team_policy_group(team.id, member_user_id)
 
-    return {"removed": True}
+    from open_webui.models.users import Users as UsersModel
+
+    # Only the fields the owner already sees in the team list, never the full UserModel.
+    member = await UsersModel.get_user_by_id(member_user_id)
+    return {
+        "removed": True,
+        "member": (
+            {"id": member.id, "email": member.email, "name": member.name} if member else None
+        ),
+    }
 
 
 @router.post("/team/portal", response_model=PortalResponse)

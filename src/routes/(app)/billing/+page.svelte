@@ -231,8 +231,8 @@
 		pendingRemoveUserId = null;
 		pendingRemoveName = null;
 		try {
-			await removeTeamMember(localStorage.token, userId);
-			toast.success($i18n.t('{{name}} removed from team', { name }));
+			const res = await removeTeamMember(localStorage.token, userId);
+			toast.success($i18n.t('{{name}} removed from team', { name: res.member?.name ?? name }));
 			teamStatus = await getTeamStatus(localStorage.token);
 		} catch (e: any) {
 			toast.error(e?.message ?? $i18n.t('Failed to remove member'));

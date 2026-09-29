@@ -460,14 +460,19 @@ def test_the_route_still_takes_no_db_parameter():
 
 
 @asynccontextmanager
-async def _removal_route(revert_raises=False):
+async def _removal_route(revert_raises=False, member_row="default"):
     """`remove_team_member` with its collaborators replaced.
 
     Yields the mock standing in for the policy-group removal, so a test can ask
     whether the route reached it.
     """
+    from open_webui.models.users import Users
     from open_webui.routers import billing as route_mod
 
+    if member_row == "default":
+        member_row = SimpleNamespace(
+            id="u-member", email="ana@example.com", name="Ana", date_of_birth="1990-01-01"
+        )
     team = SimpleNamespace(id="T1", owner_user_id="owner")
     move = AsyncMock()
     revert = AsyncMock(side_effect=RuntimeError("billing is down") if revert_raises else None)
@@ -479,6 +484,8 @@ async def _removal_route(revert_raises=False):
         route_mod.StripeBillings, "revert_to_trial", revert
     ), patch.object(
         route_mod, "remove_from_team_policy_group", move
+    ), patch.object(
+        Users, "get_user_by_id", AsyncMock(return_value=member_row)
     ):
         yield move
 
@@ -515,9 +522,22 @@ async def test_an_ordinary_removal_still_reports_success():
 
     async with _removal_route() as move:
         assert await remove_team_member("u-member", user=SimpleNamespace(id="owner")) == {
-            "removed": True
+            "removed": True,
+            "member": {"id": "u-member", "email": "ana@example.com", "name": "Ana"},
         }
         move.assert_awaited_once_with("T1", "u-member")
+
+
+@pytest.mark.asyncio
+async def test_a_removal_succeeds_when_the_user_row_is_missing():
+    """The member is already removed, so a missing user row gives `member: None`, not an error."""
+    from open_webui.routers.billing import remove_team_member
+
+    async with _removal_route(member_row=None):
+        assert await remove_team_member("u-member", user=SimpleNamespace(id="owner")) == {
+            "removed": True,
+            "member": None,
+        }
 
 
 @pytest.mark.asyncio

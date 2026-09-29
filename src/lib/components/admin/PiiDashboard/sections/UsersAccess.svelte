@@ -190,8 +190,8 @@
 						? $i18n.t("{{name}} is now in your team's policy.", { name: row.name })
 						: $i18n.t("{{name}} is no longer in your team's policy.", { name: row.name })
 					: mode === 'enforce'
-						? $i18n.t('PII masking is now enforced for this user.')
-						: $i18n.t('PII masking is no longer enforced for this user.')
+						? $i18n.t('PII masking is now enforced for {{name}}.', { name: row.name })
+						: $i18n.t('PII masking is no longer enforced for {{name}}.', { name: row.name })
 			);
 			pending = null;
 			// Re-read rather than patch the row: the effective policy is a server-side

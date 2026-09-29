@@ -856,17 +856,17 @@ class GroupTable:
                 if group_enforces_pii_masking(group.permissions) and not self._has_reason(reason):
                     # Only actual members count. Removing a non-member changes
                     # nothing, so it needs no reason and is not refused.
-                    current = await db.execute(
+                    result = await db.execute(
                         select(GroupMember.user_id).filter(
                             GroupMember.group_id == id, GroupMember.user_id.in_(user_ids)
                         )
                     )
-                    losing = {uid for (uid,) in current.all()}
-                    if losing:
+                    dropped = {uid for (uid,) in result.all()}
+                    if dropped:
                         log.warning(
                             'Refusing to remove %d member(s) from group %s: it enforces PII '
                             'masking and no reason was given.',
-                            len(losing),
+                            len(dropped),
                             id,
                         )
                         return None

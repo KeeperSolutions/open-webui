@@ -326,6 +326,23 @@ describe('what an admin sees for somebody else’s team member', () => {
 		expect(text).toContain(TEAM_NAME);
 		expect(text).not.toContain(TEAM_ID);
 	});
+
+	it('names the person in the success message', async () => {
+		vi.clearAllMocks();
+		vi.mocked(removeUserFromGroup).mockResolvedValue({} as never);
+		mountAdmin(['g1']);
+		screen.getByText('Remove').click();
+		await new Promise((r) => setTimeout(r, 0));
+		await fireEvent.input(document.querySelector('#pii-policy-reason')!, {
+			target: { value: 'left the project' }
+		});
+		[...document.querySelectorAll('[role="dialog"] button')]
+			.find((b) => b.textContent?.trim() === 'Remove')!
+			.click();
+		await new Promise((r) => setTimeout(r, 0));
+
+		expect(toast.success).toHaveBeenCalledWith('PII masking is no longer enforced for Ana.');
+	});
 });
 
 describe('what a team owner sees, and what must never be in the page', () => {
@@ -527,9 +544,7 @@ describe("the owner's success message", () => {
 		await confirm('Remove from team policy');
 
 		expect(toast.success).toHaveBeenCalledWith("Ana is no longer in your team's policy.");
-		expect(toast.success).not.toHaveBeenCalledWith(
-			'PII masking is no longer enforced for this user.'
-		);
+		expect(toast.success).not.toHaveBeenCalledWith('PII masking is no longer enforced for Ana.');
 	});
 
 	it('reports the addition as membership too', async () => {
