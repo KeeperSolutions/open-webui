@@ -101,7 +101,11 @@ export const downloadGoogleDriveDocument = async (
 	return result;
 };
 
-export const saveDocumentToGoogleDrive = async (token: string, fileId: string) => {
+export const saveDocumentToGoogleDrive = async (
+	token: string,
+	fileId: string,
+	chatId: string | null = null
+) => {
 	let error = null;
 	const res = await fetch(`${WEBUI_API_BASE_URL}/connectors/google-drive/save/${fileId}`, {
 		method: 'POST',
@@ -109,7 +113,7 @@ export const saveDocumentToGoogleDrive = async (token: string, fileId: string) =
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
 		},
-		body: JSON.stringify({})
+		body: JSON.stringify({ chat_id: chatId ?? '' })
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();

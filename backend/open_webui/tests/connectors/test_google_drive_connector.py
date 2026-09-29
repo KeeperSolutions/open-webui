@@ -264,7 +264,9 @@ def stored_files(tmp_path, *files):
     (tmp_path / 'bytes').write_bytes(b'bytes')
     update = AsyncMock()
     with (
-        patch('open_webui.models.files.Files.get_file_by_id', AsyncMock(side_effect=lambda file_id: by_id.get(file_id))),
+        patch(
+            'open_webui.models.files.Files.get_file_by_id', AsyncMock(side_effect=lambda file_id: by_id.get(file_id))
+        ),
         patch('open_webui.models.files.Files.update_file_metadata_by_id', update),
         patch('open_webui.storage.provider.Storage.get_file', lambda path: str(tmp_path / 'bytes')),
     ):
@@ -302,7 +304,13 @@ class TestDriveSaveDocuments:
         assert seen_confirmation_data['title'] == 'Save 2 files to Google Drive?'
         assert emitted[0] == {
             'type': 'chat:message:document',
-            'data': {'file_id': 'f1', 'name': 'Report', 'format': 'docx', 'drive_id': 'drive-Report', 'web_link': 'https://docs/Report'},
+            'data': {
+                'file_id': 'f1',
+                'name': 'Report',
+                'format': 'docx',
+                'drive_id': 'drive-Report',
+                'web_link': 'https://docs/Report',
+            },
         }
         update.assert_any_await('f1', {'drive': {'id': 'drive-Report', 'web_link': 'https://docs/Report'}})
 
@@ -323,6 +331,7 @@ class TestDriveSaveDocuments:
             {'name': 'f2', 'error': 'This document no longer exists.'},
             {'name': 'Offline.pdf', 'error': "Couldn't reach Google Drive - try again in a moment."},
         ]
+        assert 'which documents were not saved' in result['note']
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('trashed, uploads', [(False, []), (True, ['Report'])])
@@ -346,19 +355,48 @@ class TestDriveSaveDocuments:
         assert client.uploaded_names == []
 
 
+SAVED_REPORT = {
+    'file_id': 'f1',
+    'name': 'Report',
+    'format': 'docx',
+    'drive_id': 'drive-Report',
+    'web_link': 'https://docs/Report',
+}
+
+
 class TestSaveDocumentEndpoint:
+    async def save(self, chat_id=''):
+        return await connectors.save_document_to_google_drive(
+            'f1', connectors.SaveDocumentForm(chat_id=chat_id), user=SimpleNamespace(id=USER['id'])
+        )
+
     @pytest.mark.asyncio
     async def test_returns_the_saved_document(self, tmp_path):
-        with stored_files(tmp_path, stored_file('f1', 'Report.docx')), patch('httpx.AsyncClient', return_value=DriveSaveClient()):
-            result = await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx')), patch(
+            'httpx.AsyncClient', return_value=DriveSaveClient()
+        ):
+            result = await self.save()
 
-        assert result == {'file_id': 'f1', 'name': 'Report', 'format': 'docx', 'drive_id': 'drive-Report', 'web_link': 'https://docs/Report'}
+        assert result == SAVED_REPORT
+
+    @pytest.mark.asyncio
+    async def test_saving_from_a_chat_updates_its_card_so_the_link_survives_a_reload(self, tmp_path):
+        upsert = AsyncMock()
+        with (
+            stored_files(tmp_path, stored_file('f1', 'Report.docx')),
+            patch('httpx.AsyncClient', return_value=DriveSaveClient()),
+            patch.object(connectors.Chats, 'get_chat_by_id_and_user_id', AsyncMock(return_value=object())),
+            patch('open_webui.socket.main.upsert_document_card', upsert),
+        ):
+            await self.save(chat_id='chat-1')
+
+        upsert.assert_awaited_once_with('chat-1', '', SAVED_REPORT, update_only=True)
 
     @pytest.mark.asyncio
     async def test_drive_not_connected_is_a_distinct_409(self):
         with patch('open_webui.routers.connectors.get_valid_access_token', new=AsyncMock(return_value=None)):
             with pytest.raises(HTTPException) as e:
-                await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+                await self.save()
 
         assert e.value.status_code == 409
         assert e.value.detail == 'drive_not_connected'
@@ -367,9 +405,17 @@ class TestSaveDocumentEndpoint:
     async def test_another_users_document_is_not_found(self, tmp_path):
         with stored_files(tmp_path, stored_file('f1', 'Report.docx', user_id='someone-else')):
             with pytest.raises(HTTPException) as e:
-                await connectors.save_document_to_google_drive('f1', user=SimpleNamespace(id=USER['id']))
+                await self.save()
 
         assert e.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_a_file_that_isnt_a_document_is_a_bad_request(self, tmp_path):
+        with stored_files(tmp_path, stored_file('f1', 'notes.txt')):
+            with pytest.raises(HTTPException) as e:
+                await self.save()
+
+        assert e.value.status_code == 400
 
     def test_non_internal_accounts_are_rejected(self):
         with pytest.raises(HTTPException) as e:
@@ -724,6 +770,36 @@ class TestDriveMoveFiles:
         # Moving creates nothing new, so no card is shown and the model isn't told there is one
         assert emitted == []
         assert 'note' not in result
+
+    @pytest.mark.asyncio
+    async def test_a_folder_name_with_braces_or_markup_is_shown_safely_in_the_confirmation(self):
+        folder = 'Q{1} <b>'
+
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                if url == f'{drive.GOOGLE_DRIVE_FILES_URL}/file1':
+                    return FakeResponse(200, {'name': 'Report.docx', 'parents': ['old-folder']})
+                return FakeResponse(200, {'files': [{'id': 'new-folder', 'name': folder}]})
+
+            async def request(self, method, url, headers=None, **kwargs):
+                return FakeResponse(200, {'id': 'file1', 'name': 'Report.docx', 'mimeType': 'text/plain'})
+
+        seen = {}
+
+        async def confirm_and_capture(payload):
+            seen.update(payload['data'])
+            return True
+
+        with patch('httpx.AsyncClient', return_value=FakeClient()):
+            result = json.loads(
+                await drive.drive_move_files(
+                    file_ids=['file1'], folder=folder,
+                    __user__=USER, __event_call__=confirm_and_capture, __event_emitter__=None,
+                )
+            )
+
+        assert result['status'] == 'success'
+        assert seen['message'] == 'Move "Report.docx" to "Q{1} &lt;b&gt;"?'
 
     @pytest.mark.asyncio
     async def test_moving_a_file_already_in_the_target_folder_errors_without_asking(self):

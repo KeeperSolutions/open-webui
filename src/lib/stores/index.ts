@@ -149,7 +149,7 @@ export const selectedTerminalId: Writable<string | null> = writable(null);
 export type ChatDocument = {
 	file_id?: string;
 	name: string;
-	format: string;
+	format?: string | null;
 	drive_id?: string;
 	web_link?: string | null;
 };

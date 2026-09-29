@@ -11,10 +11,10 @@
 		selectedDocument,
 		settings,
 		showArtifacts,
-		showControls,
-		showEmbeds
+		showControls
 	} from '$lib/stores';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
+	import { openArtifacts } from '$lib/utils/documents';
 	import { createMessagesList, replaceOutsideCode } from '$lib/utils';
 
 	/**
@@ -168,10 +168,7 @@
 		async (/** @type {string} */ value) => {
 			console.log('Preview', value);
 			await artifactCode.set(/** @type {any} */ (value));
-			selectedDocument.set(null);
-			await showControls.set(true);
-			await showArtifacts.set(true);
-			await showEmbeds.set(false);
+			openArtifacts();
 		}
 	);
 

@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-	export type RenderedDocument = {
+	type RenderedDocument = {
 		pdf?: ArrayBuffer;
 		html?: string;
 		slides?: string[];
@@ -12,16 +12,22 @@
 	const renderedDocuments = new Map<string, RenderedDocument>();
 	const RENDERED_DOCUMENTS_LIMIT = 20;
 
-	const cacheRendered = (fileId: string, rendered: RenderedDocument) => {
-		renderedDocuments.set(fileId, rendered);
+	const cacheRendered = (key: string, rendered: RenderedDocument) => {
+		renderedDocuments.set(key, rendered);
 		if (renderedDocuments.size > RENDERED_DOCUMENTS_LIMIT) {
 			renderedDocuments.delete(renderedDocuments.keys().next().value!);
 		}
 	};
+
+	export const panelIconButtonClass =
+		'p-1.5 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition disabled:opacity-60';
+
+	// The pages' 1rem padding on each side plus room for the scrollbar
+	const PAGES_SIDE_SPACE = 48;
 </script>
 
 <script lang="ts">
-	import { getContext, onDestroy, tick } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import {
 		config,
@@ -32,11 +38,13 @@
 		type ChatDocument
 	} from '$lib/stores';
 	import {
+		documentFilename,
 		documentKey,
 		downloadDocument,
+		driveActionLabel,
 		fetchDocumentBuffer,
 		openDocumentInDrive,
-		savingDocumentIds
+		savingDocumentKeys
 	} from '$lib/utils/documents';
 	import {
 		PAGE_CONTENT_WIDTH,
@@ -57,6 +65,7 @@
 	import Spinner from '../common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
+	const t = (key: string) => $i18n.t(key);
 
 	export let doc: ChatDocument;
 	export let overlay = false;
@@ -81,7 +90,8 @@
 	let probe: HTMLElement;
 	let previewWidth = 0;
 	// Pages keep their A4 size, so where they break never changes, and only scale down to fit a narrow panel
-	$: pageZoom = previewWidth ? Math.min(1, (previewWidth - 48) / PAGE_WIDTH) : 1;
+	$: pageZoom = previewWidth ? Math.min(1, (previewWidth - PAGES_SIDE_SPACE) / PAGE_WIDTH) : 1;
+	$: saving = $savingDocumentKeys.includes(documentKey(doc));
 
 	const sheetHtml = async (workbook: import('xlsx').WorkBook, sheet: string) => {
 		const { excelToTable } = await import('$lib/utils/excelToTable');
@@ -92,8 +102,10 @@
 
 	const renderSheet = async (sheet: string) => {
 		if (!excelWorkbook) return;
+		const id = loadId;
 		selectedExcelSheet = sheet;
-		fileOfficeHtml = await sheetHtml(excelWorkbook, sheet);
+		const html = await sheetHtml(excelWorkbook, sheet);
+		if (id === loadId) fileOfficeHtml = html;
 	};
 
 	const render = async (target: ChatDocument, id: number): Promise<RenderedDocument | null> => {
@@ -112,7 +124,6 @@
 			);
 			const DOMPurify = (await import('dompurify')).default;
 			await document.fonts?.ready;
-			if (!probe) await tick();
 			if (id !== loadId) return null;
 			const pages = paginateDocument(DOMPurify.sanitize(res.value), probe);
 			return {
@@ -151,6 +162,7 @@
 		const id = ++loadId;
 		const cached = renderedDocuments.get(documentKey(target));
 		if (cached) {
+			pending = false;
 			show(cached);
 			return;
 		}
@@ -165,7 +177,7 @@
 			console.error('Failed to preview document:', e);
 			if (id === loadId) {
 				show({
-					content: `${$i18n.t('Error previewing file')}: ${e instanceof Error ? e.message : e}`
+					content: `${t('Error previewing file')}: ${e instanceof Error ? e.message : t(`${e}`)}`
 				});
 			}
 		} finally {
@@ -197,9 +209,6 @@
 		};
 	};
 
-	const iconButtonClass =
-		'p-1.5 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition disabled:opacity-60';
-
 	const close = () => {
 		expanded = false;
 		showControls.set(false);
@@ -229,7 +238,7 @@
 			{#if $showDocumentList}
 				<Tooltip content={$i18n.t('Back to files')}>
 					<button
-						class="{iconButtonClass} -ml-1"
+						class="{panelIconButtonClass} -ml-1"
 						type="button"
 						aria-label={$i18n.t('Back to files')}
 						on:click={() => showArtifacts.set(false)}
@@ -250,18 +259,15 @@
 
 		<div class="flex items-center gap-0.5 shrink-0">
 			{#if $config?.features?.enable_google_drive_connector}
-				<Tooltip content={doc.web_link ? $i18n.t('Open in Drive') : $i18n.t('Add to Drive')}>
+				<Tooltip content={driveActionLabel(doc, t)}>
 					<button
-						class={iconButtonClass}
+						class={panelIconButtonClass}
 						type="button"
-						aria-label={doc.web_link ? $i18n.t('Open in Drive') : $i18n.t('Add to Drive')}
-						disabled={$savingDocumentIds.includes(documentKey(doc))}
-						on:click={async () => {
-							await openDocumentInDrive(doc, (key) => $i18n.t(key));
-							doc = doc;
-						}}
+						aria-label={driveActionLabel(doc, t)}
+						disabled={saving}
+						on:click={() => openDocumentInDrive(doc, t)}
 					>
-						{#if $savingDocumentIds.includes(documentKey(doc))}
+						{#if saving}
 							<Spinner className="size-4" />
 						{:else}
 							<GoogleDrive className="size-4 shrink-0" />
@@ -272,10 +278,10 @@
 
 			<Tooltip content={$i18n.t('Download')}>
 				<button
-					class={iconButtonClass}
+					class={panelIconButtonClass}
 					type="button"
 					aria-label={$i18n.t('Download')}
-					on:click={() => downloadDocument(doc)}
+					on:click={() => downloadDocument(doc, t)}
 				>
 					<Download className="size-4" />
 				</button>
@@ -283,7 +289,7 @@
 
 			<Tooltip content={expanded ? $i18n.t('Exit full screen') : $i18n.t('Open in full screen')}>
 				<button
-					class={iconButtonClass}
+					class={panelIconButtonClass}
 					type="button"
 					aria-label={expanded ? $i18n.t('Exit full screen') : $i18n.t('Open in full screen')}
 					on:click={() => (expanded = !expanded)}
@@ -298,7 +304,7 @@
 
 			<Tooltip content={$i18n.t('Close')}>
 				<button
-					class={iconButtonClass}
+					class={panelIconButtonClass}
 					type="button"
 					aria-label={$i18n.t('Close')}
 					on:click={close}
@@ -331,7 +337,7 @@
 			<div class="h-full" in:fade={{ duration: 200 }}>
 				<FilePreview
 					bind:currentSlide
-					selectedFile={`${doc.name}.${doc.format}`}
+					selectedFile={documentFilename(doc)}
 					{filePdfData}
 					{fileOfficeHtml}
 					{fileOfficeSlides}
@@ -375,7 +381,7 @@
 			0 1px 3px rgba(0, 0, 0, 0.12),
 			0 4px 16px rgba(0, 0, 0, 0.06);
 	}
-	/* Measures blocks at the real page width without being seen, and flow-root matches how margins sit inside a padded page */
+	/* Measures blocks at the real page width without being seen */
 	.document-probe {
 		position: absolute;
 		top: 0;
@@ -385,6 +391,7 @@
 		visibility: hidden;
 		pointer-events: none;
 	}
+	/* Keeps margins inside the box the same way the padding of a real page does */
 	.document-probe-content {
 		display: flow-root;
 	}

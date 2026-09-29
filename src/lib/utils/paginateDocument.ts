@@ -3,7 +3,7 @@ export const PAGE_WIDTH = 794;
 export const PAGE_HEIGHT = 1123;
 export const PAGE_MARGIN = 96;
 export const PAGE_CONTENT_WIDTH = PAGE_WIDTH - 2 * PAGE_MARGIN;
-export const PAGE_CONTENT_HEIGHT = PAGE_HEIGHT - 2 * PAGE_MARGIN;
+const PAGE_CONTENT_HEIGHT = PAGE_HEIGHT - 2 * PAGE_MARGIN;
 
 const isPageBreak = (el: Element) => el.tagName === 'HR' && el.classList.contains('page-break');
 

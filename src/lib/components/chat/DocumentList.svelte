@@ -3,6 +3,7 @@
 	import { showControls, showDocumentList, type ChatDocument } from '$lib/stores';
 
 	import DocumentCard from './Messages/DocumentCard.svelte';
+	import { panelIconButtonClass } from './DocumentPreview.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import XMark from '../icons/XMark.svelte';
 
@@ -26,7 +27,7 @@
 
 		<Tooltip content={$i18n.t('Close')}>
 			<button
-				class="p-1.5 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition"
+				class={panelIconButtonClass}
 				type="button"
 				aria-label={$i18n.t('Close')}
 				on:click={close}

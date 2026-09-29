@@ -2,9 +2,11 @@ import { get, writable } from 'svelte/store';
 import { toast } from 'svelte-sonner';
 import fileSaver from 'file-saver';
 import {
+	chatId,
 	selectedDocument,
 	showArtifacts,
 	showControls,
+	showDocumentList,
 	showEmbeds,
 	showSettings,
 	type ChatDocument
@@ -14,9 +16,13 @@ import { downloadGoogleDriveDocument, saveDocumentToGoogleDrive } from '$lib/api
 
 const { saveAs } = fileSaver;
 
-type Translate = (key: string) => string;
+export type Translate = (key: string) => string;
 
-export const savingDocumentIds = writable<string[]>([]);
+// Keys of the documents being saved to Drive right now, so every card and preview of one shows it
+export const savingDocumentKeys = writable<string[]>([]);
+
+// A change to a card made outside a chat event (a Drive save from a button), applied by Chat.svelte like one
+export const documentUpdates = writable<ChatDocument | null>(null);
 
 // A card is one file, known by its stored file_id, its Drive id, or both once it has been saved to Drive
 export const documentKey = (doc: ChatDocument) => doc.file_id ?? doc.drive_id ?? '';
@@ -26,6 +32,9 @@ export const isSameDocument = (a: ChatDocument, b: ChatDocument) =>
 
 export const documentFilename = (doc: ChatDocument) =>
 	doc.format ? `${doc.name}.${doc.format}` : doc.name;
+
+export const driveActionLabel = (doc: ChatDocument, t: Translate) =>
+	t(doc.web_link ? 'Open in Drive' : 'Add to Drive');
 
 type HistoryWithDocuments = {
 	messages?: Record<string, { timestamp?: number; documents?: ChatDocument[] }>;
@@ -61,13 +70,28 @@ export const mergeDuplicateDocuments = (history: HistoryWithDocuments) => {
 	}
 };
 
+// Merges a change into the card the chat already shows for that document, and says whether there was one
+export const updateDocumentCard = (history: HistoryWithDocuments, data: ChatDocument) => {
+	const owner = Object.values(history?.messages ?? {}).find((message) =>
+		message.documents?.some((doc) => isSameDocument(doc, data))
+	);
+	if (!owner?.documents) return false;
+
+	owner.documents = owner.documents.map((doc) =>
+		isSameDocument(doc, data)
+			? Object.assign(doc, data, { format: doc.format || data.format })
+			: doc
+	);
+	// The open preview holds the same object, so it is told to pick up the change too
+	const selected = get(selectedDocument);
+	if (selected && isSameDocument(selected, data)) selectedDocument.set(selected);
+	return true;
+};
+
 // The file itself, from our own storage or, for a card that only exists in Drive, through the Drive connector
 const fetchDocumentBlob = async (doc: ChatDocument): Promise<Blob> => {
-	if (doc.file_id) {
-		const result = await downloadFileById(localStorage.token, doc.file_id);
-		if (!result) throw 'Server connection failed';
-		return result.blob;
-	}
+	if (doc.file_id) return downloadFileById(localStorage.token, doc.file_id);
+
 	const result = await downloadGoogleDriveDocument(
 		localStorage.token,
 		doc.drive_id ?? '',
@@ -88,9 +112,24 @@ export const openDocumentPreview = (doc: ChatDocument) => {
 	showArtifacts.set(true);
 };
 
-export const downloadDocument = async (doc: ChatDocument) => {
+export const openDocumentList = () => {
+	showArtifacts.set(false);
+	showEmbeds.set(false);
+	showDocumentList.set(true);
+	showControls.set(true);
+};
+
+// Artifacts share the side panel with the document preview, which would otherwise stay on top of them
+export const openArtifacts = () => {
+	selectedDocument.set(null);
+	showEmbeds.set(false);
+	showControls.set(true);
+	showArtifacts.set(true);
+};
+
+export const downloadDocument = async (doc: ChatDocument, t: Translate) => {
 	const blob = await fetchDocumentBlob(doc).catch((error) => {
-		toast.error(`${error}`);
+		toast.error(t(`${error}`));
 		return null;
 	});
 	if (blob) {
@@ -127,7 +166,7 @@ export const downloadAllDocuments = async (docs: ChatDocument[], t: Translate) =
 	}
 };
 
-// Saves the document to Drive on first use and mutates it in place with the returned link, so every holder of it sees the link
+// Opens the document in Drive, saving it there first if it isn't yet, and reports the new link to every card of it
 export const openDocumentInDrive = async (doc: ChatDocument, t: Translate) => {
 	if (doc.web_link) {
 		window.open(doc.web_link, '_blank', 'noopener,noreferrer');
@@ -135,21 +174,27 @@ export const openDocumentInDrive = async (doc: ChatDocument, t: Translate) => {
 	}
 	// Without a link the card is one of ours not yet in Drive, so it has a stored file to save
 	const fileId = doc.file_id;
-	if (!fileId || get(savingDocumentIds).includes(fileId)) return;
+	if (!fileId || get(savingDocumentKeys).includes(fileId)) return;
 
 	// Opened before the await so the popup blocker still sees it as part of the click
 	const tab = window.open('', '_blank');
-	savingDocumentIds.update((ids) => [...ids, fileId]);
+	savingDocumentKeys.update((keys) => [...keys, fileId]);
 
 	try {
-		const saved = await saveDocumentToGoogleDrive(localStorage.token, fileId);
-		Object.assign(doc, saved);
+		const saved = await saveDocumentToGoogleDrive(localStorage.token, fileId, get(chatId));
+		documentUpdates.set(saved);
 
 		if (tab) {
 			tab.opener = null;
 			tab.location.href = saved.web_link;
 		} else {
-			window.open(saved.web_link, '_blank', 'noopener,noreferrer');
+			// The blank tab was blocked, and a new one opened after the await would be too, so the link is offered instead
+			toast.success(t('Saved to Google Drive.'), {
+				action: {
+					label: t('Open in Drive'),
+					onClick: () => window.open(saved.web_link, '_blank', 'noopener,noreferrer')
+				}
+			});
 		}
 	} catch (error) {
 		tab?.close();
@@ -161,9 +206,9 @@ export const openDocumentInDrive = async (doc: ChatDocument, t: Translate) => {
 				}
 			});
 		} else {
-			toast.error(`${error}`);
+			toast.error(t(`${error}`));
 		}
 	} finally {
-		savingDocumentIds.update((ids) => ids.filter((id) => id !== fileId));
+		savingDocumentKeys.update((keys) => keys.filter((key) => key !== fileId));
 	}
 };

@@ -115,4 +115,6 @@ async def test_drive_only_documents_are_matched_by_their_drive_id():
     upsert = await emit_document(messages, {'drive_id': 'd-1', 'name': 'Copy', 'format': 'xlsx', 'web_link': 'b'})
 
     assert upsert.await_args.args[1] == 'message-1'
-    assert upsert.await_args.args[2] == {'documents': [{'drive_id': 'd-1', 'name': 'Copy', 'format': 'xlsx', 'web_link': 'b'}]}
+    assert upsert.await_args.args[2] == {
+        'documents': [{'drive_id': 'd-1', 'name': 'Copy', 'format': 'xlsx', 'web_link': 'b'}]
+    }

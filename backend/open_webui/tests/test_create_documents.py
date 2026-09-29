@@ -28,7 +28,7 @@ def fake_build(format, name, content):
 async def create(files, upload=None, chat_id='chat-1', emitted=None):
     stored = []
 
-    async def default_upload(request, file, metadata, process, user):
+    async def default_upload(request, file, process, user):
         stored.append({'filename': file.filename, 'content_type': file.content_type, 'process': process})
         return SimpleNamespace(id=f'file-{len(stored)}')
 
@@ -82,7 +82,7 @@ async def test_stores_each_document_links_it_to_the_chat_and_emits_a_card():
 async def test_one_failed_build_or_store_does_not_fail_the_rest():
     stored = []
 
-    async def upload(request, file, metadata, process, user):
+    async def upload(request, file, process, user):
         if file.filename == 'Huge.pdf':
             raise HTTPException(status_code=413, detail='File too large')
         stored.append(file.filename)
@@ -100,9 +100,9 @@ async def test_one_failed_build_or_store_does_not_fail_the_rest():
 
     assert result['status'] == 'partial'
     assert stored == ['Report.docx']
-    assert [f['name'] for f in result['failed']] == ['Notes.odt', 'Broken.xlsx', 'Huge.pdf']
-    assert result['failed'][2]['error'] == "Couldn't save this document - File too large"
-    assert built_in.DOCUMENT_FAILURES_NOTE in result['note']
+    assert [f['name'] for f in result['failed']] == ['Broken.xlsx', 'Huge.pdf', 'Notes.odt']
+    assert result['failed'][1]['error'] == "Couldn't save this document - File too large"
+    assert 'which documents were not created' in result['note']
 
 
 @pytest.mark.asyncio
@@ -113,3 +113,28 @@ async def test_temporary_chat_skips_chat_file_linking():
 
     assert result['status'] == 'success'
     insert_chat_files.assert_not_awaited()
+
+
+async def builtin_tool_names(model):
+    from open_webui.utils.tools import get_builtin_tools
+
+    # An admin outside the internal domains skips permission and connector lookups, leaving only model-driven tools
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(config=SimpleNamespace(USER_PERMISSIONS={}))),
+        state=SimpleNamespace(),
+    )
+    tools = await get_builtin_tools(request, {'__user__': {**USER, 'role': 'admin'}}, model=model)
+    return set(tools)
+
+
+@pytest.mark.asyncio
+async def test_every_model_can_create_documents_by_default():
+    assert 'create_documents' in await builtin_tool_names({'info': {'meta': {}}})
+
+
+@pytest.mark.asyncio
+async def test_turning_off_the_documents_toggle_removes_create_documents_from_the_model():
+    names = await builtin_tool_names({'info': {'meta': {'builtinTools': {'documents': False}}}})
+
+    assert 'create_documents' not in names
+    assert 'get_current_timestamp' in names

@@ -22,7 +22,8 @@
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
-		user
+		user,
+		type ChatDocument
 	} from '$lib/stores';
 
 	import { uploadFile } from '$lib/apis/files';
@@ -34,7 +35,6 @@
 	import Artifacts from './Artifacts.svelte';
 	import DocumentPreview from './DocumentPreview.svelte';
 	import DocumentList from './DocumentList.svelte';
-	import { collectChatDocuments } from '$lib/utils/documents';
 	import Embeds from './ChatControls/Embeds.svelte';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
@@ -43,6 +43,7 @@
 	const i18n = getContext('i18n');
 
 	export let history;
+	export let chatDocuments: ChatDocument[] = [];
 	export let models = [];
 
 	export let chatId = null;
@@ -163,8 +164,6 @@
 			toast.error($i18n.t('Failed to attach file'));
 		}
 	};
-
-	$: chatDocuments = collectChatDocuments(history);
 
 	// Documents need room to be read, so their preview opens at least this share of the width
 	const DOCUMENT_PANE_MIN_SIZE = 45;

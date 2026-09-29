@@ -14,6 +14,7 @@ from open_webui.config import (
     GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI,
 )
 from open_webui.env import INTERNAL_EMAIL_DOMAINS
+from open_webui.models.chats import Chats
 from open_webui.models.connector_connections import ConnectorConnections
 from open_webui.utils.auth import (
     create_token,
@@ -326,39 +327,40 @@ async def download_google_drive_document(
 
 
 class SaveDocumentForm(BaseModel):
-    folder: str = ''
+    chat_id: str = ''
 
 
 @router.post('/google-drive/save/{file_id}')
 async def save_document_to_google_drive(
     file_id: str,
-    form_data: SaveDocumentForm | None = None,
+    form_data: SaveDocumentForm,
     user=Depends(get_internal_drive_user),
 ):
-    from open_webui.tools.built_in import (
-        _drive_load_stored_documents,
-        _drive_resolve_optional_folder,
-        _drive_save_stored_documents,
-    )
+    from open_webui.socket.main import upsert_document_card
+    from open_webui.tools.built_in import DOCUMENT_MISSING_ERROR, load_stored_documents, save_stored_documents_to_drive
 
     access_token = await get_valid_access_token(user.id)
     if not access_token:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_not_connected')
 
-    documents, failed = await _drive_load_stored_documents(user.id, [file_id])
+    documents, failed = await load_stored_documents(user.id, [file_id])
     if failed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=failed[0]['error'])
+        missing = failed[0]['error'] == DOCUMENT_MISSING_ERROR
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if missing else status.HTTP_400_BAD_REQUEST,
+            detail=failed[0]['error'],
+        )
 
-    headers = {'Authorization': f'Bearer {access_token}'}
-    folder_id = None
-    if form_data and form_data.folder:
-        folder_id, folder_error = await _drive_resolve_optional_folder(headers, form_data.folder)
-        if folder_error:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=folder_error)
-
-    saved, failed = await _drive_save_stored_documents(headers, documents, folder_id)
+    saved, failed = await save_stored_documents_to_drive({'Authorization': f'Bearer {access_token}'}, documents)
     if failed:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=failed[0]['error'])
+
+    # The card keeps its Drive link after a reload, and a later rename in Drive can still find it
+    if form_data.chat_id and await Chats.get_chat_by_id_and_user_id(form_data.chat_id, user.id):
+        try:
+            await upsert_document_card(form_data.chat_id, '', saved[0], update_only=True)
+        except Exception as e:
+            log.exception(f'Updating the document card in chat {form_data.chat_id} failed: {e}')
     return saved[0]
 
 

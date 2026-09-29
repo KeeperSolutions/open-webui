@@ -1,4 +1,7 @@
 <script context="module" lang="ts">
+	import type { ChatDocument } from '$lib/stores';
+	import type { Translate } from '$lib/utils/documents';
+
 	const formatKinds: Record<string, string> = {
 		docx: 'Document',
 		xlsx: 'Spreadsheet',
@@ -6,10 +9,7 @@
 	};
 
 	// Reads like "Document · DOCX", or just "PDF" where the kind and the extension are the same word
-	export const documentTypeLabel = (
-		format: string | null | undefined,
-		t: (key: string) => string
-	) => {
+	export const documentTypeLabel = (format: ChatDocument['format'], t: Translate) => {
 		const ext = (format ?? '').toUpperCase();
 		const kind = formatKinds[format ?? ''];
 		return kind ? `${t(kind)} · ${ext}` : ext || t('File');
@@ -20,7 +20,7 @@
 	import DriveXlsxGlyph from '$lib/components/icons/DriveXlsxGlyph.svelte';
 	import DriveDocGlyph from '$lib/components/icons/DriveDocGlyph.svelte';
 
-	export let format: string | null | undefined = null;
+	export let format: ChatDocument['format'] = null;
 
 	// Matches Google Drive's own per-type colors (Docs blue, Sheets green, Slides yellow, PDF red)
 	const formatColors: Record<string, string> = {
@@ -40,7 +40,7 @@
 	{:else if format === 'xlsx'}
 		<DriveXlsxGlyph />
 	{:else}
-		<!-- Also covers pptx: a blank slide, matching the plain colored-block look -->
+		<!-- Also covers pptx and unknown formats, matching the plain colored-block look -->
 		<DriveDocGlyph />
 	{/if}
 </div>

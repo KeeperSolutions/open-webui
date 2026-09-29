@@ -70,9 +70,11 @@
 	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
 	import {
-		isSameDocument,
+		collectChatDocuments,
+		documentUpdates,
 		mergeDuplicateDocuments,
-		openDocumentPreview
+		openDocumentPreview,
+		updateDocumentCard
 	} from '$lib/utils/documents';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { getOutputText } from './Messages/structuredOutput';
@@ -1161,21 +1163,8 @@
 					}
 				} else if (type === 'chat:message:document' || type === 'chat:message:document:update') {
 					// One card per document in the whole chat, so a later event for it (a Drive save, a rename) updates the card it already has
-					const owner = Object.values(history.messages).find((m) =>
-						m.documents?.some((doc) => isSameDocument(doc, data))
-					);
-					if (owner) {
-						owner.documents = owner.documents.map((doc) =>
-							isSameDocument(doc, data)
-								? Object.assign(doc, data, { format: doc.format || data.format })
-								: doc
-						);
-						// The open preview holds the same object, so it is told to pick up the change too
-						if ($selectedDocument && isSameDocument($selectedDocument, data)) {
-							selectedDocument.set($selectedDocument);
-						}
-					} else if (type === 'chat:message:document') {
-						// Only the first document a response creates opens on its own
+					if (!updateDocumentCard(history, data) && type === 'chat:message:document') {
+						// Only the first document a response creates opens on its own, Drive files never do
 						const isFirstCreated = !message.documents?.length && !data.drive_id;
 						message.documents = [...(message.documents ?? []), data];
 						if (isFirstCreated && !$mobile) {
@@ -1448,6 +1437,10 @@
 			stopAudio();
 		});
 
+		const documentUpdatesSubscribe = documentUpdates.subscribe((data) => {
+			if (data && updateDocumentCard(history, data)) history = history;
+		});
+
 		const showControlsSubscribe = showControls.subscribe(async (value) => {
 			await tick();
 			if (controlPane && !$mobile) {
@@ -1534,6 +1527,7 @@
 				}
 				pageSubscribe();
 				showControlsSubscribe();
+				documentUpdatesSubscribe();
 				selectedFolderSubscribe();
 
 				// Clear the selected chat when leaving the chat surface (e.g. navigating
@@ -1730,6 +1724,7 @@
 	};
 
 	$: onHistoryChange(history);
+	$: chatDocuments = collectChatDocuments(history);
 
 	const dispatchCallOverlayAudio = (message, final = false) => {
 		if (!$showCallOverlay) {
@@ -3993,6 +3988,7 @@
 								}
 							}}
 							{history}
+							{chatDocuments}
 							title={$chatTitle}
 							bind:selectedModels
 							shareEnabled={!!history.currentId}
@@ -4319,6 +4315,7 @@
 					<ChatControls
 						bind:this={controlPaneComponent}
 						bind:history
+						{chatDocuments}
 						bind:chatFiles
 						bind:params
 						bind:files

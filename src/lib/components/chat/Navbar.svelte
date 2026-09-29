@@ -10,12 +10,14 @@
 		mobile,
 		settings,
 		showArtifacts,
+		showCallOverlay,
 		showControls,
 		showDocumentList,
 		showEmbeds,
 		showSidebar,
 		temporaryChatEnabled,
-		user
+		user,
+		type ChatDocument
 	} from '$lib/stores';
 
 	import { slide } from 'svelte/transition';
@@ -39,7 +41,7 @@
 	import ChatCheck from '../icons/ChatCheck.svelte';
 	import Knobs from '../icons/Knobs.svelte';
 	import Document from '../icons/Document.svelte';
-	import { collectChatDocuments } from '$lib/utils/documents';
+	import { openDocumentList } from '$lib/utils/documents';
 	import { isTemporaryChatId } from '$lib/utils/chatId';
 
 	const i18n = getContext('i18n');
@@ -52,6 +54,7 @@
 
 	export let chat;
 	export let history;
+	export let chatDocuments: ChatDocument[] = [];
 	export let title = '';
 	export let selectedModels = [''];
 	export let showModelSelector = true;
@@ -73,19 +76,12 @@
 	let showShareChatModal = false;
 	let showDownloadChatModal = false;
 
-	$: hasDocuments = collectChatDocuments(history).length > 0;
-	$: documentListOpen = $showControls && $showDocumentList && !$showArtifacts;
+	$: documentListOpen =
+		$showControls && $showDocumentList && !$showArtifacts && !$showEmbeds && !$showCallOverlay;
 
 	const toggleDocumentList = () => {
-		if (documentListOpen) {
-			showControls.set(false);
-			return;
-		}
-		// Leaving an open preview or embed shows the list in its place
-		showArtifacts.set(false);
-		showEmbeds.set(false);
-		showDocumentList.set(true);
-		showControls.set(true);
+		if (documentListOpen) showControls.set(false);
+		else openDocumentList();
 	};
 </script>
 
@@ -263,14 +259,14 @@
 						</Tooltip>
 					{/if}
 
-					{#if hasDocuments}
+					{#if chatDocuments.length > 0}
 						<Tooltip content={$i18n.t('Files')}>
 							<button
 								class="flex cursor-pointer items-center justify-center rounded-lg transition hover:bg-gray-50/40 hover:text-gray-700 dark:hover:bg-gray-800/40 dark:hover:text-gray-200 {documentListOpen
 									? 'text-gray-700 dark:text-gray-200'
 									: 'text-gray-500 dark:text-gray-400'} {$mobile ? 'size-9' : 'size-6'}"
 								on:click={toggleDocumentList}
-								aria-label="Files"
+								aria-label={$i18n.t('Files')}
 								aria-pressed={documentListOpen}
 							>
 								<Document className={$mobile ? 'size-5.5' : 'size-4.5'} strokeWidth="1.5" />

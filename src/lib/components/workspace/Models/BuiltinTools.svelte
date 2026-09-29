@@ -31,6 +31,12 @@
 			label: $i18n.t('Files'),
 			description: $i18n.t('List, search, and read files attached to the current chat')
 		},
+		documents: {
+			label: $i18n.t('Documents'),
+			description: $i18n.t(
+				'Create Word, Excel, PowerPoint, and PDF files the user can preview and download'
+			)
+		},
 		channels: {
 			label: $i18n.t('Channels'),
 			description: $i18n.t('Search channels and channel messages')

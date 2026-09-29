@@ -13,6 +13,7 @@ import html
 import json
 import logging
 import mimetypes
+import threading
 import time
 from functools import lru_cache
 from typing import Annotated, Literal, Optional
@@ -4584,24 +4585,30 @@ DRIVE_NATIVE_MIME_TYPE_FORMATS = {v: k for k, v in DRIVE_DOCUMENT_NATIVE_MIME_TY
 DRIVE_NATIVE_MIME_TYPE_FORMATS['application/pdf'] = 'pdf'
 
 
+async def _emit_document_cards(event_emitter, documents: list[dict], update_only: bool = False):
+    """Show each document as a card in the chat, or with update_only just refresh the card it already has."""
+    if not event_emitter:
+        return
+    for document in documents:
+        await event_emitter(
+            {'type': 'chat:message:document:update' if update_only else 'chat:message:document', 'data': document}
+        )
+
+
 async def _drive_emit_document_card(event_emitter, f: dict, format: str = None, update_only: bool = False):
     """Show a written Drive file as a document card, the same card create_documents uses - always call this on
     success so the user gets a reliable link/download card instead of the model composing its own text link.
     With update_only it only refreshes a card the chat already shows for this file (e.g. after a rename)."""
-    if not event_emitter:
-        return
-
     format = format or DRIVE_NATIVE_MIME_TYPE_FORMATS.get(f.get('mimeType', ''))
     name = f['name']
     # Cards show the format on their own, so an uploaded "report.pdf" reads as "report"
     if format and name.lower().endswith(f'.{format}'):
         name = name[: -len(format) - 1]
 
-    await event_emitter(
-        {
-            'type': 'chat:message:document:update' if update_only else 'chat:message:document',
-            'data': {'drive_id': f['id'], 'name': name, 'format': format, 'web_link': f.get('webViewLink')},
-        }
+    await _emit_document_cards(
+        event_emitter,
+        [{'drive_id': f['id'], 'name': name, 'format': format, 'web_link': f.get('webViewLink')}],
+        update_only=update_only,
     )
 
 
@@ -4744,9 +4751,18 @@ def _apply_reference_doc_replacements(docx_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+# Docx files in one batch are built in parallel threads, and lru_cache alone would let each of them build this
+_reference_doc_lock = threading.Lock()
+
+
 @lru_cache(maxsize=1)
 def _get_pandoc_reference_doc():
     """The reference.docx for docx output - pandoc's default restyled once per process, or None if that fails."""
+    with _reference_doc_lock:
+        return _build_pandoc_reference_doc()
+
+
+def _build_pandoc_reference_doc():
     import os
     import subprocess
 
@@ -4759,16 +4775,16 @@ def _get_pandoc_reference_doc():
             [pypandoc.get_pandoc_path(), '--print-default-data-file', 'reference.docx'], capture_output=True, check=True
         ).stdout
         restyled = _apply_reference_doc_replacements(default_doc)
+
+        path = CACHE_DIR / 'pandoc' / 'reference.docx'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(f'.{os.getpid()}.tmp')
+        tmp_path.write_bytes(restyled)
+        os.replace(tmp_path, path)
+        return path
     except Exception as e:
         log.warning(f'Could not build the docx reference styles, falling back to pandoc defaults: {e}')
         return None
-
-    path = CACHE_DIR / 'pandoc' / 'reference.docx'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(f'.{os.getpid()}.tmp')
-    tmp_path.write_bytes(restyled)
-    os.replace(tmp_path, path)
-    return path
 
 
 def _build_docx_document_bytes(content: str) -> bytes:
@@ -4868,7 +4884,7 @@ class DocumentSpec(TypedDict):
     ]
 
 
-# Repeated in a failed build's error so the model can fix the content and retry
+# Told to the model when a document's content is empty or can't be built, so it can fix the content and retry
 DOCUMENT_CONTENT_HINTS = {
     'pdf': 'content must be markdown text',
     'docx': 'content must be markdown text',
@@ -4877,8 +4893,9 @@ DOCUMENT_CONTENT_HINTS = {
 }
 
 DOCUMENT_FAILURES_NOTE = (
-    'Tell the user which documents were not created and why, using `message` as-is without paraphrasing it.'
+    'Tell the user which documents were not {done} and why, using `message` as-is without paraphrasing it.'
 )
+DOCUMENT_MISSING_ERROR = 'This document no longer exists.'
 
 
 def _document_display_name(f: dict) -> str:
@@ -4917,14 +4934,15 @@ def _documents_summary_message(created: list, failed: list, action: str = 'creat
     return f'{done} {len(created)} of {total} documents. Not {done.lower()} - {not_done}'
 
 
-def _documents_result(created: list, failed: list, created_note: str = '', action: str = 'create') -> str:
+def _documents_result(done: list, failed: list, success_note: str = '', action: str = 'create') -> str:
     result = {
-        'status': _drive_batch_status(created, failed),
-        'created' if action == 'create' else 'saved': created,
+        'status': _drive_batch_status(done, failed),
+        f'{action}d': done,
         'failed': failed,
-        'message': _documents_summary_message(created, failed, action),
+        'message': _documents_summary_message(done, failed, action),
     }
-    note = ' '.join(n for n in (DOCUMENT_FAILURES_NOTE if failed else '', created_note if created else '') if n)
+    failures_note = DOCUMENT_FAILURES_NOTE.format(done=f'{action}d')
+    note = ' '.join(n for n in (failures_note if failed else '', success_note if done else '') if n)
     if note:
         result['note'] = note
     return json.dumps(result, ensure_ascii=False)
@@ -5021,7 +5039,7 @@ async def _drive_call(client, method: str, url: str, headers: dict, log_label: s
     return data, None
 
 
-# Shown to the model on every successful write - the UI already renders a card with this link
+# Shown to the model after a write that shows a Drive document card, so it doesn't repeat the link
 DRIVE_CARD_NOTE = 'A card with an Open in Drive link is already shown to the user - do not include a link or the word "here" in your reply.'
 
 
@@ -5425,7 +5443,7 @@ async def drive_save_edited_copy(
     save_name = name or f'Edit of {original_name}'
 
     display_name = f'{save_name}.{format}' if format else save_name
-    message = f'Save edit as "{display_name}"' + (f' in "{folder}"?' if folder else '?')
+    message = f'Save edit as "{html.escape(display_name)}"' + (f' in "{html.escape(folder)}"?' if folder else '?')
 
     confirmed = await __event_call__(
         {
@@ -5542,7 +5560,7 @@ async def drive_move_files(
             'type': 'confirmation',
             'data': {
                 'title': title,
-                'message': _drive_batch_message(f'Move {{}} to "{folder}"?', names),
+                'message': _drive_batch_message(f'Move {{}} to "{_drive_dialog_text(folder)}"?', names),
                 'action': 'drive_move_files',
                 'allow_remember': True,
             },
@@ -5613,6 +5631,11 @@ async def _drive_fetch_metadata_batch(client, headers: dict, file_ids: list[str]
         else:
             metadata_by_id[file_id] = metadata
     return metadata_by_id, failed
+
+
+def _drive_dialog_text(text: str) -> str:
+    """User or Drive text for a confirmation dialog, escaped for its HTML and with braces doubled for a template."""
+    return html.escape(text).replace('{', '{{').replace('}', '}}')
 
 
 def _drive_batch_message(template: str, names: dict, trailing: str = '') -> str:
@@ -5965,7 +5988,9 @@ async def drive_copy_files(
             'type': 'confirmation',
             'data': {
                 'title': title,
-                'message': _drive_batch_message('Copy {}' + (f' into "{folder}"?' if folder else '?'), names),
+                'message': _drive_batch_message(
+                    'Copy {}' + (f' into "{_drive_dialog_text(folder)}"?' if folder else '?'), names
+                ),
                 'action': 'drive_copy',
                 'allow_remember': True,
             },
@@ -6060,7 +6085,7 @@ async def drive_create_files(
 
     names = {i: f['name'] for i, f in enumerate(files)}
     title = 'Create Google Drive file?' if len(files) == 1 else f'Create {len(files)} files?'
-    message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), names)
+    message = _drive_batch_message('Create {}' + (f' in "{_drive_dialog_text(folder)}"?' if folder else '?'), names)
 
     confirmed = await __event_call__(
         {
@@ -6127,9 +6152,7 @@ async def _store_document(
         headers={'content-type': DOCUMENT_MIME_TYPES[f['format']]},
     )
     try:
-        file_item = await upload_file_handler(
-            request, file=upload, metadata={'generated_document': True}, process=False, user=user
-        )
+        file_item = await upload_file_handler(request, file=upload, process=False, user=user)
         return file_item.id, None
     except HTTPException as e:
         return None, f"Couldn't save this document - {e.detail}"
@@ -6138,14 +6161,19 @@ async def _store_document(
         return None, "Couldn't save this document - try again in a moment."
 
 
-async def _drive_load_stored_documents(user_id: str, file_ids: list[str]) -> tuple[list[dict], list[dict]]:
+async def load_stored_documents(user_id: str, file_ids: list[str]) -> tuple[list[dict], list[dict]]:
     """Look up documents made by create_documents that belong to this user, as (documents, failed)."""
     from open_webui.models.files import Files
 
+    files = await asyncio.gather(*(Files.get_file_by_id(file_id) for file_id in file_ids), return_exceptions=True)
     documents, failed = [], []
-    for file_id, file in zip(file_ids, await asyncio.gather(*(Files.get_file_by_id(file_id) for file_id in file_ids))):
+    for file_id, file in zip(file_ids, files):
+        if isinstance(file, BaseException):
+            log.error(f'Loading stored document {file_id} failed: {file}', exc_info=file)
+            failed.append({'name': file_id, 'error': "Couldn't load this document - try again in a moment."})
+            continue
         if not file or file.user_id != user_id:
-            failed.append({'name': file_id, 'error': 'This document no longer exists.'})
+            failed.append({'name': file_id, 'error': DOCUMENT_MISSING_ERROR})
             continue
         stem, _, extension = (file.meta or {}).get('name', file.filename).rpartition('.')
         if not stem or extension.lower() not in DOCUMENT_MIME_TYPES:
@@ -6214,8 +6242,8 @@ async def _drive_save_stored_document(client, headers: dict, document: dict, fol
     return _drive_saved_document(document, data['id'], data.get('webViewLink'))
 
 
-async def _drive_save_stored_documents(
-    headers: dict, documents: list[dict], folder_id: str | None
+async def save_stored_documents_to_drive(
+    headers: dict, documents: list[dict], folder_id: str | None = None
 ) -> tuple[list[dict], list[dict]]:
     """Save each stored document to Drive on its own, as (saved, failed)."""
     async with httpx.AsyncClient() as client:
@@ -6238,6 +6266,21 @@ async def _drive_save_stored_documents(
         else:
             saved.append(result)
     return saved, failed
+
+
+async def _create_document(request: Request, user: UserModel, f) -> tuple[dict | None, dict | None]:
+    """Validate, build and store one document on its own, as (created, None) or (None, failure)."""
+    f = f if isinstance(f, dict) else {}
+    f['format'] = (f.get('format') or '').lower()
+
+    error = _document_input_error(f)
+    if not error:
+        file_bytes, error = await _build_document_safe(f)
+    if not error:
+        file_id, error = await _store_document(request, user, f, file_bytes)
+    if error:
+        return None, {'name': _document_display_name(f), 'error': error}
+    return {'file_id': file_id, 'name': f['name'], 'format': f['format']}, None
 
 
 async def create_documents(
@@ -6264,44 +6307,26 @@ async def create_documents(
     if not files:
         return json.dumps({'error': 'No documents given to create.'})
 
-    valid, failed = [], []
-    for f in files:
-        f = f if isinstance(f, dict) else {}
-        f['format'] = (f.get('format') or '').lower()
-        error = _document_input_error(f)
-        if error:
-            failed.append({'name': _document_display_name(f), 'error': error})
-        else:
-            valid.append(f)
-
-    to_store = []
-    for f, (file_bytes, error) in zip(valid, await asyncio.gather(*(_build_document_safe(f) for f in valid))):
-        if error:
-            failed.append({'name': _document_display_name(f), 'error': error})
-        else:
-            to_store.append((f, file_bytes))
-
     user = UserModel(**__user__)
-    created = []
-    for f, (file_id, error) in zip(
-        [f for f, _ in to_store],
-        await asyncio.gather(*(_store_document(__request__, user, f, file_bytes) for f, file_bytes in to_store)),
-    ):
-        if error:
-            failed.append({'name': _document_display_name(f), 'error': error})
-        else:
-            created.append({'file_id': file_id, 'name': f['name'], 'format': f['format']})
+    results = await asyncio.gather(*(_create_document(__request__, user, f) for f in files))
+    created = [document for document, _ in results if document]
+    failed = [failure for _, failure in results if failure]
 
     if created and is_saved_chat_id(__chat_id__) and __message_id__:
-        await Chats.insert_chat_files(
-            chat_id=__chat_id__, message_id=__message_id__, file_ids=[c['file_id'] for c in created], user_id=user.id
-        )
+        try:
+            await Chats.insert_chat_files(
+                chat_id=__chat_id__,
+                message_id=__message_id__,
+                file_ids=[c['file_id'] for c in created],
+                user_id=user.id,
+            )
+        except Exception as e:
+            # The files are stored and their cards still work, only the chat's file list misses them
+            log.exception(f'Linking created documents to chat {__chat_id__} failed: {e}')
 
-    if __event_emitter__:
-        for document in created:
-            await __event_emitter__({'type': 'chat:message:document', 'data': document})
+    await _emit_document_cards(__event_emitter__, created)
 
-    return _documents_result(created, failed, created_note=DOCUMENT_CARD_NOTE)
+    return _documents_result(created, failed, success_note=DOCUMENT_CARD_NOTE)
 
 
 async def drive_save_documents(
@@ -6315,7 +6340,7 @@ async def drive_save_documents(
     Save documents made with create_documents to the current user's Google Drive. Word/Excel/PowerPoint
     are saved as native Google Docs/Sheets/Slides, so the user can open and edit them in Drive. Only
     call this when the user asks for the documents in Drive - create_documents already lets them
-    preview and download without it, and each card has its own Open in Drive button.
+    preview and download without it, and each card can add its document to Drive on its own.
 
     To put a brand new document in Drive, call create_documents first and then this tool with the
     file_ids it returned. Pass every document to save in ONE call - a single confirmation covers the
@@ -6338,7 +6363,7 @@ async def drive_save_documents(
     if error:
         return error
 
-    documents, failed = await _drive_load_stored_documents(__user__['id'], list(dict.fromkeys(file_ids)))
+    documents, failed = await load_stored_documents(__user__['id'], list(dict.fromkeys(file_ids)))
     if not documents:
         return _documents_result([], failed, action='save')
 
@@ -6349,7 +6374,8 @@ async def drive_save_documents(
 
     names = {i: _document_display_name(d) for i, d in enumerate(documents)}
     title = 'Save to Google Drive?' if len(documents) == 1 else f'Save {len(documents)} files to Google Drive?'
-    message = _drive_batch_message('Save {}' + (f' to "{folder}"?' if folder else ' to your Drive?'), names)
+    destination = f' to "{_drive_dialog_text(folder)}"?' if folder else ' to your Drive?'
+    message = _drive_batch_message('Save {}' + destination, names)
 
     confirmed = await __event_call__(
         {
@@ -6365,12 +6391,10 @@ async def drive_save_documents(
     if confirmed is not True:
         return _drive_cancelled('save these documents to Drive', 'Tell the user the documents were not saved to Drive')
 
-    saved, save_failed = await _drive_save_stored_documents(headers, documents, folder_id)
-    if __event_emitter__:
-        for document in saved:
-            await __event_emitter__({'type': 'chat:message:document', 'data': document})
+    saved, save_failed = await save_stored_documents_to_drive(headers, documents, folder_id)
+    await _emit_document_cards(__event_emitter__, saved)
 
-    return _documents_result(saved, failed + save_failed, created_note=DRIVE_CARD_NOTE, action='save')
+    return _documents_result(saved, failed + save_failed, success_note=DRIVE_CARD_NOTE, action='save')
 
 
 def _drive_folder_creation_levels(folders: list[dict]):
@@ -6448,7 +6472,9 @@ async def drive_create_folders(
         i: f['name'] + (f' (in "{f["parent"]}")' if f.get('parent') else '') for i, f in enumerate(folders)
     }
     title = 'Create Google Drive folder?' if len(folders) == 1 else f'Create {len(folders)} folders?'
-    message = _drive_batch_message('Create {}' + (f' in "{folder}"?' if folder else '?'), display_names)
+    message = _drive_batch_message(
+        'Create {}' + (f' in "{_drive_dialog_text(folder)}"?' if folder else '?'), display_names
+    )
 
     confirmed = await __event_call__(
         {
