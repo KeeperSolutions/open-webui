@@ -58,6 +58,7 @@
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
 	import DriveDocumentCard from './DriveDocumentCard.svelte';
+	import DocumentCard from './DocumentCard.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -118,6 +119,13 @@
 			name: string;
 			format: string;
 			web_link?: string;
+		}[];
+		documents?: {
+			file_id: string;
+			name: string;
+			format: string;
+			drive_id?: string;
+			web_link?: string | null;
 		}[];
 		info?: {
 			openai?: boolean;
@@ -206,10 +214,13 @@
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 
-	// The Drive card already links out, so strip any Drive link the model added in its own text
+	// The document cards already link out, so strip any Drive link the model added in its own text
 	const stripDriveLinks = (content: string) =>
 		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
-	$: displayContent = message.driveDocuments ? stripDriveLinks(message.content ?? '') : message.content;
+	$: displayContent =
+		message.driveDocuments || message.documents
+			? stripDriveLinks(message.content ?? '')
+			: message.content;
 
 	let edit = false;
 	let editedContent = '';
@@ -941,6 +952,10 @@
 
 							{#if message.driveDocuments}
 								<DriveDocumentCard driveDocuments={message.driveDocuments} />
+							{/if}
+
+							{#if message.documents}
+								<DocumentCard documents={message.documents} />
 							{/if}
 						</div>
 					</div>

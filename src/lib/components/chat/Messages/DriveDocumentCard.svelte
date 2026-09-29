@@ -2,8 +2,7 @@
 	import { getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	import { downloadGoogleDriveDocument } from '$lib/apis/connectors';
-	import DriveXlsxGlyph from '$lib/components/icons/DriveXlsxGlyph.svelte';
-	import DriveDocGlyph from '$lib/components/icons/DriveDocGlyph.svelte';
+	import DocumentFormatIcon, { formatLabels } from './DocumentFormatIcon.svelte';
 
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
@@ -16,21 +15,6 @@
 	};
 
 	export let driveDocuments: DriveDocument[] = [];
-
-	const formatLabels: Record<string, string> = {
-		pdf: 'PDF',
-		docx: 'Word',
-		xlsx: 'Excel',
-		pptx: 'PowerPoint'
-	};
-
-	// Matches Google Drive's own per-type colors (Docs blue, Sheets green, Slides yellow, PDF red)
-	const formatColors: Record<string, string> = {
-		pdf: '#E8918C',
-		docx: '#7C93F5',
-		xlsx: '#6FCF97',
-		pptx: '#F5DFA0'
-	};
 
 	const download = async (doc: DriveDocument) => {
 		const token = localStorage.token;
@@ -48,19 +32,7 @@
 				class="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-gray-900 dark:bg-black border border-gray-800"
 			>
 				<div class="flex items-center gap-2.5 min-w-0">
-					<div
-						class="flex items-center justify-center w-8 h-8 rounded-lg shrink-0"
-						style="background-color: {formatColors[doc.format ?? ''] ?? '#5f6368'}"
-					>
-						{#if doc.format === 'pdf'}
-							<span class="text-[8px] font-bold text-white tracking-tight">PDF</span>
-						{:else if doc.format === 'xlsx'}
-							<DriveXlsxGlyph />
-						{:else}
-							<!-- Also covers pptx: a blank slide, matching the plain colored-block look -->
-							<DriveDocGlyph />
-						{/if}
-					</div>
+					<DocumentFormatIcon format={doc.format} />
 					<div class="min-w-0">
 						<div class="text-sm text-white truncate">{doc.name}</div>
 						<div class="text-[0.6875rem] text-gray-400">

@@ -316,6 +316,38 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 	return res;
 };
 
+export const downloadFileById = async (token: string, id: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/content?attachment=true`, {
+		method: 'GET',
+		headers: {
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+
+			const disposition = res.headers.get('Content-Disposition') ?? '';
+			const match =
+				disposition.match(/filename\*=UTF-8''([^;]+)/i) ??
+				disposition.match(/filename="?([^";]+)"?/);
+
+			return { blob: await res.blob(), filename: match ? decodeURIComponent(match[1]) : null };
+		})
+		.catch((err) => {
+			error = err.detail ?? 'Server connection failed';
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getFileContentById = async (id: string) => {
 	let error = null;
 

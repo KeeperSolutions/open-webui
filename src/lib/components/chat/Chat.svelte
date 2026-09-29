@@ -1161,6 +1161,11 @@
 					} else {
 						message.driveDocuments = [data];
 					}
+				} else if (type === 'chat:message:document') {
+					message.documents = [
+						...(message.documents ?? []).filter((doc) => doc.file_id !== data.file_id),
+						data
+					];
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
 					const toastContent = data?.content ?? '';
