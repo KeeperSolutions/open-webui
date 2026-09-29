@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
+import { getGroups } from '$lib/apis/groups';
+import { getUsers } from '$lib/apis/users';
 import type { AccessUser } from './sections/usersAccess';
 import {
 	createUsersAccessLoader as createLoaderWithFetchers,
@@ -60,6 +64,12 @@ describe('createUsersAccessLoader', () => {
 			users: [],
 			truncatedUsers: null,
 			policyGroups: [],
+			enforceTargets: [],
+			teamOnlyPolicyGroups: 0,
+			broadPolicyGroups: 0,
+			// `null` until a team-scoped load completes.
+			teamGroupId: null,
+			mayManagePolicy: false,
 			loading: true,
 			failed: false,
 			errorDetail: null
@@ -343,7 +353,7 @@ describe('createUsersAccessLoader — policy groups', () => {
 
 		await loader.load();
 
-		expect(get(loader).policyGroups).toEqual([{ id: 'g1', name: 'Policy' }]);
+		expect(get(loader).policyGroups).toEqual([{ id: 'g1', name: 'Policy', isTeamGroup: false }]);
 	});
 
 	it('fails the section when the group list cannot be read', async () => {
@@ -385,5 +395,195 @@ describe('createUsersAccessLoader — policy groups', () => {
 
 		expect(groupCalls).toHaveLength(1);
 		expect(get(loader).users).toEqual([mkUser(9)]);
+	});
+});
+/**
+ * These tests mock the API module, not the fetcher, because `teamId` is bound
+ * only inside the default fetcher. Every other test here injects its own fetchers
+ * and never reaches the mock.
+ */
+
+vi.mock('$lib/apis/users', () => ({ getUsers: vi.fn() }));
+vi.mock('$lib/apis/groups', () => ({ getGroups: vi.fn() }));
+
+describe('createUsersAccessLoader — team id propagation', () => {
+	const usersApi = vi.mocked(getUsers);
+	const groupsApi = vi.mocked(getGroups);
+
+	beforeEach(() => {
+		usersApi.mockReset();
+		groupsApi.mockReset();
+		usersApi.mockResolvedValue({ users: [], total: 0 });
+		groupsApi.mockResolvedValue([]);
+	});
+
+	it('hands the team id to the users API', async () => {
+		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
+		expect(usersApi).toHaveBeenCalledTimes(1);
+		expect(usersApi.mock.calls[0][6]).toBe('T1');
+	});
+
+	it('hands null to the users API when the screen is instance-wide', async () => {
+		await createLoaderWithFetchers().load();
+		expect(usersApi.mock.calls[0][6]).toBeNull();
+	});
+
+	it('does NOT hand the team id to the groups API', async () => {
+		// `GET /groups/` is not scoped by team, and passing an id there would
+		// suggest scoping that does not exist.
+		await createLoaderWithFetchers(undefined, undefined, 'T1').load();
+		expect(groupsApi).toHaveBeenCalledTimes(1);
+		expect(groupsApi.mock.calls[0].slice(1)).not.toContain('T1');
+	});
+});
+
+describe('createUsersAccessLoader — naming and destinations are separate lists', () => {
+	const oneUser: UsersFetcher = async () => ({ users: [mkUser(1)], total: 1 });
+
+	it('publishes a team group for naming but not as a destination', async () => {
+		// Team groups must stay nameable, or the removal dialog has no name to
+		// show for them, but must never be offered as a destination.
+		const groups: GroupsFetcher = async () => [
+			{ id: 'g1', name: 'Policy', permissions: { chat: { pii_masking_enforced: true } } },
+			{
+				id: 'g-team',
+				name: 'PII — Acme · abcdef01',
+				permissions: { chat: { pii_masking_enforced: true } },
+				is_team_group: true
+			}
+		];
+		const loader = createUsersAccessLoader(oneUser, groups);
+
+		await loader.load();
+
+		const state = get(loader);
+		expect(state.policyGroups.map((g) => g.id)).toEqual(['g1', 'g-team']);
+		expect(state.enforceTargets.map((g) => g.id)).toEqual(['g1']);
+	});
+});
+
+// `import.meta.url` is not a file: URL under vite, so the path is resolved from
+// the project root, which is where vitest runs.
+const dashboardSource = readFileSync(
+	resolve(process.cwd(), 'src/lib/components/admin/PiiDashboard/PiiDashboard.svelte'),
+	'utf-8'
+);
+
+/**
+ * The `<UsersAccess … />` element as written, so an assertion about a prop
+ * cannot be satisfied by the same text on a neighbouring section.
+ */
+const usersAccessCallSite = (() => {
+	const start = dashboardSource.indexOf('<UsersAccess');
+	if (start < 0) throw new Error('PiiDashboard.svelte no longer mounts <UsersAccess>');
+	const end = dashboardSource.indexOf('/>', start);
+	if (end < 0) throw new Error('<UsersAccess> is no longer self-closing; this slice is wrong');
+	return dashboardSource.slice(start, end + 2);
+})();
+
+describe('the dashboard hands each list to the prop of the same name', () => {
+	/**
+	 * Other tests pass these lists to `rowActionFor` or `UsersAccess` directly,
+	 * so only this one catches a swapped binding in `PiiDashboard.svelte`, which
+	 * would put team groups in the Enforce dropdown.
+	 *
+	 * Reads the source because mounting the whole dashboard would need three
+	 * loaders and four stores. Only named props are checked, because some props
+	 * are renamed on purpose (`truncated` reads `truncatedUsers`).
+	 */
+	it.each(['policyGroups', 'enforceTargets', 'broadPolicyGroups'])(
+		'passes %s from the field of that name',
+		(prop) => {
+			expect(dashboardSource).toContain(`${prop}={$usersAccess.${prop}}`);
+		}
+	);
+
+	it('never feeds the naming list to the destination prop', () => {
+		expect(dashboardSource).not.toContain('enforceTargets={$usersAccess.policyGroups}');
+	});
+});
+
+describe('the dashboard hands each permission to the prop of that name', () => {
+	/**
+	 * Swapping `mayAct` and `mayManagePolicy` at the call site would give a team
+	 * owner the `Manage` link to the admin screen and hide the two membership
+	 * buttons. Other tests set both props by hand, so only this one catches it.
+	 *
+	 * Uses an allow-list of props, because `truncated` reads `truncatedUsers`
+	 * on purpose (see the last case).
+	 */
+	it.each([
+		// Derived from the role, not from the loader. `{mayAct}` also matches the
+		// tail of `mayAct={mayAct}`, so either spelling passes.
+		['mayAct', '{mayAct}'],
+		['mayManagePolicy', 'mayManagePolicy={$usersAccess.mayManagePolicy}'],
+		['teamGroupId', 'teamGroupId={$usersAccess.teamGroupId}']
+	])('binds %s at the call site', (_prop, binding) => {
+		expect(usersAccessCallSite).toContain(binding);
+	});
+
+	it('never lets the reported permission decide who may act', () => {
+		// Needed because a swap still contains `{mayAct}` as the tail of
+		// `mayManagePolicy={mayAct}`, which satisfies the positive case above.
+		expect(usersAccessCallSite).not.toMatch(/mayAct=\{\$usersAccess\./);
+	});
+
+	it('never lets the role stand in for the reported permission', () => {
+		expect(usersAccessCallSite).not.toContain('mayManagePolicy={mayAct}');
+	});
+
+	it('never passes the addressed team where its policy group belongs', () => {
+		// `teamId` is a team id and `teamGroupId` a group id. This swap would
+		// silently hide both owner buttons.
+		expect(usersAccessCallSite).not.toContain('teamGroupId={teamId}');
+	});
+
+	it('does not claim that prop and field always share a name', () => {
+		// The counter-example that requires the allow-list above.
+		expect(usersAccessCallSite).toContain('truncated={$usersAccess.truncatedUsers}');
+	});
+});
+
+describe('createUsersAccessLoader — the permission the server reports', () => {
+	/**
+	 * Only a literal `true` grants the permission. An older backend omits the
+	 * field, and treating absence as permitted would show buttons the server
+	 * then refuses.
+	 */
+	const page =
+		(over: Record<string, unknown>): UsersFetcher =>
+		async () => ({
+			users: [mkUser(1)],
+			total: 1,
+			...over
+		});
+
+	it('reports the permission when the server grants it', async () => {
+		const loader = createUsersAccessLoader(page({ may_manage_team_policy: true }));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(true);
+	});
+
+	it('reports no permission when the server denies it', async () => {
+		const loader = createUsersAccessLoader(page({ may_manage_team_policy: false }));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(false);
+	});
+
+	it('reports no permission when the field is absent', async () => {
+		// Absent is not "yes". A permission has to be granted to exist.
+		const loader = createUsersAccessLoader(page({}));
+		await loader.load();
+		expect(get(loader).mayManagePolicy).toBe(false);
+	});
+
+	it('reports no permission for any value that is not literally true', async () => {
+		// `'true'`, `1` and `null` are all things a payload can carry and none of
+		// them is a grant.
+		for (const value of ['true', 1, null, undefined]) {
+			const loader = createUsersAccessLoader(page({ may_manage_team_policy: value }));
+			await loader.load();
+			expect(get(loader).mayManagePolicy).toBe(false);
+		}
 	});
 });

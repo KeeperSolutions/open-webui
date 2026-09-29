@@ -1,7 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import type { MetricsResponse } from '$lib/apis/langfuse';
+import { getLangfuseMetrics } from '$lib/apis/langfuse';
 import { createMetricsLoader, type MetricsFetcher } from './metricsLoader';
+
+vi.mock('$lib/apis/langfuse', () => ({ getLangfuseMetrics: vi.fn() }));
 
 const response = (from: string, to: string, models: string[] = ['gpt-4']): MetricsResponse => ({
 	from,
@@ -217,5 +220,30 @@ describe('createMetricsLoader', () => {
 		// A destroyed loader publishes nothing further.
 		expect(get(loader).windowFrom).toBe('');
 		expect(get(loader).loading).toBe(true);
+	});
+});
+/**
+ * These tests mock the API module, not the fetcher, because `teamId` is bound
+ * only inside the default fetcher. Every other test here injects its own fetcher
+ * and never reaches the mock.
+ */
+
+describe('createMetricsLoader — team id propagation', () => {
+	const api = vi.mocked(getLangfuseMetrics);
+
+	beforeEach(() => {
+		api.mockReset();
+		api.mockResolvedValue(response('FROM', 'TO'));
+	});
+
+	it('hands the team id to the API', async () => {
+		await createMetricsLoader(undefined, 'T1').load('week', 7);
+		expect(api).toHaveBeenCalledTimes(1);
+		expect(api.mock.calls[0][4]).toBe('T1');
+	});
+
+	it('hands null when the screen is instance-wide', async () => {
+		await createMetricsLoader().load('week', 7);
+		expect(api.mock.calls[0][4]).toBeNull();
 	});
 });

@@ -34,6 +34,8 @@
 	import XMarkIcon from './icons/XMark.svelte';
 	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
+	import ChartBar from '$lib/components/icons/ChartBar.svelte';
+	import { loadOwnedTeamId, ownedTeamId } from './ownedTeam';
 
 	const i18n = getContext('i18n');
 
@@ -96,6 +98,13 @@
 		// Fetch usage info when dropdown opens, if user has permission
 		if (state && ($config?.features?.enable_public_active_users_count || role === 'admin')) {
 			getUsageInfo();
+		}
+
+		// Fetched on open, not on mount: the menu is mounted on every page, so a
+		// mount-time fetch would add a request to every navigation.
+		// `loadOwnedTeamId` fetches once per session, so reopening costs nothing.
+		if (state && ($config?.features?.enable_billing ?? false)) {
+			loadOwnedTeamId(localStorage.token);
 		}
 	};
 </script>
@@ -305,6 +314,30 @@
 						<CreditCard className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					</div>
 					<div class="self-center truncate">{$i18n.t('Billing')}</div>
+				</button>
+			{/if}
+
+			<!--
+				The team owner's link to their team's PII dashboard. Shown only to
+				owners, because the page refuses plain members (`resolve_dashboard_scope`).
+			-->
+			{#if $ownedTeamId}
+				<button
+					class="flex {$mobile ? 'h-11' : 'h-[1.6875rem]'} items-center gap-2 rounded-xl px-2 {$mobile ? 'text-[15px]' : 'text-[13px]'} w-full hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition cursor-pointer select-none"
+					type="button"
+					on:click={async () => {
+						show = false;
+						if ($mobile) {
+							await tick();
+							showSidebar.set(false);
+						}
+						goto(`/team/${$ownedTeamId}/pii-dashboard`);
+					}}
+				>
+					<div class="self-center">
+						<ChartBar className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
+					</div>
+					<div class="self-center truncate">{$i18n.t('Team PII Dashboard')}</div>
 				</button>
 			{/if}
 

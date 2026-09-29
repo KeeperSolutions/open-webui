@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { MetricRow } from '$lib/apis/langfuse';
 import { totals } from './costAnalytics';
 import {
+	mayActFor,
 	statusOf,
 	costByUser,
 	buildRows,
@@ -13,9 +14,14 @@ import {
 	pageRange,
 	ROWS_PER_PAGE,
 	policyGroupsOf,
+	enforcesMasking,
+	enforceTargetsOf,
 	rowActionFor,
 	type AccessUser,
-	type PolicyGroup
+	type PolicyGroup,
+	teamOnlyPolicyGroupCount,
+	grantsOnlyMasking,
+	broadPolicyGroupCount
 } from './usersAccess';
 
 const row = (user: string, cost: number, model = 'gpt-4', tokens = 10): MetricRow => ({
@@ -162,7 +168,7 @@ describe('buildRows', () => {
 		expect(buildRows([user({ settings: storedOff })], [])[0].masking).toBe('off');
 	});
 
-	it('⚠️ never reports off while the policy is enforced', () => {
+	it('never reports off while the policy is enforced', () => {
 		// The contradiction this column was rebuilt to remove: a governance table
 		// reporting a risk that does not exist, because masking IS on.
 		const enforcedButStoredOff = user({ settings: storedOff, pii_masking_enforced: true });
@@ -396,8 +402,19 @@ describe('maskingRank', () => {
 // The row action
 // ---------------------------------------------------------------------------
 
-const POLICY: PolicyGroup = { id: 'g1', name: 'Policy' };
-const OTHER: PolicyGroup = { id: 'g2', name: 'Legal' };
+const POLICY: PolicyGroup = { id: 'g1', name: 'Policy', isTeamGroup: false };
+const OTHER: PolicyGroup = { id: 'g2', name: 'Legal', isTeamGroup: false };
+const TEAM_GROUP: PolicyGroup = {
+	id: 'g-team',
+	name: 'PII \u2014 Acme \u00b7 t1',
+	isTeamGroup: true
+};
+
+/**
+ * Group lists where naming and destinations are the same set. Tests that need
+ * the two to differ pass `{ naming, targets }` explicitly.
+ */
+const lists = (gs: PolicyGroup[]) => ({ naming: gs, targets: gs });
 
 const actionRow = (enforced: boolean, policyGroupIds: string[] = []) => ({
 	enforced,
@@ -413,26 +430,28 @@ describe('policyGroupsOf', () => {
 				{ id: 'g3', name: 'Bare', permissions: {} },
 				{ id: 'g4', name: 'Null', permissions: null }
 			])
-		).toEqual([{ id: 'g1', name: 'Policy' }]);
+		).toEqual([{ id: 'g1', name: 'Policy', isTeamGroup: false }]);
 	});
 
-	it('falls back to the id when a group has no name', () => {
+	it('reports a nameless group as unnamed rather than as its id', () => {
+		// `null` lets the component render a sentence; an id would be shown verbatim
+		// as the group name in the removal dialog.
 		expect(
 			policyGroupsOf([{ id: 'g1', permissions: { chat: { pii_masking_enforced: true } } }])
-		).toEqual([{ id: 'g1', name: 'g1' }]);
+		).toEqual([{ id: 'g1', name: null, isTeamGroup: false }]);
 	});
 });
 
 describe('rowActionFor — more than one source', () => {
 	it('offers Enforce when the user is not under policy', () => {
-		expect(rowActionFor(actionRow(false), [POLICY])).toEqual({
+		expect(rowActionFor(actionRow(false), lists([POLICY]))).toEqual({
 			kind: 'enforce',
 			targets: [POLICY]
 		});
 	});
 
 	it('offers Remove when exactly one group is the source', () => {
-		expect(rowActionFor(actionRow(true, ['g1']), [POLICY, OTHER])).toEqual({
+		expect(rowActionFor(actionRow(true, ['g1']), lists([POLICY, OTHER]))).toEqual({
 			kind: 'remove',
 			group: POLICY
 		});
@@ -442,51 +461,194 @@ describe('rowActionFor — more than one source', () => {
 		// The middle case, and the only one that can lie: `Remove` here would take
 		// the user out of one group and leave them enforced by the other, while the
 		// label promised an unlock.
-		expect(rowActionFor(actionRow(true, ['g1', 'g2']), [POLICY, OTHER])).toEqual({
+		expect(rowActionFor(actionRow(true, ['g1', 'g2']), lists([POLICY, OTHER]))).toEqual({
 			kind: 'none',
 			via: [POLICY, OTHER]
 		});
 	});
 
-	it('names an unknown source group by id rather than dropping it', () => {
+	it('counts an unknown source group without printing its id', () => {
 		// Dropping it would turn a two-source user into a one-source user, and put
-		// a Remove button on a row where removal unlocks nothing.
-		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), [POLICY])).toEqual({
+		// a Remove button on a row where removal unlocks nothing. It is also not
+		// named by its id: see `namedGroup`.
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		expect(rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]))).toEqual({
 			kind: 'none',
-			via: [POLICY, { id: 'ghost', name: 'ghost' }]
+			via: [POLICY, { id: 'ghost', name: null, isTeamGroup: false }]
 		});
+		// The unknown group is logged so the mismatch is visible.
+		expect(warn).toHaveBeenCalledOnce();
+		warn.mockRestore();
 	});
 
 	it('offers nothing, and blames no group, under an instance-wide default', () => {
-		expect(rowActionFor(actionRow(true, []), [POLICY])).toEqual({ kind: 'none', via: [] });
+		expect(rowActionFor(actionRow(true, []), lists([POLICY]))).toEqual({ kind: 'none', via: [] });
 	});
 
 	it('never offers Enforce to someone already enforced — the mirror case', () => {
 		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
-			expect(rowActionFor(actionRow(true, sources), [POLICY, OTHER]).kind).not.toBe('enforce');
+			expect(rowActionFor(actionRow(true, sources), lists([POLICY, OTHER])).kind).not.toBe(
+				'enforce'
+			);
 		}
+	});
+});
+
+describe('mayActFor', () => {
+	it('lets an administrator act', () => {
+		expect(mayActFor('admin')).toBe(true);
+	});
+
+	it('does not let anyone else act', () => {
+		for (const role of ['user', 'pending', '', undefined, null]) {
+			expect(mayActFor(role)).toBe(false);
+		}
+	});
+
+	it('takes the role and nothing else', () => {
+		// With a single parameter, the address the viewer arrived at cannot enter
+		// the decision. Adding a parameter fails this assertion.
+		expect(mayActFor.length).toBe(1);
+	});
+});
+
+describe('rowActionFor — a viewer who may not act', () => {
+	it('offers an em dash, not a claim, on a row that is not enforced', () => {
+		// Not `{ kind: 'none', via: [] }`: the component renders an empty `via` as
+		// "Enforced instance-wide", which would be false for an unmasked person.
+		expect(
+			rowActionFor(actionRow(false), lists([POLICY]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual({ kind: 'readonly' });
+	});
+
+	it('says a source exists outside the team, and names nothing', () => {
+		expect(
+			rowActionFor(actionRow(true, ['g1']), lists([POLICY]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('gives the same answer for two sources as for one', () => {
+		// The number of enforcing groups is not disclosed to a non-admin either.
+		expect(
+			rowActionFor(actionRow(true, ['g1', 'g2']), lists([POLICY, OTHER]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual(
+			rowActionFor(actionRow(true, ['g1']), lists([POLICY]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		);
+	});
+
+	it('carries no group data at all, checked over the serialised value', () => {
+		// Checked over the whole serialisation so that any added field carrying a
+		// group name or id fails, not only the fields listed here.
+		const serialised = JSON.stringify(
+			rowActionFor(actionRow(true, ['g1', 'ghost']), lists([POLICY]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		);
+		expect(serialised).not.toContain('g1');
+		expect(serialised).not.toContain('ghost');
+		expect(serialised).not.toContain(POLICY.name);
+		expect(JSON.parse(serialised)).toEqual({ kind: 'masked-elsewhere' });
+	});
+
+	it('does not leak a group id even when the group list cannot name it', () => {
+		// An unknown group has no name, so only its id could leak here.
+		const action = rowActionFor(actionRow(true, ['ghost']), lists([]), {
+			mayAct: false,
+			teamGroupId: null,
+			mayManagePolicy: false
+		});
+		expect(JSON.stringify(action)).not.toContain('ghost');
+	});
+
+	it('leaves the instance-wide default exactly as it was', () => {
+		// It names no group, so nothing about it needs hiding.
+		expect(
+			rowActionFor(actionRow(true, []), lists([POLICY]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'none',
+			via: []
+		});
+	});
+
+	it('changes nothing for a viewer who may act', () => {
+		for (const sources of [[], ['g1'], ['g1', 'g2']]) {
+			expect(
+				rowActionFor(actionRow(true, sources), lists([POLICY, OTHER]), {
+					mayAct: true,
+					teamGroupId: null,
+					mayManagePolicy: false
+				})
+			).toEqual(rowActionFor(actionRow(true, sources), lists([POLICY, OTHER])));
+		}
+		expect(
+			rowActionFor(actionRow(false), lists([POLICY]), {
+				mayAct: true,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual(rowActionFor(actionRow(false), lists([POLICY])));
 	});
 });
 
 describe('rowActionFor — destinations', () => {
 	it('carries the single destination when exactly one group has the policy', () => {
-		const action = rowActionFor(actionRow(false), [POLICY]);
+		const action = rowActionFor(actionRow(false), lists([POLICY]));
 		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });
 	});
 
 	it('carries every candidate when several groups have the policy', () => {
 		// The choice is made per call, from these; nothing here remembers one.
-		const action = rowActionFor(actionRow(false), [POLICY, OTHER]);
+		const action = rowActionFor(actionRow(false), lists([POLICY, OTHER]));
 		expect(action.kind === 'enforce' && action.targets).toEqual([POLICY, OTHER]);
 	});
 
 	it('carries no destination when no group has the policy', () => {
 		// The component disables the action on this; it must never invent a group.
-		expect(rowActionFor(actionRow(false), [])).toEqual({ kind: 'enforce', targets: [] });
+		expect(rowActionFor(actionRow(false), lists([]))).toEqual({ kind: 'enforce', targets: [] });
 	});
 });
 
 describe('buildRows — policy sources', () => {
+	it("carries the server's masked-elsewhere answer onto the row", () => {
+		/**
+		 * The `rowActionFor` tests build rows directly, so only this test covers the
+		 * mapping. Without the field, a team owner would be told that removing
+		 * someone lets them turn masking off while another group still masks them.
+		 */
+		expect(buildRows([user({ masked_by_other_policy: true })], [])[0].maskedByOtherPolicy).toBe(
+			true
+		);
+		expect(buildRows([user({ masked_by_other_policy: false })], [])[0].maskedByOtherPolicy).toBe(
+			false
+		);
+		// Absent reads as `false`; the id scan in `rowActionFor` answers instead.
+		expect(buildRows([user()], [])[0].maskedByOtherPolicy).toBe(false);
+	});
+
 	it('carries the enforcing group ids onto the row', () => {
 		const r = buildRows(
 			[user({ pii_masking_enforced: true, pii_policy_group_ids: ['g1'] })],
@@ -597,5 +759,599 @@ describe('pageRange', () => {
 
 	it('defaults to the page size the table uses', () => {
 		expect(pageRange(57, 1)).toEqual({ from: 1, to: ROWS_PER_PAGE });
+	});
+});
+
+describe('policyGroupsOf — a team group is not an enforce destination', () => {
+	const enforcing = (id: string, over = {}) => ({
+		id,
+		name: id,
+		permissions: { chat: { pii_masking_enforced: true } },
+		...over
+	});
+
+	it('excludes groups a team owns', () => {
+		const out = enforceTargetsOf([
+			enforcing('custom'),
+			enforcing('team-a', { is_team_group: true })
+		]);
+		expect(out.map((g) => g.id)).toEqual(['custom']);
+	});
+
+	it('but policyGroupsOf keeps them, because naming is not a destination', () => {
+		/**
+		 * The naming list must include team groups, so an admin's `Remove` dialog
+		 * for a team member shows the group's name instead of its raw id.
+		 */
+		const out = policyGroupsOf([enforcing('custom'), enforcing('team-a', { is_team_group: true })]);
+		expect(out.map((g) => g.id)).toEqual(['custom', 'team-a']);
+		expect(out.find((g) => g.id === 'team-a')?.isTeamGroup).toBe(true);
+	});
+
+	it('keeps custom groups that enforce', () => {
+		expect(policyGroupsOf([enforcing('custom')]).map((g) => g.id)).toEqual(['custom']);
+	});
+
+	it('keeps a group the backend explicitly marked as not a team group', () => {
+		/**
+		 * `GET /groups/` sends `is_team_group: false` for every ordinary group. A
+		 * filter written as `=== undefined` would pass the other tests here and drop
+		 * every destination in production.
+		 */
+		expect(
+			policyGroupsOf([enforcing('custom', { is_team_group: false })]).map((g) => g.id)
+		).toEqual(['custom']);
+	});
+
+	it('treats a missing flag as "not a team group"', () => {
+		// Treating it as a team group would hide every destination for a payload
+		// that predates the field.
+		expect(policyGroupsOf([enforcing('older-payload')]).map((g) => g.id)).toEqual([
+			'older-payload'
+		]);
+	});
+
+	it('still ignores groups that do not enforce at all', () => {
+		expect(policyGroupsOf([{ id: 'plain', name: 'plain', permissions: {} }])).toEqual([]);
+	});
+});
+
+describe('grantsOnlyMasking', () => {
+	it('accepts a group whose only permission is masking', () => {
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true } })).toBe(true);
+	});
+
+	it('accepts one carrying other permissions that are OFF', () => {
+		// The stored tree is mostly `false` leaves, so counting keys instead of
+		// values would reject every real group.
+		expect(
+			grantsOnlyMasking({
+				chat: { pii_masking_enforced: true, file_upload: false, temporary_enforced: false },
+				features: { web_search: false }
+			})
+		).toBe(true);
+	});
+
+	it('rejects one that also switches something else on', () => {
+		expect(
+			grantsOnlyMasking({ chat: { pii_masking_enforced: true }, features: { web_search: true } })
+		).toBe(false);
+	});
+
+	it('rejects one that grants something else in the same branch', () => {
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, file_upload: true } })).toBe(
+			false
+		);
+	});
+
+	it('rejects a group that grants nothing at all', () => {
+		expect(grantsOnlyMasking({})).toBe(false);
+		expect(grantsOnlyMasking(null)).toBe(false);
+		expect(grantsOnlyMasking(undefined)).toBe(false);
+	});
+
+	it('rejects one that grants only something else', () => {
+		expect(grantsOnlyMasking({ features: { web_search: true } })).toBe(false);
+	});
+
+	it('counts a truthy non-boolean as a grant, because the server does', () => {
+		/**
+		 * The server ends permission checks in `bool(...)`
+		 * (`utils/access_control/__init__.py`) and does not validate leaves, so `1`
+		 * is a real grant. Missing it would let `Enforce` hand over that capability.
+		 * A group with a numeric setting is therefore not a destination, and the
+		 * empty state explains why.
+		 */
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true }, limits: { seats: 5 } })).toBe(
+			false
+		);
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, web_search: 1 } })).toBe(false);
+		expect(grantsOnlyMasking({ chat: { pii_masking_enforced: true, model: 'gpt' } })).toBe(false);
+	});
+
+	it('still ignores every falsy leaf, whatever its type', () => {
+		// `bool(0)`, `bool("")` and `bool(None)` are all False on the server too.
+		expect(
+			grantsOnlyMasking({
+				chat: { pii_masking_enforced: true, web_search: 0, note: '', other: null }
+			})
+		).toBe(true);
+	});
+
+	it('treats a truthy masking flag as enforcing, matching the server', () => {
+		// `group_enforces_pii_masking` ends in `bool(node)` (`utils/pii_policy.py`),
+		// so a group carrying `1` masks people and must be named as their source.
+		expect(enforcesMasking({ chat: { pii_masking_enforced: 1 } })).toBe(true);
+		expect(enforcesMasking({ chat: { pii_masking_enforced: 0 } })).toBe(false);
+	});
+});
+
+describe('enforceTargetsOf — a group that grants more is not a destination', () => {
+	const masking = { chat: { pii_masking_enforced: true } };
+	const broad = { chat: { pii_masking_enforced: true }, features: { web_search: true } };
+
+	it('offers only the single-purpose group', () => {
+		const out = enforceTargetsOf([
+			{ id: 'dedicated', name: 'PII Masking Policy', permissions: masking },
+			{ id: 'wide', name: 'Proba spajanja', permissions: broad }
+		]);
+		expect(out.map((g) => g.id)).toEqual(['dedicated']);
+	});
+
+	it('but policyGroupsOf keeps the broad one, because naming is not a destination', () => {
+		/**
+		 * Someone masked by the broad group must still be named in the admin's
+		 * Remove dialog, so the destination filter must not apply to naming.
+		 */
+		const out = policyGroupsOf([
+			{ id: 'dedicated', name: 'PII Masking Policy', permissions: masking },
+			{ id: 'wide', name: 'Proba spajanja', permissions: broad }
+		]);
+		expect(out.map((g) => g.id)).toEqual(['dedicated', 'wide']);
+	});
+
+	it('can leave the list empty, which is a real state', () => {
+		expect(enforceTargetsOf([{ id: 'wide', permissions: broad }])).toEqual([]);
+	});
+
+	it('still excludes a team group even when it grants only masking', () => {
+		// The two exclusions are independent; neither may shadow the other.
+		expect(enforceTargetsOf([{ id: 'team', permissions: masking, is_team_group: true }])).toEqual(
+			[]
+		);
+	});
+});
+
+describe('broadPolicyGroupCount — the third reason the list is empty', () => {
+	const masking = { chat: { pii_masking_enforced: true } };
+	const broad = { chat: { pii_masking_enforced: true }, features: { web_search: true } };
+
+	it('counts enforcing groups excluded for granting more', () => {
+		expect(broadPolicyGroupCount([{ id: 'w', permissions: broad }])).toBe(1);
+	});
+
+	it('does not count the single-purpose one', () => {
+		expect(broadPolicyGroupCount([{ id: 'd', permissions: masking }])).toBe(0);
+	});
+
+	it('does not count a group that does not enforce at all', () => {
+		expect(
+			broadPolicyGroupCount([{ id: 'p', permissions: { features: { web_search: true } } }])
+		).toBe(0);
+	});
+
+	it('does not count a team group — that cause has its own counter', () => {
+		expect(broadPolicyGroupCount([{ id: 't', permissions: broad, is_team_group: true }])).toBe(0);
+	});
+});
+
+describe('teamOnlyPolicyGroupCount — why the destination list is empty', () => {
+	const enforcing = (id: string, over = {}) => ({
+		id,
+		name: id,
+		permissions: { chat: { pii_masking_enforced: true } },
+		...over
+	});
+
+	it('counts enforcing team groups', () => {
+		expect(
+			teamOnlyPolicyGroupCount([
+				enforcing('t1', { is_team_group: true }),
+				enforcing('t2', { is_team_group: true }),
+				enforcing('custom')
+			])
+		).toBe(2);
+	});
+
+	it('is zero when nothing enforces', () => {
+		expect(teamOnlyPolicyGroupCount([{ id: 'plain', permissions: {} }])).toBe(0);
+	});
+
+	it('does not count a team group that does not enforce', () => {
+		// The count answers "was a destination excluded", and a non-enforcing group
+		// was never a destination.
+		expect(teamOnlyPolicyGroupCount([{ id: 't', permissions: {}, is_team_group: true }])).toBe(0);
+	});
+});
+
+describe('rowActionFor — masking that comes from the viewer’s own team', () => {
+	const enforced = (ids: string[]) => ({ enforced: true, policyGroupIds: ids });
+	const TEAM = 'g-team';
+	const OTHER = 'g-other';
+
+	it('names the team policy when the team group is the source', () => {
+		expect(
+			rowActionFor(enforced([TEAM]), lists([]), {
+				mayAct: false,
+				teamGroupId: TEAM,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-team',
+			teamGroupId: TEAM
+		});
+	});
+
+	it('still says "outside the team" when the source is another group', () => {
+		expect(
+			rowActionFor(enforced([OTHER]), lists([]), {
+				mayAct: false,
+				teamGroupId: TEAM,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('says team policy — and nothing else — when both are sources', () => {
+		/**
+		 * Mentioning the other source would disclose that a source outside the
+		 * owner's reach exists.
+		 */
+		expect(
+			rowActionFor(enforced([TEAM, OTHER]), lists([]), {
+				mayAct: false,
+				teamGroupId: TEAM,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-team',
+			teamGroupId: TEAM
+		});
+	});
+
+	it('falls back to "outside the team" when the team has no group yet', () => {
+		// A team whose policy group has not been created yet.
+		expect(
+			rowActionFor(enforced([OTHER]), lists([]), {
+				mayAct: false,
+				teamGroupId: null,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('is still an em dash for someone who is not masked at all', () => {
+		expect(
+			rowActionFor({ enforced: false, policyGroupIds: [] }, lists([]), {
+				mayAct: false,
+				teamGroupId: TEAM,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'readonly'
+		});
+	});
+
+	it('carries the team id and nothing else', () => {
+		const action = rowActionFor(enforced([TEAM, OTHER]), lists([]), {
+			mayAct: false,
+			teamGroupId: TEAM,
+			mayManagePolicy: false
+		});
+		expect(Object.keys(action).sort()).toEqual(['kind', 'teamGroupId']);
+	});
+
+	it('changes nothing for a viewer who may act', () => {
+		// `mayAct` comes from the role; the team id must not affect the admin branch.
+		expect(
+			rowActionFor({ enforced: false, policyGroupIds: [] }, lists([]), {
+				mayAct: true,
+				teamGroupId: TEAM,
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'enforce',
+			targets: []
+		});
+	});
+
+	// No arity assertion here, unlike `mayActFor`: the team id is an input by
+	// design. The payload is covered by "carries the team id and nothing else".
+});
+
+// ---------------------------------------------------------------------------
+// An admin acting on somebody else's team member
+// ---------------------------------------------------------------------------
+
+describe('rowActionFor — naming is not a destination', () => {
+	const teamMember = { enforced: true, policyGroupIds: ['g-team'] };
+	// What the loader produces: the team group can be named but not targeted.
+	const split = { naming: [POLICY, TEAM_GROUP], targets: [POLICY] };
+
+	it('names the team group instead of falling back to its id', () => {
+		/**
+		 * The team group is only in `naming`, not `targets`. The action must still
+		 * carry its name, or the removal dialog would show a raw id.
+		 */
+		expect(rowActionFor(teamMember, split)).toEqual({
+			kind: 'remove',
+			group: TEAM_GROUP
+		});
+	});
+
+	it('still offers Remove — an admin is not barred from a team policy', () => {
+		// An admin may take someone out of a team's policy group; the button only
+		// has to name the group correctly.
+		expect(rowActionFor(teamMember, split).kind).toBe('remove');
+	});
+
+	it('does not offer the team group as an Enforce destination', () => {
+		const action = rowActionFor({ enforced: false, policyGroupIds: [] }, split);
+		expect(action).toEqual({ kind: 'enforce', targets: [POLICY] });
+		expect(JSON.stringify(action)).not.toContain('g-team');
+	});
+
+	it('marks which named group belongs to a team', () => {
+		const action = rowActionFor(teamMember, split);
+		expect(action.kind === 'remove' && action.group.isTeamGroup).toBe(true);
+	});
+
+	it('leaves an ordinary policy group exactly as it was', () => {
+		expect(rowActionFor({ enforced: true, policyGroupIds: ['g1'] }, split)).toEqual({
+			kind: 'remove',
+			group: POLICY
+		});
+	});
+
+	it('changes nothing for a viewer who may not act', () => {
+		/**
+		 * The non-admin branch runs before the naming lookup and carries no group
+		 * name, so a wider `naming` list cannot reach it. Fails if the branches merge.
+		 */
+		expect(
+			rowActionFor(teamMember, split, {
+				mayAct: false,
+				teamGroupId: 'g-team',
+				mayManagePolicy: false
+			})
+		).toEqual({
+			kind: 'masked-team',
+			teamGroupId: 'g-team'
+		});
+		expect(
+			rowActionFor(teamMember, split, { mayAct: false, teamGroupId: null, mayManagePolicy: false })
+		).toEqual({ kind: 'masked-elsewhere' });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A team owner, who may manage membership of one group and nothing else
+// ---------------------------------------------------------------------------
+
+describe('rowActionFor — a team owner with the power to act', () => {
+	const TEAM = 'g-team';
+	const ELSEWHERE = 'g-admins';
+
+	/**
+	 * Every viewer field is set explicitly. `mayAct: false` and
+	 * `mayManagePolicy: false` mean different things, and a partial viewer could
+	 * let a branch pass for the wrong reason.
+	 */
+	const owner = (teamGroupId: string | null = TEAM) => ({
+		mayAct: false,
+		teamGroupId,
+		mayManagePolicy: true
+	});
+	const readOnlyOwner = (teamGroupId: string | null = TEAM) => ({
+		mayAct: false,
+		teamGroupId,
+		mayManagePolicy: false
+	});
+	const admin = { mayAct: true, teamGroupId: null, mayManagePolicy: true };
+	/**
+	 * An administrator on a team dashboard, as the server reports it: `mayAct`
+	 * from the role, `teamGroupId` from the address, and `may_manage_team_policy`
+	 * true. Without this viewer, dropping `!mayAct` from the owner-branch
+	 * condition would pass every test.
+	 */
+	const adminOnTeamDashboard = { mayAct: true, teamGroupId: TEAM, mayManagePolicy: true };
+
+	const row = (policyGroupIds: string[], enforced = policyGroupIds.length > 0) => ({
+		enforced,
+		policyGroupIds
+	});
+
+	const anyGroups = { naming: [POLICY, TEAM_GROUP], targets: [POLICY] };
+
+	// -- which button, and why ----------------------------------------------
+
+	it('offers Remove when the person is in the team policy', () => {
+		expect(rowActionFor(row([TEAM]), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: false
+		});
+	});
+
+	it('offers Add when the person is not', () => {
+		expect(rowActionFor(row([]), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: false
+		});
+	});
+
+	it('offers Add to someone masked only by an administrator group', () => {
+		/**
+		 * The person is masked, so keying on `enforced` would offer Remove with
+		 * nothing to remove. Membership of the team group decides, and they are not
+		 * in it.
+		 */
+		expect(rowActionFor(row([ELSEWHERE]), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: true
+		});
+	});
+
+	it('offers Add to someone masked by the instance default', () => {
+		// Enforced with no group behind it: not in the team policy, so Add. No
+		// other group enforces them, so `maskedElsewhere` is false.
+		expect(rowActionFor(row([], true), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: false
+		});
+	});
+
+	it('offers Add to someone who is not masked at all', () => {
+		expect(rowActionFor(row([], false), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: false
+		});
+	});
+
+	it('never returns readonly — the action is always offered', () => {
+		for (const groups of [[], [TEAM], [ELSEWHERE], [TEAM, ELSEWHERE]]) {
+			expect(rowActionFor(row(groups), anyGroups, owner()).kind).toMatch(/^team-/);
+		}
+	});
+
+	// -- what the row adds, and what it must never add -----------------------
+
+	it('says the person stays masked when another group also enforces them', () => {
+		expect(rowActionFor(row([TEAM, ELSEWHERE]), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: true
+		});
+	});
+
+	it('carries a boolean and no identity, in every state', () => {
+		/**
+		 * `maskedElsewhere` is reduced to a boolean inside `rowActionFor`, so
+		 * nothing downstream has a group name or id to print.
+		 */
+		for (const groups of [[], [TEAM], [ELSEWHERE], [TEAM, ELSEWHERE]]) {
+			const action = rowActionFor(row(groups), anyGroups, owner());
+			expect(Object.keys(action).sort()).toEqual(['kind', 'maskedElsewhere']);
+			expect(JSON.stringify(action)).not.toContain(ELSEWHERE);
+			expect(JSON.stringify(action)).not.toContain(TEAM);
+		}
+	});
+
+	// -- the narrowed payload a non-admin actually receives -------------------
+
+	/**
+	 * The payload a team owner receives. `pii_policy_group_ids` is narrowed
+	 * server-side to the team's own group, because `GET /groups/id/{id}/info`
+	 * returns any group's name to any verified user. The id scan sees nothing
+	 * else, so `masked_by_other_policy` is the whole answer.
+	 */
+	const narrowed = (inTeamPolicy: boolean, maskedByOtherPolicy: boolean) => ({
+		enforced: inTeamPolicy || maskedByOtherPolicy,
+		policyGroupIds: inTeamPolicy ? [TEAM] : [],
+		maskedByOtherPolicy
+	});
+
+	it('believes the server when the ids can no longer say', () => {
+		// The narrowed list holds no other id, so without the server flag the
+		// dialog would promise that leaving the team policy lets them unmask.
+		expect(rowActionFor(narrowed(true, true), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: true
+		});
+	});
+
+	it('offers Add, and says they are already masked, on the narrowed shape', () => {
+		expect(rowActionFor(narrowed(false, true), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: true
+		});
+	});
+
+	it('says nothing else masks them when the server says so', () => {
+		expect(rowActionFor(narrowed(true, false), anyGroups, owner())).toEqual({
+			kind: 'team-remove',
+			maskedElsewhere: false
+		});
+		expect(rowActionFor(narrowed(false, false), anyGroups, owner())).toEqual({
+			kind: 'team-add',
+			maskedElsewhere: false
+		});
+	});
+
+	it('still carries no identity once the flag is what answers', () => {
+		for (const shape of [narrowed(true, true), narrowed(false, true)]) {
+			const action = rowActionFor(shape, anyGroups, owner());
+			expect(Object.keys(action).sort()).toEqual(['kind', 'maskedElsewhere']);
+			expect(JSON.stringify(action)).not.toContain(TEAM);
+			expect(JSON.stringify(action)).not.toContain(ELSEWHERE);
+		}
+	});
+
+	it('keeps the id scan as a second term, for a fuller list', () => {
+		// No supported state sends a full list to this branch, but the OR errs
+		// towards "still masked" rather than a false promise.
+		expect(
+			rowActionFor({ ...row([TEAM, ELSEWHERE]), maskedByOtherPolicy: false }, anyGroups, owner())
+		).toEqual({ kind: 'team-remove', maskedElsewhere: true });
+	});
+
+	// -- the boundaries of the branch ----------------------------------------
+
+	it('falls back to the read-only branch when the team has no group', () => {
+		/**
+		 * There is no group to add anyone to. Matches the server, which reports
+		 * `may_manage_team_policy: false` for a team whose group was never created.
+		 */
+		expect(rowActionFor(row([ELSEWHERE]), anyGroups, owner(null))).toEqual({
+			kind: 'masked-elsewhere'
+		});
+	});
+
+	it('leaves a read-only viewer exactly as they were', () => {
+		expect(rowActionFor(row([TEAM]), anyGroups, readOnlyOwner())).toEqual({
+			kind: 'masked-team',
+			teamGroupId: TEAM
+		});
+		expect(rowActionFor(row([ELSEWHERE]), anyGroups, readOnlyOwner())).toEqual({
+			kind: 'masked-elsewhere'
+		});
+		expect(rowActionFor(row([], false), anyGroups, readOnlyOwner())).toEqual({ kind: 'readonly' });
+	});
+
+	it('keeps an administrator out of the owner branch even on a team dashboard', () => {
+		/**
+		 * An administrator here holds all three viewer fields, so only `mayAct`
+		 * separates the branches. The admin action names the team group; the
+		 * owner's names nothing.
+		 */
+		expect(
+			rowActionFor(
+				row([TEAM]),
+				{ naming: [{ id: TEAM, name: 'PII — Acme · t1', isTeamGroup: true }], targets: [] },
+				adminOnTeamDashboard
+			)
+		).toEqual({ kind: 'remove', group: { id: TEAM, name: 'PII — Acme · t1', isTeamGroup: true } });
+	});
+
+	it('leaves the administrator branch untouched, naming the team', () => {
+		/**
+		 * An administrator also holds `mayManagePolicy` but must not take the owner
+		 * branch: they may reach every group, and their action names the team group.
+		 */
+		expect(
+			rowActionFor(row([TEAM_GROUP.id]), { naming: [TEAM_GROUP], targets: [] }, admin)
+		).toEqual({ kind: 'remove', group: TEAM_GROUP });
 	});
 });
