@@ -30,13 +30,16 @@ if (!('IntersectionObserver' in globalThis)) {
 	globalThis.IntersectionObserver = IntersectionObserverStub;
 }
 
+// Test files marked `@vitest-environment node` have no DOM, so `Element` is undefined there.
+const hasDom = typeof Element !== 'undefined';
+
 // jsdom does not implement scrolling
-if (!Element.prototype.scrollIntoView) {
+if (hasDom && !Element.prototype.scrollIntoView) {
 	Element.prototype.scrollIntoView = () => {};
 }
 
 // jsdom lacks the Web Animations API that Svelte's transition directives use internally
-if (!Element.prototype.animate) {
+if (hasDom && !Element.prototype.animate) {
 	Element.prototype.animate = function () {
 		return {
 			finished: Promise.resolve(),
