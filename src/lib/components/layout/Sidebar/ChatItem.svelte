@@ -80,6 +80,9 @@
 
 	export let onDragEnd = () => {};
 
+	// Only true for the one row a parent wants an onboarding wizard to spotlight
+	export let spotlightTarget = false;
+
 	function formatTimeAgo(timestamp: number): string {
 		const now = Date.now();
 		const diff = now - timestamp * 1000; // timestamp is in seconds
@@ -502,6 +505,7 @@
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
 	id="sidebar-chat-group"
+	data-spotlight-id={spotlightTarget ? 'chat-row' : undefined}
 	bind:this={itemElement}
 	class=" w-full {className} relative group {$mobile ? 'mb-2' : ''}"
 	draggable={!confirmEdit && !readonly}

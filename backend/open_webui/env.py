@@ -1430,6 +1430,22 @@ try:
 except ValueError:
     LEDGER_BOOTSTRAP_DAYS = 30
 
+# Minimum time between repeat admin alert emails for the same model/condition
+# (unpriced model, ECB unreachable, etc). Persisted in billing_alert_state so it's
+# enforced across process restarts and multiple concurrent instances, not just in-process.
+# Default 28800 = 8 hours. Uses _int_env (defined above), which clamps to a minimum of 1 -
+# a plain int(os.getenv(...)) would accept 0 or negative values, making every cooldown
+# check immediately true.
+BILLING_ALERT_COOLDOWN_SECONDS = _int_env('BILLING_ALERT_COOLDOWN_SECONDS', 28800)
+
+# How long an in-flight alert claim (status=claiming, between try_claim_alert()/
+# try_claim_recovery() and the send completing) is honored before another poll may treat it
+# as orphaned and reclaim it. Deliberately much shorter than BILLING_ALERT_COOLDOWN_SECONDS -
+# a claim only blocks a real duplicate email for a few minutes at most, not the full cooldown,
+# so a process crash/restart between the claim write and the send (no exception, so
+# release_claim() never runs) can't strand a claim for hours. Default 300 = 5 minutes.
+BILLING_ALERT_CLAIM_TTL_SECONDS = _int_env('BILLING_ALERT_CLAIM_TTL_SECONDS', 300)
+
 
 # SMTP email config (optional — if not set, invite emails are silently skipped)
 SMTP_HOST: str = os.getenv('SMTP_HOST', '')

@@ -29,3 +29,23 @@ if (!('IntersectionObserver' in globalThis)) {
 	// @ts-expect-error - assigning stub to global
 	globalThis.IntersectionObserver = IntersectionObserverStub;
 }
+
+// jsdom does not implement scrolling
+if (!Element.prototype.scrollIntoView) {
+	Element.prototype.scrollIntoView = () => {};
+}
+
+// jsdom lacks the Web Animations API that Svelte's transition directives use internally
+if (!Element.prototype.animate) {
+	Element.prototype.animate = function () {
+		return {
+			finished: Promise.resolve(),
+			cancel: () => {},
+			play: () => {},
+			pause: () => {},
+			reverse: () => {},
+			onfinish: null,
+			oncancel: null
+		} as unknown as Animation;
+	};
+}
