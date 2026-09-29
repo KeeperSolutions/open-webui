@@ -146,7 +146,16 @@ export const showFileNavPath: Writable<string | null> = writable(null);
 export const showFileNavDir: Writable<string | null> = writable(null);
 export const selectedTerminalId: Writable<string | null> = writable(null);
 
-export const selectedDocumentId: Writable<string | null> = writable(null);
+export type ChatDocument = {
+	file_id?: string;
+	name: string;
+	format: string;
+	drive_id?: string;
+	web_link?: string | null;
+};
+
+export const selectedDocument: Writable<ChatDocument | null> = writable(null);
+export const showDocumentList = writable(false);
 
 export const artifactCode = writable(null);
 export const artifactContents = writable(null);

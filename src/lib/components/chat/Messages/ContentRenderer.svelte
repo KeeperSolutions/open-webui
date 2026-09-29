@@ -8,6 +8,7 @@
 		artifactCode,
 		chatId,
 		mobile,
+		selectedDocument,
 		settings,
 		showArtifacts,
 		showControls,
@@ -156,6 +157,7 @@
 			) {
 				autoOpenedArtifactIds.add(artifactId);
 				await tick();
+				selectedDocument.set(null);
 				showArtifacts.set(true);
 				showControls.set(true);
 			}
@@ -166,6 +168,7 @@
 		async (/** @type {string} */ value) => {
 			console.log('Preview', value);
 			await artifactCode.set(/** @type {any} */ (value));
+			selectedDocument.set(null);
 			await showControls.set(true);
 			await showArtifacts.set(true);
 			await showEmbeds.set(false);

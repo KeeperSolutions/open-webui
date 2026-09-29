@@ -30,6 +30,7 @@ from open_webui.env import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
+from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import UserNameResponse, Users
@@ -965,6 +966,47 @@ async def _make_channel_emitter(request_info):
     return __channel_emitter__
 
 
+def is_same_document(a: dict, b: dict) -> bool:
+    """A card is one file, known by its stored file_id, its Drive id, or both once it has been saved to Drive."""
+    return bool(
+        (a.get('file_id') and a.get('file_id') == b.get('file_id'))
+        or (a.get('drive_id') and a.get('drive_id') == b.get('drive_id'))
+    )
+
+
+async def upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool = False):
+    """Keep one card per document per chat: update the message already showing it, or add it to this message."""
+    chat = await Chats.get_chat_by_id(chat_id)
+    messages = (chat.chat if chat else {}).get('history', {}).get('messages', {})
+
+    owner_id = next(
+        (
+            mid
+            for mid, message in messages.items()
+            if any(is_same_document(d, document) for d in message.get('documents', []))
+        ),
+        None,
+    )
+    if owner_id is None and update_only:
+        return
+
+    if owner_id:
+        documents = []
+        for d in messages[owner_id]['documents']:
+            if not is_same_document(d, document):
+                documents.append(d)
+                continue
+            # A renamed Drive copy of a stored document renames the stored file too, so downloads use the new name
+            if d.get('file_id') and document.get('name') and document['name'] != d.get('name'):
+                await Files.update_file_name_by_id(d['file_id'], f"{document['name']}.{d['format']}")
+            documents.append({**d, **document, 'format': d.get('format') or document.get('format')})
+    else:
+        owner_id = message_id
+        documents = [*messages.get(owner_id, {}).get('documents', []), document]
+
+    await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, owner_id, {'documents': documents}, touch=False)
+
+
 async def get_event_emitter(request_info, update_db=True):
     # Channel mode: route pipeline output to channel message updates
     if (request_info.get('chat_id') or '').startswith('channel:'):
@@ -1071,23 +1113,12 @@ async def get_event_emitter(request_info, update_db=True):
                     touch=False,
                 )
 
-            elif event_type == 'chat:message:document':
-                document = event_data.get('data', {})
-                message = await Chats.get_message_by_id_and_message_id(
+            elif event_type in ('chat:message:document', 'chat:message:document:update'):
+                await upsert_document_card(
                     request_info['chat_id'],
                     request_info['message_id'],
-                )
-                documents = [
-                    d for d in (message or {}).get('documents', []) if d.get('file_id') != document.get('file_id')
-                ]
-
-                await Chats.upsert_message_to_chat_by_id_and_message_id(
-                    request_info['chat_id'],
-                    request_info['message_id'],
-                    {
-                        'documents': [*documents, document],
-                    },
-                    touch=False,
+                    event_data.get('data', {}),
+                    update_only=event_type == 'chat:message:document:update',
                 )
 
             elif event_type in ('source', 'citation'):

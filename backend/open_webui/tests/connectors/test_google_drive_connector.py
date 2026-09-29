@@ -519,16 +519,24 @@ class TestDriveCopyFiles:
                 )
 
         client = FakeClient()
+        emitted = []
+
+        async def emit(event):
+            emitted.append(event)
+
         with patch('httpx.AsyncClient', return_value=client):
             result = json.loads(
                 await drive.drive_copy_files(
                     file_ids=['src123'], folder='Archive',
-                    __user__=USER, __event_call__=confirm, __event_emitter__=None,
+                    __user__=USER, __event_call__=confirm, __event_emitter__=emit,
                 )
             )
 
         assert result['status'] == 'success'
         assert client.copy_calls[0]['json']['parents'] == ['folder-xyz']
+        # A copy is a new file, so it gets the same document card create_documents uses
+        assert [e['type'] for e in emitted] == ['chat:message:document']
+        assert emitted[0]['data']['drive_id'] == 'copy123'
         assert client.copy_calls[0]['json']['name'] == 'Copy of Original.txt'
 
     @pytest.mark.asyncio
@@ -698,16 +706,24 @@ class TestDriveMoveFiles:
                     200, {'id': 'file1', 'name': 'Report.docx', 'mimeType': 'application/vnd.google-apps.document', 'webViewLink': 'x'}
                 )
 
+        emitted = []
+
+        async def emit(event):
+            emitted.append(event)
+
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
                 await drive.drive_move_files(
                     file_ids=['file1'], folder='Archive',
-                    __user__=USER, __event_call__=confirm, __event_emitter__=None,
+                    __user__=USER, __event_call__=confirm, __event_emitter__=emit,
                 )
             )
 
         assert result['status'] == 'success'
         assert result['moved'] == [{'id': 'file1', 'name': 'Report.docx', 'folder': 'Archive'}]
+        # Moving creates nothing new, so no card is shown and the model isn't told there is one
+        assert emitted == []
+        assert 'note' not in result
 
     @pytest.mark.asyncio
     async def test_moving_a_file_already_in_the_target_folder_errors_without_asking(self):
@@ -980,15 +996,28 @@ class TestDriveRenameFile:
                     200, {'id': 'file1', 'name': 'New Name.docx', 'mimeType': 'application/vnd.google-apps.document', 'webViewLink': 'x'}
                 )
 
+        emitted = []
+
+        async def emit(event):
+            emitted.append(event)
+
         with patch('httpx.AsyncClient', return_value=FakeClient()):
             result = json.loads(
                 await drive.drive_rename_file(
                     file_id='file1', name='New Name.docx',
-                    __user__=USER, __event_call__=confirm, __event_emitter__=None,
+                    __user__=USER, __event_call__=confirm, __event_emitter__=emit,
                 )
             )
 
         assert result['name'] == 'New Name.docx'
+        assert 'note' not in result
+        # A rename only refreshes a card the chat already shows, and the card drops the extension it shows on its own
+        assert emitted == [
+            {
+                'type': 'chat:message:document:update',
+                'data': {'drive_id': 'file1', 'name': 'New Name', 'format': 'docx', 'web_link': 'x'},
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_renaming_to_the_same_name_errors_without_asking(self):

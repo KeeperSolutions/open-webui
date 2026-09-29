@@ -4584,21 +4584,23 @@ DRIVE_NATIVE_MIME_TYPE_FORMATS = {v: k for k, v in DRIVE_DOCUMENT_NATIVE_MIME_TY
 DRIVE_NATIVE_MIME_TYPE_FORMATS['application/pdf'] = 'pdf'
 
 
-async def _drive_emit_created_card(event_emitter, f: dict, format: str = None):
-    """Emit the chat card for a written Drive file - always call this on success so the user
-    gets a reliable link/download card instead of the model composing its own text link."""
+async def _drive_emit_document_card(event_emitter, f: dict, format: str = None, update_only: bool = False):
+    """Show a written Drive file as a document card, the same card create_documents uses - always call this on
+    success so the user gets a reliable link/download card instead of the model composing its own text link.
+    With update_only it only refreshes a card the chat already shows for this file (e.g. after a rename)."""
     if not event_emitter:
         return
 
+    format = format or DRIVE_NATIVE_MIME_TYPE_FORMATS.get(f.get('mimeType', ''))
+    name = f['name']
+    # Cards show the format on their own, so an uploaded "report.pdf" reads as "report"
+    if format and name.lower().endswith(f'.{format}'):
+        name = name[: -len(format) - 1]
+
     await event_emitter(
         {
-            'type': 'chat:message:drive_document_created',
-            'data': {
-                'id': f['id'],
-                'name': f['name'],
-                'format': format or DRIVE_NATIVE_MIME_TYPE_FORMATS.get(f.get('mimeType', '')),
-                'web_link': f.get('webViewLink'),
-            },
+            'type': 'chat:message:document:update' if update_only else 'chat:message:document',
+            'data': {'drive_id': f['id'], 'name': name, 'format': format, 'web_link': f.get('webViewLink')},
         }
     )
 
@@ -5461,7 +5463,7 @@ async def drive_save_edited_copy(
                 if error:
                     return json.dumps({'error': error})
 
-        await _drive_emit_created_card(__event_emitter__, f, format=format)
+        await _drive_emit_document_card(__event_emitter__, f, format=format)
         return json.dumps(
             {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
             ensure_ascii=False,
@@ -5574,16 +5576,11 @@ async def drive_move_files(
         log.exception(f'drive_move_files error: {e}')
         return json.dumps({'error': str(e)})
 
-    for f in moved_files:
-        await _drive_emit_created_card(__event_emitter__, f)
-
     result = {
         'status': _drive_batch_status(moved_files, failed),
         'moved': [{'id': f['id'], 'name': f['name'], 'folder': folder} for f in moved_files],
         'failed': failed,
     }
-    if moved_files:
-        result['note'] = DRIVE_CARD_NOTE
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -5821,16 +5818,11 @@ async def drive_restore_files(
         log.exception(f'drive_restore_files error: {e}')
         return json.dumps({'error': str(e)})
 
-    for f in restored_files:
-        await _drive_emit_created_card(__event_emitter__, f)
-
     result = {
         'status': _drive_batch_status(restored_files, failed),
         'restored': [{'id': f['id'], 'name': f['name']} for f in restored_files],
         'failed': failed,
     }
-    if restored_files:
-        result['note'] = DRIVE_CARD_NOTE
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -5852,9 +5844,8 @@ async def drive_rename_file(
 
     :param file_id: The Google Drive file id to rename (from drive_search or a previous write tool's result)
     :param name: The new name for the file
-    :return: JSON with the file's id and new name. There is no link in this result on purpose -
-        the UI already shows an "Open in Drive" button for this file, so don't invent or repeat
-        a link (or the word "here") in your reply to the user
+    :return: JSON with the file's id and new name. If the chat already shows a card for this file it
+        now shows the new name, and no new card is added - so just tell the user the file was renamed
     """
 
     headers, error = await _drive_prepare_write(__user__, __event_call__)
@@ -5910,11 +5901,8 @@ async def drive_rename_file(
         if error:
             return error
 
-        await _drive_emit_created_card(__event_emitter__, f)
-        return json.dumps(
-            {'status': 'success', 'id': f['id'], 'name': f['name'], 'note': DRIVE_CARD_NOTE},
-            ensure_ascii=False,
-        )
+        await _drive_emit_document_card(__event_emitter__, f, update_only=True)
+        return json.dumps({'status': 'success', 'id': f['id'], 'name': f['name']}, ensure_ascii=False)
     except Exception as e:
         log.exception(f'drive_rename_file error: {e}')
         return json.dumps({'error': str(e)})
@@ -6014,7 +6002,7 @@ async def drive_copy_files(
         return json.dumps({'error': str(e)})
 
     for f in copied_files:
-        await _drive_emit_created_card(__event_emitter__, f)
+        await _drive_emit_document_card(__event_emitter__, f)
 
     result = {
         'status': _drive_batch_status(copied_files, failed),
@@ -6108,7 +6096,7 @@ async def drive_create_files(
             failed.append({'name': f['name'], 'error': create_error})
         else:
             created.append({'id': data['id'], 'name': data['name'], 'mime_type': data['mimeType']})
-            await _drive_emit_created_card(__event_emitter__, data)
+            await _drive_emit_document_card(__event_emitter__, data)
 
     result = {'status': _drive_batch_status(created, failed), 'created': created, 'failed': failed}
     if created:

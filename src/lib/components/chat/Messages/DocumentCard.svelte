@@ -1,132 +1,111 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { toast } from 'svelte-sonner';
-	import fileSaver from 'file-saver';
-	import { config, selectedDocumentId, showSettings } from '$lib/stores';
-	import { downloadFileById } from '$lib/apis/files';
-	import { saveDocumentToGoogleDrive } from '$lib/apis/connectors';
-	import DocumentFormatIcon, { formatLabels } from './DocumentFormatIcon.svelte';
+	import { config, selectedDocument, type ChatDocument } from '$lib/stores';
+	import {
+		documentKey,
+		downloadAllDocuments,
+		downloadDocument,
+		openDocumentInDrive,
+		openDocumentPreview,
+		savingDocumentIds
+	} from '$lib/utils/documents';
+	import DocumentFormatIcon, { documentTypeLabel } from './DocumentFormatIcon.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Download from '$lib/components/icons/Download.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	type Document = {
-		file_id: string;
-		name: string;
-		format: string;
-		drive_id?: string;
-		web_link?: string | null;
-	};
+	export let documents: ChatDocument[] = [];
 
-	export let documents: Document[] = [];
+	let downloadingAll = false;
 
-	let savingIds: string[] = [];
-
-	const download = async (doc: Document) => {
-		const result = await downloadFileById(localStorage.token, doc.file_id).catch((error) => {
-			toast.error(`${error}`);
-			return null;
-		});
-		if (result) {
-			saveAs(result.blob, result.filename ?? `${doc.name}.${doc.format}`);
-		}
-	};
-
-	const openInDrive = async (doc: Document) => {
-		if (doc.web_link) {
-			window.open(doc.web_link, '_blank', 'noopener,noreferrer');
-			return;
-		}
-		if (savingIds.includes(doc.file_id)) return;
-
-		// Opened before the await so the popup blocker still sees it as part of the click
-		const tab = window.open('', '_blank');
-		savingIds = [...savingIds, doc.file_id];
-
-		try {
-			const saved = await saveDocumentToGoogleDrive(localStorage.token, doc.file_id);
-			// Mutated in place so the message's own documents list keeps the link too
-			Object.assign(doc, saved);
-			documents = documents;
-
-			if (tab) {
-				tab.opener = null;
-				tab.location.href = saved.web_link;
-			} else {
-				window.open(saved.web_link, '_blank', 'noopener,noreferrer');
-			}
-		} catch (error) {
-			tab?.close();
-			if (error === 'drive_not_connected') {
-				toast.error($i18n.t('Connect Google Drive in Settings to save documents there.'), {
-					action: {
-						label: $i18n.t('Settings'),
-						onClick: () => showSettings.set({ tab: 'connectors' })
-					}
-				});
-			} else {
-				toast.error(`${error}`);
-			}
-		} finally {
-			savingIds = savingIds.filter((id) => id !== doc.file_id);
-		}
-	};
-
-	const select = (doc: Document) => {
-		selectedDocumentId.set(doc.file_id);
-	};
+	const buttonClass =
+		'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition disabled:opacity-60';
 </script>
 
 {#if documents.length > 0}
-	<div class="mt-1 mb-2 w-full flex flex-col gap-1.5">
-		{#each documents as doc (doc.file_id)}
+	<div class="mt-1 mb-2 w-full max-w-xl flex flex-col gap-1.5">
+		{#each documents as doc (documentKey(doc))}
 			<div
-				class="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl bg-gray-900 dark:bg-black border cursor-pointer transition {$selectedDocumentId ===
-				doc.file_id
-					? 'border-gray-400'
-					: 'border-gray-800 hover:border-gray-700'}"
+				class="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-white dark:bg-gray-850 border cursor-pointer transition {$selectedDocument &&
+				documentKey($selectedDocument) === documentKey(doc)
+					? 'border-gray-400 dark:border-gray-500'
+					: 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'}"
 				role="button"
 				tabindex="0"
-				aria-pressed={$selectedDocumentId === doc.file_id}
-				on:click={() => select(doc)}
+				aria-pressed={!!$selectedDocument && documentKey($selectedDocument) === documentKey(doc)}
+				on:click={() => openDocumentPreview(doc)}
 				on:keydown={(e) => {
 					if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
 						e.preventDefault();
-						select(doc);
+						openDocumentPreview(doc);
 					}
 				}}
 			>
-				<div class="flex items-center gap-2.5 min-w-0">
+				<div class="flex items-center gap-3 min-w-0">
 					<DocumentFormatIcon format={doc.format} />
 					<div class="min-w-0">
-						<div class="text-sm text-white truncate">{doc.name}</div>
-						<div class="text-[0.6875rem] text-gray-400">
-							{formatLabels[doc.format ?? ''] ?? $i18n.t('File')}
+						<div class="text-sm text-gray-900 dark:text-white truncate">{doc.name}</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400">
+							{documentTypeLabel(doc.format, (key) => $i18n.t(key))}
 						</div>
 					</div>
 				</div>
 
-				<div class="flex items-center gap-2 shrink-0">
+				<div class="flex items-center gap-1.5 shrink-0">
 					{#if $config?.features?.enable_google_drive_connector}
 						<button
-							class="px-3 py-1.5 text-xs font-medium border border-gray-700 text-white hover:bg-gray-800 transition rounded-full disabled:opacity-60"
+							class={buttonClass}
 							type="button"
-							disabled={savingIds.includes(doc.file_id)}
-							on:click|stopPropagation={() => openInDrive(doc)}
+							disabled={$savingDocumentIds.includes(documentKey(doc))}
+							on:click|stopPropagation={async () => {
+								await openDocumentInDrive(doc, (key) => $i18n.t(key));
+								documents = documents;
+							}}
 						>
-							{savingIds.includes(doc.file_id) ? $i18n.t('Saving...') : $i18n.t('Open in Drive')}
+							{#if $savingDocumentIds.includes(documentKey(doc))}
+								<Spinner className="size-3.5" />
+							{:else}
+								<GoogleDrive className="size-3.5 shrink-0" />
+							{/if}
+							{doc.web_link ? $i18n.t('Open in Drive') : $i18n.t('Add to Drive')}
 						</button>
 					{/if}
 
 					<button
-						class="px-3 py-1.5 text-xs font-medium bg-white hover:bg-gray-100 text-black transition rounded-full"
+						class={buttonClass}
 						type="button"
-						on:click|stopPropagation={() => download(doc)}
+						on:click|stopPropagation={() => downloadDocument(doc)}
 					>
-						{doc.format ? `${$i18n.t('Download')} .${doc.format}` : $i18n.t('Download')}
+						<Download className="size-3.5" />
+						{$i18n.t('Download')}
 					</button>
 				</div>
 			</div>
 		{/each}
+
+		{#if documents.length > 1}
+			<button
+				class="{buttonClass} w-fit mt-0.5"
+				type="button"
+				disabled={downloadingAll}
+				on:click={async () => {
+					downloadingAll = true;
+					try {
+						await downloadAllDocuments(documents, (key) => $i18n.t(key));
+					} finally {
+						downloadingAll = false;
+					}
+				}}
+			>
+				{#if downloadingAll}
+					<Spinner className="size-3.5" />
+				{:else}
+					<Download className="size-3.5" />
+				{/if}
+				{$i18n.t('Download all')}
+			</button>
+		{/if}
 	</div>
 {/if}

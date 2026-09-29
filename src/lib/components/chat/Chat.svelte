@@ -42,6 +42,8 @@
 		functions,
 		selectedFolder,
 		showEmbeds,
+		selectedDocument,
+		showDocumentList,
 		selectedTerminalId,
 		showFileNavPath,
 		showFileNavDir,
@@ -67,6 +69,11 @@
 	} from '$lib/utils';
 	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
+	import {
+		isSameDocument,
+		mergeDuplicateDocuments,
+		openDocumentPreview
+	} from '$lib/utils/documents';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { getOutputText } from './Messages/structuredOutput';
 
@@ -1152,20 +1159,29 @@
 					} else {
 						message.connectorSuggestions = [data];
 					}
-				} else if (type === 'chat:message:drive_document_created') {
-					if (message?.driveDocuments) {
-						message.driveDocuments = [
-							...message.driveDocuments.filter((doc) => doc.id !== data.id),
-							data
-						];
-					} else {
-						message.driveDocuments = [data];
+				} else if (type === 'chat:message:document' || type === 'chat:message:document:update') {
+					// One card per document in the whole chat, so a later event for it (a Drive save, a rename) updates the card it already has
+					const owner = Object.values(history.messages).find((m) =>
+						m.documents?.some((doc) => isSameDocument(doc, data))
+					);
+					if (owner) {
+						owner.documents = owner.documents.map((doc) =>
+							isSameDocument(doc, data)
+								? Object.assign(doc, data, { format: doc.format || data.format })
+								: doc
+						);
+						// The open preview holds the same object, so it is told to pick up the change too
+						if ($selectedDocument && isSameDocument($selectedDocument, data)) {
+							selectedDocument.set($selectedDocument);
+						}
+					} else if (type === 'chat:message:document') {
+						// Only the first document a response creates opens on its own
+						const isFirstCreated = !message.documents?.length && !data.drive_id;
+						message.documents = [...(message.documents ?? []), data];
+						if (isFirstCreated && !$mobile) {
+							openDocumentPreview(message.documents.at(-1));
+						}
 					}
-				} else if (type === 'chat:message:document') {
-					message.documents = [
-						...(message.documents ?? []).filter((doc) => doc.file_id !== data.file_id),
-						data
-					];
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
 					const toastContent = data?.content ?? '';
@@ -1450,6 +1466,7 @@
 				showCallOverlay.set(false);
 				showArtifacts.set(false);
 				showEmbeds.set(false);
+				showDocumentList.set(false);
 			}
 		});
 
@@ -2055,6 +2072,7 @@
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
 		chatId.set(chatIdProp || $chatId);
 		noteChatDebug('loadChat set active chat id');
+		selectedDocument.set(null);
 
 		if ($temporaryChatEnabled) {
 			noteChatDebug('loadChat disabling temporary chat');
@@ -2133,6 +2151,7 @@
 				// Sanitize history: repair orphaned references and structurally-malformed
 				// nodes from failed regenerations (#24424, #24157, #20474)
 				sanitizeHistory(history);
+				mergeDuplicateDocuments(history);
 
 				chatTitle.set(chatContent.title);
 
@@ -3925,7 +3944,7 @@
 				></div>
 			{/if}
 
-			<PaneGroup direction="horizontal" class="w-full h-full">
+			<PaneGroup direction="horizontal" class="chat-pane-group w-full h-full">
 				<Pane defaultSize={50} minSize={30} class="h-full flex relative max-w-full flex-col">
 					<FilesOverlay show={dragged} />
 					{#if embedded}
@@ -4336,5 +4355,13 @@
 	::-webkit-scrollbar {
 		height: 0.5rem;
 		width: 0.5rem;
+	}
+
+	/* The side panel slides open and closed, but follows the pointer directly while its resizer is dragged */
+	:global(.chat-pane-group > [data-pane]) {
+		transition: flex-grow 300ms cubic-bezier(0.2, 0, 0, 1);
+	}
+	:global(.chat-pane-group:has(> [data-pane-resizer][data-active='pointer']) > [data-pane]) {
+		transition: none;
 	}
 </style>

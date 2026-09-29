@@ -22,7 +22,8 @@
 		temporaryChatEnabled,
 		TTSWorker,
 		user,
-		theme
+		theme,
+		type ChatDocument
 	} from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
@@ -57,7 +58,6 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
-	import DriveDocumentCard from './DriveDocumentCard.svelte';
 	import DocumentCard from './DocumentCard.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
@@ -114,19 +114,7 @@
 			icon: string;
 			connect_url: string;
 		}[];
-		driveDocuments?: {
-			id: string;
-			name: string;
-			format: string;
-			web_link?: string;
-		}[];
-		documents?: {
-			file_id: string;
-			name: string;
-			format: string;
-			drive_id?: string;
-			web_link?: string | null;
-		}[];
+		documents?: ChatDocument[];
 		info?: {
 			openai?: boolean;
 			prompt_tokens?: number;
@@ -217,10 +205,7 @@
 	// The document cards already link out, so strip any Drive link the model added in its own text
 	const stripDriveLinks = (content: string) =>
 		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
-	$: displayContent =
-		message.driveDocuments || message.documents
-			? stripDriveLinks(message.content ?? '')
-			: message.content;
+	$: displayContent = message.documents ? stripDriveLinks(message.content ?? '') : message.content;
 
 	let edit = false;
 	let editedContent = '';
@@ -948,10 +933,6 @@
 
 							{#if message.connectorSuggestions}
 								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
-							{/if}
-
-							{#if message.driveDocuments}
-								<DriveDocumentCard driveDocuments={message.driveDocuments} />
 							{/if}
 
 							{#if message.documents}

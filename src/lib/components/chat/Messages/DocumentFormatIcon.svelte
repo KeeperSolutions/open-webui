@@ -1,9 +1,18 @@
 <script context="module" lang="ts">
-	export const formatLabels: Record<string, string> = {
-		pdf: 'PDF',
-		docx: 'Word',
-		xlsx: 'Excel',
-		pptx: 'PowerPoint'
+	const formatKinds: Record<string, string> = {
+		docx: 'Document',
+		xlsx: 'Spreadsheet',
+		pptx: 'Presentation'
+	};
+
+	// Reads like "Document · DOCX", or just "PDF" where the kind and the extension are the same word
+	export const documentTypeLabel = (
+		format: string | null | undefined,
+		t: (key: string) => string
+	) => {
+		const ext = (format ?? '').toUpperCase();
+		const kind = formatKinds[format ?? ''];
+		return kind ? `${t(kind)} · ${ext}` : ext || t('File');
 	};
 </script>
 
