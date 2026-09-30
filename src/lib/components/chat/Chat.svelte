@@ -1926,11 +1926,11 @@
 			}
 		}
 
-		if ($mobile) {
-			await showControls.set(false);
-		}
+		// A new chat starts with nothing open on the right, or the pane would fall back to Controls
+		await showControls.set(false);
 		await showCallOverlay.set(false);
 		await showArtifacts.set(false);
+		selectedDocument.set(null);
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);

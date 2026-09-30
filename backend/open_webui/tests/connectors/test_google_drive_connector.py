@@ -338,12 +338,17 @@ class TestDriveSaveDocuments:
     async def test_reuses_the_earlier_drive_copy_unless_it_was_trashed(self, tmp_path, trashed, uploads):
         client = DriveSaveClient(existing={'drive-old': trashed})
         drive_copy = {'id': 'drive-old', 'web_link': 'https://docs/old'}
+        emitted = []
         with stored_files(tmp_path, stored_file('f1', 'Report.docx', drive=drive_copy)):
-            result = await self.save(['f1'], client)
+            result = await self.save(['f1'], client, emitted=emitted)
 
         assert result['status'] == 'success'
         assert client.uploaded_names == uploads
         assert result['saved'][0]['drive_id'] == ('drive-Report' if trashed else 'drive-old')
+        # The model is told a reused copy was already there, so it doesn't claim a fresh save
+        assert result['saved'][0].get('already_saved', False) is not trashed
+        assert (drive.DRIVE_ALREADY_SAVED_NOTE in result['note']) is not trashed
+        assert 'already_saved' not in emitted[0]['data']
 
     @pytest.mark.asyncio
     async def test_declined_confirmation_saves_nothing(self, tmp_path):
@@ -583,6 +588,8 @@ class TestDriveCopyFiles:
         # A copy is a new file, so it gets the same document card create_documents uses
         assert [e['type'] for e in emitted] == ['chat:message:document']
         assert emitted[0]['data']['drive_id'] == 'copy123'
+        # A plain text file's card reads like the others, its name without ".txt" and "txt" as its format
+        assert (emitted[0]['data']['name'], emitted[0]['data']['format']) == ('Original', 'txt')
         assert client.copy_calls[0]['json']['name'] == 'Copy of Original.txt'
 
     @pytest.mark.asyncio

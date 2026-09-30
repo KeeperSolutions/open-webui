@@ -62,3 +62,14 @@ def test_missing_style_block_raises():
 
     with pytest.raises(ValueError, match='docDefaults'):
         built_in._apply_reference_doc_replacements(buf.getvalue())
+
+
+def test_docx_is_a4_with_google_docs_headings(reference_doc):
+    docx_bytes = built_in._build_docx_document_bytes('# Naslov\n\n### Podnaslov\n\nTekst.\n')
+    document = read_part(docx_bytes, 'word/document.xml')
+    styles = read_part(docx_bytes, 'word/styles.xml')
+
+    assert re.search(r'<w:pgSz [^>]*w:h="16838"', document) and re.search(r'<w:pgSz [^>]*w:w="11906"', document)
+    heading3 = re.search(r'<w:style [^>]*w:styleId="Heading3".*?</w:style>', styles, re.S).group(0)
+    assert re.search(r'<w:color [^>]*w:val="434343"', heading3)
+    assert '0F4761' not in re.search(r'<w:style [^>]*w:styleId="Heading1".*?</w:style>', styles, re.S).group(0)

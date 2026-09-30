@@ -265,7 +265,7 @@ async def download_google_drive_document(
     filename: str = 'document',
     user=Depends(get_internal_drive_user),
 ):
-    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
+    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx', 'txt'}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
 
     access_token = await get_valid_access_token(user.id)
@@ -337,7 +337,12 @@ async def save_document_to_google_drive(
     user=Depends(get_internal_drive_user),
 ):
     from open_webui.socket.main import upsert_document_card
-    from open_webui.tools.built_in import DOCUMENT_MISSING_ERROR, load_stored_documents, save_stored_documents_to_drive
+    from open_webui.tools.built_in import (
+        DOCUMENT_MISSING_ERROR,
+        drive_document_card,
+        load_stored_documents,
+        save_stored_documents_to_drive,
+    )
 
     access_token = await get_valid_access_token(user.id)
     if not access_token:
@@ -354,14 +359,15 @@ async def save_document_to_google_drive(
     saved, failed = await save_stored_documents_to_drive({'Authorization': f'Bearer {access_token}'}, documents)
     if failed:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=failed[0]['error'])
+    card = drive_document_card(saved[0])
 
     # The card keeps its Drive link after a reload, and a later rename in Drive can still find it
     if form_data.chat_id and await Chats.get_chat_by_id_and_user_id(form_data.chat_id, user.id):
         try:
-            await upsert_document_card(form_data.chat_id, '', saved[0], update_only=True)
+            await upsert_document_card(form_data.chat_id, '', card, update_only=True)
         except Exception as e:
             log.exception(f'Updating the document card in chat {form_data.chat_id} failed: {e}')
-    return saved[0]
+    return card
 
 
 async def get_valid_access_token(user_id: str) -> str | None:

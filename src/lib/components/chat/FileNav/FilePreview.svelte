@@ -331,18 +331,21 @@
 		</div>
 	{:else if fileOfficeSlides !== null && fileOfficeSlides.length > 0}
 		<div class="flex flex-col h-full">
-			<PanzoomContainer
-				bind:this={panzoomRef}
-				className="w-full flex-1 min-h-0 flex items-center justify-center overflow-hidden"
-				options={{ zoomDoubleClickSpeed: 1 }}
-			>
-				<img
-					src={fileOfficeSlides[currentSlide]}
-					alt="Slide {currentSlide + 1}"
-					class="max-w-full max-h-full object-contain p-3"
-					draggable="false"
-				/>
-			</PanzoomContainer>
+			<!-- panzoom listens on its parent, so this wrapper keeps it off the slide buttons and clips a moved slide -->
+			<div class="w-full flex-1 min-h-0 overflow-hidden outline-none">
+				<PanzoomContainer
+					bind:this={panzoomRef}
+					className="w-full h-full flex items-center justify-center"
+					options={{ zoomDoubleClickSpeed: 1, filterKey: () => true }}
+				>
+					<img
+						src={fileOfficeSlides[currentSlide]}
+						alt="Slide {currentSlide + 1}"
+						class="max-w-full max-h-full object-contain p-3"
+						draggable="false"
+					/>
+				</PanzoomContainer>
+			</div>
 			{#if fileOfficeSlides.length > 1}
 				<div
 					class="flex items-center justify-center gap-3 py-2 px-3 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-500"

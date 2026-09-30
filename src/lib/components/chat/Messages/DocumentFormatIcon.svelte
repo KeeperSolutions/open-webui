@@ -5,7 +5,8 @@
 	const formatKinds: Record<string, string> = {
 		docx: 'Document',
 		xlsx: 'Spreadsheet',
-		pptx: 'Presentation'
+		pptx: 'Presentation',
+		txt: 'Text'
 	};
 
 	// Reads like "Document · DOCX", or just "PDF" where the kind and the extension are the same word
@@ -19,6 +20,7 @@
 <script lang="ts">
 	import DriveXlsxGlyph from '$lib/components/icons/DriveXlsxGlyph.svelte';
 	import DriveDocGlyph from '$lib/components/icons/DriveDocGlyph.svelte';
+	import DriveSlidesGlyph from '$lib/components/icons/DriveSlidesGlyph.svelte';
 
 	export let format: ChatDocument['format'] = null;
 
@@ -39,8 +41,10 @@
 		<span class="text-[8px] font-bold text-white tracking-tight">PDF</span>
 	{:else if format === 'xlsx'}
 		<DriveXlsxGlyph />
+	{:else if format === 'pptx'}
+		<DriveSlidesGlyph />
 	{:else}
-		<!-- Also covers pptx and unknown formats, matching the plain colored-block look -->
+		<!-- Also covers unknown formats, matching the plain colored-block look -->
 		<DriveDocGlyph />
 	{/if}
 </div>

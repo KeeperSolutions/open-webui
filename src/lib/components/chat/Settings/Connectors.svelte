@@ -28,8 +28,8 @@
 		{
 			id: 'google_drive',
 			name: 'Google Drive',
-			description:
-				"Let the model search, read, create, and manage (rename, move, delete) files in your Google Drive. It will always ask for your confirmation before changing or deleting anything.",
+			// Same text as the connector card in chat, from backend/open_webui/utils/connector_registry.py
+			description: 'Search, read and manage your Drive files',
 			connected: false,
 			externalAccount: null
 		}

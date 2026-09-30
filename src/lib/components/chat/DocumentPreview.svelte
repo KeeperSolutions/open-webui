@@ -142,6 +142,9 @@
 			const { pptxToImages } = await import('$lib/utils/pptxToHtml');
 			return { slides: (await pptxToImages(arrayBuffer)).images };
 		}
+		if (target.format === 'txt') {
+			return { content: new TextDecoder().decode(arrayBuffer) };
+		}
 		return { content: $i18n.t('Preview is not available for this file type.') };
 	};
 
@@ -328,9 +331,6 @@
 			></div>
 		</div>
 
-		{#if overlay}
-			<div class="absolute top-0 left-0 right-0 bottom-0 z-10"></div>
-		{/if}
 		{#if !shown}
 			<div class="flex items-center justify-center h-full"><Spinner className="size-4" /></div>
 		{:else}
@@ -345,6 +345,7 @@
 					{excelSheetNames}
 					{selectedExcelSheet}
 					onSheetChange={renderSheet}
+					{overlay}
 				/>
 			</div>
 		{/if}
@@ -380,6 +381,42 @@
 		box-shadow:
 			0 1px 3px rgba(0, 0, 0, 0.12),
 			0 4px 16px rgba(0, 0, 0, 0.06);
+	}
+	/* Same type as the generated docx, which follows Google Docs; the probe shares it so pages break where they're measured */
+	.document-preview :global(:is(.document-page, .document-probe-content)) {
+		font-family: Arial, sans-serif;
+		font-size: 11pt;
+		line-height: 1.15;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) :is(h1, h2, h3, h4, h5, h6)) {
+		font-weight: 400;
+		line-height: 1.15;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) h1) {
+		font-size: 20pt;
+		margin: 20pt 0 6pt;
+		color: #000;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) h2) {
+		font-size: 16pt;
+		margin: 18pt 0 6pt;
+		color: #000;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) h3) {
+		font-size: 14pt;
+		margin: 16pt 0 4pt;
+		color: #434343;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) :is(h4, h5, h6)) {
+		font-size: 12pt;
+		margin: 14pt 0 4pt;
+		color: #666;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) :is(h5, h6)) {
+		font-size: 11pt;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) p) {
+		margin: 3pt 0 6pt;
 	}
 	/* Measures blocks at the real page width without being seen */
 	.document-probe {
