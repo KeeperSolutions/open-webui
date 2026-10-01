@@ -1401,6 +1401,12 @@ async def generate_chat_completion(
     is_streaming_request = bool(payload.get('stream', False))
     if not is_streaming_request:
         payload.pop('stream_options', None)
+    # TEMP DEBUG (Bug A investigation, remove after verification): confirm what
+    # open-webui itself actually sends outbound, per model, before any provider involvement.
+    log.warning(
+        '[BUGA-DEBUG] outbound model=%s stream=%s stream_options=%s',
+        payload.get('model'), is_streaming_request, payload.get('stream_options'),
+    )
 
     payload = json.dumps(payload)
 

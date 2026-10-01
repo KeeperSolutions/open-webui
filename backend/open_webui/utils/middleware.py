@@ -5780,6 +5780,17 @@ async def streaming_chat_response_handler(response, ctx):
                                     # Normalize usage data to standard format
                                     raw_usage = data.get('usage', {}) or {}
                                     raw_usage.update(data.get('timings', {}))  # llama.cpp
+                                    # TEMP DEBUG (Bug A investigation, remove after verification):
+                                    # log chunk shape only, never content, to compare which
+                                    # providers' final SSE chunk actually carries `usage`.
+                                    if data.get('choices') and data['choices'][0].get('finish_reason'):
+                                        log.warning(
+                                            '[BUGA-DEBUG] model=%s has_usage=%s finish_reason=%s keys=%s',
+                                            data.get('model'),
+                                            bool(data.get('usage')),
+                                            data['choices'][0].get('finish_reason'),
+                                            sorted(data.keys()),
+                                        )
                                     if raw_usage:
                                         usage = merge_usage(usage, raw_usage)
                                         await event_emitter(
