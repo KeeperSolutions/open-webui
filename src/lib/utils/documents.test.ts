@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
-import { collectChatDocuments, isSameDocument, mergeDuplicateDocuments } from './documents';
+import {
+	collectChatDocuments,
+	isSameDocument,
+	mergeDuplicateDocuments,
+	migrateDriveDocuments
+} from './documents';
 
 const report = { file_id: 'f1', name: 'Report', format: 'docx' };
 
@@ -52,5 +57,32 @@ describe('mergeDuplicateDocuments', () => {
 		]);
 		expect(history.messages.b.documents).toEqual([]);
 		expect(history.messages.a.documents[0]).toBe(first);
+	});
+});
+
+describe('migrateDriveDocuments', () => {
+	it('turns the old driveDocuments of a message into document cards', () => {
+		const history = {
+			messages: {
+				a: {
+					timestamp: 1,
+					documents: [{ drive_id: 'd1', name: 'Plan', format: 'docx', web_link: 'new' }],
+					driveDocuments: [
+						{ id: 'd1', name: 'Plan', format: 'docx', web_link: 'old' },
+						{ id: 'd2', name: 'Budget.pdf', format: 'pdf', web_link: 'link' }
+					]
+				},
+				b: { timestamp: 2 }
+			}
+		};
+
+		migrateDriveDocuments(history);
+
+		expect(history.messages.a.documents).toEqual([
+			{ drive_id: 'd1', name: 'Plan', format: 'docx', web_link: 'new' },
+			{ drive_id: 'd2', name: 'Budget', format: 'pdf', web_link: 'link' }
+		]);
+		expect(history.messages.a).not.toHaveProperty('driveDocuments');
+		expect(history.messages.b).toEqual({ timestamp: 2 });
 	});
 });

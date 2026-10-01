@@ -729,7 +729,12 @@ async def get_builtin_tools(
 
                 granted_scopes = (connection.scopes or '').split()
                 if CONNECTOR_WRITE_SCOPES.get(connector['id']) in granted_scopes:
-                    builtin_functions.extend(CONNECTOR_WRITE_FUNCTIONS.get(connector['id'], []))
+                    builtin_functions.extend(
+                        f
+                        for f in CONNECTOR_WRITE_FUNCTIONS.get(connector['id'], [])
+                        # It only saves file_ids from create_documents, so it's useless without that tool
+                        if f is not drive_save_documents or is_builtin_tool_enabled('documents')
+                    )
             else:
                 all_connected = False
 

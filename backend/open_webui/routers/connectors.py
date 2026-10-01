@@ -347,6 +347,10 @@ async def save_document_to_google_drive(
     access_token = await get_valid_access_token(user.id)
     if not access_token:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_not_connected')
+    # Google lets the user untick write access on consent, and the upload would then fail with a generic error
+    connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
+    if GOOGLE_DRIVE_WRITE_SCOPE not in (getattr(connection, 'scopes', None) or '').split():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_write_not_granted')
 
     documents, failed = await load_stored_documents(user.id, [file_id])
     if failed:

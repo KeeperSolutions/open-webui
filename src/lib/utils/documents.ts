@@ -54,6 +54,32 @@ export const collectChatDocuments = (history: HistoryWithDocuments) => {
 	return collected;
 };
 
+type LegacyDriveDocument = { id: string; name: string; format: string; web_link?: string };
+
+// Chats saved before document cards kept Drive files in message.driveDocuments, which nothing renders anymore
+export const migrateDriveDocuments = (history: {
+	messages?: Record<string, { documents?: ChatDocument[]; driveDocuments?: LegacyDriveDocument[] }>;
+}) => {
+	for (const message of Object.values(history?.messages ?? {})) {
+		if (!message.driveDocuments) continue;
+		const documents = message.documents ?? [];
+		for (const old of message.driveDocuments) {
+			const extension = `.${old.format}`;
+			const doc = {
+				drive_id: old.id,
+				name: old.name.toLowerCase().endsWith(extension)
+					? old.name.slice(0, -extension.length)
+					: old.name,
+				format: old.format,
+				web_link: old.web_link
+			};
+			if (!documents.some((kept) => isSameDocument(kept, doc))) documents.push(doc);
+		}
+		message.documents = documents;
+		delete message.driveDocuments;
+	}
+};
+
 // Chats saved before cards were kept one per document can show the same file twice, so later copies fold into the first card
 export const mergeDuplicateDocuments = (history: HistoryWithDocuments) => {
 	const kept: ChatDocument[] = [];
@@ -205,6 +231,16 @@ export const openDocumentInDrive = async (doc: ChatDocument, t: Translate) => {
 					onClick: () => showSettings.set({ tab: 'connectors' })
 				}
 			});
+		} else if (error === 'drive_write_not_granted') {
+			toast.error(
+				t('Reconnect Google Drive in Settings and allow access to save documents there.'),
+				{
+					action: {
+						label: t('Settings'),
+						onClick: () => showSettings.set({ tab: 'connectors' })
+					}
+				}
+			);
 		} else {
 			toast.error(t(`${error}`));
 		}

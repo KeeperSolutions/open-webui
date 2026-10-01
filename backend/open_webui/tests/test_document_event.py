@@ -118,3 +118,39 @@ async def test_drive_only_documents_are_matched_by_their_drive_id():
     assert upsert.await_args.args[2] == {
         'documents': [{'drive_id': 'd-1', 'name': 'Copy', 'format': 'xlsx', 'web_link': 'b'}]
     }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_card_updates_on_one_message_do_not_overwrite_each_other():
+    import asyncio
+    import copy
+
+    stored = {
+        'message-1': {
+            'documents': [
+                {'file_id': 'file-1', 'name': 'A', 'format': 'docx'},
+                {'file_id': 'file-2', 'name': 'B', 'format': 'xlsx'},
+            ]
+        }
+    }
+
+    async def get_chat(chat_id):
+        snapshot = copy.deepcopy(stored)
+        # Lets the other update read the same state before this one writes, like two requests hitting the DB
+        await asyncio.sleep(0)
+        return SimpleNamespace(chat={'history': {'messages': snapshot}})
+
+    async def upsert(chat_id, message_id, message, touch):
+        stored[message_id] = {**stored.get(message_id, {}), **message}
+
+    with (
+        patch.object(socket_main.Chats, 'get_chat_by_id', get_chat),
+        patch.object(socket_main.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert),
+    ):
+        await asyncio.gather(
+            socket_main.upsert_document_card('chat-1', 'message-1', {'file_id': 'file-1', 'drive_id': 'd-1'}, True),
+            socket_main.upsert_document_card('chat-1', 'message-1', {'file_id': 'file-2', 'drive_id': 'd-2'}, True),
+        )
+
+    assert [d.get('drive_id') for d in stored['message-1']['documents']] == ['d-1', 'd-2']
+    assert 'chat-1' not in socket_main.DOCUMENT_CARD_LOCKS

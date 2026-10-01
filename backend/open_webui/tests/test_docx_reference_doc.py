@@ -15,11 +15,10 @@ except OSError:
 
 
 @pytest.fixture
-def reference_doc(tmp_path):
-    built_in._get_pandoc_reference_doc.cache_clear()
+def reference_doc(tmp_path, monkeypatch):
+    monkeypatch.setattr(built_in, '_reference_doc', None)
     with patch('open_webui.config.CACHE_DIR', tmp_path):
         yield built_in._get_pandoc_reference_doc()
-    built_in._get_pandoc_reference_doc.cache_clear()
 
 
 def read_part(docx_bytes: bytes, name: str) -> str:

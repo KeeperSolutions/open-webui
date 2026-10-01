@@ -73,6 +73,7 @@
 		collectChatDocuments,
 		documentUpdates,
 		mergeDuplicateDocuments,
+		migrateDriveDocuments,
 		openDocumentPreview,
 		updateDocumentCard
 	} from '$lib/utils/documents';
@@ -2146,6 +2147,7 @@
 				// Sanitize history: repair orphaned references and structurally-malformed
 				// nodes from failed regenerations (#24424, #24157, #20474)
 				sanitizeHistory(history);
+				migrateDriveDocuments(history);
 				mergeDuplicateDocuments(history);
 
 				chatTitle.set(chatContent.title);

@@ -110,6 +110,34 @@ async def test_one_failed_build_or_store_does_not_fail_the_rest():
 
 
 @pytest.mark.asyncio
+async def test_wrongly_typed_fields_fail_only_their_own_document():
+    emitted = []
+    result, stored, _ = await create(
+        [
+            {'name': 'Report', 'format': 'docx', 'content': '# Hi'},
+            {'name': 'A', 'format': 5, 'content': 'x'},
+            {'name': 123, 'format': 'pdf', 'content': 'x'},
+            {'name': 'B', 'format': 'pdf', 'content': ['x']},
+            'not a document',
+        ],
+        emitted=emitted,
+    )
+
+    assert result['status'] == 'partial'
+    assert [s['filename'] for s in stored] == ['Report.docx']
+    assert len(emitted) == 1
+    assert len(result['failed']) == 4
+
+
+@pytest.mark.asyncio
+async def test_slashes_in_a_name_are_replaced_so_the_card_and_stored_file_match():
+    result, stored, _ = await create([{'name': 'Q1/Q2\\Q3 Report', 'format': 'pdf', 'content': 'x'}])
+
+    assert result['created'][0]['name'] == 'Q1-Q2-Q3 Report'
+    assert stored[0]['filename'] == 'Q1-Q2-Q3 Report.pdf'
+
+
+@pytest.mark.asyncio
 async def test_temporary_chat_skips_chat_file_linking():
     result, _, insert_chat_files = await create(
         [{'name': 'Report', 'format': 'docx', 'content': '# Hi'}], chat_id='temporary:chat-1'
@@ -144,10 +172,47 @@ async def test_turning_off_the_documents_toggle_removes_create_documents_from_th
     assert 'get_current_timestamp' in names
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('documents_on', [True, False])
+async def test_drive_save_documents_is_only_offered_with_create_documents(documents_on):
+    import open_webui.utils.tools as tools
+
+    write_access = SimpleNamespace(scopes=f'{tools.GOOGLE_DRIVE_WRITE_SCOPE} email')
+    model = {'info': {'meta': {'builtinTools': {'documents': documents_on}}}}
+    with (
+        patch.object(tools, 'is_internal_email', return_value=True),
+        patch.object(tools.ConnectorConnections, 'get_by_user_and_connector', AsyncMock(return_value=write_access)),
+    ):
+        names = await builtin_tool_names(model)
+
+    # Without create_documents the model has no file_ids to save, other Drive write tools stay
+    assert ('drive_save_documents' in names) is documents_on
+    assert 'drive_create_files' in names
+
+
 def test_pdf_builds_with_bold_italic_and_code_with_diacritics():
     content = '# Popis\n\n***Važno*** i **_hitno_**\n\n- `ključ` od ureda\n\n```\nčćžšđ\n```\n'
 
     assert built_in._build_pdf_document_bytes('Checklist', content).startswith(b'%PDF')
+
+
+def test_pdf_keeps_spaces_between_inline_tags_and_drops_newlines_between_blocks():
+    from fpdf import FPDF
+
+    written = []
+    original = FPDF.write_html
+
+    def capture(self, text, *args, **kwargs):
+        written.append(text)
+        return original(self, text, *args, **kwargs)
+
+    with patch.object(FPDF, 'write_html', capture):
+        built_in._build_pdf_document_bytes('T', '# T\n\n**Ime:** *Ivan* i [a](x) [b](y)\n\n- prvi\n- drugi\n')
+
+    html = written[0]
+    assert '</strong> <em>' in html
+    assert '</a> <a' in html
+    assert '\n' not in html
 
 
 def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
@@ -192,6 +257,9 @@ def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
         ('007', ('007', None)),
         ('10.749,20', ('10.749,20', None)),
         ('Kutije', ('Kutije', None)),
+        ('12345678901234567', ('12345678901234567', None)),
+        ('12345678901234.56', ('12345678901234.56', None)),
+        ('123456789012345', (123456789012345, None)),
     ],
 )
 def test_xlsx_cells_become_numbers_only_when_they_plainly_are(text, expected):
@@ -213,3 +281,29 @@ def test_xlsx_has_arial_a_bold_frozen_header_and_numeric_cells():
     assert ws.freeze_panes == 'A2'
     assert ws.title == 'Sheet1'
     assert ws.column_dimensions['A'].width > ws.column_dimensions['B'].width == built_in.XLSX_MIN_COLUMN_WIDTH
+
+
+def test_reference_doc_is_built_once_by_parallel_docx_builds_and_a_failure_is_retried(monkeypatch):
+    import threading
+    import time
+
+    builds = []
+
+    def build():
+        builds.append(threading.current_thread().name)
+        time.sleep(0.05)
+        return None if len(builds) == 1 else 'reference.docx'
+
+    monkeypatch.setattr(built_in, '_build_pandoc_reference_doc', build)
+    monkeypatch.setattr(built_in, '_reference_doc', None)
+
+    # The first build fails, so the next call tries again instead of keeping pandoc's defaults for good
+    assert built_in._get_pandoc_reference_doc() is None
+    threads = [threading.Thread(target=built_in._get_pandoc_reference_doc) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(builds) == 2
+    assert built_in._get_pandoc_reference_doc() == 'reference.docx'

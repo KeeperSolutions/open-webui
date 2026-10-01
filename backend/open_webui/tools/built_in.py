@@ -4664,6 +4664,9 @@ PDF_TEXT_COLOR = '#000000'
 # Google Docs' 1in page margins, in fpdf's millimeters
 PDF_PAGE_MARGIN = 25.4
 MM_PER_PT = 25.4 / 72
+PDF_BLOCK_TAG_WHITESPACE = (
+    r'\s*(</?(?:p|h[1-6]|ul|ol|li|blockquote|pre|table|thead|tbody|tr|th|td|hr|br|div)\b[^>]*>)\s*'
+)
 
 
 def _build_pdf_document_bytes(title: str, content: str) -> bytes:
@@ -4726,8 +4729,8 @@ def _build_pdf_document_bytes(title: str, content: str) -> bytes:
     }
     # Models usually open with their own "# Title", so ours is only added when the content has none
     heading = '' if content.lstrip().startswith('#') else f'<h1>{escape(title)}</h1>'
-    # fpdf renders the newlines markdown leaves between tags as blank lines
-    html = re.sub(r'>\s+<', '><', heading + markdown(content))
+    # fpdf renders the newlines markdown leaves around block tags as blank lines, spaces between inline tags must stay
+    html = re.sub(PDF_BLOCK_TAG_WHITESPACE, r'\1', heading + markdown(content))
     pdf.write_html(html, tag_styles=tag_styles, li_prefix_color=PDF_TEXT_COLOR)
     return bytes(pdf.output())
 
@@ -4849,15 +4852,19 @@ def _apply_reference_doc_replacements(docx_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-# Docx files in one batch are built in parallel threads, and lru_cache alone would let each of them build this
+# Docx files in one batch are built in parallel threads, so the cache is checked under the lock and they build it once
 _reference_doc_lock = threading.Lock()
+_reference_doc = None
 
 
-@lru_cache(maxsize=1)
 def _get_pandoc_reference_doc():
     """The reference.docx for docx output - pandoc's default restyled once per process, or None if that fails."""
+    global _reference_doc
     with _reference_doc_lock:
-        return _build_pandoc_reference_doc()
+        # A failed build isn't kept, so a passing problem doesn't leave pandoc's defaults until a restart
+        if _reference_doc is None:
+            _reference_doc = _build_pandoc_reference_doc()
+        return _reference_doc
 
 
 def _build_pandoc_reference_doc():
@@ -4926,6 +4933,9 @@ def _xlsx_cell_value(text: str):
     elif re.fullmatch(r'-?[1-9]\d{0,2}(,\d{3})+(\.\d+)?', number):
         grouped = True
     else:
+        return text, None
+    # Excel keeps 15 significant digits, so longer ids or account numbers would silently change
+    if sum(c.isdigit() for c in number) > 15:
         return text, None
 
     parsed = float(number.replace(',', ''))
@@ -6517,6 +6527,10 @@ async def _drive_save_stored_document(client, headers: dict, document: dict, fol
         )
         if response.status_code == 200 and not response.json().get('trashed'):
             return {**_drive_saved_document(document, saved['id'], saved.get('web_link')), 'already_saved': True}
+        # Only a deleted or trashed copy is replaced, any other error would otherwise upload a duplicate
+        if response.status_code not in (200, 404):
+            log.error(f'Google Drive saved copy check failed: {response.status_code} {response.text}')
+            raise DriveSaveError(_drive_error_message(response, "Couldn't check this document's Google Drive copy."))
 
     file_path = await asyncio.to_thread(Storage.get_file, document['path'])
     file_bytes = await asyncio.to_thread(Path(file_path).read_bytes)
@@ -6563,7 +6577,11 @@ async def save_stored_documents_to_drive(
 async def _create_document(request: Request, user: UserModel, f) -> tuple[dict | None, dict | None]:
     """Validate, build and store one document on its own, as (created, None) or (None, failure)."""
     f = f if isinstance(f, dict) else {}
-    f['format'] = (f.get('format') or '').lower()
+    # Models sometimes send numbers or lists here, which count as missing instead of crashing the whole batch
+    f = {**f, **{key: f[key] if isinstance(f.get(key), str) else '' for key in ('name', 'format', 'content')}}
+    f['format'] = f['format'].lower()
+    # The upload keeps only what follows the last slash, so "Q1/Q2 Report" would be stored as "Q2 Report"
+    f['name'] = f['name'].replace('/', '-').replace('\\', '-')
 
     error = _document_input_error(f)
     if not error:

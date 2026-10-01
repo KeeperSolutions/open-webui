@@ -974,8 +974,27 @@ def is_same_document(a: dict, b: dict) -> bool:
     )
 
 
+# One lock per chat, so two card updates can't both read the same documents list and each write back only its own
+DOCUMENT_CARD_LOCKS: dict[str, tuple[asyncio.Lock, int]] = {}
+
+
 async def upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool = False):
     """Keep one card per document per chat: update the message already showing it, or add it to this message."""
+    # The count of callers holding or waiting on the lock lets the last one drop it, so the dict doesn't grow per chat
+    lock, users = DOCUMENT_CARD_LOCKS.get(chat_id, (asyncio.Lock(), 0))
+    DOCUMENT_CARD_LOCKS[chat_id] = (lock, users + 1)
+    try:
+        async with lock:
+            await _upsert_document_card(chat_id, message_id, document, update_only)
+    finally:
+        lock, users = DOCUMENT_CARD_LOCKS[chat_id]
+        if users == 1:
+            del DOCUMENT_CARD_LOCKS[chat_id]
+        else:
+            DOCUMENT_CARD_LOCKS[chat_id] = (lock, users - 1)
+
+
+async def _upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool):
     chat = await Chats.get_chat_by_id(chat_id)
     messages = (chat.chat if chat else {}).get('history', {}).get('messages', {})
 

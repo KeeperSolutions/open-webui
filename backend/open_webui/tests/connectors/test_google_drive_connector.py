@@ -37,8 +37,12 @@ class FakeClientBase:
 
 @pytest.fixture(autouse=True)
 def mock_access_token():
-    with patch(
-        'open_webui.routers.connectors.get_valid_access_token', new=AsyncMock(return_value='fake-token')
+    connection = SimpleNamespace(scopes=f'{connectors.GOOGLE_DRIVE_WRITE_SCOPE} email')
+    with (
+        patch('open_webui.routers.connectors.get_valid_access_token', new=AsyncMock(return_value='fake-token')),
+        patch.object(
+            connectors.ConnectorConnections, 'get_by_user_and_connector', new=AsyncMock(return_value=connection)
+        ),
     ):
         yield
 
@@ -250,6 +254,9 @@ class DriveSaveClient(FakeClientBase):
             drive_id = url.rsplit('/', 1)[-1]
             if drive_id not in self.existing:
                 return FakeResponse(404, {})
+            # True or False is the copy's trashed flag, a number is an error status from Drive
+            if isinstance(self.existing[drive_id], int) and not isinstance(self.existing[drive_id], bool):
+                return FakeResponse(self.existing[drive_id], {'error': {'message': 'Rate limit exceeded'}})
             return FakeResponse(200, {'id': drive_id, 'trashed': self.existing[drive_id]})
         name = json.loads(content.split(b'\r\n')[3])['name']
         if name in self.offline_names:
@@ -351,6 +358,18 @@ class TestDriveSaveDocuments:
         assert 'already_saved' not in emitted[0]['data']
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('status', [401, 429, 500])
+    async def test_an_error_checking_the_earlier_copy_fails_instead_of_uploading_a_duplicate(self, tmp_path, status):
+        client = DriveSaveClient(existing={'drive-old': status})
+        drive_copy = {'id': 'drive-old', 'web_link': 'https://docs/old'}
+        with stored_files(tmp_path, stored_file('f1', 'Report.docx', drive=drive_copy)) as update:
+            result = await self.save(['f1'], client)
+
+        assert result['status'] == 'error'
+        assert client.uploaded_names == []
+        update.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_declined_confirmation_saves_nothing(self, tmp_path):
         client = DriveSaveClient()
         with stored_files(tmp_path, stored_file('f1', 'Report.docx')):
@@ -405,6 +424,24 @@ class TestSaveDocumentEndpoint:
 
         assert e.value.status_code == 409
         assert e.value.detail == 'drive_not_connected'
+
+    @pytest.mark.asyncio
+    async def test_drive_connected_without_write_access_is_a_distinct_409(self, tmp_path):
+        read_only = SimpleNamespace(scopes='https://www.googleapis.com/auth/drive.readonly email')
+        client = DriveSaveClient()
+        with (
+            stored_files(tmp_path, stored_file('f1', 'Report.docx')),
+            patch('httpx.AsyncClient', return_value=client),
+            patch.object(
+                connectors.ConnectorConnections, 'get_by_user_and_connector', new=AsyncMock(return_value=read_only)
+            ),
+        ):
+            with pytest.raises(HTTPException) as e:
+                await self.save()
+
+        assert e.value.status_code == 409
+        assert e.value.detail == 'drive_write_not_granted'
+        assert client.uploaded_names == []
 
     @pytest.mark.asyncio
     async def test_another_users_document_is_not_found(self, tmp_path):
