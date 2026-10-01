@@ -2,7 +2,7 @@ import datetime as dt
 import logging
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Float, Index, Integer, Text, case, func, insert
@@ -93,10 +93,14 @@ class UsageLedgerTable:
             self._has_data = True
         return has_data
 
-    def bulk_insert_ignore(self, rows: List[Dict]) -> int:
-        """Insert rows, silently skipping duplicates on langfuse_observation_id. Returns inserted count."""
+    def bulk_insert_ignore(self, rows: List[Dict]) -> Set[str]:
+        """Insert rows, silently skipping duplicates on langfuse_observation_id. Returns the
+        set of langfuse_observation_id values that were actually newly inserted this call -
+        callers that gate alerts on "did this poll see a genuinely new row" (not just "did
+        this poll re-fetch a row from the trailing watermark window") must use this set, not
+        len(rows), since the same observation can appear in multiple consecutive polls."""
         if not rows:
-            return 0
+            return set()
         now_ts = int(time.time())
         records = [
             {
@@ -115,33 +119,46 @@ class UsageLedgerTable:
             }
             for r in rows
         ]
+        inserted_ids: Set[str] = set()
         with get_db() as db:
             try:
-                # PostgreSQL: ON CONFLICT DO NOTHING
-                stmt = pg_insert(UsageLedger).values(records).on_conflict_do_nothing(
-                    index_elements=["langfuse_observation_id"]
+                # PostgreSQL: ON CONFLICT DO NOTHING, RETURNING tells us exactly which rows
+                # were new (a no-op conflict returns nothing for that row).
+                stmt = (
+                    pg_insert(UsageLedger)
+                    .values(records)
+                    .on_conflict_do_nothing(index_elements=["langfuse_observation_id"])
+                    .returning(UsageLedger.langfuse_observation_id)
                 )
                 result = db.execute(stmt)
+                inserted_ids = {row[0] for row in result.fetchall()}
                 db.commit()
-                inserted = result.rowcount if result.rowcount >= 0 else len(records)
             except Exception:
-                # SQLite fallback: INSERT OR IGNORE
+                # SQLite fallback: INSERT OR IGNORE, one row at a time so each insert's own
+                # rowcount tells us whether that specific row was new.
                 db.rollback()
-                inserted = 0
                 for record in records:
                     try:
                         result = db.execute(
                             insert(UsageLedger).prefix_with("OR IGNORE").values(**record)
                         )
-                        inserted += result.rowcount
-                    except Exception:
-                        pass
+                        if result.rowcount:
+                            inserted_ids.add(record["langfuse_observation_id"])
+                    except Exception as e:
+                        # OR IGNORE already handles the expected case (duplicate
+                        # langfuse_observation_id) without raising - anything that does
+                        # raise here is unexpected (malformed row, disk full, ...) and must
+                        # not be indistinguishable from an ordinary skipped duplicate.
+                        log.warning(
+                            "[usage-ledger] bulk_insert_ignore: row %s failed to insert: %s",
+                            record.get("langfuse_observation_id"), e,
+                        )
                 db.commit()
-        if inserted > 0:
+        if inserted_ids:
             self._has_data = True
-        return inserted
+        return inserted_ids
 
-    def bulk_upsert_costs(self, rows: List[Dict]) -> int:
+    def bulk_upsert_costs(self, rows: List[Dict]) -> Set[str]:
         """Update cost columns for existing rows where cost_eur is currently NULL.
 
         Used by the nightly deep rescan to backfill pricing that Langfuse added after
@@ -149,15 +166,19 @@ class UsageLedgerTable:
         the incoming cost_usd AND cost_eur are both NOT NULL — priced rows are never
         touched, and rows where ECB was also unavailable (cost_eur=None) are skipped.
         Uses a single bulk CASE UPDATE to avoid N+1 round-trips.
-        Returns the number of rows updated.
+        Returns the set of langfuse_observation_id values actually backfilled - callers
+        that need to re-derive which MODELS just went from unpriced to priced (the deep
+        rescan's "pricing recovered" signal) must use this set, not the row count, since
+        the backfilled rows are by definition pre-existing/duplicate from
+        bulk_insert_ignore's point of view and therefore invisible to that classification.
         """
         if not rows:
-            return 0
+            return set()
         # Require both cost_usd and cost_eur to be non-None — skips rows where ECB
         # was also unavailable during the rescan, which would write NULL back onto NULL.
         costed = [r for r in rows if r.get("cost_usd") is not None and r.get("cost_eur") is not None]
         if not costed:
-            return 0
+            return set()
 
         now_ts = int(time.time())
         obs_ids = [r["langfuse_observation_id"] for r in costed]
@@ -184,13 +205,14 @@ class UsageLedgerTable:
                     ),
                     synced_at=now_ts,
                 )
+                .returning(UsageLedger.langfuse_observation_id)
             )
+            updated_ids = {row[0] for row in result.fetchall()}
             db.commit()
-            updated = result.rowcount if result.rowcount >= 0 else 0
 
-        if updated > 0:
+        if updated_ids:
             self._has_data = True
-        return updated
+        return updated_ids
 
     def bulk_upsert_user_ids(self, rows: List[Dict]) -> int:
         """Update user_id for existing rows where user_id is currently NULL or empty.

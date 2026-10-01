@@ -5785,7 +5785,7 @@ async def streaming_chat_response_handler(response, ctx):
                                     # providers' final SSE chunk actually carries `usage`.
                                     if data.get('choices') and data['choices'][0].get('finish_reason'):
                                         log.warning(
-                                            '[BUGA-DEBUG] model=%s has_usage=%s finish_reason=%s keys=%s',
+                                            '[TRAU-556-DEBUG] model=%s has_usage=%s finish_reason=%s keys=%s',
                                             data.get('model'),
                                             bool(data.get('usage')),
                                             data['choices'][0].get('finish_reason'),

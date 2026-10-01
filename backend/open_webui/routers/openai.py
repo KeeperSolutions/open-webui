@@ -1404,7 +1404,7 @@ async def generate_chat_completion(
     # TEMP DEBUG (Bug A investigation, remove after verification): confirm what
     # open-webui itself actually sends outbound, per model, before any provider involvement.
     log.warning(
-        '[BUGA-DEBUG] outbound model=%s stream=%s stream_options=%s',
+        '[TRAU-556-DEBUG] outbound model=%s stream=%s stream_options=%s',
         payload.get('model'), is_streaming_request, payload.get('stream_options'),
     )
 
@@ -1581,7 +1581,7 @@ async def generate_chat_completion(
                     # response shape, to compare against the streaming-path has_usage logging.
                     if isinstance(response, dict):
                         log.warning(
-                            '[BUGA-DEBUG] non-stream model=%s has_usage=%s keys=%s',
+                            '[TRAU-556-DEBUG] non-stream model=%s has_usage=%s keys=%s',
                             response.get('model'), bool(response.get('usage')), sorted(response.keys()),
                         )
 

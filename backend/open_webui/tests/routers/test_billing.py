@@ -395,7 +395,8 @@ class TestOverageCheckBulk:
 
     def test_bulk_fetch_called_once_not_per_user(self):
         mock_ledger = MagicMock()
-        mock_ledger.bulk_insert_ignore.return_value = 0
+        mock_ledger.bulk_insert_ignore.return_value = set()
+        mock_ledger.bulk_upsert_costs.return_value = set()
         mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
 
         mock_uc_db = MagicMock()
@@ -409,7 +410,8 @@ class TestOverageCheckBulk:
     def test_no_per_user_ledger_call(self):
         """get_cost_eur_for_user_current_month (singular) must NOT be called."""
         mock_ledger = MagicMock()
-        mock_ledger.bulk_insert_ignore.return_value = 0
+        mock_ledger.bulk_insert_ignore.return_value = set()
+        mock_ledger.bulk_upsert_costs.return_value = set()
         mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
 
         mock_uc_db = MagicMock()

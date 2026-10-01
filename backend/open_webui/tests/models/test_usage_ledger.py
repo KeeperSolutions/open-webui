@@ -67,18 +67,18 @@ def _make_row(obs_id: str, user: str, cost_eur: float | None = 0.01, observed_at
 
 
 class TestBulkInsertIgnore:
-    def test_inserts_new_rows_and_returns_count(self, ledger):
+    def test_inserts_new_rows_and_returns_their_ids(self, ledger):
         rows = [_make_row("obs_001", "a@x.com"), _make_row("obs_002", "b@x.com")]
         inserted = ledger.bulk_insert_ignore(rows)
-        assert inserted == 2
+        assert inserted == {"obs_001", "obs_002"}
 
     def test_skips_duplicate_observation_id(self, ledger):
         ledger.bulk_insert_ignore([_make_row("obs_dup", "a@x.com")])
         inserted = ledger.bulk_insert_ignore([_make_row("obs_dup", "a@x.com")])
-        assert inserted == 0
+        assert inserted == set()
 
-    def test_returns_zero_for_empty_list(self, ledger):
-        assert ledger.bulk_insert_ignore([]) == 0
+    def test_returns_empty_set_for_empty_list(self, ledger):
+        assert ledger.bulk_insert_ignore([]) == set()
 
     def test_partial_insert_when_some_duplicates(self, ledger):
         ledger.bulk_insert_ignore([_make_row("obs_existing", "a@x.com")])
@@ -86,7 +86,7 @@ class TestBulkInsertIgnore:
             _make_row("obs_existing", "a@x.com"),
             _make_row("obs_new_unique", "a@x.com"),
         ])
-        assert inserted == 1
+        assert inserted == {"obs_new_unique"}
 
 
 class TestGetMaxObservedAt:
@@ -112,7 +112,7 @@ class TestBulkUpsertCosts:
             "eur_usd_rate": 1.15,
             "cost_eur": 0.05 / 1.15,
         }])
-        assert updated == 1
+        assert updated == {"obs_upsert_a"}
         result = ledger.get_cost_eur_for_user_current_month("u@x.com")
         assert result == pytest.approx(0.05 / 1.15)
 
@@ -124,12 +124,12 @@ class TestBulkUpsertCosts:
             "eur_usd_rate": 1.15,
             "cost_eur": 0.99 / 1.15,
         }])
-        assert updated == 0
+        assert updated == set()
         result = ledger.get_cost_eur_for_user_current_month("u2@x.com")
         assert result == pytest.approx(0.05)
 
-    def test_returns_zero_for_empty_input(self, ledger):
-        assert ledger.bulk_upsert_costs([]) == 0
+    def test_returns_empty_set_for_empty_input(self, ledger):
+        assert ledger.bulk_upsert_costs([]) == set()
 
     def test_skips_rows_without_cost_usd(self, ledger):
         ledger.bulk_insert_ignore([_make_row("obs_upsert_c", "u3@x.com", cost_eur=None)])
@@ -139,7 +139,7 @@ class TestBulkUpsertCosts:
             "eur_usd_rate": None,
             "cost_eur": None,
         }])
-        assert updated == 0
+        assert updated == set()
 
     def test_skips_rows_where_ecb_unavailable(self, ledger):
         # cost_usd present but cost_eur=None (ECB was down during rescan) — must not
@@ -151,7 +151,7 @@ class TestBulkUpsertCosts:
             "eur_usd_rate": None,
             "cost_eur": None,
         }])
-        assert updated == 0
+        assert updated == set()
         # cost_eur should still be NULL, not changed
         assert ledger.get_cost_eur_for_user_current_month("u4@x.com") == 0.0
 
@@ -175,7 +175,7 @@ class TestBulkUpsertCosts:
             {"langfuse_observation_id": "obs_upsert_f1", "cost_usd": 0.10, "eur_usd_rate": 1.15, "cost_eur": 0.10 / 1.15},
             {"langfuse_observation_id": "obs_upsert_f2", "cost_usd": 0.20, "eur_usd_rate": 1.15, "cost_eur": 0.20 / 1.15},
         ])
-        assert updated == 2
+        assert updated == {"obs_upsert_f1", "obs_upsert_f2"}
         result = ledger.get_cost_eur_for_user_current_month("u6@x.com")
         assert result == pytest.approx((0.10 + 0.20) / 1.15)
 

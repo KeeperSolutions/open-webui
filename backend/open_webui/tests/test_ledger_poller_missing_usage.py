@@ -41,7 +41,11 @@ def _run_sync_capture_rows(obs_rows):
     import open_webui.tasks.billing as tasks_mod
 
     mock_ledger = MagicMock()
-    mock_ledger.bulk_insert_ignore.return_value = 0
+    mock_ledger.bulk_insert_ignore.side_effect = lambda rows: {r["langfuse_observation_id"] for r in rows}
+    # None of these tests pass deep_rescan=True, so bulk_upsert_costs is never actually
+    # called - stubbed anyway so a future edit that adds deep_rescan=True here doesn't hit
+    # a bare MagicMock where `obs_id in backfilled_cost_ids` is expected to work like a set.
+    mock_ledger.bulk_upsert_costs.return_value = set()
     mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
     mock_ledger.get_models_with_recent_priced_rows.return_value = []
 
@@ -125,27 +129,30 @@ class TestMissingUsageBecomesZeroTokens:
         for key in ("tokens_input", "tokens_output", "tokens_total", "cost_eur"):
             assert missing_row[key] == genuinely_zero_row[key]
 
-    def test_missing_usage_model_is_marked_unpriced_even_though_it_has_a_real_price(self):
-        """Second finding from the investigation: "unpriced" is the wrong label
-        for this case. A model is marked unpriced purely because this
-        observation had no calculatedTotalCost - even when the same model is
-        genuinely priced in Langfuse and simply had no usage to price on this
-        particular reply. Captured here as a regression test for the mislabel,
-        not a statement that this is desired long-term behavior (see the
-        still-open poller fix in project memory: distinguish "has usage but no
-        cost" from "no cost at all" before deciding a model is unpriced)."""
+    def test_missing_usage_model_is_not_marked_unpriced(self):
+        """Second finding from the investigation, now fixed: "unpriced" used to
+        be the wrong label for this case - a model got marked unpriced purely
+        because one observation had no calculatedTotalCost, even when the
+        model is genuinely priced in Langfuse and the observation simply had
+        no usage to price. _sync_observations now only classifies a model as
+        unpriced when a newly-inserted row has real usage but no cost -
+        a usage-less observation must not trigger the alert at all."""
         import open_webui.tasks.billing as tasks_mod
         from unittest.mock import MagicMock as _MM
 
         mock_ledger = _MM()
-        mock_ledger.bulk_insert_ignore.return_value = 0
+        mock_ledger.bulk_insert_ignore.side_effect = lambda rows: {r["langfuse_observation_id"] for r in rows}
+        mock_ledger.bulk_upsert_costs.return_value = set()
         mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
         mock_ledger.get_models_with_recent_priced_rows.return_value = []
 
+        from open_webui.models.billing_alert_state import ALERT_TYPE_UNPRICED_MODEL
+
         claimed = {}
 
-        def _try_claim(_type, model):
-            claimed[model] = True
+        def _try_claim(alert_type, model):
+            if alert_type == ALERT_TYPE_UNPRICED_MODEL:
+                claimed[model] = True
             return True
 
         mock_alert_state = _MM()
@@ -160,4 +167,80 @@ class TestMissingUsageBecomesZeroTokens:
              patch("open_webui.models.users.Users.get_super_admin_user", return_value=None):
             tasks_mod._sync_observations(datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc))
 
-        assert "grok-4.6" in claimed
+        assert "grok-4.6" not in claimed
+
+    def test_newly_inserted_row_with_usage_but_no_cost_is_marked_unpriced(self):
+        """Control case for the fix above: a row that genuinely has usage but
+        no cost (the real "unpriced model" signal) must still trigger the
+        alert - the fix narrows the unpriced condition, it doesn't disable it."""
+        import open_webui.tasks.billing as tasks_mod
+        from unittest.mock import MagicMock as _MM
+        from open_webui.models.billing_alert_state import ALERT_TYPE_UNPRICED_MODEL
+
+        mock_ledger = _MM()
+        mock_ledger.bulk_insert_ignore.side_effect = lambda rows: {r["langfuse_observation_id"] for r in rows}
+        mock_ledger.bulk_upsert_costs.return_value = set()
+        mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
+        mock_ledger.get_models_with_recent_priced_rows.return_value = []
+
+        claimed = {}
+
+        def _try_claim(alert_type, model):
+            if alert_type == ALERT_TYPE_UNPRICED_MODEL:
+                claimed[model] = True
+            return True
+
+        mock_alert_state = _MM()
+        mock_alert_state.try_claim_alert.side_effect = _try_claim
+        mock_alert_state.get_alerted_keys.return_value = set()
+
+        with patch("open_webui.models.usage_ledger.UsageLedgerDB", mock_ledger), \
+             patch("open_webui.models.billing_alert_state.BillingAlertStateDB", mock_alert_state), \
+             patch("open_webui.langfuse.observations.fetch_observations_since",
+                   return_value=iter([_obs(
+                       "o1", usage={"input": 10, "output": 5, "total": 15},
+                       cost_usd=None, model="qwen2.5:7b",
+                   )])), \
+             patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=1.1), \
+             patch("open_webui.models.users.Users.get_super_admin_user", return_value=None):
+            tasks_mod._sync_observations(datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc))
+
+        assert "qwen2.5:7b" in claimed
+
+    def test_reread_of_already_inserted_row_does_not_reclassify(self):
+        """Third finding from the investigation: the poller re-reads the trailing
+        watermark window every poll, so an already-synced row can appear again.
+        Simulated here by having bulk_insert_ignore report the row as a
+        duplicate (not newly inserted) - it must not be reclassified as
+        unpriced/priced on this re-read, since doing so was the root cause of
+        repeated alert spam for the same already-known observation."""
+        import open_webui.tasks.billing as tasks_mod
+        from unittest.mock import MagicMock as _MM
+        from open_webui.models.billing_alert_state import ALERT_TYPE_UNPRICED_MODEL
+
+        mock_ledger = _MM()
+        mock_ledger.bulk_insert_ignore.return_value = set()  # nothing newly inserted
+        mock_ledger.bulk_upsert_costs.return_value = set()
+        mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
+        mock_ledger.get_models_with_recent_priced_rows.return_value = []
+
+        claimed = {}
+
+        def _try_claim(alert_type, model):
+            if alert_type == ALERT_TYPE_UNPRICED_MODEL:
+                claimed[model] = True
+            return True
+
+        mock_alert_state = _MM()
+        mock_alert_state.try_claim_alert.side_effect = _try_claim
+        mock_alert_state.get_alerted_keys.return_value = set()
+
+        with patch("open_webui.models.usage_ledger.UsageLedgerDB", mock_ledger), \
+             patch("open_webui.models.billing_alert_state.BillingAlertStateDB", mock_alert_state), \
+             patch("open_webui.langfuse.observations.fetch_observations_since",
+                   return_value=iter([_obs("o1", usage=None, cost_usd=None, model="grok-4.6")])), \
+             patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=1.1), \
+             patch("open_webui.models.users.Users.get_super_admin_user", return_value=None):
+            tasks_mod._sync_observations(datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc))
+
+        assert claimed == {}
