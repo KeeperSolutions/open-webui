@@ -1577,6 +1577,14 @@ async def generate_chat_completion(
                     if is_responses and isinstance(response, dict):
                         response = convert_responses_result(response)
 
+                    # TEMP DEBUG (Bug A investigation, remove after verification): non-streaming
+                    # response shape, to compare against the streaming-path has_usage logging.
+                    if isinstance(response, dict):
+                        log.warning(
+                            '[BUGA-DEBUG] non-stream model=%s has_usage=%s keys=%s',
+                            response.get('model'), bool(response.get('usage')), sorted(response.keys()),
+                        )
+
                     return response
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 # Transient network/timeout error (session build or request).
