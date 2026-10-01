@@ -974,18 +974,28 @@ def is_same_document(a: dict, b: dict) -> bool:
     )
 
 
-# One lock per chat, so two card updates can't both read the same documents list and each write back only its own
+# The chat row lock serializes card updates across workers, this one also covers SQLite, which ignores row locks
 DOCUMENT_CARD_LOCKS: dict[str, tuple[asyncio.Lock, int]] = {}
 
 
 async def upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool = False):
     """Keep one card per document per chat: update the message already showing it, or add it to this message."""
+    renames = []
+
+    def build(messages: dict):
+        update = document_card_update(messages, message_id, document, update_only)
+        if update is None:
+            return None
+        owner_id, documents, card_renames = update
+        renames.extend(card_renames)
+        return owner_id, {'documents': documents}
+
     # The count of callers holding or waiting on the lock lets the last one drop it, so the dict doesn't grow per chat
     lock, users = DOCUMENT_CARD_LOCKS.get(chat_id, (asyncio.Lock(), 0))
     DOCUMENT_CARD_LOCKS[chat_id] = (lock, users + 1)
     try:
         async with lock:
-            await _upsert_document_card(chat_id, message_id, document, update_only)
+            await Chats.update_message_with_lock(chat_id, build, touch=False)
     finally:
         lock, users = DOCUMENT_CARD_LOCKS[chat_id]
         if users == 1:
@@ -993,11 +1003,15 @@ async def upsert_document_card(chat_id: str, message_id: str, document: dict, up
         else:
             DOCUMENT_CARD_LOCKS[chat_id] = (lock, users - 1)
 
+    # A renamed Drive copy of a stored document renames the stored file too, so downloads use the new name
+    for file_id, filename in renames:
+        await Files.update_file_name_by_id(file_id, filename)
 
-async def _upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool):
-    chat = await Chats.get_chat_by_id(chat_id)
-    messages = (chat.chat if chat else {}).get('history', {}).get('messages', {})
 
+def document_card_update(
+    messages: dict, message_id: str, document: dict, update_only: bool
+) -> tuple[str, list[dict], list[tuple[str, str]]] | None:
+    """The message to put the card on, its new documents list and the stored files to rename, or None to skip."""
     owner_id = next(
         (
             mid
@@ -1007,23 +1021,20 @@ async def _upsert_document_card(chat_id: str, message_id: str, document: dict, u
         None,
     )
     if owner_id is None and update_only:
-        return
+        return None
 
-    if owner_id:
-        documents = []
-        for d in messages[owner_id]['documents']:
-            if not is_same_document(d, document):
-                documents.append(d)
-                continue
-            # A renamed Drive copy of a stored document renames the stored file too, so downloads use the new name
-            if d.get('file_id') and document.get('name') and document['name'] != d.get('name'):
-                await Files.update_file_name_by_id(d['file_id'], f"{document['name']}.{d['format']}")
-            documents.append({**d, **document, 'format': d.get('format') or document.get('format')})
-    else:
-        owner_id = message_id
-        documents = [*messages.get(owner_id, {}).get('documents', []), document]
+    if owner_id is None:
+        return message_id, [*messages.get(message_id, {}).get('documents', []), document], []
 
-    await Chats.upsert_message_to_chat_by_id_and_message_id(chat_id, owner_id, {'documents': documents}, touch=False)
+    documents, renames = [], []
+    for d in messages[owner_id]['documents']:
+        if not is_same_document(d, document):
+            documents.append(d)
+            continue
+        if d.get('file_id') and document.get('name') and document['name'] != d.get('name'):
+            renames.append((d['file_id'], f"{document['name']}.{d['format']}"))
+        documents.append({**d, **document, 'format': d.get('format') or document.get('format')})
+    return owner_id, documents, renames
 
 
 async def get_event_emitter(request_info, update_db=True):

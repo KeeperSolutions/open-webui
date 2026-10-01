@@ -205,7 +205,9 @@
 	// The document cards already link out, so strip any Drive link the model added in its own text
 	const stripDriveLinks = (content: string) =>
 		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
-	$: displayContent = message.documents ? stripDriveLinks(message.content ?? '') : message.content;
+	$: displayContent = message.documents?.length
+		? stripDriveLinks(message.content ?? '')
+		: message.content;
 
 	let edit = false;
 	let editedContent = '';

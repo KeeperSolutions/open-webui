@@ -163,6 +163,20 @@ export const downloadDocument = async (doc: ChatDocument, t: Translate) => {
 	}
 };
 
+// Drive names can hold "/" or "../", which JSZip would turn into folders, and two equal names would overwrite each other
+export const zipEntryNames = (docs: ChatDocument[]) => {
+	const used = new Set<string>();
+	return docs.map((doc) => {
+		const original = documentFilename(doc).replace(/[/\\]/g, '-');
+		let filename = original;
+		for (let n = 2; used.has(filename); n++) {
+			filename = original.replace(/(\.[^.]+)?$/, ` (${n})$1`);
+		}
+		used.add(filename);
+		return filename;
+	});
+};
+
 export const downloadAllDocuments = async (docs: ChatDocument[], t: Translate) => {
 	const results = await Promise.all(docs.map((doc) => fetchDocumentBlob(doc).catch(() => null)));
 	const failed = results.filter((result) => !result).length;
@@ -173,18 +187,11 @@ export const downloadAllDocuments = async (docs: ChatDocument[], t: Translate) =
 
 	const JSZip = (await import('jszip')).default;
 	const zip = new JSZip();
-	const used = new Set<string>();
-	results.forEach((blob, i) => {
-		if (!blob) return;
-		const original = documentFilename(docs[i]);
-		let filename = original;
-		// Two documents with the same name would overwrite each other inside the zip
-		for (let n = 2; used.has(filename); n++) {
-			filename = original.replace(/(\.[^.]+)?$/, ` (${n})$1`);
-		}
-		used.add(filename);
-		zip.file(filename, blob);
-	});
+	const fetched = docs
+		.map((doc, i) => ({ doc, blob: results[i] }))
+		.filter((entry): entry is { doc: ChatDocument; blob: Blob } => Boolean(entry.blob));
+	const names = zipEntryNames(fetched.map((entry) => entry.doc));
+	fetched.forEach(({ blob }, i) => zip.file(names[i], blob));
 
 	saveAs(await zip.generateAsync({ type: 'blob' }), 'documents.zip');
 	if (failed) {

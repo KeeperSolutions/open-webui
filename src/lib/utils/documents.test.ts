@@ -4,7 +4,8 @@ import {
 	collectChatDocuments,
 	isSameDocument,
 	mergeDuplicateDocuments,
-	migrateDriveDocuments
+	migrateDriveDocuments,
+	zipEntryNames
 } from './documents';
 
 const report = { file_id: 'f1', name: 'Report', format: 'docx' };
@@ -84,5 +85,25 @@ describe('migrateDriveDocuments', () => {
 		]);
 		expect(history.messages.a).not.toHaveProperty('driveDocuments');
 		expect(history.messages.b).toEqual({ timestamp: 2 });
+	});
+});
+
+describe('zipEntryNames', () => {
+	it('keeps every entry flat and unique', () => {
+		const names = zipEntryNames([
+			{ drive_id: 'd1', name: 'Q1/Q2 Report', format: 'docx' },
+			{ drive_id: 'd2', name: '../secret', format: 'pdf' },
+			{ drive_id: 'd3', name: 'a\\b', format: 'xlsx' },
+			{ file_id: 'f1', name: 'Notes', format: 'docx' },
+			{ file_id: 'f2', name: 'Notes', format: 'docx' }
+		]);
+
+		expect(names).toEqual([
+			'Q1-Q2 Report.docx',
+			'..-secret.pdf',
+			'a-b.xlsx',
+			'Notes.docx',
+			'Notes (2).docx'
+		]);
 	});
 });

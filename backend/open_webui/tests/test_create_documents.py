@@ -260,6 +260,9 @@ def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
         ('12345678901234567', ('12345678901234567', None)),
         ('12345678901234.56', ('12345678901234.56', None)),
         ('123456789012345', (123456789012345, None)),
+        ("'123456789012345678", ('123456789012345678', None)),
+        ("'120", ('120', None)),
+        ("''x", ("'x", None)),
     ],
 )
 def test_xlsx_cells_become_numbers_only_when_they_plainly_are(text, expected):
@@ -307,3 +310,9 @@ def test_reference_doc_is_built_once_by_parallel_docx_builds_and_a_failure_is_re
 
     assert len(builds) == 2
     assert built_in._get_pandoc_reference_doc() == 'reference.docx'
+
+
+@pytest.mark.parametrize('content', ['---', '\n---\n  \n---'])
+def test_pptx_with_no_slides_fails_instead_of_saving_an_empty_deck(content):
+    with pytest.raises(ValueError):
+        built_in._build_pptx_document_bytes(content)

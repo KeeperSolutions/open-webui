@@ -102,10 +102,11 @@
 
 	const renderSheet = async (sheet: string) => {
 		if (!excelWorkbook) return;
-		const id = loadId;
+		const workbook = excelWorkbook;
 		selectedExcelSheet = sheet;
-		const html = await sheetHtml(excelWorkbook, sheet);
-		if (id === loadId) fileOfficeHtml = html;
+		const html = await sheetHtml(workbook, sheet);
+		// A slower earlier sheet, or one from the previous workbook, must not replace the one now selected
+		if (workbook === excelWorkbook && sheet === selectedExcelSheet) fileOfficeHtml = html;
 	};
 
 	const render = async (target: ChatDocument, id: number): Promise<RenderedDocument | null> => {
@@ -417,6 +418,19 @@
 	}
 	.document-preview :global(:is(.document-page, .document-probe-content) p) {
 		margin: 3pt 0 6pt;
+	}
+	/* Tailwind's reset hides list markers, which Word shows like Google Docs: filled, hollow, then square bullets */
+	.document-preview :global(:is(.document-page, .document-probe-content) ul) {
+		list-style: disc;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) ul ul) {
+		list-style: circle;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) ul ul ul) {
+		list-style: square;
+	}
+	.document-preview :global(:is(.document-page, .document-probe-content) ol) {
+		list-style: decimal;
 	}
 	/* Measures blocks at the real page width without being seen */
 	.document-probe {

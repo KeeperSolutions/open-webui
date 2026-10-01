@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 
 # local imports
 from open_webui.internal.db import Base, EncryptedJSONField, JSONField, get_async_db_context
@@ -321,6 +322,11 @@ class ChatStatsExport(BaseModel):
     tags: list[str] = []
     stats: AggregateChatStats
     chat: ChatBody
+
+
+def chat_row_for_update(chat_id: str):
+    """The chat row, locked until the transaction ends. SQLite ignores the lock, its writes are serialized anyway."""
+    return select(Chat).where(Chat.id == chat_id).with_for_update()
 
 
 class ChatTable:
@@ -994,9 +1000,8 @@ class ChatTable:
 
         return chat.chat.get('history', {}).get('messages', {}).get(message_id, {})
 
-    async def upsert_message_to_chat_by_id_and_message_id(
-        self, id: str, message_id: str, message: dict, *, touch: bool = True
-    ) -> ChatModel | None:
+    @staticmethod
+    def _prepare_message_for_db(message: dict) -> None:
         if not message.get('content'):
             output_text = get_output_text(message.get('output'))
             if output_text:
@@ -1006,45 +1011,86 @@ class ChatTable:
         if isinstance(message.get('content'), str):
             message['content'] = sanitize_text_for_db(message['content'])
 
+    def _write_message_to_chat_row(self, chat_item: Chat, message_id: str, message: dict, touch: bool) -> dict:
+        self._sanitize_chat_row(chat_item)
+        chat = chat_item.chat or {}
+        self._repair_chat_current_id(chat)
+
+        history = chat.get('history', {})
+        saved_message = self.upsert_message_to_history(history, message_id, message)
+        chat['history'] = history
+        clean_chat = self._clean_null_bytes(chat)
+        chat_item.chat = clean_chat
+        chat_item.title = self._clean_null_bytes(clean_chat['title']) if 'title' in clean_chat else 'New Chat'
+        chat_item.current_message_id = self.get_current_message_id(clean_chat)
+        flag_modified(chat_item, 'chat')
+
+        if touch:
+            chat_item.updated_at = int(time.time())
+        return saved_message
+
+    @staticmethod
+    async def _dual_write_message(chat_id: str, message_id: str, user_id: str, saved_message: dict) -> None:
+        # Dual-write to chat_message table
+        try:
+            await ChatMessages.upsert_message(
+                message_id=message_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                data=saved_message,
+            )
+        except Exception as e:
+            log.warning(f'Failed to write to chat_message table: {e}')
+
+    async def upsert_message_to_chat_by_id_and_message_id(
+        self, id: str, message_id: str, message: dict, *, touch: bool = True
+    ) -> ChatModel | None:
+        self._prepare_message_for_db(message)
+
         try:
             async with get_async_db_context() as session:
                 chat_item = await session.get(Chat, id)
                 if chat_item is None:
                     return None
 
-                self._sanitize_chat_row(chat_item)
-                chat = chat_item.chat or {}
-                self._repair_chat_current_id(chat)
-
-                history = chat.get('history', {})
-                saved_message = self.upsert_message_to_history(history, message_id, message)
-                chat['history'] = history
-                clean_chat = self._clean_null_bytes(chat)
-                chat_item.chat = clean_chat
-                chat_item.title = self._clean_null_bytes(clean_chat['title']) if 'title' in clean_chat else 'New Chat'
-                chat_item.current_message_id = self.get_current_message_id(clean_chat)
-                flag_modified(chat_item, 'chat')
-
-                if touch:
-                    chat_item.updated_at = int(time.time())
-
+                saved_message = self._write_message_to_chat_row(chat_item, message_id, message, touch)
                 await session.commit()
                 updated_chat = ChatModel.model_validate(chat_item)
                 user_id = chat_item.user_id
 
-            # Dual-write to chat_message table
-            try:
-                await ChatMessages.upsert_message(
-                    message_id=message_id,
-                    chat_id=id,
-                    user_id=user_id,
-                    data=saved_message,
-                )
-            except Exception as e:
-                log.warning(f'Failed to write to chat_message table: {e}')
-
+            await self._dual_write_message(id, message_id, user_id, saved_message)
             return updated_chat
         except Exception:
+            return None
+
+    async def update_message_with_lock(
+        self, id: str, build: Callable[[dict], tuple[str, dict] | None], *, touch: bool = True
+    ) -> ChatModel | None:
+        """Build a message update from the chat's current messages and save it while the chat row is locked,
+        so concurrent read-modify-writes from any worker or instance apply one after another.
+        `build` gets the messages and returns (message_id, fields to merge), or None to write nothing."""
+        try:
+            async with get_async_db_context() as session:
+                chat_item = (await session.execute(chat_row_for_update(id))).scalar_one_or_none()
+                if chat_item is None:
+                    return None
+
+                update = build((chat_item.chat or {}).get('history', {}).get('messages', {}))
+                if update is None:
+                    await session.rollback()
+                    return None
+                message_id, message = update
+                self._prepare_message_for_db(message)
+
+                saved_message = self._write_message_to_chat_row(chat_item, message_id, message, touch)
+                await session.commit()
+                updated_chat = ChatModel.model_validate(chat_item)
+                user_id = chat_item.user_id
+
+            await self._dual_write_message(id, message_id, user_id, saved_message)
+            return updated_chat
+        except Exception as e:
+            log.exception(f'Locked message update in chat {id} failed: {e}')
             return None
 
     async def delete_message_from_chat_by_id_and_message_id(self, id: str, message_id: str) -> ChatModel | None:

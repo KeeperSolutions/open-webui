@@ -35,23 +35,19 @@
 {#if documents.length > 0}
 	<div class="mt-1 mb-2 w-full max-w-xl flex flex-col gap-1.5">
 		{#each documents as doc (documentKey(doc))}
+			<!-- The preview button's ::after covers the whole card, so a click anywhere opens it, while the actions stay separate buttons above it -->
 			<div
-				class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 px-3 py-2.5 rounded-xl bg-white dark:bg-gray-850 border cursor-pointer transition {selectedKey ===
+				class="relative flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 px-3 py-2.5 rounded-xl bg-white dark:bg-gray-850 border transition {selectedKey ===
 				documentKey(doc)
 					? 'border-gray-400 dark:border-gray-500'
 					: 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'}"
-				role="button"
-				tabindex="0"
-				aria-pressed={selectedKey === documentKey(doc)}
-				on:click={() => openDocumentPreview(doc)}
-				on:keydown={(e) => {
-					if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-						e.preventDefault();
-						openDocumentPreview(doc);
-					}
-				}}
 			>
-				<div class="flex items-center gap-3 min-w-0">
+				<button
+					class="flex items-center gap-3 min-w-0 text-left cursor-pointer outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-gray-400"
+					type="button"
+					aria-pressed={selectedKey === documentKey(doc)}
+					on:click={() => openDocumentPreview(doc)}
+				>
 					<DocumentFormatIcon format={doc.format} />
 					<div class="min-w-0">
 						<!-- A long name wraps instead of being cut off -->
@@ -60,16 +56,18 @@
 							{documentTypeLabel(doc.format, t)}
 						</div>
 					</div>
-				</div>
+				</button>
 
 				<!-- On phones the buttons get a row of their own and share it equally, on wider screens they sit beside the name -->
-				<div class="flex items-center gap-1.5 shrink-0 max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center">
+				<div
+					class="relative z-10 pointer-events-none [&>button]:pointer-events-auto flex items-center gap-1.5 shrink-0 max-sm:[&>button]:flex-1 max-sm:[&>button]:justify-center"
+				>
 					{#if hasDrive}
 						<button
 							class={buttonClass}
 							type="button"
 							disabled={isSaving(doc)}
-							on:click|stopPropagation={() => openDocumentInDrive(doc, t)}
+							on:click={() => openDocumentInDrive(doc, t)}
 						>
 							{#if isSaving(doc)}
 								<Spinner className={iconClass} />
@@ -80,11 +78,7 @@
 						</button>
 					{/if}
 
-					<button
-						class={buttonClass}
-						type="button"
-						on:click|stopPropagation={() => downloadDocument(doc, t)}
-					>
+					<button class={buttonClass} type="button" on:click={() => downloadDocument(doc, t)}>
 						<Download className={iconClass} />
 						{$i18n.t('Download')}
 					</button>

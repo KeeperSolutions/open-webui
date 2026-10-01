@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,13 +7,21 @@ import open_webui.socket.main as socket_main
 REQUEST_INFO = {'user_id': 'user-1', 'chat_id': 'chat-1', 'message_id': 'message-2'}
 
 
+def locked_update(messages, upsert):
+    # Runs the card update against these messages and records what it would write, like the locked DB update does
+    async def update_message_with_lock(chat_id, build, touch=True):
+        update = build(messages)
+        if update is not None:
+            await upsert(chat_id, *update, touch=touch)
+
+    return update_message_with_lock
+
+
 async def emit_document(messages, document, event_type='chat:message:document', rename=None):
     upsert = AsyncMock()
-    chat = SimpleNamespace(chat={'history': {'messages': messages}})
     with (
         patch.object(socket_main.sio, 'emit', AsyncMock()),
-        patch.object(socket_main.Chats, 'get_chat_by_id', AsyncMock(return_value=chat)),
-        patch.object(socket_main.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert),
+        patch.object(socket_main.Chats, 'update_message_with_lock', locked_update(messages, upsert)),
         patch.object(socket_main.Files, 'update_file_name_by_id', rename or AsyncMock()),
     ):
         emitter = await socket_main.get_event_emitter(REQUEST_INFO)
@@ -134,19 +141,14 @@ async def test_concurrent_card_updates_on_one_message_do_not_overwrite_each_othe
         }
     }
 
-    async def get_chat(chat_id):
+    async def update_message_with_lock(chat_id, build, touch=True):
         snapshot = copy.deepcopy(stored)
         # Lets the other update read the same state before this one writes, like two requests hitting the DB
         await asyncio.sleep(0)
-        return SimpleNamespace(chat={'history': {'messages': snapshot}})
-
-    async def upsert(chat_id, message_id, message, touch):
+        message_id, message = build(snapshot)
         stored[message_id] = {**stored.get(message_id, {}), **message}
 
-    with (
-        patch.object(socket_main.Chats, 'get_chat_by_id', get_chat),
-        patch.object(socket_main.Chats, 'upsert_message_to_chat_by_id_and_message_id', upsert),
-    ):
+    with patch.object(socket_main.Chats, 'update_message_with_lock', update_message_with_lock):
         await asyncio.gather(
             socket_main.upsert_document_card('chat-1', 'message-1', {'file_id': 'file-1', 'drive_id': 'd-1'}, True),
             socket_main.upsert_document_card('chat-1', 'message-1', {'file_id': 'file-2', 'drive_id': 'd-2'}, True),

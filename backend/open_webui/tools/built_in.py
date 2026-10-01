@@ -4926,6 +4926,9 @@ def _xlsx_cell_value(text: str):
     import re
 
     value = text.strip()
+    # Models copy Excel's "'" prefix for forcing text, which we'd otherwise write into the cell as a visible character
+    if value.startswith("'"):
+        return value[1:], None
     percent = value.endswith('%')
     number = value[:-1].strip() if percent else value
     if re.fullmatch(r'-?(0|[1-9]\d*)(\.\d+)?', number):
@@ -5119,7 +5122,11 @@ def _build_pptx_document_bytes(content: str) -> bytes:
     chunks = [
         [line.strip() for line in chunk.strip().splitlines() if line.strip()] for chunk in content.split('---')
     ]
-    for i, lines in enumerate(chunk for chunk in chunks if chunk):
+    chunks = [chunk for chunk in chunks if chunk]
+    # Content like "---" passes the empty check but leaves no slide, and an empty deck isn't a success
+    if not chunks:
+        raise ValueError('No slides in the content')
+    for i, lines in enumerate(chunks):
         title = lines[0].lstrip('#').strip()
         rest = [line.lstrip('-*').strip() for line in lines[1:]]
 
