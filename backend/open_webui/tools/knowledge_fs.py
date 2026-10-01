@@ -82,7 +82,7 @@ def is_regex_pattern(pattern: str) -> bool:
 
 def normalize_regex(pattern: str) -> str:
     r"""Normalize POSIX BRE patterns to Python regex (\| → |)."""
-    return pattern.replace('\\|', '|').replace(r'\|', '|')
+    return pattern.replace(r'\|', '|')
 
 
 def build_matcher(pattern: str, case_insensitive: bool = False, use_regex: bool = False) -> tuple:

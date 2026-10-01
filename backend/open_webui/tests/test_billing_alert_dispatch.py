@@ -51,7 +51,7 @@ def _obs(obs_id: str, model: str | None, cost_usd: float | None) -> dict:
 def _run_sync(
     obs_rows, alert_state_db, *,
     unpriced_send_succeeds=True, recovered_send_succeeds=True,
-    deep_rescan=False, already_ledgered_ids=(),
+    deep_rescan=False, already_ledgered_ids=(), ledger_recovered_models=(),
 ):
     """Run _sync_observations with Langfuse/ledger/users mocked, but the real
     (in-memory) BillingAlertStateDB so cooldown gating is genuinely exercised.
@@ -60,7 +60,12 @@ def _run_sync(
     earlier poll (so bulk_insert_ignore reports them as duplicates) - used to
     exercise the deep-rescan cost-backfill path, where bulk_upsert_costs must be
     the thing that makes a previously-unpriced row's new price visible to
-    classification, not bulk_insert_ignore (which sees only a duplicate id)."""
+    classification, not bulk_insert_ignore (which sees only a duplicate id).
+
+    ledger_recovered_models simulates get_models_with_recent_priced_rows' 24h-lookback
+    hit (a model that already has a priced row somewhere in the ledger, independent of
+    whatever this poll's own observations contain) - used to exercise candidate_recovered's
+    ledger_recovered branch without needing a real backing DB for it."""
     import open_webui.models.billing_alert_state as alert_state_mod
     import open_webui.tasks.billing as tasks_mod
 
@@ -75,7 +80,7 @@ def _run_sync(
     )
     mock_ledger.bulk_upsert_user_ids.return_value = 0
     mock_ledger.get_cost_eur_for_users_current_month.return_value = {}
-    mock_ledger.get_models_with_recent_priced_rows.return_value = []
+    mock_ledger.get_models_with_recent_priced_rows.return_value = list(ledger_recovered_models)
 
     mock_admin = MagicMock()
     mock_admin.email = "admin@example.com"
@@ -272,12 +277,13 @@ class TestPricingRecoveredAlertDispatch:
 
     def test_same_poll_mixed_batch_does_not_send_both_unpriced_and_restored(self, alert_state_db):
         """Third finding from the investigation: a single poll whose batch contains both a
-        without-usage and a with-usage observation for the same already-alerted model used to
-        trigger "unpriced" and "restored" emails in the very same poll - directly
-        contradictory, and the source of the ~1,000/~1,000 alert-spam pair observed in
-        production. A model that both regains pricing AND produces a fresh unpriced
-        observation in the same poll must not be claimed as recovered in that poll - the
-        recovery alert is deferred to a later poll where it doesn't collide."""
+        priced and an unpriced observation (both carry usage; only cost_usd differs - see
+        _obs()) for the same already-alerted model used to trigger "unpriced" and "restored"
+        emails in the very same poll - directly contradictory, and the source of the
+        ~1,000/~1,000 alert-spam pair observed in production. A model that both regains
+        pricing AND produces a fresh unpriced observation in the same poll must not be
+        claimed as recovered in that poll - the recovery alert is deferred to a later poll
+        where it doesn't collide."""
         # Model is already in an alerted state from an earlier poll.
         _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
         assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
@@ -292,6 +298,32 @@ class TestPricingRecoveredAlertDispatch:
         mock_send_recovered.assert_not_called()
         # The relapse alert itself is allowed to fire (cooldown forced open above) - what must
         # never happen is both firing together.
+        assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+    def test_cooldown_gated_relapse_still_blocks_same_poll_recovery(self, alert_state_db):
+        """Copilot review finding: excluding only claimed_unpriced (models that WON the
+        try_claim_alert race this poll) isn't enough - a model still inside its alert cooldown
+        loses that race every time, so it never reaches claimed_unpriced even when this poll
+        saw a genuine fresh unpriced observation for it. If exclusion were based on
+        claimed_unpriced alone, a stale priced source (ledger_recovered's 24h lookback, here)
+        could still clear the model's alert state in the very same poll its fresh unpriced
+        evidence was seen - the fix excludes unpriced_models instead, which doesn't depend on
+        whether the claim happened to succeed."""
+        # Poll 1: model alerted unpriced (cooldown now active, NOT forced open this time).
+        _run_sync([_obs("o1", "grok-4.6", None)], alert_state_db)
+        assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
+
+        # Poll 2, still within cooldown: a fresh unpriced observation for the same model
+        # (try_claim_alert will lose the cooldown check -> claimed_unpriced stays empty),
+        # PLUS a stale already-priced row for it surfaces via the 24h ledger lookback.
+        mock_send_unpriced, mock_send_recovered = _run_sync(
+            [_obs("o2", "grok-4.6", None)],
+            alert_state_db,
+            ledger_recovered_models=["grok-4.6"],
+        )
+
+        mock_send_unpriced.assert_not_called()  # still in cooldown, no new unpriced email
+        mock_send_recovered.assert_not_called()  # must NOT fire despite ledger_recovered hit
         assert alert_state_db.is_alerted(ALERT_TYPE_UNPRICED_MODEL, "grok-4.6")
 
     def test_failed_recovery_send_does_not_extend_cooldown_for_later_relapse(self, alert_state_db):

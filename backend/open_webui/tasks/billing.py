@@ -253,11 +253,17 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
         ledger_recovered = set(UsageLedgerDB.get_models_with_recent_priced_rows(
             list(alerted_models), since_24h
         ))
-    # A model that is itself being claimed as newly-unpriced this same poll must never also be
-    # claimed as recovered in it - sending both "unpriced" and "restored" for one model in one
-    # poll is a direct contradiction (observed as alert spam when a batch mixed a with-usage
-    # and a without-usage observation for the same model).
-    candidate_recovered = ((priced_models | ledger_recovered) & alerted_models) - claimed_unpriced
+    # A model with a fresh unpriced observation THIS poll must never also be claimed as
+    # recovered in it - sending both "unpriced" and "restored" for one model in one poll is a
+    # direct contradiction (observed as alert spam when a batch mixed a priced and an unpriced
+    # observation for the same model). Excluding unpriced_models, not just claimed_unpriced,
+    # matters: a model still inside its alert cooldown loses the
+    # try_claim_alert race (so it never reaches claimed_unpriced) even though this poll saw a
+    # real unpriced observation for it - excluding only claimed_unpriced would let a stale
+    # priced row (from ledger_recovered's 24h lookback, or an older row this poll's deep-rescan
+    # backfilled) clear that model's alert state in the very same poll its fresh unpriced
+    # evidence was seen.
+    candidate_recovered = ((priced_models | ledger_recovered) & alerted_models) - unpriced_models
     # Claim first, send second - same reasoning as the unpriced-model block above: computing
     # candidate_recovered and sending the email are separate from the DB write, so without an
     # atomic claim two instances could both compute the same set and both email before either
