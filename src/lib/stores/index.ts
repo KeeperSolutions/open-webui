@@ -362,6 +362,8 @@ type Config = {
 		/** Backend's PII_FILTER_IDS; absent on older backends, hence optional. */
 		pii_filter_ids?: string[];
 		pii_ingest_scan?: boolean;
+		/** Backend's PII_ACTIVE; absent on older backends, hence optional. */
+		pii_active?: boolean;
 	};
 	oauth: {
 		providers: {

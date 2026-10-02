@@ -14,6 +14,7 @@
 	import { formatCostDisplay } from '$lib/apis/langfuse/tableUtils';
 	import { toast } from 'svelte-sonner';
 	import { addUserToGroup, removeUserFromGroup } from '$lib/apis/groups';
+	import { getPiiMaskingDefault } from '$lib/utils/pii';
 	import {
 		buildRows,
 		unattributedCost,
@@ -284,7 +285,10 @@
 	// `buildRows` keeps the parameter and its default, so
 	// `grantedCount`/`allModels` stay computed-from-nothing rather than deleted —
 	// the next thing to report model access resolves them the same way.
-	$: rows = buildRows(users, metricRows);
+	// `getPiiMaskingDefault({})` with no stored valve resolves straight to the
+	// served PII_ACTIVE default, same value a user with no preference would start
+	// with — so an "unset" row is reported as actually protected or not.
+	$: rows = buildRows(users, metricRows, undefined, getPiiMaskingDefault({}));
 
 	$: sorted = sortRows(rows, orderBy, direction);
 
@@ -521,7 +525,7 @@
 									<!--
 										No Toggle here: a switch shape is an affordance for
 										changing, and this column is a read-only report. The Pill
-										carries the whole statement in all four states.
+										carries the whole statement in all five states.
 									-->
 									{#if row.masking === 'enforced'}
 										<Pill kind="ok">🔒 {$i18n.t('On — enforced')}</Pill>
@@ -533,6 +537,10 @@
 										     read as "the normal one" rather than as one of four
 										     distinct answers. -->
 										<Pill kind="ok">{$i18n.t('On — by user')}</Pill>
+									{:else if row.masking === 'default_off'}
+										<!-- Same risk tier as 'off' (see maskingRank), but the user
+										     never chose this - the served PII_ACTIVE default did. -->
+										<Pill kind="warn">{$i18n.t('Off — default')}</Pill>
 									{:else}
 										<Pill kind="warn">{$i18n.t('Off — flagged')}</Pill>
 									{/if}

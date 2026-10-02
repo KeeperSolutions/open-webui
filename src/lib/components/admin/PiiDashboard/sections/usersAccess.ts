@@ -194,11 +194,12 @@ export function broadPolicyGroupCount(groups: GroupRecord[]): number {
 /**
  * What the masking column states about one user.
  *
- * ⚠️ Only `off` is a risk. `default` means the user never chose — and with no
- * stored valve the pipeline masks anyway, so those users ARE protected. Anything
- * rendering these must not colour `default` as a warning.
+ * `default` / `default_off` both mean the user never chose — which one applies
+ * depends on the served `PII_ACTIVE` default (see `maskingStateOf`), not a fixed
+ * "unset is always protected" assumption. Only `off` and `default_off` are a
+ * risk; `enforced`, `default` and `on` are not.
  */
-export type MaskingState = 'enforced' | 'default' | 'on' | 'off';
+export type MaskingState = 'enforced' | 'default' | 'default_off' | 'on' | 'off';
 
 export type UserRow = {
 	id: string;
@@ -437,7 +438,11 @@ function claimKeys(users: AccessUser[]): Map<string, number> {
 export function buildRows(
 	users: AccessUser[],
 	metricRows: MetricRow[],
-	catalogue: ModelCatalogue = { models: [], truncated: false }
+	catalogue: ModelCatalogue = { models: [], truncated: false },
+	// The served PII_ACTIVE default (same value getPiiMaskingDefault() falls
+	// back to on the frontend) — an explicit parameter, not a config-store
+	// read, so this module stays pure and unit-testable without a store mock.
+	servedDefault = true
 ): UserRow[] {
 	const owner = claimKeys(users);
 	const cost = new Array<number>(users.length).fill(0);
@@ -467,7 +472,8 @@ export function buildRows(
 			maskedByOtherPolicy: u.masked_by_other_policy === true,
 			masking: maskingStateOf(
 				u.pii_masking_enforced === true,
-				getStoredPiiMasking(u.settings?.ui ?? {})
+				getStoredPiiMasking(u.settings?.ui ?? {}),
+				servedDefault
 			),
 			cost: cost[index],
 			grantedCount,
@@ -480,27 +486,35 @@ export function buildRows(
  * The masking state shown for one user.
  *
  * ⚠️ Policy is checked FIRST and unconditionally. Under an enforced policy the
- * effective value is ON no matter what the user stored, so `off` must be
- * unreachable — otherwise the governance table reports a risk that does not
- * exist, which is exactly the contradiction this column was rebuilt to remove.
+ * effective value is ON no matter what the user stored, so `off`/`default_off`
+ * must be unreachable — otherwise the governance table reports a risk that does
+ * not exist, which is exactly the contradiction this column was rebuilt to remove.
  *
- * `unset` maps to `default`, not to `off`: an absent valve means the backend
- * sends no key and the pipeline masks by default.
+ * `unset` maps to `default` or `default_off` depending on `servedDefault`
+ * (the backend's `PII_ACTIVE`, same source `getPiiMaskingDefault()` reads on
+ * the frontend and `_resolve_pii_masking_decision()` falls back to on the
+ * backend) — an absent valve means the backend sends no key, and the pipeline
+ * masks or doesn't depending on that served default, not unconditionally on.
  */
-export function maskingStateOf(enforced: boolean, stored: StoredPiiMasking): MaskingState {
+export function maskingStateOf(
+	enforced: boolean,
+	stored: StoredPiiMasking,
+	servedDefault: boolean
+): MaskingState {
 	if (enforced) return 'enforced';
-	if (stored === 'unset') return 'default';
+	if (stored === 'unset') return servedDefault ? 'default' : 'default_off';
 	return stored ? 'on' : 'off';
 }
 
 /**
  * Sort rank for the masking column: risk first.
  *
- * Ascending puts `off` at the top, which is the only state that needs an admin
- * to look. Mirrors the previous boolean ordering, where `false` sorted first.
+ * Ascending puts `off` and `default_off` at the top — both are states an admin
+ * needs to look at, tied for the same risk tier. Mirrors the previous boolean
+ * ordering, where `false` sorted first.
  */
 export function maskingRank(state: MaskingState): number {
-	return { off: 0, default: 1, on: 2, enforced: 3 }[state];
+	return { off: 0, default_off: 0, default: 1, on: 2, enforced: 3 }[state];
 }
 
 /** How many rows one page of the table shows. */
