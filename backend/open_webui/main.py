@@ -444,6 +444,7 @@ from open_webui.env import (
     LICENSE_KEY,
     LOG_FORMAT,
     MAX_BODY_LOG_SIZE,
+    PII_ACTIVE,
     PII_FILTER_IDS,
     # Redis
     REDIS_CLUSTER,
@@ -2959,6 +2960,9 @@ async def get_app_config(request: Request):
                     # polls for that scan's result, and each poll re-fetches the file's
                     # whole content — so it has to know when no scan is coming.
                     'pii_ingest_scan': ENABLE_INGEST_PII_SCAN,
+                    # Global default for PII masking - the frontend's getPiiMaskingDefault()
+                    # falls back to this when no per-user valve value is stored yet.
+                    'pii_active': PII_ACTIVE,
                     'enable_trustminder_feedback': ENABLE_TRUSTMINDER_FEEDBACK,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,

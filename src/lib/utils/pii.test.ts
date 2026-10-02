@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('$lib/apis', () => ({
 	getPipelinesList: vi.fn(),
@@ -170,6 +170,39 @@ describe('getPiiMaskingDefault', () => {
 				}
 			})
 		).toBe(false);
+	});
+});
+
+describe('getPiiMaskingDefault falls back to the served pii_active flag', () => {
+	beforeEach(() => config.set(undefined));
+	afterEach(() => config.set(undefined));
+
+	it('defaults to true when pii_active is absent (older cached /api/config)', () => {
+		setConfig({});
+		expect(getPiiMaskingDefault({})).toBe(true);
+	});
+
+	it('defaults to true when config itself is unset', () => {
+		expect(getPiiMaskingDefault({})).toBe(true);
+	});
+
+	it('reads true from the served pii_active flag', () => {
+		setConfig({ pii_active: true });
+		expect(getPiiMaskingDefault({})).toBe(true);
+	});
+
+	it('reads false from the served pii_active flag', () => {
+		setConfig({ pii_active: false });
+		expect(getPiiMaskingDefault({})).toBe(false);
+	});
+
+	it('a stored valve value still wins over pii_active', () => {
+		setConfig({ pii_active: false });
+		expect(
+			getPiiMaskingDefault({
+				pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } }
+			})
+		).toBe(true);
 	});
 });
 

@@ -1000,6 +1000,12 @@ PII_FILTER_IDS = {
     if fid.strip()
 }
 
+# Global default for PII masking. False turns masking OFF by default for every
+# user who hasn't made an explicit choice (team/group policy, if any, still
+# overrides this; an explicit per-chat toggle is always respected). Mirrors
+# the frontend fallback in getPiiMaskingDefault() (src/lib/utils/pii.ts).
+PII_ACTIVE = os.getenv("PII_ACTIVE", "True").lower() == "true"
+
 
 ####################################
 # CHAT

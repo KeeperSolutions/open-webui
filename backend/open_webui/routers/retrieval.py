@@ -49,6 +49,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import (
     DEVICE_TYPE,
     DOCKER,
+    PII_ACTIVE,
     RAG_EMBEDDING_TIMEOUT,
     SENTENCE_TRANSFORMERS_BACKEND,
     SENTENCE_TRANSFORMERS_CROSS_ENCODER_BACKEND,
@@ -1882,7 +1883,7 @@ ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', 'False'
 
 
 def _user_pii_masking_enabled(user) -> bool:
-    """Read the user's persisted pii_masking_enabled valve setting (default True).
+    """Read the user's persisted pii_masking_enabled valve setting (default PII_ACTIVE).
     Mirrors getPiiMaskingDefault() on the frontend."""
     user_settings = getattr(user, 'settings', None) or {}
     if not isinstance(user_settings, dict):
@@ -1895,7 +1896,7 @@ def _user_pii_masking_enabled(user) -> bool:
         valve_val = (valves.get(filter_id) or {}).get('pii_masking_enabled')
         if isinstance(valve_val, bool):
             return valve_val
-    return True
+    return PII_ACTIVE
 
 
 async def _store_ingest_pii_detections(request, file_id, text_content, user, pii_masking_enabled=None):

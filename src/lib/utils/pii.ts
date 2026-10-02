@@ -114,7 +114,9 @@ export function getPiiMaskingDefault(settings: {
 		const v = valves?.[id]?.pii_masking_enabled;
 		if (typeof v === 'boolean') return v;
 	}
-	return true;
+	// `pii_active` missing (older cached /api/config) reads as on, matching the
+	// pre-existing hardcoded-true behavior - only an explicit `false` turns it off.
+	return get(config)?.features?.pii_active !== false;
 }
 
 /** A user's stored masking preference, with "never chose" kept distinct. */
