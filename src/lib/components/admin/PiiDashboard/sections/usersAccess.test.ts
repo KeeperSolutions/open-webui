@@ -153,11 +153,30 @@ describe('buildRows', () => {
 		ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } }
 	};
 
-	it("reads masking as 'default' when the user never touched the setting", () => {
-		// Absent key means the pipeline masks anyway — protected, not at risk.
+	it("reads masking as 'default' when the user never touched the setting and the served default is on", () => {
+		// Absent key means the pipeline masks only when PII_ACTIVE (the 4th
+		// param, defaulted true here) says so - protected, not at risk.
 		expect(buildRows([user()], [])[0].masking).toBe('default');
 		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default');
 		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default');
+	});
+
+	it("reads masking as 'default_off' when the user never touched the setting and the served default is off", () => {
+		// Copilot review finding: buildRows must reflect the served PII_ACTIVE
+		// default, not assume an unset user is always protected.
+		expect(buildRows([user()], [], undefined, false)[0].masking).toBe('default_off');
+		expect(buildRows([user({ settings: null })], [], undefined, false)[0].masking).toBe(
+			'default_off'
+		);
+	});
+
+	it('an explicitly stored value is unaffected by the served default either way', () => {
+		expect(buildRows([user({ settings: storedOn })], [], undefined, false)[0].masking).toBe(
+			'on'
+		);
+		expect(buildRows([user({ settings: storedOff })], [], undefined, true)[0].masking).toBe(
+			'off'
+		);
 	});
 
 	it("reads masking as 'on' when the user chose it", () => {
@@ -359,33 +378,55 @@ describe('reconciliation with section 3', () => {
 });
 
 describe('maskingStateOf', () => {
-	it('policy wins over anything stored', () => {
-		expect(maskingStateOf(true, false)).toBe('enforced');
-		expect(maskingStateOf(true, true)).toBe('enforced');
-		expect(maskingStateOf(true, 'unset')).toBe('enforced');
+	it('policy wins over anything stored, regardless of the served default', () => {
+		expect(maskingStateOf(true, false, true)).toBe('enforced');
+		expect(maskingStateOf(true, true, true)).toBe('enforced');
+		expect(maskingStateOf(true, 'unset', true)).toBe('enforced');
+		expect(maskingStateOf(true, 'unset', false)).toBe('enforced');
 	});
 
-	it("maps 'unset' to default, never to off", () => {
-		expect(maskingStateOf(false, 'unset')).toBe('default');
-		expect(maskingStateOf(false, 'unset')).not.toBe('off');
+	it("maps 'unset' to default when the served default is on, never to off", () => {
+		expect(maskingStateOf(false, 'unset', true)).toBe('default');
+		expect(maskingStateOf(false, 'unset', true)).not.toBe('off');
 	});
 
-	it('maps stored booleans straight through when unenforced', () => {
-		expect(maskingStateOf(false, true)).toBe('on');
-		expect(maskingStateOf(false, false)).toBe('off');
+	it("maps 'unset' to default_off when the served default is off, never to default or on", () => {
+		// Copilot review finding: an 'unset' user is only protected when the
+		// served PII_ACTIVE default says so - with PII_ACTIVE=false this must
+		// read as a risk state, not as "On — default".
+		expect(maskingStateOf(false, 'unset', false)).toBe('default_off');
+		expect(maskingStateOf(false, 'unset', false)).not.toBe('default');
+		expect(maskingStateOf(false, 'unset', false)).not.toBe('on');
 	});
 
-	it('produces off in exactly one combination', () => {
-		const combos: [boolean, boolean | 'unset'][] = [
-			[true, true],
-			[true, false],
-			[true, 'unset'],
-			[false, true],
-			[false, false],
-			[false, 'unset']
+	it('maps stored booleans straight through when unenforced, regardless of the served default', () => {
+		expect(maskingStateOf(false, true, true)).toBe('on');
+		expect(maskingStateOf(false, true, false)).toBe('on');
+		expect(maskingStateOf(false, false, true)).toBe('off');
+		expect(maskingStateOf(false, false, false)).toBe('off');
+	});
+
+	it('produces a risk state (off or default_off) in exactly the unenforced, unprotected combinations', () => {
+		const combos: [boolean, boolean | 'unset', boolean][] = [
+			[true, true, true],
+			[true, false, true],
+			[true, 'unset', true],
+			[true, 'unset', false],
+			[false, true, true],
+			[false, true, false],
+			[false, false, true],
+			[false, false, false],
+			[false, 'unset', true],
+			[false, 'unset', false]
 		];
-		const offs = combos.filter(([e, s]) => maskingStateOf(e, s) === 'off');
-		expect(offs).toEqual([[false, false]]);
+		const risky = combos.filter(([e, s, d]) =>
+			['off', 'default_off'].includes(maskingStateOf(e, s, d))
+		);
+		expect(risky).toEqual([
+			[false, false, true],
+			[false, false, false],
+			[false, 'unset', false]
+		]);
 	});
 });
 

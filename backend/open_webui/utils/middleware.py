@@ -38,6 +38,7 @@ from open_webui.env import (
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
     GLOBAL_LOG_LEVEL,
+    PII_ACTIVE,
     PII_FILTER_IDS,
     RAG_SYSTEM_CONTEXT,
     SSE_KEEPALIVE_INTERVAL,
@@ -1195,15 +1196,23 @@ def _masked_source_cache_put(key, masked_doc, detections):
 async def _resolve_pii_masking_decision(request, user, features):
     """Return `(policy_enforced, pii_expected)` for this request.
 
-    Masking is expected unless `features.pii_masking` is False. A team policy
-    that mandates masking overrides that flag, as it does on the prompt path;
-    otherwise a user could turn the toggle off and send an attachment unmasked
-    while the prompt stays masked. `resolve_pii_masking_enforced` is memoized
-    per request and fails closed, so repeated calls cost one permission lookup.
+    Masking is expected unless `features.pii_masking` is explicitly False. A team
+    policy that mandates masking overrides that flag, as it does on the prompt
+    path; otherwise a user could turn the toggle off and send an attachment
+    unmasked while the prompt stays masked. `resolve_pii_masking_enforced` is
+    memoized per request and fails closed, so repeated calls cost one permission
+    lookup. When the request sends no explicit choice at all (`request_pii is
+    None` — a non-browser caller that omits `features.pii_masking`; the chat web
+    UI always sends an explicit value via `getPiiMaskingDefault()`), the global
+    `PII_ACTIVE` default decides, same as the frontend's own fallback.
     """
     request_pii = features.get("pii_masking") if isinstance(features, dict) else None
     policy_enforced = await resolve_pii_masking_enforced(request, user)
-    return policy_enforced, policy_enforced or request_pii is not False
+    if policy_enforced:
+        return policy_enforced, True
+    if request_pii is None:
+        return policy_enforced, PII_ACTIVE
+    return policy_enforced, request_pii is not False
 
 
 async def _mask_text_via_pii_pipeline(

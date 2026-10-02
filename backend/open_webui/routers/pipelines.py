@@ -24,6 +24,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_TIMEOUT_SOCK_READ,
     AIOHTTP_FILE_STREAM_CHUNK_SIZE,
     LLM_RETRY_RETRYABLE_STATUS,
+    PII_ACTIVE,
     PII_FILTER_IDS,
 )
 from open_webui.events import EVENTS, publish_event
@@ -815,7 +816,7 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
             try:
                 if (
                     filter_id in PII_FILTER_IDS
-                    and per_filter_valves.get('pii_masking_enabled', True)
+                    and per_filter_valves.get('pii_masking_enabled', PII_ACTIVE)
                     and _payload_task_type(payload) not in _CHUNKING_EXEMPT_TASKS
                     and _chunkable_message_indices(payload)
                 ):
@@ -855,10 +856,11 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                 # masking enabled, the original (unmasked) `payload` must NOT be
                 # returned to the caller — refuse the request instead. Every other
                 # filter keeps best-effort passthrough (e.g. a telemetry outage
-                # must never block chat). `pii_masking_enabled` defaults to True
-                # (the pipeline default) when neither the per-request override nor
-                # a stored valve set it.
-                if filter_id in PII_FILTER_IDS and per_filter_valves.get('pii_masking_enabled', True):
+                # must never block chat). `pii_masking_enabled` defaults to
+                # PII_ACTIVE when neither the per-request override nor a stored
+                # valve set it — masking isn't mandatory to begin with when the
+                # global default is off, so there's nothing to fail closed on.
+                if filter_id in PII_FILTER_IDS and per_filter_valves.get('pii_masking_enabled', PII_ACTIVE):
                     raise PiiMaskingUnavailableError() from e
 
     return payload

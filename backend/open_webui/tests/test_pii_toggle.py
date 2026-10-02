@@ -477,3 +477,56 @@ class TestMetadataFeaturesFallback:
             ))
 
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# PII_ACTIVE fallback — fail-closed connection-error check, when neither the
+# per-request override nor a stored valve sets pii_masking_enabled
+# ---------------------------------------------------------------------------
+
+def _patch_session_raises(exc):
+    """Patch aiohttp.ClientSession so session.post(...) raises `exc` immediately,
+    simulating the pipeline being unreachable (connection refused/timeout)."""
+    session = MagicMock()
+    session.post = MagicMock(side_effect=exc)
+
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    return patch("open_webui.routers.pipelines.aiohttp.ClientSession", return_value=session_cm)
+
+
+class TestPiiActiveFallbackOnConnectionError:
+    """No explicit per-request choice (features omitted) and no stored valve -
+    the fail-closed connection-error guard must consult PII_ACTIVE, not a
+    hardcoded True, for whether masking was expected to begin with."""
+
+    def test_refuses_when_pii_active_true(self):
+        import open_webui.routers.pipelines as P
+        from open_webui.routers.pipelines import PiiMaskingUnavailableError
+
+        payload = {"model": "gpt-4"}  # no features at all
+        user = _make_user()  # no stored setting either
+
+        with patch.object(P, "PII_ACTIVE", True), \
+             _patch_session_raises(ConnectionError("refused")):
+            with pytest.raises(PiiMaskingUnavailableError):
+                _run(process_pipeline_inlet_filter(
+                    _make_request(), payload, user, _make_models()
+                ))
+
+    def test_passes_through_when_pii_active_false(self):
+        import open_webui.routers.pipelines as P
+
+        payload = {"model": "gpt-4"}
+        user = _make_user()
+
+        with patch.object(P, "PII_ACTIVE", False), \
+             _patch_session_raises(ConnectionError("refused")):
+            # Must not raise - masking was never expected by default, so a
+            # connection error has nothing to fail closed on.
+            result = _run(process_pipeline_inlet_filter(
+                _make_request(), payload, user, _make_models()
+            ))
+        assert result == payload
