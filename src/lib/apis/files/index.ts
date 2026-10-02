@@ -316,6 +316,32 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 	return res;
 };
 
+export const downloadFileById = async (token: string, id: string): Promise<Blob> => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/content`, {
+		method: 'GET',
+		headers: {
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return await res.blob();
+		})
+		.catch((err) => {
+			error = err.detail ?? 'Server connection failed';
+			console.error(err);
+			return null;
+		});
+
+	if (error || !res) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getFileContentById = async (id: string) => {
 	let error = null;
 

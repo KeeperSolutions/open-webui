@@ -8,6 +8,8 @@
  * No theme resolution, charts, SmartArt, or animations — preview only.
  */
 
+import type JSZip from 'jszip';
+
 const EMU_PER_PX = 9525;
 const emuToPx = (emu: number) => Math.round(emu / EMU_PER_PX);
 
@@ -21,6 +23,91 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
 		img.onerror = () => reject(new Error('Failed to load image'));
 		img.src = src;
 	});
+
+type Zip = JSZip;
+
+const parseXml = (text: string) => new DOMParser().parseFromString(text, 'application/xml');
+
+/** Map each relationship id of a part (slide, layout...) to its target path and type. */
+const readRels = async (
+	zip: Zip,
+	partPath: string
+): Promise<Record<string, { target: string; type: string }>> => {
+	const dir = partPath.slice(0, partPath.lastIndexOf('/'));
+	const file = zip.file(`${dir}/_rels/${partPath.slice(dir.length + 1)}.rels`);
+	const rels: Record<string, { target: string; type: string }> = {};
+	if (!file) return rels;
+
+	const relEls = parseXml(await file.async('text')).getElementsByTagName('Relationship');
+	for (let i = 0; i < relEls.length; i++) {
+		const target = relEls[i].getAttribute('Target') ?? '';
+		rels[relEls[i].getAttribute('Id') ?? ''] = {
+			target: target.startsWith('../') ? 'ppt/' + target.replace('../', '') : target,
+			type: relEls[i].getAttribute('Type') ?? ''
+		};
+	}
+	return rels;
+};
+
+/** The part a relationship of the given kind (e.g. "slideLayout") points to, with its own path. */
+const loadRelatedPart = async (zip: Zip, partPath: string, kind: string) => {
+	const rel = Object.values(await readRels(zip, partPath)).find((r) => r.type.endsWith(`/${kind}`));
+	const file = rel ? zip.file(rel.target) : null;
+	return file && rel ? { path: rel.target, doc: parseXml(await file.async('text')) } : null;
+};
+
+// Placeholders with no type are content/body boxes, and a centered title is styled like a title
+const TITLE_PLACEHOLDERS = ['title', 'ctrTitle'];
+const placeholderKind = (type: string) => (TITLE_PLACEHOLDERS.includes(type) ? 'title' : type || 'body');
+
+const placeholderOf = (shape: Element) => {
+	const ph = shape.getElementsByTagName('p:ph')[0];
+	return ph ? { type: ph.getAttribute('type') ?? '', idx: ph.getAttribute('idx') ?? '' } : null;
+};
+
+/** What a placeholder inherits when the slide doesn't say: from its layout (same idx, or same type), then its master. */
+const inherited = <T>(
+	ph: { type: string; idx: string },
+	layout: Document | null,
+	master: Document | null,
+	pick: (sp: Element) => T | null | undefined
+): T | null => {
+	const find = (doc: Document | null, matches: (other: { type: string; idx: string }) => boolean) => {
+		if (!doc) return null;
+		for (const sp of Array.from(doc.getElementsByTagName('p:sp'))) {
+			const other = placeholderOf(sp);
+			const value = other && matches(other) ? pick(sp) : null;
+			if (value) return value;
+		}
+		return null;
+	};
+	const kind = placeholderKind(ph.type);
+	return (
+		(ph.idx ? find(layout, (o) => o.idx === ph.idx) : null) ??
+		find(layout, (o) => placeholderKind(o.type) === kind) ??
+		find(master, (o) => placeholderKind(o.type) === kind)
+	);
+};
+
+const bodyAnchor = (sp: Element) => sp.getElementsByTagName('a:bodyPr')[0]?.getAttribute('anchor');
+
+/** The master's bullet character for a body paragraph at the given indent level. */
+const masterBullet = (master: Document | null, level: number) =>
+	master
+		?.getElementsByTagName('p:bodyStyle')[0]
+		?.getElementsByTagName(`a:lvl${level + 1}pPr`)[0]
+		?.getElementsByTagName('a:buChar')[0]
+		?.getAttribute('char') ?? '•';
+
+/** The master's default font size in pt for a title or body paragraph at the given indent level. */
+const masterFontPt = (master: Document | null, kind: string, level: number): number | null => {
+	const style = master?.getElementsByTagName(kind === 'title' ? 'p:titleStyle' : 'p:bodyStyle')[0];
+	const sz = style
+		?.getElementsByTagName(`a:lvl${level + 1}pPr`)[0]
+		?.getElementsByTagName('a:defRPr')[0]
+		?.getAttribute('sz');
+	return sz ? parseInt(sz, 10) / 100 : null;
+};
 
 /**
  * Convert PPTX ArrayBuffer → array of PNG data URL strings, one per slide.
@@ -84,25 +171,20 @@ export async function pptxToImages(
 		const slideDoc = new DOMParser().parseFromString(slideText, 'application/xml');
 
 		// Load relationship file for this slide to resolve image references
-		const slideNum = slidePath.match(/slide(\d+)/)?.[1];
-		const relsPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`;
-		const rels: Record<string, string> = {};
-		const relsFile = zip.file(relsPath);
-		if (relsFile) {
-			const relsText = await relsFile.async('text');
-			const relsDoc = new DOMParser().parseFromString(relsText, 'application/xml');
-			const relEls = relsDoc.getElementsByTagName('Relationship');
-			for (let i = 0; i < relEls.length; i++) {
-				const rel = relEls[i];
-				const id = rel.getAttribute('Id') ?? '';
-				const target = rel.getAttribute('Target') ?? '';
-				if (target.startsWith('../')) {
-					rels[id] = 'ppt/' + target.replace('../', '');
-				} else {
-					rels[id] = target;
-				}
-			}
-		}
+		const rels = Object.fromEntries(
+			Object.entries(await readRels(zip, slidePath)).map(([id, rel]) => [id, rel.target])
+		);
+
+		// Placeholders (title, content) usually leave their position and font size to the layout and master
+		const layout = await loadRelatedPart(zip, slidePath, 'slideLayout');
+		const master = layout ? await loadRelatedPart(zip, layout.path, 'slideMaster') : null;
+		const theme = master ? await loadRelatedPart(zip, master.path, 'theme') : null;
+		// The theme's body font, which text without a font of its own is drawn in
+		const themeFont = theme?.doc
+			.getElementsByTagName('a:minorFont')[0]
+			?.getElementsByTagName('a:latin')[0]
+			?.getAttribute('typeface');
+		const fontFamily = `${themeFont ? `"${themeFont}", ` : ''}Calibri, Arial, sans-serif`;
 
 		// ── Create canvas and render slide ───────────────────────────
 		const canvas = document.createElement('canvas');
@@ -126,8 +208,15 @@ export async function pptxToImages(
 		];
 
 		for (const shape of shapes) {
+			const ph = placeholderOf(shape);
 			const xfrm =
-				shape.getElementsByTagName('a:xfrm')[0] ?? shape.getElementsByTagName('p:xfrm')[0];
+				shape.getElementsByTagName('a:xfrm')[0] ??
+				shape.getElementsByTagName('p:xfrm')[0] ??
+				(ph
+					? inherited(ph, layout?.doc ?? null, master?.doc ?? null, (sp) =>
+							sp.getElementsByTagName('a:xfrm')[0]
+						)
+					: null);
 			if (!xfrm) continue;
 
 			const off = xfrm.getElementsByTagName('a:off')[0];
@@ -171,11 +260,24 @@ export async function pptxToImages(
 
 			const paragraphs = txBody.getElementsByTagName('a:p');
 			let cursorY = y;
-			const defaultFontSize = 12;
+			const kind = ph ? placeholderKind(ph.type) : null;
+			// Words are laid out first and drawn once the text's height is known, so it can sit at the bottom or middle
+			const words: { text: string; x: number; y: number; font: string; color: string }[] = [];
+			const anchor =
+				bodyAnchor(shape) ??
+				(ph ? inherited(ph, layout?.doc ?? null, master?.doc ?? null, bodyAnchor) : null);
 
 			for (let pi = 0; pi < paragraphs.length; pi++) {
 				const para = paragraphs[pi];
 				const runs = para.getElementsByTagName('a:r');
+				const pPr = para.getElementsByTagName('a:pPr')[0];
+				const level = parseInt(pPr?.getAttribute('lvl') ?? '0', 10) || 0;
+				const defaultFontSize = (kind && masterFontPt(master?.doc ?? null, kind, level)) || 12;
+				// Content placeholders get their bullets from the master, which isn't rendered, so they're drawn here
+				const bullet =
+					kind === 'body' && !pPr?.getElementsByTagName('a:buNone').length
+						? `${masterBullet(master?.doc ?? null, level)} `
+						: '';
 
 				if (runs.length === 0) {
 					cursorY += defaultFontSize * 1.5;
@@ -203,8 +305,9 @@ export async function pptxToImages(
 				for (let ri = 0; ri < runs.length; ri++) {
 					const run = runs[ri];
 					const rPr = run.getElementsByTagName('a:rPr')[0];
-					const text = run.getElementsByTagName('a:t')[0]?.textContent ?? '';
-					if (!text) continue;
+					const runText = run.getElementsByTagName('a:t')[0]?.textContent ?? '';
+					if (!runText) continue;
+					const text = ri === 0 ? bullet + runText : runText;
 
 					let fontPt = defaultFontSize;
 					let bold = false;
@@ -226,25 +329,32 @@ export async function pptxToImages(
 						}
 					}
 
-					ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontPt}pt Calibri, Arial, sans-serif`;
-					ctx.fillStyle = color;
-					ctx.textBaseline = 'alphabetic';
+					const font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontPt}pt ${fontFamily}`;
+					ctx.font = font;
 
 					// Simple word-wrap within the shape bounds
-					const words = text.split(/(\s+)/);
-					for (const word of words) {
+					for (const word of text.split(/(\s+)/)) {
 						const metrics = ctx.measureText(word);
 						if (cursorX + metrics.width > x + w && cursorX > x + 4) {
 							cursorX = x + 4;
 							cursorY += lineHeight;
 						}
-						if (cursorY > y + h) break;
-						ctx.fillText(word, cursorX, cursorY);
+						words.push({ text: word, x: cursorX, y: cursorY, font, color });
 						cursorX += metrics.width;
 					}
 				}
 
 				cursorY += lineHeight * 0.4; // paragraph spacing
+			}
+
+			const spare = Math.max(0, y + h - cursorY);
+			const shift = anchor === 'b' ? spare : anchor === 'ctr' ? spare / 2 : 0;
+			ctx.textBaseline = 'alphabetic';
+			for (const word of words) {
+				if (word.y + shift > y + h) break;
+				ctx.font = word.font;
+				ctx.fillStyle = word.color;
+				ctx.fillText(word.text, word.x, word.y + shift);
 			}
 
 			ctx.restore();

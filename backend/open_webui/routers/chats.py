@@ -1788,6 +1788,8 @@ async def fork_chat_by_id(
     if not fork:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=ERROR_MESSAGES.DEFAULT())
 
+    await Chats.link_message_documents(fork.id, fork_history.get('messages'), user.id)
+
     if chat.pinned:
         fork = await Chats.toggle_chat_pinned_by_id(fork.id, db=db) or fork
 
@@ -1838,6 +1840,7 @@ async def clone_chat_by_id(
 
         if chats:
             chat = chats[0]
+            await Chats.link_message_documents(chat.id, (updated_chat.get('history') or {}).get('messages'), user.id)
             await publish_event(
                 request,
                 EVENTS.CHAT_CLONED,
@@ -1922,6 +1925,7 @@ async def clone_shared_chat_by_id(
 
     if chats:
         chat = chats[0]
+        await Chats.link_message_documents(chat.id, (updated_chat.get('history') or {}).get('messages'), user.id)
         return ChatResponse.model_validate(chat, from_attributes=True)
     else:
         raise HTTPException(

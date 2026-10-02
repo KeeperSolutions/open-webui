@@ -335,6 +335,7 @@ async def upload_file_handler(
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
+    generated: bool = False,
 ):
     log.info(f'file.content_type: {file.content_type} {process}')
 
@@ -426,6 +427,8 @@ async def upload_file_handler(
                         'size': len(contents),
                         'file_hash': file_hash,
                         'data': file_metadata,
+                        # Set only by server code, since the client controls 'data' above
+                        **({'generated': True} if generated else {}),
                     },
                 }
             ),

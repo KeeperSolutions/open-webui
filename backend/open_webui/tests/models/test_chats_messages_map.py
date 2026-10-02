@@ -86,6 +86,25 @@ class TestGetMessagesMapByChatId:
         assert result["assistant-msg"]["parentId"] == "user-msg"
 
     @pytest.mark.asyncio
+    async def test_fast_path_overlays_the_documents_so_a_fork_keeps_its_cards(self):
+        documents = [{"file_id": "f1", "name": "Report", "format": "docx"}]
+        fast_path_map = {
+            "assistant-msg": {"id": "assistant-msg", "role": "assistant", "parentId": None, "content": ""},
+        }
+        legacy_messages = {
+            "assistant-msg": {"id": "assistant-msg", "role": "assistant", "content": "Done", "documents": documents},
+        }
+        chat = _make_chat("chat-docs", "user-1", legacy_messages)
+
+        with patch(
+            "open_webui.models.chats.ChatMessages.get_messages_map_by_chat_id",
+            AsyncMock(return_value=fast_path_map),
+        ), patch.object(Chats, "get_chat_by_id", AsyncMock(return_value=chat)):
+            result = await Chats.get_messages_map_by_chat_id("chat-docs")
+
+        assert result["assistant-msg"]["documents"] == documents
+
+    @pytest.mark.asyncio
     async def test_fast_path_without_legacy_chat_leaves_content_untouched(self):
         """If the chat row itself can't be loaded, don't crash — just return
         the fast-path map as-is (best effort, matches prior behavior)."""

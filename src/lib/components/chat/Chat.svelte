@@ -42,6 +42,8 @@
 		functions,
 		selectedFolder,
 		showEmbeds,
+		selectedDocument,
+		showDocumentList,
 		selectedTerminalId,
 		showFileNavPath,
 		showFileNavDir,
@@ -65,10 +67,19 @@
 		isYoutubeUrl,
 		displayFileHandler
 	} from '$lib/utils';
+	import type { ChatDocument } from '$lib/stores';
 	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
+	import {
+		collectChatDocuments,
+		documentUpdates,
+		mergeDuplicateDocuments,
+		migrateDriveDocuments,
+		openDocumentPreview,
+		updateDocumentCard
+	} from '$lib/utils/documents';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
-	import { getOutputText } from './Messages/structuredOutput';
+	import { getOutputText, hasTextAfterToolCalls } from './Messages/structuredOutput';
 
 	import {
 		archiveChatById,
@@ -174,6 +185,16 @@
 	let eventConfirmationInputOptions: ({ label?: string; value: string } | string)[] = [];
 	let eventConfirmationAction = '';
 	let eventConfirmationShowRemember = false;
+	// The first document a response creates, waiting for the answer text before its preview opens
+	let pendingDocumentOpen: { messageId: string; document: ChatDocument } | null = null;
+	$: if (
+		pendingDocumentOpen &&
+		hasTextAfterToolCalls(history?.messages?.[pendingDocumentOpen.messageId] ?? { done: true })
+	) {
+		openDocumentPreview(pendingDocumentOpen.document);
+		pendingDocumentOpen = null;
+	}
+
 	let eventCallback = null;
 
 	// Actions the user opted to skip confirmation for, across every chat - survives a page
@@ -1152,14 +1173,16 @@
 					} else {
 						message.connectorSuggestions = [data];
 					}
-				} else if (type === 'chat:message:drive_document_created') {
-					if (message?.driveDocuments) {
-						message.driveDocuments = [
-							...message.driveDocuments.filter((doc) => doc.id !== data.id),
-							data
-						];
-					} else {
-						message.driveDocuments = [data];
+				} else if (type === 'chat:message:document' || type === 'chat:message:document:update') {
+					// One card per document in the whole chat, so a later event for it (a Drive save, a rename) updates the card it already has
+					if (!updateDocumentCard(history, data) && type === 'chat:message:document') {
+						// Only the first document a response creates opens on its own, Drive files never do
+						const isFirstCreated = !message.documents?.length && !data.drive_id;
+						message.documents = [...(message.documents ?? []), data];
+						// It opens once the model starts its answer, together with the cards
+						if (isFirstCreated && !$mobile) {
+							pendingDocumentOpen = { messageId: message.id, document: message.documents.at(-1) };
+						}
 					}
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
@@ -1427,6 +1450,10 @@
 			stopAudio();
 		});
 
+		const documentUpdatesSubscribe = documentUpdates.subscribe((data) => {
+			if (data && updateDocumentCard(history, data)) history = history;
+		});
+
 		const showControlsSubscribe = showControls.subscribe(async (value) => {
 			await tick();
 			if (controlPane && !$mobile) {
@@ -1445,6 +1472,7 @@
 				showCallOverlay.set(false);
 				showArtifacts.set(false);
 				showEmbeds.set(false);
+				showDocumentList.set(false);
 			}
 		});
 
@@ -1512,6 +1540,7 @@
 				}
 				pageSubscribe();
 				showControlsSubscribe();
+				documentUpdatesSubscribe();
 				selectedFolderSubscribe();
 
 				// Clear the selected chat when leaving the chat surface (e.g. navigating
@@ -1708,6 +1737,7 @@
 	};
 
 	$: onHistoryChange(history);
+	$: chatDocuments = collectChatDocuments(history);
 
 	const dispatchCallOverlayAudio = (message, final = false) => {
 		if (!$showCallOverlay) {
@@ -1909,11 +1939,12 @@
 			}
 		}
 
-		if ($mobile) {
-			await showControls.set(false);
-		}
+		// A new chat starts with nothing open on the right, or the pane would fall back to Controls
+		await showControls.set(false);
 		await showCallOverlay.set(false);
 		await showArtifacts.set(false);
+		selectedDocument.set(null);
+		pendingDocumentOpen = null;
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -2050,6 +2081,8 @@
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
 		chatId.set(chatIdProp || $chatId);
 		noteChatDebug('loadChat set active chat id');
+		selectedDocument.set(null);
+		pendingDocumentOpen = null;
 
 		if ($temporaryChatEnabled) {
 			noteChatDebug('loadChat disabling temporary chat');
@@ -2128,6 +2161,8 @@
 				// Sanitize history: repair orphaned references and structurally-malformed
 				// nodes from failed regenerations (#24424, #24157, #20474)
 				sanitizeHistory(history);
+				migrateDriveDocuments(history);
+				mergeDuplicateDocuments(history);
 
 				chatTitle.set(chatContent.title);
 
@@ -3920,7 +3955,7 @@
 				></div>
 			{/if}
 
-			<PaneGroup direction="horizontal" class="w-full h-full">
+			<PaneGroup direction="horizontal" class="chat-pane-group w-full h-full">
 				<Pane defaultSize={50} minSize={30} class="h-full flex relative max-w-full flex-col">
 					<FilesOverlay show={dragged} />
 					{#if embedded}
@@ -3969,6 +4004,7 @@
 								}
 							}}
 							{history}
+							{chatDocuments}
 							title={$chatTitle}
 							bind:selectedModels
 							shareEnabled={!!history.currentId}
@@ -4295,6 +4331,7 @@
 					<ChatControls
 						bind:this={controlPaneComponent}
 						bind:history
+						{chatDocuments}
 						bind:chatFiles
 						bind:params
 						bind:files
@@ -4331,5 +4368,13 @@
 	::-webkit-scrollbar {
 		height: 0.5rem;
 		width: 0.5rem;
+	}
+
+	/* The side panel slides open and closed, but follows the pointer directly while its resizer is dragged */
+	:global(.chat-pane-group > [data-pane]) {
+		transition: flex-grow 300ms cubic-bezier(0.2, 0, 0, 1);
+	}
+	:global(.chat-pane-group:has(> [data-pane-resizer][data-active='pointer']) > [data-pane]) {
+		transition: none;
 	}
 </style>
