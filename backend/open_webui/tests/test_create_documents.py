@@ -1,4 +1,7 @@
+import asyncio
 import json
+import sys
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -6,6 +9,8 @@ import pytest
 from fastapi import HTTPException
 
 import open_webui.tools.built_in as built_in
+from open_webui.utils import document_builders
+from open_webui.utils.rate_limit import RateLimiter
 
 USER = {
     'id': 'user-1',
@@ -19,18 +24,34 @@ USER = {
 }
 
 
-def fake_build(format, name, content):
+@pytest.fixture(autouse=True)
+def fresh_rate_limiter():
+    RateLimiter._memory_store.clear()
+    with patch.object(built_in, '_document_rate_limiter', RateLimiter(None, limit=built_in.DOCUMENT_MAX_PER_HOUR, window=3600)):
+        yield
+    RateLimiter._memory_store.clear()
+
+
+async def fake_build(format, name, content):
     if name == 'Broken':
         raise ValueError('bad content')
+    if name == 'Big':
+        return b'x' * 2_000_001
     return b'bytes'
 
 
-async def create(files, upload=None, chat_id='chat-1', emitted=None):
+async def create(files, upload=None, chat_id='chat-1', emitted=None, already_this_hour=0):
     stored = []
 
-    async def default_upload(request, file, metadata, process, user):
+    async def default_upload(request, file, metadata, process, user, generated=False):
         stored.append(
-            {'filename': file.filename, 'content_type': file.content_type, 'metadata': metadata, 'process': process}
+            {
+                'filename': file.filename,
+                'content_type': file.content_type,
+                'metadata': metadata,
+                'process': process,
+                'generated': generated,
+            }
         )
         return SimpleNamespace(id=f'file-{len(stored)}')
 
@@ -43,6 +64,8 @@ async def create(files, upload=None, chat_id='chat-1', emitted=None):
         patch('open_webui.routers.files.upload_file_handler', upload or default_upload),
         patch.object(built_in.Chats, 'insert_chat_files', insert_chat_files),
     ):
+        for _ in range(already_this_hour):
+            built_in._document_rate_limiter.is_limited(USER['id'])
         result = json.loads(
             await built_in.create_documents(
                 files=files,
@@ -75,6 +98,8 @@ async def test_stores_each_document_links_it_to_the_chat_and_emits_a_card():
     assert all(s['process'] is False for s in stored)
     # a missing metadata falls back to the route's Form(None) default, which upload_file_handler can't read
     assert all(s['metadata'] == {} for s in stored)
+    # the server marks generated files itself, so cleanup can tell them apart from uploads
+    assert all(s['generated'] is True for s in stored)
     insert_chat_files.assert_awaited_once_with(
         chat_id='chat-1', message_id='message-1', file_ids=['file-1', 'file-2'], user_id='user-1'
     )
@@ -86,7 +111,7 @@ async def test_stores_each_document_links_it_to_the_chat_and_emits_a_card():
 async def test_one_failed_build_or_store_does_not_fail_the_rest():
     stored = []
 
-    async def upload(request, file, metadata, process, user):
+    async def upload(request, file, metadata, process, user, generated=False):
         if file.filename == 'Huge.pdf':
             raise HTTPException(status_code=413, detail='File too large')
         stored.append(file.filename)
@@ -127,6 +152,230 @@ async def test_wrongly_typed_fields_fail_only_their_own_document():
     assert [s['filename'] for s in stored] == ['Report.docx']
     assert len(emitted) == 1
     assert len(result['failed']) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_document_over_the_size_limit_fails_on_its_own():
+    with patch.object(built_in, 'DOCUMENT_MAX_BYTES', 2_000_000):
+        result, stored, _ = await create(
+            [{'name': 'Small', 'format': 'pdf', 'content': 'x'}, {'name': 'Big', 'format': 'pdf', 'content': 'y'}]
+        )
+
+    assert [s['filename'] for s in stored] == ['Small.pdf']
+    assert result['status'] == 'partial'
+    assert result['failed'] == [
+        {'name': 'Big.pdf', 'error': 'The file is larger than 2 MB - split the content into smaller documents.'}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_documents_over_the_per_call_limit_fail_and_the_rest_are_created():
+    with patch.object(built_in, 'DOCUMENT_MAX_PER_CALL', 2):
+        result, stored, _ = await create([{'name': f'Doc {i}', 'format': 'pdf', 'content': 'x'} for i in range(4)])
+
+    assert [s['filename'] for s in stored] == ['Doc 0.pdf', 'Doc 1.pdf']
+    assert result['status'] == 'partial'
+    assert [f['name'] for f in result['failed']] == ['Doc 2.pdf', 'Doc 3.pdf']
+    assert result['failed'][0]['error'] == 'Only 2 documents can be created per call - create this one in a new call.'
+
+
+@pytest.mark.asyncio
+async def test_documents_over_the_hourly_limit_fail_and_the_rest_are_created():
+    with (
+        patch.object(built_in, 'DOCUMENT_MAX_PER_HOUR', 5),
+        patch.object(built_in, '_document_rate_limiter', RateLimiter(None, limit=5, window=3600)),
+    ):
+        result, stored, _ = await create(
+            [{'name': f'Doc {i}', 'format': 'pdf', 'content': 'x'} for i in range(4)], already_this_hour=3
+        )
+
+    assert [s['filename'] for s in stored] == ['Doc 0.pdf', 'Doc 1.pdf']
+    assert [f['name'] for f in result['failed']] == ['Doc 2.pdf', 'Doc 3.pdf']
+    assert result['failed'][0]['error'] == 'The limit of 5 generated documents per hour is reached - try again later.'
+
+
+@pytest.mark.asyncio
+async def test_documents_left_after_the_hour_is_used_up_share_one_reason_and_one_sentence():
+    with (
+        patch.object(built_in, 'DOCUMENT_MAX_PER_CALL', 3),
+        patch.object(built_in, 'DOCUMENT_MAX_PER_HOUR', 4),
+        patch.object(built_in, '_document_rate_limiter', RateLimiter(None, limit=4, window=3600)),
+    ):
+        result, stored, _ = await create([{'name': f'Test {i}', 'format': 'pdf', 'content': 'x'} for i in range(10)], already_this_hour=2)
+
+    hour_error = 'The limit of 4 generated documents per hour is reached - try again later.'
+    assert len(stored) == 2
+    # Documents 3 and up are over the per-call limit too, but the hour being used up is the reason they all share
+    assert {f['error'] for f in result['failed']} == {hour_error}
+    assert result['message'] == f'Created 2 of 10 documents. Not created - 8 documents left out: {hour_error}'
+    assert built_in.DOCUMENT_LIMIT_REACHED_NOTE in result['note']
+
+
+def test_documents_left_out_by_the_hourly_limit_are_never_named_even_when_only_one_or_two():
+    error = 'The limit of 40 generated documents per hour is reached - try again later.'
+    failed = [{'name': 'Test 19.docx', 'error': error, 'limit_reached': True}]
+    assert built_in._documents_failures_text(failed) == f'1 document left out: {error}'
+
+    failed.append({'name': 'Test 20.docx', 'error': error, 'limit_reached': True})
+    failed.append({'name': 'Broken.xlsx', 'error': "Couldn't build."})
+    assert built_in._documents_failures_text(failed) == f"Broken.xlsx: Couldn't build. 2 documents left out: {error}"
+
+
+def test_documents_failing_for_the_same_reason_are_named_only_when_there_are_a_few():
+    failed = [{'name': f'D{i}.pdf', 'error': 'Empty content.'} for i in range(3)]
+    assert built_in._documents_failures_text(failed) == '3 documents (D0.pdf, D1.pdf, D2.pdf): Empty content.'
+
+    failed += [{'name': 'D3.pdf', 'error': 'Empty content.'}, {'name': 'X.pdf', 'error': "Couldn't save."}]
+    assert built_in._documents_failures_text(failed) == "4 documents: Empty content. X.pdf: Couldn't save."
+
+
+@pytest.mark.asyncio
+async def test_the_hourly_limit_does_not_reset_when_the_documents_are_deleted():
+    with (
+        patch.object(built_in, 'DOCUMENT_MAX_PER_HOUR', 2),
+        patch.object(built_in, '_document_rate_limiter', RateLimiter(None, limit=2, window=3600)),
+    ):
+        first, _, _ = await create([{'name': f'A{i}', 'format': 'pdf', 'content': 'x'} for i in range(2)])
+        # The files are gone from storage and the database by now, so nothing in them can count
+        second, stored, _ = await create([{'name': 'B', 'format': 'pdf', 'content': 'x'}])
+
+    assert first['status'] == 'success'
+    assert stored == []
+    assert 'per hour is reached' in second['failed'][0]['error']
+
+
+class FakeBuildProcess:
+    pid = 0
+    returncode = 0
+
+    async def communicate(self, payload):
+        await asyncio.sleep(0.05)
+        return b'bytes', b''
+
+
+@pytest.mark.asyncio
+async def test_only_a_few_documents_are_built_at_the_same_time():
+    running = {'now': 0, 'peak': 0}
+
+    async def fake_subprocess(*args, **kwargs):
+        running['now'] += 1
+        running['peak'] = max(running['peak'], running['now'])
+
+        class Process(FakeBuildProcess):
+            async def communicate(self, payload):
+                await asyncio.sleep(0.05)
+                running['now'] -= 1
+                return b'bytes', b''
+
+        return Process()
+
+    # A fresh semaphore, since the module's one may be tied to another test's event loop
+    with (
+        patch.object(built_in, '_document_build_slots', asyncio.Semaphore(built_in.DOCUMENT_BUILD_CONCURRENCY)),
+        patch('asyncio.create_subprocess_exec', fake_subprocess),
+    ):
+        results = await asyncio.gather(*(built_in._build_document_bytes('pdf', f'Doc {i}', 'x') for i in range(8)))
+
+    assert results == [b'bytes'] * 8
+    assert running['peak'] == built_in.DOCUMENT_BUILD_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_a_build_runs_in_a_child_process_and_returns_the_file():
+    file_bytes = await built_in._build_document_bytes('xlsx', 'Data', 'a,b\n1,2')
+
+    assert file_bytes.startswith(b'PK')
+
+
+@pytest.mark.asyncio
+async def test_a_build_that_runs_too_long_is_killed():
+    hang = [sys.executable, '-c', 'import time; time.sleep(60)']
+    started = time.monotonic()
+    with (
+        patch.object(built_in, 'DOCUMENT_BUILD_COMMAND', hang),
+        patch.object(built_in, 'DOCUMENT_BUILD_TIMEOUT_SECONDS', 0.5),
+        pytest.raises(built_in.DocumentBuildTimeout),
+    ):
+        await built_in._build_document_bytes('pdf', 'Hangs', 'x')
+
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.asyncio
+async def test_a_build_that_crashes_reports_what_the_process_said():
+    crash = [sys.executable, '-c', 'import sys; sys.stderr.write("fonts missing"); sys.exit(1)']
+    with patch.object(built_in, 'DOCUMENT_BUILD_COMMAND', crash), pytest.raises(built_in.DocumentBuildError) as e:
+        await built_in._build_document_bytes('pdf', 'Crashes', 'x')
+
+    assert 'fonts missing' in str(e.value)
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_document_fails_on_its_own_with_a_clear_message():
+    async def build(format, name, content):
+        if name == 'Hangs':
+            raise built_in.DocumentBuildTimeout('too long')
+        return b'bytes'
+
+    with patch.object(built_in, '_build_document_bytes', build):
+        ok, ok_error = await built_in._build_document_safe({'format': 'pdf', 'name': 'Fine', 'content': 'x'})
+        timed_out, error = await built_in._build_document_safe({'format': 'docx', 'name': 'Hangs', 'content': 'x'})
+
+    assert ok == b'bytes' and ok_error is None
+    assert timed_out is None
+    assert error.startswith(f'Building this docx file took longer than {built_in.DOCUMENT_BUILD_TIMEOUT_SECONDS} seconds')
+
+
+@pytest.mark.asyncio
+async def test_a_document_over_the_content_limit_fails_on_its_own():
+    with patch.object(built_in, 'DOCUMENT_MAX_CONTENT_CHARS', 10):
+        result, stored, _ = await create(
+            [{'name': 'Short', 'format': 'pdf', 'content': 'x' * 10}, {'name': 'Long', 'format': 'pdf', 'content': 'x' * 11}]
+        )
+
+    assert [s['filename'] for s in stored] == ['Short.pdf']
+    assert result['failed'] == [
+        {'name': 'Long.pdf', 'error': 'The content is longer than 10 characters - split it into several documents.'}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_child_that_builds_a_file_over_the_size_limit_is_reported_as_too_large():
+    # xlsx of 5000 rows is far over 1 byte, so the child refuses to hand it over
+    with patch.object(built_in, 'DOCUMENT_MAX_BYTES', 1), pytest.raises(built_in.DocumentTooLarge):
+        await built_in._build_document_bytes('xlsx', 'Data', 'a,b\n1,2')
+
+
+@pytest.mark.asyncio
+async def test_a_killed_build_leaves_no_temp_directory_behind(tmp_path):
+    seen = tmp_path / 'tmp_dir_path'
+    script = (
+        'import json, sys, time; spec = json.loads(sys.stdin.read()); '
+        f'open({str(seen)!r}, "w").write(spec["tmp_dir"]); '
+        'open(spec["tmp_dir"] + "/half-written.docx", "w").write("x"); time.sleep(60)'
+    )
+    with (
+        patch.object(built_in, 'DOCUMENT_BUILD_COMMAND', [sys.executable, '-c', script]),
+        patch.object(built_in, 'DOCUMENT_BUILD_TIMEOUT_SECONDS', 1),
+        pytest.raises(built_in.DocumentBuildTimeout),
+    ):
+        await built_in._build_document_bytes('docx', 'Hangs', 'x')
+
+    import os
+
+    assert seen.exists()
+    assert not os.path.exists(seen.read_text())
+
+
+@pytest.mark.asyncio
+async def test_the_user_is_not_shown_the_childs_traceback():
+    async def build(format, name, content):
+        raise built_in.DocumentBuildError('The pdf build exited with 1: Traceback (most recent call last): /app/secret.py')
+
+    with patch.object(built_in, '_build_document_bytes', build):
+        _, error = await built_in._build_document_safe({'format': 'pdf', 'name': 'T', 'content': 'x'})
+
+    assert error == "Couldn't build this pdf file - content must be markdown text."
 
 
 @pytest.mark.asyncio
@@ -193,7 +442,7 @@ async def test_drive_save_documents_is_only_offered_with_create_documents(docume
 def test_pdf_builds_with_bold_italic_and_code_with_diacritics():
     content = '# Popis\n\n***Važno*** i **_hitno_**\n\n- `ključ` od ureda\n\n```\nčćžšđ\n```\n'
 
-    assert built_in._build_pdf_document_bytes('Checklist', content).startswith(b'%PDF')
+    assert document_builders._build_pdf_document_bytes('Checklist', content).startswith(b'%PDF')
 
 
 def test_pdf_keeps_spaces_between_inline_tags_and_drops_newlines_between_blocks():
@@ -207,7 +456,7 @@ def test_pdf_keeps_spaces_between_inline_tags_and_drops_newlines_between_blocks(
         return original(self, text, *args, **kwargs)
 
     with patch.object(FPDF, 'write_html', capture):
-        built_in._build_pdf_document_bytes('T', '# T\n\n**Ime:** *Ivan* i [a](x) [b](y)\n\n- prvi\n- drugi\n')
+        document_builders._build_pdf_document_bytes('T', '# T\n\n**Ime:** *Ivan* i [a](x) [b](y)\n\n- prvi\n- drugi\n')
 
     html = written[0]
     assert '</strong> <em>' in html
@@ -221,9 +470,9 @@ def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
     from pptx import Presentation
 
     content = 'Selidba ureda\nPlan za upravu\n---\nCiljevi\n- prvi\n- drugi'
-    prs = Presentation(io.BytesIO(built_in._build_pptx_document_bytes(content)))
+    prs = Presentation(io.BytesIO(document_builders._build_pptx_document_bytes(content)))
 
-    assert (prs.slide_width, prs.slide_height) == built_in.PPTX_SLIDE_SIZE
+    assert (prs.slide_width, prs.slide_height) == document_builders.PPTX_SLIDE_SIZE
     cover, slide = prs.slides
     assert cover.slide_layout == prs.slide_layouts[0]
     assert [p.text_frame.text for p in cover.placeholders] == ['Selidba ureda', 'Plan za upravu']
@@ -232,8 +481,8 @@ def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
     layout_boxes = {
         p.placeholder_format.idx: (p.left, p.top, p.width, p.height) for p in slide.slide_layout.placeholders
     }
-    assert layout_boxes[0] == built_in.PPTX_TITLE_BOX
-    assert layout_boxes[1] == built_in.PPTX_BODY_BOX
+    assert layout_boxes[0] == document_builders.PPTX_TITLE_BOX
+    assert layout_boxes[1] == document_builders.PPTX_BODY_BOX
 
     # Google's cover is centered, its content titles are left-aligned and bullets are a filled circle
     from pptx.oxml.ns import qn
@@ -266,7 +515,7 @@ def test_pptx_uses_google_slides_page_boxes_and_a_cover_slide():
     ],
 )
 def test_xlsx_cells_become_numbers_only_when_they_plainly_are(text, expected):
-    assert built_in._xlsx_cell_value(text) == expected
+    assert document_builders._xlsx_cell_value(text) == expected
 
 
 def test_xlsx_has_arial_a_bold_frozen_header_and_numeric_cells():
@@ -275,7 +524,7 @@ def test_xlsx_has_arial_a_bold_frozen_header_and_numeric_cells():
     from openpyxl import load_workbook
 
     content = 'Stavka,Cijena\nPrijevoz kamionom i dostava na novu lokaciju,"1,200.00"\n'
-    ws = load_workbook(io.BytesIO(built_in._build_xlsx_document_bytes(content))).active
+    ws = load_workbook(io.BytesIO(document_builders._build_xlsx_document_bytes(content))).active
 
     header, price = ws['A1'], ws['B2']
     assert (header.font.name, header.font.sz, header.font.b) == ('Arial', 10, True)
@@ -283,7 +532,7 @@ def test_xlsx_has_arial_a_bold_frozen_header_and_numeric_cells():
     assert (price.value, price.number_format) == (1200.0, '#,##0.00')
     assert ws.freeze_panes == 'A2'
     assert ws.title == 'Sheet1'
-    assert ws.column_dimensions['A'].width > ws.column_dimensions['B'].width == built_in.XLSX_MIN_COLUMN_WIDTH
+    assert ws.column_dimensions['A'].width > ws.column_dimensions['B'].width == document_builders.XLSX_MIN_COLUMN_WIDTH
 
 
 def test_reference_doc_is_built_once_by_parallel_docx_builds_and_a_failure_is_retried(monkeypatch):
@@ -297,22 +546,22 @@ def test_reference_doc_is_built_once_by_parallel_docx_builds_and_a_failure_is_re
         time.sleep(0.05)
         return None if len(builds) == 1 else 'reference.docx'
 
-    monkeypatch.setattr(built_in, '_build_pandoc_reference_doc', build)
-    monkeypatch.setattr(built_in, '_reference_doc', None)
+    monkeypatch.setattr(document_builders, '_build_pandoc_reference_doc', build)
+    monkeypatch.setattr(document_builders, '_reference_doc', None)
 
     # The first build fails, so the next call tries again instead of keeping pandoc's defaults for good
-    assert built_in._get_pandoc_reference_doc() is None
-    threads = [threading.Thread(target=built_in._get_pandoc_reference_doc) for _ in range(3)]
+    assert document_builders._get_pandoc_reference_doc() is None
+    threads = [threading.Thread(target=document_builders._get_pandoc_reference_doc) for _ in range(3)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
     assert len(builds) == 2
-    assert built_in._get_pandoc_reference_doc() == 'reference.docx'
+    assert document_builders._get_pandoc_reference_doc() == 'reference.docx'
 
 
 @pytest.mark.parametrize('content', ['---', '\n---\n  \n---'])
 def test_pptx_with_no_slides_fails_instead_of_saving_an_empty_deck(content):
     with pytest.raises(ValueError):
-        built_in._build_pptx_document_bytes(content)
+        document_builders._build_pptx_document_bytes(content)

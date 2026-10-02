@@ -471,6 +471,91 @@ class TestSaveDocumentEndpoint:
 # ---------------------------------------------------------------------------
 
 
+class UploadRecorder(FakeClientBase):
+    def __init__(self, session_status=200):
+        self.calls = []
+        self.session_status = session_status
+
+    async def request(self, method, url, headers=None, content=None, params=None, **kwargs):
+        self.calls.append({'method': method, 'url': url, 'headers': headers, 'params': params, 'content': content})
+        response = FakeResponse(200, {'id': 'drive-1', 'webViewLink': 'https://docs/1'})
+        if params and params.get('uploadType') == 'resumable':
+            response = FakeResponse(self.session_status, {})
+            response.headers = {'Location': 'https://upload/session-1'}
+        return response
+
+
+class TestDriveUploadDocumentBytes:
+    @pytest.mark.asyncio
+    async def test_a_small_file_goes_up_in_one_multipart_request(self):
+        client = UploadRecorder()
+        await drive._drive_upload_document_bytes(client, {}, 'Report', 'docx', b'x' * 1000)
+
+        assert [c['params']['uploadType'] for c in client.calls] == ['multipart']
+
+    @pytest.mark.asyncio
+    async def test_a_file_over_the_multipart_limit_uses_a_resumable_session(self):
+        client = UploadRecorder()
+        file_bytes = b'x' * (drive.DRIVE_MULTIPART_MAX_BYTES + 1)
+        response = await drive._drive_upload_document_bytes(
+            client, {'Authorization': 'Bearer t'}, 'Big', 'xlsx', file_bytes, parent_id='folder-1'
+        )
+
+        session, upload = client.calls
+        assert session['method'] == 'POST' and session['params']['uploadType'] == 'resumable'
+        assert json.loads(session['content']) == {
+            'name': 'Big',
+            'mimeType': 'application/vnd.google-apps.spreadsheet',
+            'parents': ['folder-1'],
+        }
+        assert session['headers']['X-Upload-Content-Type'] == drive.DOCUMENT_MIME_TYPES['xlsx']
+        assert session['headers']['X-Upload-Content-Length'] == str(len(file_bytes))
+        assert upload['method'] == 'PUT' and upload['url'] == 'https://upload/session-1'
+        assert upload['content'] == file_bytes
+        assert response.json()['id'] == 'drive-1'
+
+    @pytest.mark.asyncio
+    async def test_a_failed_resumable_session_is_returned_without_sending_the_bytes(self):
+        client = UploadRecorder(session_status=403)
+        response = await drive._drive_upload_document_bytes(
+            client, {}, 'Big', 'pdf', b'x' * (drive.DRIVE_MULTIPART_MAX_BYTES + 1)
+        )
+
+        assert response.status_code == 403
+        assert len(client.calls) == 1
+
+
+class DownloadClient(FakeClientBase):
+    async def get(self, url, headers=None, params=None):
+        response = FakeResponse(200, {})
+        response.content = b'file bytes'
+        response.headers = {'Content-Type': 'application/octet-stream'}
+        return response
+
+
+class TestDownloadDocumentEndpoint:
+    async def download(self, filename, format='docx'):
+        with patch('httpx.AsyncClient', return_value=DownloadClient()):
+            return await connectors.download_google_drive_document(
+                'd1', format=format, filename=filename, user=SimpleNamespace(id=USER['id'])
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_name_with_croatian_letters_downloads_instead_of_failing_on_the_header(self):
+        response = await self.download('Edit of Izvještaj: Prednosti i manjkovi rada od kuće')
+
+        header = response.headers['content-disposition']
+        assert response.body == b'file bytes'
+        assert 'filename="Edit of Izvje_taj_ Prednosti i manjkovi rada od ku_e.docx"' in header
+        assert "filename*=UTF-8''Edit%20of%20Izvje%C5%A1taj_%20Prednosti%20i%20manjkovi%20rada%20od%20ku%C4%87e.docx" in header
+
+    @pytest.mark.asyncio
+    async def test_a_plain_name_keeps_its_name_and_gets_the_format_as_extension(self):
+        response = await self.download('Report', format='xlsx')
+
+        assert response.headers['content-disposition'].startswith('attachment; filename="Report.xlsx"')
+
+
 class TestDriveCreateFolders:
     @pytest.mark.asyncio
     async def test_creates_a_single_folder(self):
@@ -742,6 +827,51 @@ class TestDriveSaveEditedCopy:
         assert result['status'] == 'success'
         assert result['name'] == 'Edit of Plain Notes'
         assert client.create_calls[0]['json']['parents'] == ['orig-parent']
+
+    @pytest.mark.asyncio
+    async def test_a_failed_document_build_is_reported_without_the_childs_traceback(self):
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                return FakeResponse(
+                    200, {'name': 'Report', 'mimeType': drive.DRIVE_DOCUMENT_NATIVE_MIME_TYPES['docx'], 'parents': []}
+                )
+
+        async def failing_build(format, name, content):
+            raise drive.DocumentBuildError('The docx build exited with 1: Traceback /app/secret.py')
+
+        with (
+            patch('httpx.AsyncClient', return_value=FakeClient()),
+            patch.object(drive, '_build_document_bytes', failing_build),
+        ):
+            result = json.loads(
+                await drive.drive_save_edited_copy(
+                    file_id='doc1', content='text', __user__=USER, __event_call__=confirm, __event_emitter__=None
+                )
+            )
+
+        assert result == {'error': "Couldn't build this docx file - content must be markdown text."}
+
+    @pytest.mark.asyncio
+    async def test_rejects_content_over_the_limit_for_a_built_document_before_asking_the_user(self):
+        class FakeClient(FakeClientBase):
+            async def get(self, url, headers=None, params=None):
+                return FakeResponse(
+                    200, {'name': 'Report', 'mimeType': drive.DRIVE_DOCUMENT_NATIVE_MIME_TYPES['docx'], 'parents': []}
+                )
+
+        confirmed = AsyncMock(return_value=True)
+        with (
+            patch('httpx.AsyncClient', return_value=FakeClient()),
+            patch.object(drive, 'DOCUMENT_MAX_CONTENT_CHARS', 10),
+        ):
+            result = json.loads(
+                await drive.drive_save_edited_copy(
+                    file_id='doc1', content='x' * 11, __user__=USER, __event_call__=confirmed, __event_emitter__=None
+                )
+            )
+
+        assert 'longer than 10 characters' in result['error']
+        confirmed.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

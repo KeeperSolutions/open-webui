@@ -69,7 +69,12 @@
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
-	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
+	import {
+		getOutputText,
+		hasTextAfterToolCalls,
+		replaceOutputMessageText,
+		type OutputItem
+	} from './structuredOutput';
 
 	interface MessageType {
 		id: string;
@@ -937,7 +942,8 @@
 								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
 							{/if}
 
-							{#if message.documents}
+							<!-- Held back until the model starts its answer, so they don't sit there while it is still working -->
+							{#if message.documents && hasTextAfterToolCalls(message)}
 								<DocumentCard documents={message.documents} />
 							{/if}
 						</div>

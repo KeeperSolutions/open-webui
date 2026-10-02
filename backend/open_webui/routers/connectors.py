@@ -4,7 +4,7 @@ import mimetypes
 import re
 import time
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -319,10 +319,15 @@ async def download_google_drive_document(
     safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
     if safe_filename.lower().endswith(f'.{format.lower()}'):
         safe_filename = safe_filename[: -(len(format) + 1)]
+    full_filename = f'{safe_filename}.{format}'
+    # Headers are latin-1, so letters like "š" or "ć" go only in the UTF-8 form and the plain one gets an underscore
+    ascii_filename = full_filename.encode('ascii', 'replace').decode().replace('?', '_')
     return Response(
         content=response.content,
         media_type=content_type,
-        headers={'Content-Disposition': f'attachment; filename="{safe_filename}.{format}"'},
+        headers={
+            'Content-Disposition': f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quote(full_filename)}'
+        },
     )
 
 

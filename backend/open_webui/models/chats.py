@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -927,7 +928,7 @@ class ChatTable:
     # Fields that only ever live in the encrypted JSON blob — chat_message
     # deliberately excludes them (see ChatMessage's column comment), so the
     # normalized table can never be treated as sufficient on its own.
-    CONTENT_ONLY_FIELDS = ('content', 'output', 'files', 'sources', 'embeds')
+    CONTENT_ONLY_FIELDS = ('content', 'output', 'files', 'sources', 'embeds', 'documents')
 
     async def get_messages_map_by_chat_id(self, id: str) -> dict | None:
         """Message map for walking history (see ``get_message_list``).
@@ -2292,31 +2293,101 @@ class ChatTable:
         except Exception:
             return False
 
+    async def find_generated_files_of_chats(self, chat_ids, db: AsyncSession | None = None) -> dict[str, str]:
+        """Generated files of these chats (ids or a select) that no other chat links, as {id: path}."""
+        from open_webui.models.files import File
+
+        try:
+            async with get_async_db_context(db) as session:
+                rows = await session.execute(
+                    select(File.id, File.path, File.meta)
+                    .join(ChatFile, ChatFile.file_id == File.id)
+                    .where(ChatFile.chat_id.in_(chat_ids))
+                )
+                generated = {file_id: path for file_id, path, meta in rows.all() if (meta or {}).get('generated')}
+                if not generated:
+                    return {}
+
+                # Joined to Chat, since without foreign keys (SQLite) a deleted chat's links can stay behind
+                still_used = await session.execute(
+                    select(ChatFile.file_id)
+                    .join(Chat, Chat.id == ChatFile.chat_id)
+                    .where(ChatFile.file_id.in_(generated), ChatFile.chat_id.notin_(chat_ids))
+                )
+                for (file_id,) in still_used.all():
+                    generated.pop(file_id, None)
+                return generated
+        except Exception as e:
+            log.exception(f'Looking up the generated files of chats to delete failed: {e}')
+            return {}
+
+    async def delete_generated_files(self, files: dict[str, str], db: AsyncSession | None = None) -> None:
+        """Delete generated files ({id: path}) and their stored content, never raising since the chat is already gone."""
+        from open_webui.models.files import File
+        from open_webui.storage.provider import Storage
+
+        if not files:
+            return
+        try:
+            async with get_async_db_context(db) as session:
+                await session.execute(delete(ChatFile).where(ChatFile.file_id.in_(files)))
+                await session.execute(delete(File).where(File.id.in_(files)))
+                await session.commit()
+        except Exception as e:
+            log.exception(f'Deleting the generated files of deleted chats failed: {e}')
+            return
+        for path in files.values():
+            try:
+                await asyncio.to_thread(Storage.delete_file, path)
+            except Exception as e:
+                log.warning(f'Could not delete the stored file {path} of a deleted chat: {e}')
+
+    async def link_message_documents(self, chat_id: str, messages: dict, user_id: str) -> None:
+        """Link the documents on a copied chat's messages to it, so they live as long as any chat that shows them."""
+        for message_id, message in (messages or {}).items():
+            if not isinstance(message, dict):
+                continue
+            file_ids = [
+                document['file_id']
+                for document in message.get('documents') or []
+                if isinstance(document, dict) and document.get('file_id')
+            ]
+            if file_ids:
+                try:
+                    await self.insert_chat_files(chat_id=chat_id, message_id=message_id, file_ids=file_ids, user_id=user_id)
+                except Exception as e:
+                    log.warning(f'Linking the documents of message {message_id} to chat {chat_id} failed: {e}')
+
     async def delete_chat_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats([id], db=db)
         try:
             async with get_async_db_context(db) as session:
                 await session.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await session.execute(delete(ChatMessage).filter_by(chat_id=id))
                 await session.execute(delete(Chat).filter_by(id=id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True and await self.delete_shared_chat_by_chat_id(id, db=session)
         except Exception:
             return False
 
     async def delete_chat_by_id_and_user_id(self, id: str, user_id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats(select(Chat.id).filter_by(id=id, user_id=user_id), db=db)
         try:
             async with get_async_db_context(db) as session:
                 await session.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await session.execute(delete(ChatMessage).filter_by(chat_id=id))
                 await session.execute(delete(Chat).filter_by(id=id, user_id=user_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True and await self.delete_shared_chat_by_chat_id(id, db=session)
         except Exception:
             return False
 
     async def delete_chats_by_user_id(self, user_id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats(select(Chat.id).filter_by(user_id=user_id), db=db)
         try:
             async with get_async_db_context(db) as session:
                 await self.delete_shared_chats_by_user_id(user_id, db=session)
@@ -2332,6 +2403,7 @@ class ChatTable:
                 )
                 await session.execute(delete(Chat).filter_by(user_id=user_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True
         except Exception:
@@ -2340,6 +2412,9 @@ class ChatTable:
     async def delete_chats_by_user_id_and_folder_id(
         self, user_id: str, folder_id: str, db: AsyncSession | None = None
     ) -> bool:
+        generated = await self.find_generated_files_of_chats(
+            select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id), db=db
+        )
         try:
             async with get_async_db_context(db) as session:
                 chat_ids_stmt = select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id)
@@ -2349,6 +2424,7 @@ class ChatTable:
                 await session.execute(delete(ChatMessage).filter(ChatMessage.chat_id.in_(chat_ids_stmt)))
                 await session.execute(delete(Chat).filter_by(user_id=user_id, folder_id=folder_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True
         except Exception:

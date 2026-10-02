@@ -6,6 +6,7 @@
 	import { injectCsp } from '$lib/utils/csp';
 	import { isCodeFile } from '$lib/utils/codeHighlight';
 	import { initMermaid, renderMermaidDiagram } from '$lib/utils';
+	import { slideAfterKey } from '$lib/utils/slides';
 	import Spinner from '../../common/Spinner.svelte';
 	import PDFViewer from '../../common/PDFViewer.svelte';
 	import PanzoomContainer from '../../common/PanzoomContainer.svelte';
@@ -266,7 +267,17 @@
 	export const resetPdfView = () => {
 		pdfViewerRef?.resetView();
 	};
+
+	const onSlideKey = (event: KeyboardEvent) => {
+		const next = slideAfterKey(event, currentSlide, fileOfficeSlides?.length ?? 0);
+		if (next === null) return;
+		event.preventDefault();
+		resetImageView();
+		currentSlide = next;
+	};
 </script>
+
+<svelte:window on:keydown={onSlideKey} />
 
 <div
 	class="flex-1 {fileImageUrl !== null || (fileOfficeSlides !== null && fileOfficeSlides.length > 0)

@@ -67,6 +67,7 @@
 		isYoutubeUrl,
 		displayFileHandler
 	} from '$lib/utils';
+	import type { ChatDocument } from '$lib/stores';
 	import { isEventForLoadedChat } from '$lib/utils/chatEvents';
 	import { AudioQueue } from '$lib/utils/audio';
 	import {
@@ -78,7 +79,7 @@
 		updateDocumentCard
 	} from '$lib/utils/documents';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
-	import { getOutputText } from './Messages/structuredOutput';
+	import { getOutputText, hasTextAfterToolCalls } from './Messages/structuredOutput';
 
 	import {
 		archiveChatById,
@@ -184,6 +185,16 @@
 	let eventConfirmationInputOptions: ({ label?: string; value: string } | string)[] = [];
 	let eventConfirmationAction = '';
 	let eventConfirmationShowRemember = false;
+	// The first document a response creates, waiting for the answer text before its preview opens
+	let pendingDocumentOpen: { messageId: string; document: ChatDocument } | null = null;
+	$: if (
+		pendingDocumentOpen &&
+		hasTextAfterToolCalls(history?.messages?.[pendingDocumentOpen.messageId] ?? { done: true })
+	) {
+		openDocumentPreview(pendingDocumentOpen.document);
+		pendingDocumentOpen = null;
+	}
+
 	let eventCallback = null;
 
 	// Actions the user opted to skip confirmation for, across every chat - survives a page
@@ -1168,8 +1179,9 @@
 						// Only the first document a response creates opens on its own, Drive files never do
 						const isFirstCreated = !message.documents?.length && !data.drive_id;
 						message.documents = [...(message.documents ?? []), data];
+						// It opens once the model starts its answer, together with the cards
 						if (isFirstCreated && !$mobile) {
-							openDocumentPreview(message.documents.at(-1));
+							pendingDocumentOpen = { messageId: message.id, document: message.documents.at(-1) };
 						}
 					}
 				} else if (type === 'notification') {
@@ -1932,6 +1944,7 @@
 		await showCallOverlay.set(false);
 		await showArtifacts.set(false);
 		selectedDocument.set(null);
+		pendingDocumentOpen = null;
 
 		if (!embedded && $page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -2069,6 +2082,7 @@
 		chatId.set(chatIdProp || $chatId);
 		noteChatDebug('loadChat set active chat id');
 		selectedDocument.set(null);
+		pendingDocumentOpen = null;
 
 		if ($temporaryChatEnabled) {
 			noteChatDebug('loadChat disabling temporary chat');

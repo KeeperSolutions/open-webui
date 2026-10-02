@@ -378,3 +378,24 @@ export function replaceOutputMessageText(
 
 	return replaced ? nextOutput : output;
 }
+
+// True once the model writes text after its last tool call (or is done), i.e. when the tool results have an answer to sit under
+export function hasTextAfterToolCalls(message: {
+	done?: boolean;
+	output?: OutputItem[] | null;
+	content?: string | null;
+}): boolean {
+	if (message.done) return true;
+
+	const output = message.output;
+	if (Array.isArray(output) && output.length) {
+		const lastToolIndex = output.reduce(
+			(last, item, index) =>
+				item?.type === 'function_call' || item?.type === 'function_call_output' ? index : last,
+			-1
+		);
+		return getOutputText(output.slice(lastToolIndex + 1)).trim() !== '';
+	}
+
+	return ((message.content ?? '').split('</details>').at(-1) ?? '').trim() !== '';
+}
