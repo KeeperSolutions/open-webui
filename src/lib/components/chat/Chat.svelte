@@ -1108,7 +1108,9 @@
 								history.messages[msg.id] = {
 									...existing,
 									originalContent: existing.content,
-									...msg
+									...msg,
+									// Spread alone keeps the old `output` when the filter drops it.
+									output: msg.output
 								};
 							}
 						}
