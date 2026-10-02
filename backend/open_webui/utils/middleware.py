@@ -4603,17 +4603,17 @@ async def start_initial_title_generation(
         **{k: v for k, v in metadata.items() if k != 'pii_detections_public'},
         'message_id': message_id,
     }
-    title_ctx = {
-        'request': request,
-        'form_data': form_data,
-        'user': user,
-        'metadata': title_metadata,
-        'tasks': {TASKS.TITLE_GENERATION: title_task},
-        'event_emitter': await get_event_emitter(title_metadata, update_db=False),
-    }
 
     async def _run_initial_title_generation():
         try:
+            title_ctx = {
+                'request': request,
+                'form_data': form_data,
+                'user': user,
+                'metadata': title_metadata,
+                'tasks': {TASKS.TITLE_GENERATION: title_task},
+                'event_emitter': await get_event_emitter(title_metadata, update_db=False),
+            }
             await background_tasks_handler(title_ctx)
         except Exception as e:
             log.debug(f'Error generating initial chat title: {e}')
