@@ -9,6 +9,8 @@ import { getPipelines, getPipelinesList } from '$lib/apis';
 import { config } from '$lib/stores';
 import {
 	getPiiMaskingDefault,
+	piiMaskingInstanceDefault,
+	preferenceOf,
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
 	scopeCardDetections,
@@ -452,5 +454,30 @@ describe('piiIngestScanEnabled', () => {
 		// times waiting for a scan that never runs.
 		setConfig({ pii_ingest_scan: 'yes' });
 		expect(piiIngestScanEnabled()).toBe(false);
+	});
+});
+
+describe('instance default', () => {
+	beforeEach(() => config.set(undefined as any));
+
+	it('is ON unless the config says false', () => {
+		expect(piiMaskingInstanceDefault()).toBe(true);
+		config.set({ features: { pii_masking_default: false } } as any);
+		expect(piiMaskingInstanceDefault()).toBe(false);
+		config.set({ features: { pii_masking_default: 'no' } } as any);
+		expect(piiMaskingInstanceDefault()).toBe(true);
+	});
+
+	it('applies only to users who never chose', () => {
+		config.set({ features: { pii_masking_default: false } } as any);
+		expect(getPiiMaskingDefault({})).toBe(false);
+		const on = { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } };
+		expect(getPiiMaskingDefault(on)).toBe(true);
+	});
+
+	it('maps stored values to the three preferences', () => {
+		expect(preferenceOf('unset')).toBe('default');
+		expect(preferenceOf(true)).toBe('on');
+		expect(preferenceOf(false)).toBe('off');
 	});
 });

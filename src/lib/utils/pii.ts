@@ -94,17 +94,22 @@ export function piiFilterIds(): readonly string[] {
 }
 
 /**
- * A user's masking default, from their stored pipeline valves.
+ * Masking for users who never chose, as set by an admin.
  *
- * ⚠️ Reading the `config` store makes this function **impure**: its answer
- * depends on ambient state its signature does not mention. `buildRows` in the
- * PII dashboard calls it, so that pure, unit-tested function is now indirectly
- * store-dependent without saying so.
+ * Read from `/api/config`. Anything but an explicit `false` reads as ON, so a
+ * missing or malformed value never turns masking off.
+ */
+export function piiMaskingInstanceDefault(): boolean {
+	return get(config)?.features?.pii_masking_default !== false;
+}
+
+/** The three choices a user or an admin can store. `default` stores nothing. */
+export type PiiMaskingPreference = 'default' | 'on' | 'off';
+
+/**
+ * A user's effective masking default: their stored choice, else the instance default.
  *
- * The preferred shape is an explicit parameter — `getPiiMaskingDefault(settings, ids)`
- * — with callers passing the list down. It was not taken here because threading
- * the ids through `buildRows` means changing that module, which was out of scope
- * for this change. Take that route when the signature is next touched.
+ * Reads the `config` store, so the result depends on ambient state.
  */
 export function getPiiMaskingDefault(settings: {
 	pipelines?: { valves?: Record<string, Record<string, unknown>> };
@@ -114,25 +119,29 @@ export function getPiiMaskingDefault(settings: {
 		const v = valves?.[id]?.pii_masking_enabled;
 		if (typeof v === 'boolean') return v;
 	}
-	return true;
+	return piiMaskingInstanceDefault();
 }
 
 /** A user's stored masking preference, with "never chose" kept distinct. */
 export type StoredPiiMasking = boolean | 'unset';
+
+export function preferenceOf(stored: StoredPiiMasking): PiiMaskingPreference {
+	if (stored === 'unset') return 'default';
+	return stored ? 'on' : 'off';
+}
 
 /**
  * What the user actually stored — `true`, `false`, or `'unset'` when they have
  * never touched the setting.
  *
  * ⚠️ Deliberately NOT a variant of `getPiiMaskingDefault`, which collapses
- * `'unset'` into `true`. That collapse is correct for the enforcement path,
+ * `'unset'` into the instance default. That collapse is correct for the enforcement path,
  * which only needs the effective value; it is wrong for a governance report,
  * which must tell "chose protection" apart from "never chose". Two questions,
- * two functions — `getPiiMaskingDefault` stays untouched.
+ * two functions.
  *
- * ⚠️ `'unset'` does NOT mean unprotected. With no stored valve the backend sends
- * no key and the pipeline defaults to masking ON, so these users ARE masked.
- * Anything rendering this must treat `'unset'` as an on-state, never as a risk.
+ * `'unset'` means the user follows the instance default (`piiMaskingInstanceDefault`),
+ * which can be ON or OFF.
  *
  * Same id traversal as `getPiiMaskingDefault`: the first configured filter id
  * carrying a boolean wins, so both functions agree on which value is "the"

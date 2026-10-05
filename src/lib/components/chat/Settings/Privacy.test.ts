@@ -7,7 +7,8 @@ import { tick } from 'svelte';
 // vi.mock factories are hoisted above every declaration in this file, so any
 // value they close over has to be created by vi.hoisted.
 const h = vi.hoisted(() => ({
-	updateUserSettings: vi.fn(async () => ({})),
+	setOwnPiiMasking: vi.fn(async (_token: string, _preference: string) => ({ ui: { saved: true } })),
+	toastError: vi.fn(),
 	getSessionUser: vi.fn(async () => ({ role: 'user', permissions: {} })),
 	isPiiPipelineConfigured: vi.fn(async () => true),
 	settingsSet: vi.fn(),
@@ -20,9 +21,10 @@ const h = vi.hoisted(() => ({
 	}
 }));
 
-const { updateUserSettings, getSessionUser, isPiiPipelineConfigured } = h;
+const { setOwnPiiMasking, getSessionUser, isPiiPipelineConfigured } = h;
 
-vi.mock('$lib/apis/users', () => ({ updateUserSettings: h.updateUserSettings }));
+vi.mock('$lib/apis/users', () => ({ setOwnPiiMasking: h.setOwnPiiMasking }));
+vi.mock('svelte-sonner', () => ({ toast: { error: h.toastError } }));
 vi.mock('$lib/apis/auths', () => ({ getSessionUser: h.getSessionUser }));
 vi.mock('$lib/utils/pii', async () => {
 	const actual = await vi.importActual<typeof import('$lib/utils/pii')>('$lib/utils/pii');
@@ -83,6 +85,8 @@ const STORED_OFF = {
 	pipelines: { valves: { pii_filter: { pii_masking_enabled: false } } }
 };
 
+const lastPreference = () => (setOwnPiiMasking.mock.calls.at(-1) as any[] | undefined)?.[1];
+
 const renderPrivacy = () => render(Privacy, { props: {}, context: new Map([['i18n', i18n]]) });
 
 const save = async () => {
@@ -91,33 +95,90 @@ const save = async () => {
 	await tick();
 };
 
-/** The masking valves in the payload the component tried to persist. */
-const persistedValves = () => {
-	const call = updateUserSettings.mock.calls.at(-1) as any[] | undefined;
-	return call?.[1]?.ui?.pipelines?.valves ?? null;
-};
-
 beforeEach(() => {
 	vi.clearAllMocks();
 	(globalThis as any).localStorage = { token: 'test-token' };
 	h.state.settings = {};
 	h.state.user = { role: 'user', permissions: {} };
+	h.state.config = { features: { pii_filter_ids: ['pii_filter'] } };
 });
 
 describe('Privacy — policy is not enforced', () => {
-	it('renders an interactive Switch and no policy note', () => {
+	const toggle = () => screen.getByRole('switch');
+	const toggled = () => toggle().getAttribute('aria-checked') === 'true';
+
+	it('renders an interactive switch and no policy note', () => {
 		renderPrivacy();
 		expect(screen.queryByTestId('pii-masking-lock')).toBeNull();
 		expect(screen.queryByText(/enforced by your organisation/i)).toBeNull();
+		expect(toggle()).toBeTruthy();
 	});
 
-	it('Save persists the user’s own value', async () => {
+	it('shows an unset user the instance default of on', async () => {
+		renderPrivacy();
+		await tick();
+		expect(toggled()).toBe(true);
+	});
+
+	it('shows an unset user the instance default of off', async () => {
+		h.state.config = { features: { pii_filter_ids: ['pii_filter'], pii_masking_default: false } };
+		renderPrivacy();
+		await tick();
+		expect(toggled()).toBe(false);
+	});
+
+	it('shows the stored choice', async () => {
 		h.state.settings = STORED_OFF;
 		renderPrivacy();
 		await tick();
+		expect(toggled()).toBe(false);
+	});
+
+	it('Save without a change writes nothing, so an unset user keeps following the default', async () => {
+		renderPrivacy();
+		await tick();
+		await save();
+		expect(setOwnPiiMasking).not.toHaveBeenCalled();
+	});
+
+	it('Save sends off after switching off', async () => {
+		renderPrivacy();
+		await tick();
+		await fireEvent.click(toggle());
+		await tick();
 		await save();
 
-		expect(persistedValves()?.pii_filter?.pii_masking_enabled).toBe(false);
+		expect(lastPreference()).toBe('off');
+		expect(h.settingsSet).toHaveBeenCalledWith({ saved: true });
+	});
+
+	it('Save sends on after switching on from a stored off', async () => {
+		h.state.settings = STORED_OFF;
+		renderPrivacy();
+		await tick();
+		await fireEvent.click(toggle());
+		await tick();
+		await save();
+
+		expect(lastPreference()).toBe('on');
+	});
+
+	it('shows the error and keeps the store when the save is refused', async () => {
+		setOwnPiiMasking.mockRejectedValueOnce('PII masking is enforced');
+		const dispatched = vi.fn();
+		render(Privacy, {
+			props: {},
+			context: new Map([['i18n', i18n]]),
+			events: { save: dispatched }
+		} as any);
+		await tick();
+		await fireEvent.click(toggle());
+		await tick();
+		await save();
+
+		expect(h.toastError).toHaveBeenCalledWith('PII masking is enforced');
+		expect(h.settingsSet).not.toHaveBeenCalled();
+		expect(dispatched).not.toHaveBeenCalled();
 	});
 });
 
@@ -128,49 +189,24 @@ describe('Privacy — policy enforced', () => {
 
 	// --- The invariant the whole feature rests on: the policy never writes ---
 
-	it('Save does not touch any masking valve while locked', async () => {
+	it('renders only the locked switch and Save does not write', async () => {
 		h.state.settings = STORED_OFF;
 		renderPrivacy();
 		await tick();
-		await save();
 
-		const valves = persistedValves();
-		// The stored preference survives verbatim...
-		expect(valves?.pii_filter?.pii_masking_enabled).toBe(false);
-		// ...and no filter id was rewritten to the displayed `true`.
-		for (const valve of Object.values(valves ?? {})) {
-			expect((valve as any).pii_masking_enabled).not.toBe(true);
-		}
+		expect(screen.getByTestId('pii-masking-lock')).toBeTruthy();
+
+		await save();
+		expect(setOwnPiiMasking).not.toHaveBeenCalled();
 	});
 
-	it('literal: the stored valve object is not rewritten at all while locked', async () => {
-		// The value-level assertion above cannot see the guard being removed: with
-		// the structural separation in place, rewriting the valves would write the
-		// SAME value back. This checks the literal "must not touch" instead,
-		// by reference identity — an untouched valve is still the very object that
-		// came out of settings, while any rewrite produces a fresh one.
+	it('structural: the locked Switch displays ON without a binding', async () => {
 		h.state.settings = STORED_OFF;
-		const originalValve = STORED_OFF.pipelines.valves.pii_filter;
-
 		renderPrivacy();
 		await tick();
-		await save();
 
-		expect(persistedValves()?.pii_filter).toBe(originalValve);
-	});
-
-	it('structural: the locked Switch carries no binding back to the stored value', async () => {
-		h.state.settings = STORED_OFF;
-		const { container } = renderPrivacy();
-		await tick();
-
-		// Displayed ON (policy) while stored stays OFF (user's own choice).
 		const lock = screen.getByTestId('pii-masking-lock');
 		expect(lock.querySelector('[aria-checked="true"]')).not.toBeNull();
-
-		await save();
-		expect(persistedValves()?.pii_filter?.pii_masking_enabled).toBe(false);
-		expect(container).toBeTruthy();
 	});
 
 	// --- Locking -------------------------------------------------------------
