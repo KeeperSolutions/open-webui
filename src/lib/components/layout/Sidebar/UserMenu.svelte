@@ -532,7 +532,7 @@
 					}}
 				>
 					<div class="self-center">
-						<UserIcon className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
+						<ChartBar className={$mobile ? 'size-4.5' : 'size-3.5'} strokeWidth="1.5" />
 					</div>
 					<div class="self-center truncate">{$i18n.t('PII Dashboard')}</div>
 				</a>
