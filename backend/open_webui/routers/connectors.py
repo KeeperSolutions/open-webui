@@ -16,6 +16,7 @@ from open_webui.config import (
 from open_webui.env import INTERNAL_EMAIL_DOMAINS
 from open_webui.models.chats import Chats
 from open_webui.models.connector_connections import ConnectorConnections
+from open_webui.tools.documents import DOCUMENT_MIME_TYPES
 from open_webui.utils.auth import (
     create_token,
     decode_token,
@@ -58,19 +59,20 @@ GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 # didn't create, and covers drive.readonly's access too, so that scope isn't requested separately
 GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive'
 
-# PDF has no native Google format, so it's downloaded via alt=media instead of exported
-GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
-    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-}
-
 # Used to pick a default export format when the caller doesn't specify one for a native Google file
 GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS = {
     'application/vnd.google-apps.document': 'docx',
     'application/vnd.google-apps.spreadsheet': 'xlsx',
     'application/vnd.google-apps.presentation': 'pptx',
 }
+
+# PDF has no native Google format, so it's downloaded via alt=media instead of exported
+GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
+    format: DOCUMENT_MIME_TYPES[format] for format in GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS.values()
+}
+
+# Drive cards can also be plain text files, which create_documents doesn't make
+DRIVE_DOWNLOAD_FORMATS = {*DOCUMENT_MIME_TYPES, 'txt'}
 
 # Refresh a bit before actual expiry to avoid handing out a token that expires mid-request
 TOKEN_EXPIRY_BUFFER_SECONDS = 120
@@ -265,7 +267,7 @@ async def download_google_drive_document(
     filename: str = 'document',
     user=Depends(get_internal_drive_user),
 ):
-    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx', 'txt'}:
+    if format is not None and format not in DRIVE_DOWNLOAD_FORMATS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
 
     access_token = await get_valid_access_token(user.id)
@@ -342,12 +344,8 @@ async def save_document_to_google_drive(
     user=Depends(get_internal_drive_user),
 ):
     from open_webui.socket.main import upsert_document_card
-    from open_webui.tools.built_in import (
-        DOCUMENT_MISSING_ERROR,
-        drive_document_card,
-        load_stored_documents,
-        save_stored_documents_to_drive,
-    )
+    from open_webui.tools.documents import DOCUMENT_MISSING_ERROR, load_stored_documents
+    from open_webui.tools.google_drive import drive_document_card, save_stored_documents_to_drive
 
     access_token = await get_valid_access_token(user.id)
     if not access_token:
@@ -355,7 +353,7 @@ async def save_document_to_google_drive(
     # Google lets the user untick write access on consent, and the upload would then fail with a generic error
     connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
     if GOOGLE_DRIVE_WRITE_SCOPE not in (getattr(connection, 'scopes', None) or '').split():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_write_not_granted')
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='drive_write_not_granted')
 
     documents, failed = await load_stored_documents(user.id, [file_id])
     if failed:

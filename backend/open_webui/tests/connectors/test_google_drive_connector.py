@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException
 
 import open_webui.routers.connectors as connectors
-import open_webui.tools.built_in as drive
+import open_webui.tools.documents as documents
+import open_webui.tools.google_drive as drive
 
 USER = {'id': 'test-user-id'}
 
@@ -426,7 +427,7 @@ class TestSaveDocumentEndpoint:
         assert e.value.detail == 'drive_not_connected'
 
     @pytest.mark.asyncio
-    async def test_drive_connected_without_write_access_is_a_distinct_409(self, tmp_path):
+    async def test_drive_connected_without_write_access_is_a_distinct_403(self, tmp_path):
         read_only = SimpleNamespace(scopes='https://www.googleapis.com/auth/drive.readonly email')
         client = DriveSaveClient()
         with (
@@ -439,7 +440,7 @@ class TestSaveDocumentEndpoint:
             with pytest.raises(HTTPException) as e:
                 await self.save()
 
-        assert e.value.status_code == 409
+        assert e.value.status_code == 403
         assert e.value.detail == 'drive_write_not_granted'
         assert client.uploaded_names == []
 
@@ -542,12 +543,12 @@ class TestDownloadDocumentEndpoint:
 
     @pytest.mark.asyncio
     async def test_a_name_with_croatian_letters_downloads_instead_of_failing_on_the_header(self):
-        response = await self.download('Edit of Izvještaj: Prednosti i manjkovi rada od kuće')
+        response = await self.download('Edit of Izvještaj: kuće')
 
         header = response.headers['content-disposition']
         assert response.body == b'file bytes'
-        assert 'filename="Edit of Izvje_taj_ Prednosti i manjkovi rada od ku_e.docx"' in header
-        assert "filename*=UTF-8''Edit%20of%20Izvje%C5%A1taj_%20Prednosti%20i%20manjkovi%20rada%20od%20ku%C4%87e.docx" in header
+        assert 'filename="Edit of Izvje_taj_ ku_e.docx"' in header
+        assert "filename*=UTF-8''Edit%20of%20Izvje%C5%A1taj_%20ku%C4%87e.docx" in header
 
     @pytest.mark.asyncio
     async def test_a_plain_name_keeps_its_name_and_gets_the_format_as_extension(self):
@@ -837,7 +838,7 @@ class TestDriveSaveEditedCopy:
                 )
 
         async def failing_build(format, name, content):
-            raise drive.DocumentBuildError('The docx build exited with 1: Traceback /app/secret.py')
+            raise documents.DocumentBuildError('The docx build exited with 1: Traceback /app/secret.py')
 
         with (
             patch('httpx.AsyncClient', return_value=FakeClient()),

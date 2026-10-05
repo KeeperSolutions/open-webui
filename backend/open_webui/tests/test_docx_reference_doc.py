@@ -25,7 +25,14 @@ def read_part(docx_bytes: bytes, name: str) -> str:
     return zipfile.ZipFile(io.BytesIO(docx_bytes)).read(name).decode('utf-8')
 
 
-def test_reference_doc_has_table_borders_and_arial(reference_doc, tmp_path):
+def arial_family(font_table: str) -> str | None:
+    """The family the font table gives Arial, which is what a viewer without Arial substitutes from."""
+    entry = re.search(r'<w:font w:name="Arial">(.*?)</w:font>', font_table, re.S)
+    family = entry and re.search(r'<w:family w:val="(\w+)"', entry.group(1))
+    return family and family.group(1)
+
+
+def test_reference_doc_has_table_borders_and_arial_as_a_sans_serif(reference_doc, tmp_path):
     assert reference_doc == tmp_path / 'pandoc' / 'reference.docx'
 
     docx_bytes = reference_doc.read_bytes()
@@ -35,7 +42,9 @@ def test_reference_doc_has_table_borders_and_arial(reference_doc, tmp_path):
     assert '<w:insideH w:val="single"' in styles
     assert 'w:fill="F2F2F2"' in styles
     assert 'w:ascii="Arial"' in styles
-    assert theme.count('<a:latin typeface="Arial"/>') == 2
+    # The file only names Arial, so these tell a viewer without it to fall back to a sans-serif
+    assert theme.count('<a:latin typeface="Arial" panose="020B0604020202020204" pitchFamily="34"') == 2
+    assert arial_family(read_part(docx_bytes, 'word/fontTable.xml')) == 'swiss'
 
 
 def test_reference_doc_is_built_once_per_process(reference_doc):
@@ -52,6 +61,7 @@ def test_docx_build_uses_the_restyled_reference_doc(reference_doc):
     assert re.search(r'<w:insideH [^>]*w:val="single"', styles)
     assert 'w:fill="F2F2F2"' in styles
     assert '<w:tblStyle w:val="Table" />' in read_part(docx_bytes, 'word/document.xml')
+    assert arial_family(read_part(docx_bytes, 'word/fontTable.xml')) == 'swiss'
 
 
 def test_missing_style_block_raises():
@@ -64,7 +74,7 @@ def test_missing_style_block_raises():
 
 
 def test_docx_is_a4_with_google_docs_headings(reference_doc):
-    docx_bytes = document_builders._build_docx_document_bytes('# Naslov\n\n### Podnaslov\n\nTekst.\n')
+    docx_bytes = document_builders._build_docx_document_bytes('# Title\n\n### Subtitle\n\nText.\n')
     document = read_part(docx_bytes, 'word/document.xml')
     styles = read_part(docx_bytes, 'word/styles.xml')
 

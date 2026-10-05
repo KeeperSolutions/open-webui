@@ -1,7 +1,12 @@
-// A4 at 96dpi with Word's default 2.54cm margins
-export const PAGE_WIDTH = 794;
-export const PAGE_HEIGHT = 1123;
-export const PAGE_MARGIN = 96;
+// CSS fixes 1in at 96px in every browser, whatever the monitor's real DPI
+const CSS_PX_PER_INCH = 96;
+const MM_PER_INCH = 25.4;
+const mmToPx = (mm: number) => Math.round((mm / MM_PER_INCH) * CSS_PX_PER_INCH);
+
+// A4 with 1in (2.54cm) margins, the default in Word and Google Docs
+export const PAGE_WIDTH = mmToPx(210);
+export const PAGE_HEIGHT = mmToPx(297);
+export const PAGE_MARGIN = CSS_PX_PER_INCH;
 export const PAGE_CONTENT_WIDTH = PAGE_WIDTH - 2 * PAGE_MARGIN;
 const PAGE_CONTENT_HEIGHT = PAGE_HEIGHT - 2 * PAGE_MARGIN;
 

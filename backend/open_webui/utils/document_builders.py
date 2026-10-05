@@ -149,6 +149,14 @@ def _reference_doc_heading_style(style_id: str) -> str:
     )
 
 
+# Arial is Google's default font, and the panose and swiss (sans-serif) family let a viewer without Arial substitute a sans-serif
+ARIAL_PANOSE = '020B0604020202020204'
+ARIAL_THEME_FONT = f'<a:latin typeface="Arial" panose="{ARIAL_PANOSE}" pitchFamily="34" charset="0"/>'
+ARIAL_FONT_TABLE_ENTRY = (
+    f'<w:font w:name="Arial"><w:panose1 w:val="{ARIAL_PANOSE}"/><w:charset w:val="00"/>'
+    '<w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font>'
+)
+
 # Blocks swapped by pattern, since re-serialising with ElementTree would rename the namespace prefixes
 REFERENCE_DOC_REPLACEMENTS = {
     'word/styles.xml': [
@@ -205,8 +213,11 @@ REFERENCE_DOC_REPLACEMENTS = {
         ),
     ],
     'word/theme/theme1.xml': [
-        (r'(?<=<a:majorFont>)\s*<a:latin [^>]*/>', '<a:latin typeface="Arial"/>'),
-        (r'(?<=<a:minorFont>)\s*<a:latin [^>]*/>', '<a:latin typeface="Arial"/>'),
+        (r'(?<=<a:majorFont>)\s*<a:latin [^>]*/>', ARIAL_THEME_FONT),
+        (r'(?<=<a:minorFont>)\s*<a:latin [^>]*/>', ARIAL_THEME_FONT),
+    ],
+    'word/fontTable.xml': [
+        (r'(?=<w:font )', ARIAL_FONT_TABLE_ENTRY),
     ],
 }
 
@@ -297,6 +308,8 @@ def _build_docx_document_bytes(content: str) -> bytes:
 
 
 XLSX_FONT = ('Arial', 10)
+# Family 2 is swiss (sans-serif), so a viewer without Arial substitutes a sans-serif
+XLSX_FONT_FAMILY = 2
 # Google Sheets' default column width and row height, as its own xlsx export writes them
 XLSX_MIN_COLUMN_WIDTH = 12.63
 XLSX_ROW_HEIGHT = 15.75
@@ -342,7 +355,7 @@ def _build_xlsx_document_bytes(content: str) -> bytes:
 
     wb = Workbook()
     # Every cell without a font of its own uses the workbook's first font, so this sets Google's Arial 10
-    wb._fonts[0] = Font(name=XLSX_FONT[0], size=XLSX_FONT[1])
+    wb._fonts[0] = Font(name=XLSX_FONT[0], size=XLSX_FONT[1], family=XLSX_FONT_FAMILY)
     ws = wb.active
     ws.title = 'Sheet1'
     ws.sheet_format.defaultColWidth = XLSX_MIN_COLUMN_WIDTH
@@ -360,7 +373,7 @@ def _build_xlsx_document_bytes(content: str) -> bytes:
     # A generated table almost always opens with a header, so it's bold and stays in view while scrolling
     if len(rows) > 1:
         for cell in ws[1]:
-            cell.font = Font(name=XLSX_FONT[0], size=XLSX_FONT[1], bold=True)
+            cell.font = Font(name=XLSX_FONT[0], size=XLSX_FONT[1], family=XLSX_FONT_FAMILY, bold=True)
         ws.freeze_panes = 'A2'
     for c, width in widths.items():
         ws.column_dimensions[get_column_letter(c)].width = min(
@@ -382,7 +395,6 @@ PPTX_TITLE_PT = 28
 PPTX_BODY_PT = 18
 PPTX_COVER_TITLE_PT = 52
 PPTX_COVER_SUBTITLE_PT = 28
-PPTX_FONT = 'Arial'
 # (bullet, hanging indent in EMU) for the first two body levels, as Google Slides draws them
 PPTX_BULLETS = (('●', -342900), ('○', -317500))
 PPTX_NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
@@ -474,9 +486,7 @@ def _apply_google_slides_layout(prs) -> None:
     theme = master.part.part_related_by(RT.THEME)
     theme_xml = theme.blob.decode('utf-8')
     for font in ('majorFont', 'minorFont'):
-        theme_xml = re.sub(
-            rf'(<a:{font}>\s*<a:latin typeface=")[^"]*', lambda m: m.group(1) + PPTX_FONT, theme_xml, count=1
-        )
+        theme_xml = re.sub(rf'(?<=<a:{font}>)\s*<a:latin [^>]*/>', lambda _: ARIAL_THEME_FONT, theme_xml, count=1)
     theme._blob = theme_xml.encode('utf-8')
 
 

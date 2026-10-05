@@ -28,7 +28,7 @@ const buildPptx = async (coverTitle = false) => {
 	zip.file(
 		'ppt/slides/slide1.xml',
 		`<p:sld ${NS}><p:cSld><p:spTree>` +
-			placeholder('<p:ph type="title"/>', '<p:spPr/>', paragraphs('Naslov')) +
+			placeholder('<p:ph type="title"/>', '<p:spPr/>', paragraphs('Title')) +
 			placeholder('<p:ph idx="1"/>', '<p:spPr/>', paragraphs('Prva', 'Druga')) +
 			'</p:spTree></p:cSld></p:sld>'
 	);
@@ -94,7 +94,7 @@ describe('pptxToImages', () => {
 		const { images } = await pptxToImages(await buildPptx());
 
 		expect(images).toHaveLength(1);
-		const title = drawn.find((d) => d.text === 'Naslov')!;
+		const title = drawn.find((d) => d.text === 'Title')!;
 		expect(title.x).toBe(44);
 		expect(title.y).toBeGreaterThan(20);
 		expect(title.font).toContain('44pt');
@@ -115,7 +115,7 @@ describe('pptxToImages', () => {
 		await pptxToImages(await buildPptx(true));
 
 		// The master's title box runs from y 20 to 420, so bottom-anchored text lands near its end
-		const title = drawn.find((d) => d.text === 'Naslov')!;
+		const title = drawn.find((d) => d.text === 'Title')!;
 		expect(title.y).toBeGreaterThan(350);
 		expect(title.y).toBeLessThanOrEqual(420);
 	});

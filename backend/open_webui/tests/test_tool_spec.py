@@ -1,4 +1,4 @@
-from open_webui.tools.built_in import create_documents
+from open_webui.tools.documents import create_documents
 from open_webui.utils.tools import get_builtin_tool_spec, parse_docstring
 
 
