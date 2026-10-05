@@ -903,3 +903,43 @@ class TestValidatorRules:
             validate_pii_policy_event(EVENT_MEMBER_ADDED, "g1", "admin-1", "a@x.com", user_id="u1")
             is None
         )
+
+
+# ---------------------------------------------------------------------------
+# Events that are not about a group: the instance default and one user's preference
+# ---------------------------------------------------------------------------
+
+from open_webui.models.pii_policy_audit import EVENT_DEFAULT_DISABLED, EVENT_PREFERENCE_SET
+
+_ADMIN = dict(actor_user_id="admin-1", actor_email="a@x.com")
+
+
+def test_default_change_needs_no_group_user_or_reason():
+    validate_pii_policy_event(EVENT_DEFAULT_DISABLED, group_id=None, **_ADMIN)
+
+
+def test_default_change_must_not_name_a_group_or_user():
+    with pytest.raises(ValueError):
+        validate_pii_policy_event(EVENT_DEFAULT_DISABLED, group_id="g1", **_ADMIN)
+    with pytest.raises(ValueError):
+        validate_pii_policy_event(EVENT_DEFAULT_DISABLED, group_id=None, user_id="u1", **_ADMIN)
+
+
+def test_preference_set_requires_user_and_a_known_value():
+    validate_pii_policy_event(EVENT_PREFERENCE_SET, group_id=None, user_id="u1", value="off", **_ADMIN)
+    with pytest.raises(ValueError):
+        validate_pii_policy_event(EVENT_PREFERENCE_SET, group_id=None, value="off", **_ADMIN)
+    with pytest.raises(ValueError):
+        validate_pii_policy_event(EVENT_PREFERENCE_SET, group_id=None, user_id="u1", value="maybe", **_ADMIN)
+
+
+def test_group_events_still_require_a_group():
+    with pytest.raises(ValueError):
+        validate_pii_policy_event(EVENT_MEMBER_ADDED, group_id=None, user_id="u1", **_ADMIN)
+
+
+@pytest.mark.asyncio
+async def test_preference_set_round_trip_has_no_group(audits):
+    row = await audits.insert_event(event_type=EVENT_PREFERENCE_SET, user_id="u1", value="off", **_ADMIN)
+    assert row.group_id is None
+    assert row.value == "off"

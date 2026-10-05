@@ -893,6 +893,21 @@ USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED = (
 PII_MASKING_ENFORCED_PERMISSION = 'chat.pii_masking_enforced'
 
 
+def parse_pii_masking_default(value: str) -> bool:
+    """Read the env masking default. Only "false" turns it off; any other value keeps it on."""
+    return value.strip().lower() != 'false'
+
+
+# Masking for users who never chose a preference. Admins change it from the PII
+# dashboard; PII_MASKING_DEFAULT_ENABLED sets the value before the first change.
+# Only "false" (any case) turns it off.
+PII_MASKING_DEFAULT_ENABLED = ConfigVar(
+    'PII_MASKING_DEFAULT_ENABLED',
+    'pii.masking_default_enabled',
+    parse_pii_masking_default(os.getenv('PII_MASKING_DEFAULT_ENABLED', 'True')),
+)
+
+
 USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS = (
     os.getenv('USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS', 'False').lower() == 'true'
 )

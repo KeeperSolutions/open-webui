@@ -155,18 +155,20 @@ class TestStoredSettingResolution:
         assert len(captured) == 1
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is False
 
-    def test_no_stored_setting_sends_empty_valves(self):
+    def test_no_stored_setting_sends_the_instance_default(self):
         captured = []
         payload = {"model": "gpt-4"}
         user = _make_user()  # settings=None
+        request = _make_request()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = True
 
         with _patch_session(captured):
             _run(process_pipeline_inlet_filter(
-                _make_request(), payload, user, _make_models()
+                request, payload, user, _make_models()
             ))
 
         assert len(captured) == 1
-        assert captured[0]["user"]["valves"] == {}
+        assert captured[0]["user"]["valves"] == {"pii_masking_enabled": True}
 
 
 # ---------------------------------------------------------------------------

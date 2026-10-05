@@ -119,6 +119,7 @@ from open_webui.storage.provider import Storage
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.pii_masking_preference import effective_pii_masking, instance_pii_masking_default
 from open_webui.utils.misc import (
     calculate_sha256_string,
     sanitize_text_for_db,
@@ -1866,10 +1867,6 @@ class ProcessFileForm(BaseModel):
 # monkeypatch it.
 scan_file_content_for_pii = None
 
-# Copy of the default filter ids in the frontend pii.ts. Unlike env.PII_FILTER_IDS,
-# it does not follow the PII_FILTER_IDS environment variable.
-_PII_FILTER_IDS = ('pii_filter', 'pii_filter_pipeline')
-
 # Scan uploaded files for PII at ingest so the PII card can show detections
 # before the first message. Off by default; KEEPER_ENABLE_INGEST_PII_SCAN=true
 # turns it on.
@@ -1881,21 +1878,9 @@ _PII_FILTER_IDS = ('pii_filter', 'pii_filter_pipeline')
 ENABLE_INGEST_PII_SCAN = os.environ.get('KEEPER_ENABLE_INGEST_PII_SCAN', 'False').lower() == 'true'
 
 
-def _user_pii_masking_enabled(user) -> bool:
-    """Read the user's persisted pii_masking_enabled valve setting (default True).
-    Mirrors getPiiMaskingDefault() on the frontend."""
-    user_settings = getattr(user, 'settings', None) or {}
-    if not isinstance(user_settings, dict):
-        try:
-            user_settings = user_settings.model_dump()
-        except Exception:
-            user_settings = {}
-    valves = user_settings.get('ui', {}).get('pipelines', {}).get('valves', {})
-    for filter_id in _PII_FILTER_IDS:
-        valve_val = (valves.get(filter_id) or {}).get('pii_masking_enabled')
-        if isinstance(valve_val, bool):
-            return valve_val
-    return True
+def _user_pii_masking_enabled(request, user) -> bool:
+    """The user's stored preference, or the instance default when they never chose."""
+    return effective_pii_masking(getattr(user, 'settings', None), instance_pii_masking_default(request))
 
 
 async def _store_ingest_pii_detections(request, file_id, text_content, user, pii_masking_enabled=None):
@@ -1907,10 +1892,11 @@ async def _store_ingest_pii_detections(request, file_id, text_content, user, pii
     call in `asyncio.run` inside the running event loop raises.
 
     `pii_masking_enabled` is the chat-input toggle sent with the upload and takes
-    priority over the user's stored valve setting. None falls back to that setting."""
+    priority over the user's stored preference. None falls back to the stored
+    preference, or to the instance default when the user has not chosen."""
     if not ENABLE_INGEST_PII_SCAN:
         return
-    effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(user)
+    effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(request, user)
     if not effective:
         return
     # One upload can call process_file twice: once for the file, and again with

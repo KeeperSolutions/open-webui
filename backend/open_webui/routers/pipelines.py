@@ -30,6 +30,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.routers.openai import get_all_models_responses
 from open_webui.utils.auth import get_admin_user
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.pii_masking_preference import effective_pii_masking, instance_pii_masking_default
 from open_webui.utils.pii_chunking import (
     PII_INLET_CHARS_PER_SECOND,
     PII_INLET_CHUNK_CHARS,
@@ -763,6 +764,10 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
     if 'pipeline' in model:
         sorted_filters.append(model)
 
+    # Sent when the request carries no masking flag (task generators, API
+    # clients), so the pipeline never falls back to its own built-in default.
+    preferred_pii = effective_pii_masking(user_settings_dict, instance_pii_masking_default(request))
+
     async with aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(sock_read=AIOHTTP_CLIENT_TIMEOUT_SOCK_READ),
@@ -794,6 +799,10 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
             request_pii = resolve_request_pii_masking(payload)
             if isinstance(request_pii, bool):
                 per_filter_valves = {**per_filter_valves, 'pii_masking_enabled': request_pii}
+            elif filter_id in PII_FILTER_IDS and not isinstance(
+                per_filter_valves.get('pii_masking_enabled'), bool
+            ):
+                per_filter_valves = {**per_filter_valves, 'pii_masking_enabled': preferred_pii}
 
             # Team policy wins over both the stored valve and the per-request
             # override, so it is applied LAST. Reversing these two blocks hands

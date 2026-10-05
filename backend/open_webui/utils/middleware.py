@@ -54,6 +54,7 @@ from open_webui.routers.images import (
     image_edits,
     image_generations,
 )
+from open_webui.utils.pii_masking_preference import effective_pii_masking, instance_pii_masking_default
 from open_webui.utils.pii_chunking import (
     PII_INLET_CHUNK_CHARS,
     PII_INLET_CONCURRENCY,
@@ -1195,7 +1196,8 @@ def _masked_source_cache_put(key, masked_doc, detections):
 async def _resolve_pii_masking_decision(request, user, features):
     """Return `(policy_enforced, pii_expected)` for this request.
 
-    Masking is expected unless `features.pii_masking` is False. A team policy
+    Masking is expected when `features.pii_masking` is True, or, without that
+    flag, when the user's preference or the instance default is ON. A team policy
     that mandates masking overrides that flag, as it does on the prompt path;
     otherwise a user could turn the toggle off and send an attachment unmasked
     while the prompt stays masked. `resolve_pii_masking_enforced` is memoized
@@ -1203,7 +1205,13 @@ async def _resolve_pii_masking_decision(request, user, features):
     """
     request_pii = features.get("pii_masking") if isinstance(features, dict) else None
     policy_enforced = await resolve_pii_masking_enforced(request, user)
-    return policy_enforced, policy_enforced or request_pii is not False
+    if isinstance(request_pii, bool):
+        requested = request_pii
+    else:
+        requested = effective_pii_masking(
+            getattr(user, "settings", None), instance_pii_masking_default(request)
+        )
+    return policy_enforced, policy_enforced or requested
 
 
 async def _mask_text_via_pii_pipeline(
@@ -1331,8 +1339,10 @@ async def _mask_text_via_pii_pipeline(
         per_filter_valves = all_filter_valves.get(filter_id, {})
         if not isinstance(per_filter_valves, dict):
             per_filter_valves = {}
-        if isinstance(request_pii, bool):
-            per_filter_valves = {**per_filter_valves, "pii_masking_enabled": request_pii}
+        per_filter_valves = {
+            **per_filter_valves,
+            "pii_masking_enabled": request_pii if isinstance(request_pii, bool) else pii_expected,
+        }
         # The pipeline decides only from `UserValves.pii_masking_enabled` and
         # ignores `features`, so a mandated policy must also force the valve on.
         # This runs after the per-request override on purpose: in the opposite
@@ -1719,11 +1729,10 @@ async def mask_sources_for_llm(
     if not _pii_expected:
         return sources, []
 
-    # Cache only when this request forces the pipeline valve on: a policy
-    # mandates masking or `features.pii_masking` is True. Otherwise the pipeline
-    # receives the user's stored valve, which can be False, and returns the text
-    # unchanged; caching that would serve the raw document to a later turn with
-    # masking on.
+    # Cache only when the request itself requires masking: a policy mandates it
+    # or `features.pii_masking` is True. The pipeline always receives the masking
+    # valve as True here, so the cache never holds unmasked text. Results masked
+    # because of the stored preference or the instance default are not cached.
     cache_enabled = bool(chat_id) and (_policy_enforced or _features.get("pii_masking") is True)
     _filter_ids = _applicable_filter_ids(
         model_id, models if models is not None else request.app.state.MODELS

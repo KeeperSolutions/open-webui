@@ -1679,9 +1679,9 @@ def test_a_skipped_pii_filter_is_not_covered_by_another_filter_answering():
 
 
 def test_a_turn_without_the_masking_flag_is_not_cached():
-    """Without `features.pii_masking` the pipeline receives the user's stored
-    valve, which can be False, so its unchanged text is not cached for a later
-    turn with masking on."""
+    """Without `features.pii_masking` the user's stored choice decides. When it is
+    OFF the text passes through unmasked and is not cached for a later turn with
+    masking on."""
     sources = _file_sources("John Smith")
     user = _make_user(pii_enabled=False)
 
@@ -1694,7 +1694,7 @@ def test_a_turn_without_the_masking_flag_is_not_cached():
         user=user,
         features={},
     )
-    assert raw_posts[0]["user"]["valves"]["pii_masking_enabled"] is False
+    assert raw_posts == []
     assert "John Smith" in json.dumps(raw[0])
 
     on_posts = []
