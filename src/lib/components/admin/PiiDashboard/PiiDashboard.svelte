@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import Topbar from './Topbar.svelte';
+	import DefaultMaskingToggle from './DefaultMaskingToggle.svelte';
 	import CostAnalytics from './sections/CostAnalytics.svelte';
 	import UsersAccess from './sections/UsersAccess.svelte';
 	import { createMetricsLoader } from './metricsLoader';
@@ -122,7 +123,17 @@
 <!-- Light-lock: neutralises .dark body globals; real dark mode is out of scope. -->
 <div class="min-h-full bg-pii-bg text-pii-ink font-['Inter'] px-6 py-4">
 	<div class="mx-auto flex max-w-[1190px] flex-col gap-6">
-		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} {teamId} />
+		<Topbar bind:period bind:customDays {windowFrom} {windowTo} windowStale={loading} {teamId}>
+			<svelte:fragment slot="controls">
+				{#if mayAct && !teamId}
+					<DefaultMaskingToggle
+						users={$usersAccess.users}
+						truncated={$usersAccess.truncatedUsers !== null}
+						onChanged={() => usersAccess.load()}
+					/>
+				{/if}
+			</svelte:fragment>
+		</Topbar>
 		<CostAnalytics
 			{rows}
 			users={$directory.users}

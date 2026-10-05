@@ -8,6 +8,7 @@ import {
 	buildRows,
 	unattributedCost,
 	modelsCountKey,
+	defaultOffCountKey,
 	maskingStateOf,
 	maskingRank,
 	pageOf,
@@ -153,11 +154,27 @@ describe('buildRows', () => {
 		ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } }
 	};
 
-	it("reads masking as 'default' when the user never touched the setting", () => {
-		// Absent key means the pipeline masks anyway — protected, not at risk.
-		expect(buildRows([user()], [])[0].masking).toBe('default');
-		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default');
-		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default');
+	it("reads masking as 'default-on' when the user never touched the setting", () => {
+		// No stored value follows the instance default, which is ON unless set otherwise.
+		expect(buildRows([user()], [])[0].masking).toBe('default-on');
+		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default-on');
+		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default-on');
+	});
+
+	it('buildRows carries the preference and the instance default', () => {
+		const rows = buildRows(
+			[{ id: 'u1', name: 'A', email: 'a@x', role: 'user', settings: { ui: {} } }],
+			[],
+			undefined,
+			false
+		);
+		expect(rows[0].masking).toBe('default-off');
+		expect(rows[0].preference).toBe('default');
+	});
+
+	it('buildRows reports a stored choice as the preference', () => {
+		expect(buildRows([user({ settings: storedOn })], [])[0].preference).toBe('on');
+		expect(buildRows([user({ settings: storedOff })], [])[0].preference).toBe('off');
 	});
 
 	it("reads masking as 'on' when the user chose it", () => {
@@ -360,19 +377,28 @@ describe('reconciliation with section 3', () => {
 
 describe('maskingStateOf', () => {
 	it('policy wins over anything stored', () => {
-		expect(maskingStateOf(true, false)).toBe('enforced');
-		expect(maskingStateOf(true, true)).toBe('enforced');
-		expect(maskingStateOf(true, 'unset')).toBe('enforced');
+		expect(maskingStateOf(true, false, true)).toBe('enforced');
+		expect(maskingStateOf(true, true, true)).toBe('enforced');
+		expect(maskingStateOf(true, 'unset', true)).toBe('enforced');
 	});
 
-	it("maps 'unset' to default, never to off", () => {
-		expect(maskingStateOf(false, 'unset')).toBe('default');
-		expect(maskingStateOf(false, 'unset')).not.toBe('off');
+	it('enforcement wins over every stored value and default', () => {
+		expect(maskingStateOf(true, false, false)).toBe('enforced');
+	});
+
+	it("maps 'unset' to default-on under an instance default of ON, never to off", () => {
+		expect(maskingStateOf(false, 'unset', true)).toBe('default-on');
+		expect(maskingStateOf(false, 'unset', true)).not.toBe('off');
+	});
+
+	it('an unset user follows an instance default of OFF', () => {
+		expect(maskingStateOf(false, 'unset', false)).toBe('default-off');
 	});
 
 	it('maps stored booleans straight through when unenforced', () => {
-		expect(maskingStateOf(false, true)).toBe('on');
-		expect(maskingStateOf(false, false)).toBe('off');
+		expect(maskingStateOf(false, true, true)).toBe('on');
+		expect(maskingStateOf(false, false, true)).toBe('off');
+		expect(maskingStateOf(false, true, false)).toBe('on');
 	});
 
 	it('produces off in exactly one combination', () => {
@@ -384,17 +410,17 @@ describe('maskingStateOf', () => {
 			[false, false],
 			[false, 'unset']
 		];
-		const offs = combos.filter(([e, s]) => maskingStateOf(e, s) === 'off');
+		const offs = combos.filter(([e, s]) => maskingStateOf(e, s, true) === 'off');
 		expect(offs).toEqual([[false, false]]);
 	});
 });
 
 describe('maskingRank', () => {
-	it('sorts risk first, so ascending surfaces off', () => {
-		const order = (['enforced', 'on', 'default', 'off'] as const)
+	it('sorts risk first', () => {
+		const order = (['enforced', 'on', 'default-on', 'default-off', 'off'] as const)
 			.slice()
 			.sort((a, b) => maskingRank(a) - maskingRank(b));
-		expect(order).toEqual(['off', 'default', 'on', 'enforced']);
+		expect(order).toEqual(['off', 'default-off', 'default-on', 'on', 'enforced']);
 	});
 });
 
@@ -1353,5 +1379,25 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		expect(
 			rowActionFor(row([TEAM_GROUP.id]), { naming: [TEAM_GROUP], targets: [] }, admin)
 		).toEqual({ kind: 'remove', group: TEAM_GROUP });
+	});
+});
+
+describe('defaultOffCountKey', () => {
+	it('uses the singular for one user', () => {
+		expect(defaultOffCountKey(1, false)).toBe(
+			'1 user who has not chosen will send personal data to the AI model unmasked.'
+		);
+		expect(defaultOffCountKey(2, false)).toBe(
+			'{{count}} users who have not chosen will send personal data to the AI model unmasked.'
+		);
+	});
+
+	it('states a lower bound when the directory is truncated', () => {
+		expect(defaultOffCountKey(1, true)).toBe(
+			'At least 1 user who has not chosen will send personal data to the AI model unmasked.'
+		);
+		expect(defaultOffCountKey(5, true)).toBe(
+			'At least {{count}} users who have not chosen will send personal data to the AI model unmasked.'
+		);
 	});
 });

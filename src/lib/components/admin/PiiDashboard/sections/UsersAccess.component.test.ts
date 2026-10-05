@@ -14,8 +14,11 @@ import { readable } from 'svelte/store';
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$lib/apis/groups', () => ({ addUserToGroup: vi.fn(), removeUserFromGroup: vi.fn() }));
 vi.mock('svelte-sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('$lib/apis/users', () => ({ setUserPiiMasking: vi.fn() }));
 
 import { addUserToGroup, removeUserFromGroup } from '$lib/apis/groups';
+import { setUserPiiMasking } from '$lib/apis/users';
+import { config } from '$lib/stores';
 import { toast } from 'svelte-sonner';
 
 import UsersAccess from './UsersAccess.svelte';
@@ -27,6 +30,8 @@ const i18n = readable({
 	t: (k: string, vars?: Record<string, unknown>) =>
 		vars ? k.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? '')) : k
 });
+
+const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
 
 const account = (over: Partial<AccessUser> = {}): AccessUser => ({
 	id: 'u1',
@@ -576,5 +581,88 @@ describe("the owner's pending action carries no group", () => {
 		);
 		const assignments = opener.match(/targets:.*/g) ?? [];
 		expect(assignments).toEqual(['targets: [],']);
+	});
+});
+
+describe('the per-user masking preference', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		config.set({ features: { pii_masking_default: true } } as never);
+	});
+
+	const control = () => document.querySelector('[data-testid="pii-preference-u1"]');
+	const toggle = () => control()?.querySelector<HTMLButtonElement>('button[aria-pressed]');
+	const reset = () =>
+		[...(control()?.querySelectorAll('button') ?? [])].find(
+			(b) => b.textContent?.trim() === 'Reset to default'
+		);
+	const stored = (value: boolean) => ({
+		settings: { ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: value } } } } }
+	});
+	const flush = () => new Promise((r) => setTimeout(r, 0));
+
+	it('shows an unset user as following the default, with no reset', () => {
+		mount({ mayAct: true });
+		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
+		expect(control()?.textContent).toContain('Default');
+		expect(reset()).toBeUndefined();
+	});
+
+	it('follows an instance default of off', () => {
+		config.set({ features: { pii_masking_default: false } } as never);
+		mount({ mayAct: true });
+		expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
+	});
+
+	it('stores the opposite of what applies now, and reloads the section', async () => {
+		vi.mocked(setUserPiiMasking).mockResolvedValue({} as never);
+		const onPolicyChanged = vi.fn();
+		mount({ mayAct: true, onPolicyChanged });
+		toggle()!.click();
+		await flush();
+
+		expect(setUserPiiMasking).toHaveBeenCalledWith(localStorage.token, 'u1', 'off');
+		expect(toast.success).toHaveBeenCalledWith(`PII masking for Ana updated. ${RELOAD_NOTE}`);
+		expect(onPolicyChanged).toHaveBeenCalled();
+	});
+
+	it('offers a reset to the default when the user has their own choice', async () => {
+		vi.mocked(setUserPiiMasking).mockResolvedValue({} as never);
+		mount({ mayAct: true, users: [account(stored(false))] });
+		expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
+		reset()!.click();
+		await flush();
+
+		expect(setUserPiiMasking).toHaveBeenCalledWith(localStorage.token, 'u1', 'default');
+	});
+
+	it('keeps showing the stored value when the save is refused', async () => {
+		vi.mocked(setUserPiiMasking).mockRejectedValue('PII masking is enforced for this user');
+		mount({ mayAct: true });
+		toggle()!.click();
+		await flush();
+
+		expect(toast.error).toHaveBeenCalledWith('PII masking is enforced for this user');
+		expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('locks an enforced row to the read-only pill', () => {
+		mount({
+			mayAct: true,
+			users: [account({ pii_masking_enforced: true, pii_policy_group_ids: ['g1'] })]
+		});
+		expect(control()).toBeNull();
+		expect(screen.getByText(/On — enforced/)).toBeTruthy();
+	});
+
+	it('shows a viewer who may not act the default-off pill', () => {
+		config.set({ features: { pii_masking_default: false } } as never);
+		mount({ mayAct: false });
+		expect(screen.getByText('Off — default')).toBeTruthy();
+	});
+
+	it('gives a team owner no control on any row', () => {
+		mount({ mayAct: false, mayManagePolicy: true, teamGroupId: 'g-team' });
+		expect(document.querySelector('[data-testid^="pii-preference-"]')).toBeNull();
 	});
 });
