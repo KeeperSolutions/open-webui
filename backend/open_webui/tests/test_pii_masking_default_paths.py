@@ -74,7 +74,7 @@ def test_ingest_scan_uses_the_instance_default():
 
 def test_only_false_turns_the_env_default_off():
     """Any value other than "false" keeps masking on, so a typo cannot disable it."""
-    from open_webui.config import parse_pii_masking_default
+    from open_webui.env import parse_pii_masking_default
 
     for value in ("True", "true", "1", "yes", "on", " True ", ""):
         assert parse_pii_masking_default(value) is True

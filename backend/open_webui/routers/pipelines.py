@@ -864,9 +864,9 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
                 # masking enabled, the original (unmasked) `payload` must NOT be
                 # returned to the caller — refuse the request instead. Every other
                 # filter keeps best-effort passthrough (e.g. a telemetry outage
-                # must never block chat). `pii_masking_enabled` defaults to True
-                # (the pipeline default) when neither the per-request override nor
-                # a stored valve set it.
+                # must never block chat). For a PII filter the valve is always set
+                # above (request flag, stored preference or the instance default), so
+                # an instance default of off means there is nothing to fail closed on.
                 if filter_id in PII_FILTER_IDS and per_filter_valves.get('pii_masking_enabled', True):
                     raise PiiMaskingUnavailableError() from e
 

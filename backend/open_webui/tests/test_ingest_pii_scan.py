@@ -499,3 +499,39 @@ def test_the_ingest_scan_is_off_by_default(monkeypatch):
 
     asyncio.run(R._store_ingest_pii_detections(MagicMock(), 'f1', 'OIB 11111111111', _user()))
     assert ran == [], 'the disabled scan must not scan, read or write anything'
+
+
+def _user_with_valve(pii_masking_enabled=None, filter_id='pii_filter'):
+    """A user with (or without) a stored pii_masking_enabled valve value, in the
+    shape _user_pii_masking_enabled() reads: settings['ui']['pipelines']['valves']."""
+    settings = None
+    if pii_masking_enabled is not None:
+        settings = {'ui': {'pipelines': {'valves': {filter_id: {'pii_masking_enabled': pii_masking_enabled}}}}}
+    return SimpleNamespace(id='u1', email='t@e.com', name='T', role='user', settings=settings)
+
+
+class TestUserPiiMaskingEnabledFallback:
+    """_user_pii_masking_enabled() mirrors getPiiMaskingDefault() on the frontend,
+    including its instance-default fallback for a user with no stored valve value yet."""
+
+    @staticmethod
+    def _request(default):
+        request = MagicMock()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        return request
+
+    def test_falls_back_to_the_instance_default_true(self):
+        import open_webui.routers.retrieval as R
+
+        assert R._user_pii_masking_enabled(self._request(True), _user_with_valve()) is True
+
+    def test_falls_back_to_the_instance_default_false(self):
+        import open_webui.routers.retrieval as R
+
+        assert R._user_pii_masking_enabled(self._request(False), _user_with_valve()) is False
+
+    def test_stored_valve_value_wins_over_the_instance_default(self):
+        import open_webui.routers.retrieval as R
+
+        user = _user_with_valve(pii_masking_enabled=True)
+        assert R._user_pii_masking_enabled(self._request(False), user) is True

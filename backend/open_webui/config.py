@@ -25,6 +25,7 @@ from open_webui.env import (
     FRONTEND_BUILD_DIR,
     OFFLINE_MODE,
     OPEN_WEBUI_DIR,
+    PII_ACTIVE,
     REDIS_KEY_PREFIX,
     REDIS_SENTINEL_HOSTS,
     REDIS_SENTINEL_PORT,
@@ -893,18 +894,12 @@ USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED = (
 PII_MASKING_ENFORCED_PERMISSION = 'chat.pii_masking_enforced'
 
 
-def parse_pii_masking_default(value: str) -> bool:
-    """Read the env masking default. Only "false" turns it off; any other value keeps it on."""
-    return value.strip().lower() != 'false'
-
-
-# Masking for users who never chose a preference. Admins change it from the PII
-# dashboard; PII_MASKING_DEFAULT_ENABLED sets the value before the first change.
-# Only "false" (any case) turns it off.
+# Masking for users who never chose a preference. PII_ACTIVE sets the value
+# until an admin changes it from the PII dashboard.
 PII_MASKING_DEFAULT_ENABLED = ConfigVar(
     'PII_MASKING_DEFAULT_ENABLED',
     'pii.masking_default_enabled',
-    parse_pii_masking_default(os.getenv('PII_MASKING_DEFAULT_ENABLED', 'True')),
+    PII_ACTIVE,
 )
 
 

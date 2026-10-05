@@ -1000,6 +1000,16 @@ PII_FILTER_IDS = {
     if fid.strip()
 }
 
+def parse_pii_masking_default(value: str) -> bool:
+    """Read the masking default from the environment. Only "false" turns it off."""
+    return value.strip().lower() != "false"
+
+
+# Initial value of the masking default for users who never chose. Admins change
+# it later from the PII dashboard; the saved value then replaces this one.
+# Enforced masking and a per-chat toggle still take precedence over it.
+PII_ACTIVE = parse_pii_masking_default(os.getenv("PII_ACTIVE", "True"))
+
 
 ####################################
 # CHAT

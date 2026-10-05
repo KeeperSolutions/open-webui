@@ -487,9 +487,9 @@ export function buildRows(
  * The masking state shown for one user.
  *
  * ⚠️ Policy is checked FIRST and unconditionally. Under an enforced policy the
- * effective value is ON no matter what the user stored, so `off` must be
- * unreachable — otherwise the governance table reports a risk that does not
- * exist, which is exactly the contradiction this column was rebuilt to remove.
+ * effective value is ON no matter what the user stored, so `off`/`default-off`
+ * must be unreachable — otherwise the governance table reports a risk that does
+ * not exist, which is exactly the contradiction this column was rebuilt to remove.
  *
  * `unset` follows the instance default and maps to `default-on` or
  * `default-off`, never to `off`.

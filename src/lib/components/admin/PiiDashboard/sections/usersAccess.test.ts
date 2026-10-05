@@ -177,6 +177,20 @@ describe('buildRows', () => {
 		expect(buildRows([user({ settings: storedOff })], [])[0].preference).toBe('off');
 	});
 
+	it("reads masking as 'default-off' when the user never touched the setting and the served default is off", () => {
+		// buildRows must reflect the instance default, not assume an unset user is
+		// always protected.
+		expect(buildRows([user()], [], undefined, false)[0].masking).toBe('default-off');
+		expect(buildRows([user({ settings: null })], [], undefined, false)[0].masking).toBe(
+			'default-off'
+		);
+	});
+
+	it('an explicitly stored value is unaffected by the served default either way', () => {
+		expect(buildRows([user({ settings: storedOn })], [], undefined, false)[0].masking).toBe('on');
+		expect(buildRows([user({ settings: storedOff })], [], undefined, true)[0].masking).toBe('off');
+	});
+
 	it("reads masking as 'on' when the user chose it", () => {
 		expect(buildRows([user({ settings: storedOn })], [])[0].masking).toBe('on');
 	});
@@ -401,17 +415,34 @@ describe('maskingStateOf', () => {
 		expect(maskingStateOf(false, true, false)).toBe('on');
 	});
 
-	it('produces off in exactly one combination', () => {
-		const combos: [boolean, boolean | 'unset'][] = [
-			[true, true],
-			[true, false],
-			[true, 'unset'],
-			[false, true],
-			[false, false],
-			[false, 'unset']
+	it('maps stored booleans straight through when unenforced, regardless of the served default', () => {
+		expect(maskingStateOf(false, true, true)).toBe('on');
+		expect(maskingStateOf(false, true, false)).toBe('on');
+		expect(maskingStateOf(false, false, true)).toBe('off');
+		expect(maskingStateOf(false, false, false)).toBe('off');
+	});
+
+	it('produces a risk state (off or default-off) in exactly the unenforced, unprotected combinations', () => {
+		const combos: [boolean, boolean | 'unset', boolean][] = [
+			[true, true, true],
+			[true, false, true],
+			[true, 'unset', true],
+			[true, 'unset', false],
+			[false, true, true],
+			[false, true, false],
+			[false, false, true],
+			[false, false, false],
+			[false, 'unset', true],
+			[false, 'unset', false]
 		];
-		const offs = combos.filter(([e, s]) => maskingStateOf(e, s, true) === 'off');
-		expect(offs).toEqual([[false, false]]);
+		const risky = combos.filter(([e, s, d]) =>
+			['off', 'default-off'].includes(maskingStateOf(e, s, d))
+		);
+		expect(risky).toEqual([
+			[false, false, true],
+			[false, false, false],
+			[false, 'unset', false]
+		]);
 	});
 });
 

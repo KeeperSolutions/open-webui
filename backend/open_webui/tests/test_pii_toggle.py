@@ -479,3 +479,57 @@ class TestMetadataFeaturesFallback:
             ))
 
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# Instance default fallback — fail-closed connection-error check, when neither the
+# per-request override nor a stored valve sets pii_masking_enabled
+# ---------------------------------------------------------------------------
+
+def _patch_session_raises(exc):
+    """Patch aiohttp.ClientSession so session.post(...) raises `exc` immediately,
+    simulating the pipeline being unreachable (connection refused/timeout)."""
+    session = MagicMock()
+    session.post = MagicMock(side_effect=exc)
+
+    session_cm = MagicMock()
+    session_cm.__aenter__ = AsyncMock(return_value=session)
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    return patch("open_webui.routers.pipelines.aiohttp.ClientSession", return_value=session_cm)
+
+
+class TestInstanceDefaultFallbackOnConnectionError:
+    """No explicit per-request choice (features omitted) and no stored valve -
+    the fail-closed connection-error guard must follow the instance default,
+    not a hardcoded True, for whether masking was expected to begin with."""
+
+    @staticmethod
+    def _request(default):
+        request = _make_request()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        return request
+
+    def test_refuses_when_the_instance_default_is_on(self):
+        from open_webui.routers.pipelines import PiiMaskingUnavailableError
+
+        payload = {"model": "gpt-4"}  # no features at all
+        user = _make_user()  # no stored setting either
+
+        with _patch_session_raises(ConnectionError("refused")):
+            with pytest.raises(PiiMaskingUnavailableError):
+                _run(process_pipeline_inlet_filter(
+                    self._request(True), payload, user, _make_models()
+                ))
+
+    def test_passes_through_when_the_instance_default_is_off(self):
+        payload = {"model": "gpt-4"}
+        user = _make_user()
+
+        with _patch_session_raises(ConnectionError("refused")):
+            # Must not raise - masking was never expected by default, so a
+            # connection error has nothing to fail closed on.
+            result = _run(process_pipeline_inlet_filter(
+                self._request(False), payload, user, _make_models()
+            ))
+        assert result == payload
