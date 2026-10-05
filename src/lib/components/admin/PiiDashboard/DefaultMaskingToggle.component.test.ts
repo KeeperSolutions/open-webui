@@ -90,6 +90,17 @@ describe('the masking default toggle', () => {
 		expect(onChanged).toHaveBeenCalled();
 	});
 
+	it('does nothing while the directory is not loaded', async () => {
+		mount({ disabled: true, users: [] });
+		expect(toggle().disabled).toBe(true);
+		toggle().click();
+		await flush();
+
+		expect(document.body.textContent).not.toContain('Turn off PII masking by default?');
+		expect(setPiiMaskingDefault).not.toHaveBeenCalled();
+		expect(toggle().getAttribute('aria-pressed')).toBe('true');
+	});
+
 	it('turns back on without asking', async () => {
 		vi.mocked(setPiiMaskingDefault).mockResolvedValue({ enabled: true } as never);
 		config.set({ features: { pii_masking_default: false } } as never);

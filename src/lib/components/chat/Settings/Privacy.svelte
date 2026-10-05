@@ -101,11 +101,16 @@
 		// While the policy locks the control, Save writes nothing, so the stored
 		// choice underneath the policy stays as the user left it.
 		if (!policyEnforced && piiMaskingEnabled !== loadedPiiMaskingEnabled) {
+			// The value sent, not the switch afterwards: the user can flip it while the
+			// request is in flight.
+			const submitted = piiMaskingEnabled;
 			try {
-				const saved = await setOwnPiiMasking(localStorage.token, piiMaskingEnabled ? 'on' : 'off');
+				const saved = await setOwnPiiMasking(localStorage.token, submitted ? 'on' : 'off');
 				// Server first, store second: the PII dashboard re-reads the server when
 				// `$settings` changes, and would otherwise cache the old value.
 				await settings.set((saved?.ui ?? $settings) as any);
+				// The form stays mounted, so the next Save compares against this value.
+				loadedPiiMaskingEnabled = submitted;
 			} catch (error) {
 				toast.error(`${error}`);
 				return;

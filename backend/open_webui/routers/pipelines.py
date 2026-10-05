@@ -161,7 +161,7 @@ def resolve_request_pii_masking(payload) -> Optional[bool]:
     return value if isinstance(value, bool) else None
 
 
-def assert_pii_masking_available(payload, model_id, models, policy_enforced=False) -> None:
+def assert_pii_masking_available(payload, model_id, models, policy_enforced=False, inherited_on=False) -> None:
     """FAIL-CLOSED guard for Mechanism 2 (registry pruning).
 
     When PII masking is required for this request but NO PII filter is present in
@@ -170,8 +170,11 @@ def assert_pii_masking_available(payload, model_id, models, policy_enforced=Fals
     loop would silently skip masking and PII would reach the LLM. Refuse the
     request instead.
 
-    "Required" means REQUESTED **or** MANDATED. `policy_enforced` carries the team
-    policy. Reading only the payload here would leave a silent hole: under an
+    "Required" means REQUESTED, MANDATED **or** INHERITED. `policy_enforced`
+    carries the team policy. `inherited_on` is the user's stored preference or the
+    instance default, and counts only when the request carries no flag of its own:
+    an explicit OFF from an unenforced user is kept. Reading only the payload here
+    would leave a silent hole: under an
     enforcing policy a user who switches the in-chat toggle off sends
     features.pii_masking=False, this guard would no-op, and if the pipeline is
     down the loop below has nothing to iterate — so the message would go out
@@ -179,14 +182,16 @@ def assert_pii_masking_available(payload, model_id, models, policy_enforced=Fals
 
     No-ops (does NOT block) when:
       * enforcement is disabled (`PII_FILTER_IDS` empty), or
-      * masking is neither requested nor mandated — so a chat with masking OFF and
-        no policy is never blocked by pipeline unavailability, or
+      * masking is neither requested, mandated nor inherited — so a chat with
+        masking OFF and no policy is never blocked by pipeline unavailability, or
       * a PII filter IS present in the resolved filters (normal path; if the call
         then fails, the inlet's own fail-closed re-raise handles it).
     """
     if not PII_FILTER_IDS:
         return
-    if not policy_enforced and resolve_request_pii_masking(payload) is not True:
+    requested = resolve_request_pii_masking(payload)
+    required = policy_enforced or requested is True or (requested is None and inherited_on)
+    if not required:
         return
     resolved_ids = {f.get('id') for f in get_sorted_filters(model_id, models)}
     if not (resolved_ids & PII_FILTER_IDS):
@@ -746,6 +751,12 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
     # the resolver returns True. Read-only — never written back to user.settings.
     policy_enforced = await resolve_pii_masking_enforced(request, user)
 
+    # What applies when the request carries no masking flag of its own (task
+    # generators, API clients): the user's stored preference, or the instance
+    # default. It is sent to the PII filter below, so the pipeline never falls back
+    # to its own built-in default, and the guard treats it as "masking expected".
+    preferred_pii = effective_pii_masking(user_settings_dict, instance_pii_masking_default(request))
+
     # FAIL-CLOSED guard (Mechanism 2), enforced HERE — the single chokepoint every
     # inlet caller flows through (main chat AND all task generators). If PII
     # masking is required for this request but no PII filter is present in the
@@ -754,19 +765,15 @@ async def process_pipeline_inlet_filter(request, payload, user, models, *, on_pr
     # would silently skip masking and PII would reach the LLM. Refuse first.
     # `policy_enforced` is passed so "required" covers MANDATED, not just
     # requested — without it an enforced user who toggled masking off in chat
-    # would slip through this guard entirely.
-    # No-op when masking is neither requested nor mandated, or no PII filter is
-    # configured.
-    assert_pii_masking_available(payload, model_id, models, policy_enforced)
+    # would slip through this guard entirely. `inherited_on` covers a request with
+    # no flag whose stored preference or instance default is on.
+    # No-op when masking is not required, or no PII filter is configured.
+    assert_pii_masking_available(payload, model_id, models, policy_enforced, inherited_on=preferred_pii)
 
     model = models[model_id]
 
     if 'pipeline' in model:
         sorted_filters.append(model)
-
-    # Sent when the request carries no masking flag (task generators, API
-    # clients), so the pipeline never falls back to its own built-in default.
-    preferred_pii = effective_pii_masking(user_settings_dict, instance_pii_masking_default(request))
 
     async with aiohttp.ClientSession(
         trust_env=True,

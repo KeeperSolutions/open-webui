@@ -152,6 +152,41 @@ describe('Privacy — policy is not enforced', () => {
 		expect(h.settingsSet).toHaveBeenCalledWith({ saved: true });
 	});
 
+	it('saves again after switching back, without closing the tab', async () => {
+		renderPrivacy();
+		await tick();
+		await fireEvent.click(toggle());
+		await tick();
+		await save();
+		expect(setOwnPiiMasking).toHaveBeenCalledTimes(1);
+		expect(lastPreference()).toBe('off');
+
+		// Back to the value the tab was opened with. The server now holds off, so
+		// this must be written, not skipped as unchanged.
+		await fireEvent.click(toggle());
+		await tick();
+		await save();
+		expect(setOwnPiiMasking).toHaveBeenCalledTimes(2);
+		expect(lastPreference()).toBe('on');
+
+		// Nothing changed since the last save.
+		await save();
+		expect(setOwnPiiMasking).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps the old baseline when the save fails, so the next Save retries', async () => {
+		setOwnPiiMasking.mockRejectedValueOnce('boom');
+		renderPrivacy();
+		await tick();
+		await fireEvent.click(toggle());
+		await tick();
+		await save();
+		await save();
+
+		expect(setOwnPiiMasking).toHaveBeenCalledTimes(2);
+		expect(lastPreference()).toBe('off');
+	});
+
 	it('Save sends on after switching on from a stored off', async () => {
 		h.state.settings = STORED_OFF;
 		renderPrivacy();

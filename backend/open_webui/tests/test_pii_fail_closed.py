@@ -309,6 +309,38 @@ class TestAssertPiiMaskingAvailable:
         with pytest.raises(PiiMaskingUnavailableError):
             assert_pii_masking_available(payload, "gpt-4", models)
 
+    def test_inherited_on_without_a_flag_filter_absent_raises(self):
+        # No flag, but the stored preference or instance default is ON → masking
+        # is expected, so a missing filter must refuse the request.
+        payload = {"model": "gpt-4"}
+        models = {"gpt-4": {"id": "gpt-4"}}
+        with pytest.raises(PiiMaskingUnavailableError):
+            assert_pii_masking_available(payload, "gpt-4", models, inherited_on=True)
+
+    def test_inherited_off_without_a_flag_filter_absent_no_raise(self):
+        payload = {"model": "gpt-4"}
+        models = {"gpt-4": {"id": "gpt-4"}}
+        assert_pii_masking_available(payload, "gpt-4", models, inherited_on=False)  # no raise
+
+    def test_explicit_off_beats_inherited_on_for_an_unenforced_user(self):
+        payload = {"model": "gpt-4", "features": {"pii_masking": False}}
+        models = {"gpt-4": {"id": "gpt-4"}}
+        assert_pii_masking_available(payload, "gpt-4", models, inherited_on=True)  # no raise
+
+    def test_explicit_off_does_not_beat_enforcement(self):
+        payload = {"model": "gpt-4", "features": {"pii_masking": False}}
+        models = {"gpt-4": {"id": "gpt-4"}}
+        with pytest.raises(PiiMaskingUnavailableError):
+            assert_pii_masking_available(
+                payload, "gpt-4", models, policy_enforced=True, inherited_on=False
+            )
+
+    def test_inherited_on_filter_present_no_raise(self):
+        payload = {"model": "gpt-4"}
+        assert_pii_masking_available(
+            payload, "gpt-4", _make_models(), inherited_on=True
+        )  # no raise
+
     def test_enforcement_disabled_no_raise(self):
         # PII_FILTER_IDS empty → fail-closed enforcement off entirely.
         payload = {"model": "gpt-4", "features": {"pii_masking": True}}

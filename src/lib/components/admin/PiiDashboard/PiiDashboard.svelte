@@ -129,6 +129,7 @@
 					<DefaultMaskingToggle
 						users={$usersAccess.users}
 						truncated={$usersAccess.truncatedUsers !== null}
+						disabled={usersLoading || usersFailed}
 						onChanged={() => usersAccess.load()}
 					/>
 				{/if}

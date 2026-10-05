@@ -7,6 +7,8 @@ instance default of OFF.
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 sys.modules.setdefault("stripe", MagicMock())
 
 from open_webui.routers.pipelines import process_pipeline_inlet_filter
@@ -118,3 +120,35 @@ def test_source_masking_decision_policy_beats_an_instance_default_of_off():
         assert _run(
             _resolve_pii_masking_decision(request, _make_user(), {"pii_masking": False})
         ) == (True, True)
+
+
+def _inlet_without_filter(user, default, payload=None):
+    """The PII filter is missing from the model registry (pipeline down)."""
+    request = _make_request()
+    request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+    models = {"gpt-4": {"id": "gpt-4"}}
+    payload = payload or {"model": "gpt-4"}
+    with patch(
+        "open_webui.routers.pipelines.resolve_pii_masking_enforced", AsyncMock(return_value=False)
+    ):
+        return _run(process_pipeline_inlet_filter(request, payload, user, models))
+
+
+def test_missing_filter_refuses_a_request_that_inherits_masking_on():
+    from open_webui.routers.pipelines import PiiMaskingUnavailableError
+
+    with pytest.raises(PiiMaskingUnavailableError):
+        _inlet_without_filter(_make_user(), True)
+    with pytest.raises(PiiMaskingUnavailableError):
+        _inlet_without_filter(_make_user(pii_enabled=True), False)
+
+
+def test_missing_filter_does_not_block_a_request_that_inherits_masking_off():
+    payload = {"model": "gpt-4"}
+    assert _inlet_without_filter(_make_user(), False, dict(payload)) == payload
+    assert _inlet_without_filter(_make_user(pii_enabled=False), True, dict(payload)) == payload
+
+
+def test_missing_filter_keeps_an_explicit_off_from_an_unenforced_user():
+    payload = {"model": "gpt-4", "features": {"pii_masking": False}}
+    assert _inlet_without_filter(_make_user(), True, dict(payload)) == payload

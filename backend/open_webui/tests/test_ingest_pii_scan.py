@@ -535,3 +535,52 @@ class TestUserPiiMaskingEnabledFallback:
 
         user = _user_with_valve(pii_masking_enabled=True)
         assert R._user_pii_masking_enabled(self._request(False), user) is True
+
+
+class TestIngestScanFollowsEnforcement:
+    """The scan runs when masking applies to the user. Group enforcement wins over
+    an explicit OFF (the locked chat toggle still sends its underlying value) and
+    over an instance default of OFF."""
+
+    @staticmethod
+    def _scans(monkeypatch, *, enforced, flag, default):
+        import open_webui.routers.retrieval as R
+
+        scans = []
+
+        async def fake_update(file_id, data, db=None):
+            return SimpleNamespace(id=file_id)
+
+        async def fake_scan(request, content, *, file_id, user, models=None, features=None):
+            scans.append(file_id)
+            return []
+
+        monkeypatch.setattr(R.Files, 'update_file_data_by_id', staticmethod(fake_update))
+        monkeypatch.setattr(R, 'scan_file_content_for_pii', fake_scan)
+        request = MagicMock()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        with patch(
+            'open_webui.routers.pipelines.resolve_pii_masking_enforced',
+            AsyncMock(return_value=enforced),
+        ):
+            asyncio.run(
+                R._store_ingest_pii_detections(
+                    request, 'f1', 'OIB 11111111111', _user(), pii_masking_enabled=flag
+                )
+            )
+        return scans
+
+    def test_enforced_user_is_scanned_when_the_default_is_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=True, flag=None, default=False) == ['f1']
+
+    def test_enforced_user_is_scanned_when_the_locked_toggle_sends_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=True, flag=False, default=True) == ['f1']
+
+    def test_unenforced_user_with_an_explicit_off_is_not_scanned(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=False, default=True) == []
+
+    def test_unenforced_user_follows_an_instance_default_of_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=None, default=False) == []
+
+    def test_unenforced_user_follows_an_instance_default_of_on(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=None, default=True) == ['f1']

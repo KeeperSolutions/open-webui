@@ -1893,10 +1893,18 @@ async def _store_ingest_pii_detections(request, file_id, text_content, user, pii
 
     `pii_masking_enabled` is the chat-input toggle sent with the upload and takes
     priority over the user's stored preference. None falls back to the stored
-    preference, or to the instance default when the user has not chosen."""
+    preference, or to the instance default when the user has not chosen. Group
+    enforcement wins over both, as it does when the file is masked for the model."""
     if not ENABLE_INGEST_PII_SCAN:
         return
-    effective = pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(request, user)
+    # Lazy import, like the middleware imports below: routers.pipelines pulls in
+    # modules that import this one.
+    from open_webui.routers.pipelines import resolve_pii_masking_enforced
+
+    effective = (
+        await resolve_pii_masking_enforced(request, user)
+        or (pii_masking_enabled if isinstance(pii_masking_enabled, bool) else _user_pii_masking_enabled(request, user))
+    )
     if not effective:
         return
     # One upload can call process_file twice: once for the file, and again with

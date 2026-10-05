@@ -17,6 +17,8 @@
 	export let users: AccessUser[] = [];
 	/** The directory is cut off, so the count is a lower bound. */
 	export let truncated = false;
+	/** The directory is not loaded, so the confirmation would count no users. */
+	export let disabled = false;
 	/** Called after the default was saved, so the sections can reload. */
 	export let onChanged: () => void = () => {};
 
@@ -56,6 +58,7 @@
 
 	// Turning the default off unmasks every user who has not chosen, so it asks first.
 	const toggle = () => {
+		if (disabled) return;
 		if (enabled) confirmOff = true;
 		else apply(true);
 	};
@@ -74,7 +77,7 @@
 	<span class="-my-px flex">
 		<Toggle
 			on={enabled}
-			disabled={saving}
+			disabled={saving || disabled}
 			ariaLabel={$i18n.t('PII masking for users who have not chosen')}
 			on:click={toggle}
 		/>
