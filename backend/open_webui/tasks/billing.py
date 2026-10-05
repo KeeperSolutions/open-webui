@@ -61,8 +61,6 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
     from open_webui.models.users import Users
 
     rows = []
-    unpriced_models: Set[str] = set()
-    priced_models: Set[str] = set()
     # Model keys that came from the "neither field present" fallback below, not from a real
     # (if oddly-named) model/name value that happens to equal "unknown" - display-labeling
     # logic must check membership here, not string-match the key against "unknown" itself.
@@ -106,14 +104,10 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
 
         eur_usd_rate = None
         cost_eur = None
-        if cost_usd is not None:
-            if batch_rate is not None:
-                eur_usd_rate = batch_rate
-                cost_eur = cost_usd / batch_rate
-                priced_models.add(model)
-            # else: rate unavailable — cost_eur stays None; don't mark as priced
-        else:
-            unpriced_models.add(model)
+        if cost_usd is not None and batch_rate is not None:
+            eur_usd_rate = batch_rate
+            cost_eur = cost_usd / batch_rate
+        # else: rate unavailable, or no cost at all — cost_eur stays None
 
         rows.append({
             "langfuse_observation_id": obs_id,
@@ -128,17 +122,54 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
             "observed_at": observed_at,
         })
 
-    inserted = UsageLedgerDB.bulk_insert_ignore(rows) if rows else 0
+    newly_inserted_ids = UsageLedgerDB.bulk_insert_ignore(rows) if rows else set()
+    inserted = len(newly_inserted_ids)
 
+    # Deep rescan's cost backfill must run BEFORE classification, not after: its whole job is
+    # fixing cost_eur on rows that are, by definition, duplicates from bulk_insert_ignore's
+    # point of view (they already exist from an earlier poll) - so if classification only
+    # looked at newly_inserted_ids, every row the rescan successfully backfills would be
+    # invisible to it and a model recovering pricing only via the nightly rescan would never
+    # trigger the "pricing recovered" alert.
+    backfilled_cost_ids: Set[str] = set()
     updated_costs = 0
     updated_users = 0
     if deep_rescan and rows:
-        updated_costs = UsageLedgerDB.bulk_upsert_costs(rows)
+        backfilled_cost_ids = UsageLedgerDB.bulk_upsert_costs(rows)
+        updated_costs = len(backfilled_cost_ids)
         if updated_costs:
             log.info("[ledger-poller] Deep rescan backfilled costs for %d previously-unpriced rows.", updated_costs)
         updated_users = UsageLedgerDB.bulk_upsert_user_ids(rows)
         if updated_users:
             log.info("[ledger-poller] Deep rescan backfilled user_id for %d previously-unattributed rows.", updated_users)
+
+    # Classify unpriced/priced/recovered only from rows this poll actually inserted for the
+    # first time, PLUS (deep rescan only) rows whose cost was just backfilled above - the same
+    # observation can appear in several consecutive hot-path polls (the fetch window trails the
+    # watermark by a couple of minutes for overlap-safety), and re-reading an already-synced
+    # row must not re-trigger alert logic every single poll. A deep-rescan backfill is the one
+    # case where a "duplicate" row legitimately carries new information (its price).
+    #
+    # "Unpriced" means the row has real usage but no cost - a row with no usage at all isn't
+    # evidence the model lacks pricing, only that this particular observation had nothing to
+    # price (see the "missing usage" investigation in project history). Conflating the two
+    # mislabels models that are genuinely priced in Langfuse as unpriced, and alerts on them
+    # every time a usage-less observation comes through.
+    unpriced_models: Set[str] = set()
+    priced_models: Set[str] = set()
+    for r in rows:
+        obs_id = r["langfuse_observation_id"]
+        newly_priced_by_rescan = obs_id in backfilled_cost_ids
+        if obs_id not in newly_inserted_ids and not newly_priced_by_rescan:
+            continue
+        if newly_priced_by_rescan:
+            priced_models.add(r["model"])
+            continue
+        has_usage = bool(r["tokens_input"] or r["tokens_output"] or r["tokens_total"])
+        if r["cost_eur"] is not None:
+            priced_models.add(r["model"])
+        elif has_usage:
+            unpriced_models.add(r["model"])
 
     log.info("[ledger-poller] Synced %d observations (%d inserted, %d cost-backfilled, %d user-backfilled).", len(rows), inserted, updated_costs, updated_users)
 
@@ -222,7 +253,17 @@ def _sync_observations(since: datetime.datetime, *, deep_rescan: bool = False) -
         ledger_recovered = set(UsageLedgerDB.get_models_with_recent_priced_rows(
             list(alerted_models), since_24h
         ))
-    candidate_recovered = (priced_models | ledger_recovered) & alerted_models
+    # A model with a fresh unpriced observation THIS poll must never also be claimed as
+    # recovered in it - sending both "unpriced" and "restored" for one model in one poll is a
+    # direct contradiction (observed as alert spam when a batch mixed a priced and an unpriced
+    # observation for the same model). Excluding unpriced_models, not just claimed_unpriced,
+    # matters: a model still inside its alert cooldown loses the
+    # try_claim_alert race (so it never reaches claimed_unpriced) even though this poll saw a
+    # real unpriced observation for it - excluding only claimed_unpriced would let a stale
+    # priced row (from ledger_recovered's 24h lookback, or an older row this poll's deep-rescan
+    # backfilled) clear that model's alert state in the very same poll its fresh unpriced
+    # evidence was seen.
+    candidate_recovered = ((priced_models | ledger_recovered) & alerted_models) - unpriced_models
     # Claim first, send second - same reasoning as the unpriced-model block above: computing
     # candidate_recovered and sending the email are separate from the DB write, so without an
     # atomic claim two instances could both compute the same set and both email before either
