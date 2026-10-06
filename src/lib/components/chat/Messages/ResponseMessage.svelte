@@ -22,7 +22,8 @@
 		temporaryChatEnabled,
 		TTSWorker,
 		user,
-		theme
+		theme,
+		type ChatDocument
 	} from '$lib/stores';
 	import { resolveTheme } from '$lib/utils/theme';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
@@ -57,7 +58,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ConnectorSuggestion from './ConnectorSuggestion.svelte';
-	import DriveDocumentCard from './DriveDocumentCard.svelte';
+	import DocumentCard from './DocumentCard.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -68,7 +69,12 @@
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
-	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
+	import {
+		getOutputText,
+		hasTextAfterToolCalls,
+		replaceOutputMessageText,
+		type OutputItem
+	} from './structuredOutput';
 
 	interface MessageType {
 		id: string;
@@ -113,12 +119,7 @@
 			icon: string;
 			connect_url: string;
 		}[];
-		driveDocuments?: {
-			id: string;
-			name: string;
-			format: string;
-			web_link?: string;
-		}[];
+		documents?: ChatDocument[];
 		info?: {
 			openai?: boolean;
 			prompt_tokens?: number;
@@ -206,10 +207,12 @@
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 
-	// The Drive card already links out, so strip any Drive link the model added in its own text
+	// The document cards already link out, so strip any Drive link the model added in its own text
 	const stripDriveLinks = (content: string) =>
 		content.replace(/\[([^\]]*)\]\(https?:\/\/(?:docs|drive)\.google\.com[^\s)]*\)/gi, '$1');
-	$: displayContent = message.driveDocuments ? stripDriveLinks(message.content ?? '') : message.content;
+	$: displayContent = message.documents?.length
+		? stripDriveLinks(message.content ?? '')
+		: message.content;
 
 	let edit = false;
 	let editedContent = '';
@@ -939,8 +942,9 @@
 								<ConnectorSuggestion connectorSuggestions={message.connectorSuggestions} />
 							{/if}
 
-							{#if message.driveDocuments}
-								<DriveDocumentCard driveDocuments={message.driveDocuments} />
+							<!-- Held back until the model starts its answer, so they don't sit there while it is still working -->
+							{#if message.documents && hasTextAfterToolCalls(message)}
+								<DocumentCard documents={message.documents} />
 							{/if}
 						</div>
 					</div>

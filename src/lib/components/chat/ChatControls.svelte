@@ -17,10 +17,13 @@
 		showCallOverlay,
 		showArtifacts,
 		showEmbeds,
+		selectedDocument,
+		showDocumentList,
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
-		user
+		user,
+		type ChatDocument
 	} from '$lib/stores';
 
 	import { uploadFile } from '$lib/apis/files';
@@ -30,6 +33,8 @@
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import Drawer from '../common/Drawer.svelte';
 	import Artifacts from './Artifacts.svelte';
+	import DocumentPreview from './DocumentPreview.svelte';
+	import DocumentList from './DocumentList.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
@@ -38,6 +43,7 @@
 	const i18n = getContext('i18n');
 
 	export let history;
+	export let chatDocuments: ChatDocument[] = [];
 	export let models = [];
 
 	export let chatId = null;
@@ -159,17 +165,24 @@
 		}
 	};
 
+	// Documents need room to be read, so their preview opens at least this share of the width
+	const DOCUMENT_PANE_MIN_SIZE = 45;
+
 	export const openPane = () => {
+		let size = minSize;
 		if (parseInt(localStorage?.chatControlsSize)) {
 			const container = document.getElementById(containerId);
-			let size = Math.floor(
-				(parseInt(localStorage?.chatControlsSize) / container.clientWidth) * 100
-			);
-			pane.resize(size);
-		} else {
-			pane.resize(minSize);
+			size = Math.floor((parseInt(localStorage?.chatControlsSize) / container.clientWidth) * 100);
 		}
+		if ($selectedDocument) {
+			size = Math.max(size, DOCUMENT_PANE_MIN_SIZE);
+		}
+		pane.resize(size);
 	};
+
+	$: if ($selectedDocument && pane?.isExpanded() && pane.getSize() < DOCUMENT_PANE_MIN_SIZE) {
+		pane.resize(DOCUMENT_PANE_MIN_SIZE);
+	}
 
 	const handleMediaQuery = async (e) => {
 		if (e.matches) {
@@ -299,8 +312,12 @@
 					</div>
 				{:else if $showEmbeds}
 					<Embeds />
+				{:else if $showArtifacts && $selectedDocument}
+					<DocumentPreview doc={$selectedDocument} />
 				{:else if $showArtifacts}
 					<Artifacts {history} />
+				{:else if $showDocumentList}
+					<DocumentList documents={chatDocuments} />
 				{:else}
 					<!-- Controls + Files tabs -->
 					<div class="flex flex-col h-full min-h-0">
@@ -443,8 +460,12 @@
 						</div>
 					{:else if $showEmbeds}
 						<Embeds overlay={dragged} />
+					{:else if $showArtifacts && $selectedDocument}
+						<DocumentPreview doc={$selectedDocument} overlay={dragged} />
 					{:else if $showArtifacts}
 						<Artifacts {history} overlay={dragged} />
+					{:else if $showDocumentList}
+						<DocumentList documents={chatDocuments} />
 					{:else}
 						<!-- Controls + Files tabs -->
 						<div class="flex flex-col h-full min-h-0">

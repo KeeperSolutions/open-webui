@@ -59,18 +59,6 @@ from open_webui.tools.built_in import (
     delete_automation,
     delete_calendar_event,
     delete_memory,
-    drive_copy_files,
-    drive_create_documents,
-    drive_create_files,
-    drive_create_folders,
-    drive_delete_files,
-    drive_list_folder,
-    drive_move_files,
-    drive_read,
-    drive_rename_file,
-    drive_restore_files,
-    drive_save_edited_copy,
-    drive_search,
     edit_image,
     execute_code,
     fetch_url,
@@ -116,6 +104,21 @@ from open_webui.tools.built_in import (
     view_note,
     view_skill,
     write_note,
+)
+from open_webui.tools.documents import create_documents
+from open_webui.tools.google_drive import (
+    drive_copy_files,
+    drive_create_files,
+    drive_create_folders,
+    drive_delete_files,
+    drive_list_folder,
+    drive_move_files,
+    drive_read,
+    drive_rename_file,
+    drive_restore_files,
+    drive_save_documents,
+    drive_save_edited_copy,
+    drive_search,
 )
 from open_webui.utils.access_control import has_access, has_connection_access, has_permission
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
@@ -538,7 +541,7 @@ CONNECTOR_WRITE_FUNCTIONS = {
     'google_drive': [
         drive_copy_files,
         drive_create_files,
-        drive_create_documents,
+        drive_save_documents,
         drive_create_folders,
         drive_save_edited_copy,
         drive_move_files,
@@ -675,6 +678,9 @@ async def get_builtin_tools(
     if is_builtin_tool_enabled('chats'):
         builtin_functions.extend([search_chats, view_chat])
 
+    if is_builtin_tool_enabled('documents'):
+        builtin_functions.append(create_documents)
+
     if (
         is_builtin_tool_enabled('subagents')
         and config.get('subagents.enable')
@@ -725,7 +731,12 @@ async def get_builtin_tools(
 
                 granted_scopes = (connection.scopes or '').split()
                 if CONNECTOR_WRITE_SCOPES.get(connector['id']) in granted_scopes:
-                    builtin_functions.extend(CONNECTOR_WRITE_FUNCTIONS.get(connector['id'], []))
+                    builtin_functions.extend(
+                        f
+                        for f in CONNECTOR_WRITE_FUNCTIONS.get(connector['id'], [])
+                        # It only saves file_ids from create_documents, so it's useless without that tool
+                        if f is not drive_save_documents or is_builtin_tool_enabled('documents')
+                    )
             else:
                 all_connected = False
 
@@ -897,15 +908,20 @@ def parse_docstring(docstring):
     # Regex to match `:param name: description` format
     param_pattern = re.compile(r':param (\w+):\s*(.+)')
     param_descriptions = {}
+    current_param = None
 
     for line in docstring.splitlines():
-        match = param_pattern.match(line.strip())
-        if not match:
-            continue
-        param_name, param_description = match.groups()
-        if param_name.startswith('__'):
-            continue
-        param_descriptions[param_name] = param_description
+        line = line.strip()
+        match = param_pattern.match(line)
+        if match:
+            param_name, param_description = match.groups()
+            current_param = None if param_name.startswith('__') else param_name
+            if current_param:
+                param_descriptions[current_param] = param_description
+        elif not line or line.startswith(':'):
+            current_param = None
+        elif current_param:
+            param_descriptions[current_param] += f' {line}'
 
     return param_descriptions
 

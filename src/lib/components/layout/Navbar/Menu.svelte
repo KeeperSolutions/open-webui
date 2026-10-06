@@ -10,17 +10,15 @@
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 
 	import {
-		showControls,
-		showArtifacts,
 		mobile,
 		temporaryChatEnabled,
 		theme,
 		user,
 		settings,
 		folders,
-		showEmbeds,
 		artifactContents
 	} from '$lib/stores';
+	import { openArtifacts } from '$lib/utils/documents';
 
 	import { getChatById } from '$lib/apis/chats';
 
@@ -353,11 +351,7 @@
 					draggable="false"
 					class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] cursor-pointer select-none hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 					id="chat-artifacts-button"
-					on:click={async () => {
-						await showControls.set(true);
-						await showArtifacts.set(true);
-						await showEmbeds.set(false);
-					}}
+					on:click={openArtifacts}
 				>
 					<Cube className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Artifacts')}</div>

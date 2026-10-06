@@ -30,6 +30,7 @@ from open_webui.env import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
+from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.notes import Notes, NoteUpdateForm
 from open_webui.models.users import UserNameResponse, Users
@@ -965,6 +966,77 @@ async def _make_channel_emitter(request_info):
     return __channel_emitter__
 
 
+def is_same_document(a: dict, b: dict) -> bool:
+    """A card is one file, known by its stored file_id, its Drive id, or both once it has been saved to Drive."""
+    return bool(
+        (a.get('file_id') and a.get('file_id') == b.get('file_id'))
+        or (a.get('drive_id') and a.get('drive_id') == b.get('drive_id'))
+    )
+
+
+# The chat row lock serializes card updates across workers, this one also covers SQLite, which ignores row locks
+DOCUMENT_CARD_LOCKS: dict[str, tuple[asyncio.Lock, int]] = {}
+
+
+async def upsert_document_card(chat_id: str, message_id: str, document: dict, update_only: bool = False):
+    """Keep one card per document per chat: update the message already showing it, or add it to this message."""
+    renames = []
+
+    def build(messages: dict):
+        update = document_card_update(messages, message_id, document, update_only)
+        if update is None:
+            return None
+        owner_id, documents, card_renames = update
+        renames.extend(card_renames)
+        return owner_id, {'documents': documents}
+
+    # The count of callers holding or waiting on the lock lets the last one drop it, so the dict doesn't grow per chat
+    lock, users = DOCUMENT_CARD_LOCKS.get(chat_id, (asyncio.Lock(), 0))
+    DOCUMENT_CARD_LOCKS[chat_id] = (lock, users + 1)
+    try:
+        async with lock:
+            await Chats.update_message_with_lock(chat_id, build, touch=False)
+    finally:
+        lock, users = DOCUMENT_CARD_LOCKS[chat_id]
+        if users == 1:
+            del DOCUMENT_CARD_LOCKS[chat_id]
+        else:
+            DOCUMENT_CARD_LOCKS[chat_id] = (lock, users - 1)
+
+    # A renamed Drive copy of a stored document renames the stored file too, so downloads use the new name
+    for file_id, filename in renames:
+        await Files.update_file_name_by_id(file_id, filename)
+
+
+def document_card_update(
+    messages: dict, message_id: str, document: dict, update_only: bool
+) -> tuple[str, list[dict], list[tuple[str, str]]] | None:
+    """The message to put the card on, its new documents list and the stored files to rename, or None to skip."""
+    owner_id = next(
+        (
+            mid
+            for mid, message in messages.items()
+            if any(is_same_document(d, document) for d in message.get('documents', []))
+        ),
+        None,
+    )
+    if owner_id is None and update_only:
+        return None
+
+    if owner_id is None:
+        return message_id, [*messages.get(message_id, {}).get('documents', []), document], []
+
+    documents, renames = [], []
+    for d in messages[owner_id]['documents']:
+        if not is_same_document(d, document):
+            documents.append(d)
+            continue
+        if d.get('file_id') and document.get('name') and document['name'] != d.get('name'):
+            renames.append((d['file_id'], f"{document['name']}.{d['format']}"))
+        documents.append({**d, **document, 'format': d.get('format') or document.get('format')})
+    return owner_id, documents, renames
+
+
 async def get_event_emitter(request_info, update_db=True):
     # Channel mode: route pipeline output to channel message updates
     if (request_info.get('chat_id') or '').startswith('channel:'):
@@ -1069,6 +1141,14 @@ async def get_event_emitter(request_info, update_db=True):
                         'files': files,
                     },
                     touch=False,
+                )
+
+            elif event_type in ('chat:message:document', 'chat:message:document:update'):
+                await upsert_document_card(
+                    request_info['chat_id'],
+                    request_info['message_id'],
+                    event_data.get('data', {}),
+                    update_only=event_type == 'chat:message:document:update',
                 )
 
             elif event_type in ('source', 'citation'):

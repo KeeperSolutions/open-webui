@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 
 # local imports
 from open_webui.internal.db import Base, EncryptedJSONField, JSONField, get_async_db_context
@@ -321,6 +323,11 @@ class ChatStatsExport(BaseModel):
     tags: list[str] = []
     stats: AggregateChatStats
     chat: ChatBody
+
+
+def chat_row_for_update(chat_id: str):
+    """The chat row, locked until the transaction ends. SQLite ignores the lock, its writes are serialized anyway."""
+    return select(Chat).where(Chat.id == chat_id).with_for_update()
 
 
 class ChatTable:
@@ -921,7 +928,7 @@ class ChatTable:
     # Fields that only ever live in the encrypted JSON blob — chat_message
     # deliberately excludes them (see ChatMessage's column comment), so the
     # normalized table can never be treated as sufficient on its own.
-    CONTENT_ONLY_FIELDS = ('content', 'output', 'files', 'sources', 'embeds')
+    CONTENT_ONLY_FIELDS = ('content', 'output', 'files', 'sources', 'embeds', 'documents')
 
     async def get_messages_map_by_chat_id(self, id: str) -> dict | None:
         """Message map for walking history (see ``get_message_list``).
@@ -994,9 +1001,8 @@ class ChatTable:
 
         return chat.chat.get('history', {}).get('messages', {}).get(message_id, {})
 
-    async def upsert_message_to_chat_by_id_and_message_id(
-        self, id: str, message_id: str, message: dict, *, touch: bool = True
-    ) -> ChatModel | None:
+    @staticmethod
+    def _prepare_message_for_db(message: dict) -> None:
         if not message.get('content'):
             output_text = get_output_text(message.get('output'))
             if output_text:
@@ -1006,45 +1012,86 @@ class ChatTable:
         if isinstance(message.get('content'), str):
             message['content'] = sanitize_text_for_db(message['content'])
 
+    def _write_message_to_chat_row(self, chat_item: Chat, message_id: str, message: dict, touch: bool) -> dict:
+        self._sanitize_chat_row(chat_item)
+        chat = chat_item.chat or {}
+        self._repair_chat_current_id(chat)
+
+        history = chat.get('history', {})
+        saved_message = self.upsert_message_to_history(history, message_id, message)
+        chat['history'] = history
+        clean_chat = self._clean_null_bytes(chat)
+        chat_item.chat = clean_chat
+        chat_item.title = self._clean_null_bytes(clean_chat['title']) if 'title' in clean_chat else 'New Chat'
+        chat_item.current_message_id = self.get_current_message_id(clean_chat)
+        flag_modified(chat_item, 'chat')
+
+        if touch:
+            chat_item.updated_at = int(time.time())
+        return saved_message
+
+    @staticmethod
+    async def _dual_write_message(chat_id: str, message_id: str, user_id: str, saved_message: dict) -> None:
+        # Dual-write to chat_message table
+        try:
+            await ChatMessages.upsert_message(
+                message_id=message_id,
+                chat_id=chat_id,
+                user_id=user_id,
+                data=saved_message,
+            )
+        except Exception as e:
+            log.warning(f'Failed to write to chat_message table: {e}')
+
+    async def upsert_message_to_chat_by_id_and_message_id(
+        self, id: str, message_id: str, message: dict, *, touch: bool = True
+    ) -> ChatModel | None:
+        self._prepare_message_for_db(message)
+
         try:
             async with get_async_db_context() as session:
                 chat_item = await session.get(Chat, id)
                 if chat_item is None:
                     return None
 
-                self._sanitize_chat_row(chat_item)
-                chat = chat_item.chat or {}
-                self._repair_chat_current_id(chat)
-
-                history = chat.get('history', {})
-                saved_message = self.upsert_message_to_history(history, message_id, message)
-                chat['history'] = history
-                clean_chat = self._clean_null_bytes(chat)
-                chat_item.chat = clean_chat
-                chat_item.title = self._clean_null_bytes(clean_chat['title']) if 'title' in clean_chat else 'New Chat'
-                chat_item.current_message_id = self.get_current_message_id(clean_chat)
-                flag_modified(chat_item, 'chat')
-
-                if touch:
-                    chat_item.updated_at = int(time.time())
-
+                saved_message = self._write_message_to_chat_row(chat_item, message_id, message, touch)
                 await session.commit()
                 updated_chat = ChatModel.model_validate(chat_item)
                 user_id = chat_item.user_id
 
-            # Dual-write to chat_message table
-            try:
-                await ChatMessages.upsert_message(
-                    message_id=message_id,
-                    chat_id=id,
-                    user_id=user_id,
-                    data=saved_message,
-                )
-            except Exception as e:
-                log.warning(f'Failed to write to chat_message table: {e}')
-
+            await self._dual_write_message(id, message_id, user_id, saved_message)
             return updated_chat
         except Exception:
+            return None
+
+    async def update_message_with_lock(
+        self, id: str, build: Callable[[dict], tuple[str, dict] | None], *, touch: bool = True
+    ) -> ChatModel | None:
+        """Build a message update from the chat's current messages and save it while the chat row is locked,
+        so concurrent read-modify-writes from any worker or instance apply one after another.
+        `build` gets the messages and returns (message_id, fields to merge), or None to write nothing."""
+        try:
+            async with get_async_db_context() as session:
+                chat_item = (await session.execute(chat_row_for_update(id))).scalar_one_or_none()
+                if chat_item is None:
+                    return None
+
+                update = build((chat_item.chat or {}).get('history', {}).get('messages', {}))
+                if update is None:
+                    await session.rollback()
+                    return None
+                message_id, message = update
+                self._prepare_message_for_db(message)
+
+                saved_message = self._write_message_to_chat_row(chat_item, message_id, message, touch)
+                await session.commit()
+                updated_chat = ChatModel.model_validate(chat_item)
+                user_id = chat_item.user_id
+
+            await self._dual_write_message(id, message_id, user_id, saved_message)
+            return updated_chat
+        except Exception as e:
+            log.exception(f'Locked message update in chat {id} failed: {e}')
             return None
 
     async def delete_message_from_chat_by_id_and_message_id(self, id: str, message_id: str) -> ChatModel | None:
@@ -2246,31 +2293,101 @@ class ChatTable:
         except Exception:
             return False
 
+    async def find_generated_files_of_chats(self, chat_ids, db: AsyncSession | None = None) -> dict[str, str]:
+        """Generated files of these chats (ids or a select) that no other chat links, as {id: path}."""
+        from open_webui.models.files import File
+
+        try:
+            async with get_async_db_context(db) as session:
+                rows = await session.execute(
+                    select(File.id, File.path, File.meta)
+                    .join(ChatFile, ChatFile.file_id == File.id)
+                    .where(ChatFile.chat_id.in_(chat_ids))
+                )
+                generated = {file_id: path for file_id, path, meta in rows.all() if (meta or {}).get('generated')}
+                if not generated:
+                    return {}
+
+                # Joined to Chat, since without foreign keys (SQLite) a deleted chat's links can stay behind
+                still_used = await session.execute(
+                    select(ChatFile.file_id)
+                    .join(Chat, Chat.id == ChatFile.chat_id)
+                    .where(ChatFile.file_id.in_(generated), ChatFile.chat_id.notin_(chat_ids))
+                )
+                for (file_id,) in still_used.all():
+                    generated.pop(file_id, None)
+                return generated
+        except Exception as e:
+            log.exception(f'Looking up the generated files of chats to delete failed: {e}')
+            return {}
+
+    async def delete_generated_files(self, files: dict[str, str], db: AsyncSession | None = None) -> None:
+        """Delete generated files ({id: path}) and their stored content, never raising since the chat is already gone."""
+        from open_webui.models.files import File
+        from open_webui.storage.provider import Storage
+
+        if not files:
+            return
+        try:
+            async with get_async_db_context(db) as session:
+                await session.execute(delete(ChatFile).where(ChatFile.file_id.in_(files)))
+                await session.execute(delete(File).where(File.id.in_(files)))
+                await session.commit()
+        except Exception as e:
+            log.exception(f'Deleting the generated files of deleted chats failed: {e}')
+            return
+        for path in files.values():
+            try:
+                await asyncio.to_thread(Storage.delete_file, path)
+            except Exception as e:
+                log.warning(f'Could not delete the stored file {path} of a deleted chat: {e}')
+
+    async def link_message_documents(self, chat_id: str, messages: dict, user_id: str) -> None:
+        """Link the documents on a copied chat's messages to it, so they live as long as any chat that shows them."""
+        for message_id, message in (messages or {}).items():
+            if not isinstance(message, dict):
+                continue
+            file_ids = [
+                document['file_id']
+                for document in message.get('documents') or []
+                if isinstance(document, dict) and document.get('file_id')
+            ]
+            if file_ids:
+                try:
+                    await self.insert_chat_files(chat_id=chat_id, message_id=message_id, file_ids=file_ids, user_id=user_id)
+                except Exception as e:
+                    log.warning(f'Linking the documents of message {message_id} to chat {chat_id} failed: {e}')
+
     async def delete_chat_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats([id], db=db)
         try:
             async with get_async_db_context(db) as session:
                 await session.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await session.execute(delete(ChatMessage).filter_by(chat_id=id))
                 await session.execute(delete(Chat).filter_by(id=id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True and await self.delete_shared_chat_by_chat_id(id, db=session)
         except Exception:
             return False
 
     async def delete_chat_by_id_and_user_id(self, id: str, user_id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats(select(Chat.id).filter_by(id=id, user_id=user_id), db=db)
         try:
             async with get_async_db_context(db) as session:
                 await session.execute(update(AutomationRun).filter_by(chat_id=id).values(chat_id=None))
                 await session.execute(delete(ChatMessage).filter_by(chat_id=id))
                 await session.execute(delete(Chat).filter_by(id=id, user_id=user_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True and await self.delete_shared_chat_by_chat_id(id, db=session)
         except Exception:
             return False
 
     async def delete_chats_by_user_id(self, user_id: str, db: AsyncSession | None = None) -> bool:
+        generated = await self.find_generated_files_of_chats(select(Chat.id).filter_by(user_id=user_id), db=db)
         try:
             async with get_async_db_context(db) as session:
                 await self.delete_shared_chats_by_user_id(user_id, db=session)
@@ -2286,6 +2403,7 @@ class ChatTable:
                 )
                 await session.execute(delete(Chat).filter_by(user_id=user_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True
         except Exception:
@@ -2294,6 +2412,9 @@ class ChatTable:
     async def delete_chats_by_user_id_and_folder_id(
         self, user_id: str, folder_id: str, db: AsyncSession | None = None
     ) -> bool:
+        generated = await self.find_generated_files_of_chats(
+            select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id), db=db
+        )
         try:
             async with get_async_db_context(db) as session:
                 chat_ids_stmt = select(Chat.id).filter_by(user_id=user_id, folder_id=folder_id)
@@ -2303,6 +2424,7 @@ class ChatTable:
                 await session.execute(delete(ChatMessage).filter(ChatMessage.chat_id.in_(chat_ids_stmt)))
                 await session.execute(delete(Chat).filter_by(user_id=user_id, folder_id=folder_id))
                 await session.commit()
+                await self.delete_generated_files(generated, db=session)
 
                 return True
         except Exception:

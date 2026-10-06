@@ -4,7 +4,7 @@ import mimetypes
 import re
 import time
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -14,7 +14,9 @@ from open_webui.config import (
     GOOGLE_DRIVE_CONNECTOR_REDIRECT_URI,
 )
 from open_webui.env import INTERNAL_EMAIL_DOMAINS
+from open_webui.models.chats import Chats
 from open_webui.models.connector_connections import ConnectorConnections
+from open_webui.tools.documents import DOCUMENT_MIME_TYPES
 from open_webui.utils.auth import (
     create_token,
     decode_token,
@@ -57,19 +59,20 @@ GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke'
 # didn't create, and covers drive.readonly's access too, so that scope isn't requested separately
 GOOGLE_DRIVE_WRITE_SCOPE = 'https://www.googleapis.com/auth/drive'
 
-# PDF has no native Google format, so it's downloaded via alt=media instead of exported
-GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
-    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-}
-
 # Used to pick a default export format when the caller doesn't specify one for a native Google file
 GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS = {
     'application/vnd.google-apps.document': 'docx',
     'application/vnd.google-apps.spreadsheet': 'xlsx',
     'application/vnd.google-apps.presentation': 'pptx',
 }
+
+# PDF has no native Google format, so it's downloaded via alt=media instead of exported
+GOOGLE_DRIVE_DOCUMENT_EXPORT_MIME_TYPES = {
+    format: DOCUMENT_MIME_TYPES[format] for format in GOOGLE_DRIVE_NATIVE_MIME_TYPE_DOWNLOAD_FORMATS.values()
+}
+
+# Drive cards can also be plain text files, which create_documents doesn't make
+DRIVE_DOWNLOAD_FORMATS = {*DOCUMENT_MIME_TYPES, 'txt'}
 
 # Refresh a bit before actual expiry to avoid handing out a token that expires mid-request
 TOKEN_EXPIRY_BUFFER_SECONDS = 120
@@ -264,7 +267,7 @@ async def download_google_drive_document(
     filename: str = 'document',
     user=Depends(get_internal_drive_user),
 ):
-    if format is not None and format not in {'pdf', 'docx', 'xlsx', 'pptx'}:
+    if format is not None and format not in DRIVE_DOWNLOAD_FORMATS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Unsupported format: {format}')
 
     access_token = await get_valid_access_token(user.id)
@@ -318,11 +321,60 @@ async def download_google_drive_document(
     safe_filename = re.sub(r'[^\w\-. ]', '_', filename) or 'document'
     if safe_filename.lower().endswith(f'.{format.lower()}'):
         safe_filename = safe_filename[: -(len(format) + 1)]
+    full_filename = f'{safe_filename}.{format}'
+    # Headers are latin-1, so letters like "š" or "ć" go only in the UTF-8 form and the plain one gets an underscore
+    ascii_filename = full_filename.encode('ascii', 'replace').decode().replace('?', '_')
     return Response(
         content=response.content,
         media_type=content_type,
-        headers={'Content-Disposition': f'attachment; filename="{safe_filename}.{format}"'},
+        headers={
+            'Content-Disposition': f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quote(full_filename)}'
+        },
     )
+
+
+class SaveDocumentForm(BaseModel):
+    chat_id: str = ''
+
+
+@router.post('/google-drive/save/{file_id}')
+async def save_document_to_google_drive(
+    file_id: str,
+    form_data: SaveDocumentForm,
+    user=Depends(get_internal_drive_user),
+):
+    from open_webui.socket.main import upsert_document_card
+    from open_webui.tools.documents import DOCUMENT_MISSING_ERROR, load_stored_documents
+    from open_webui.tools.google_drive import drive_document_card, save_stored_documents_to_drive
+
+    access_token = await get_valid_access_token(user.id)
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='drive_not_connected')
+    # Google lets the user untick write access on consent, and the upload would then fail with a generic error
+    connection = await ConnectorConnections.get_by_user_and_connector(user.id, GOOGLE_DRIVE_CONNECTOR)
+    if GOOGLE_DRIVE_WRITE_SCOPE not in (getattr(connection, 'scopes', None) or '').split():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='drive_write_not_granted')
+
+    documents, failed = await load_stored_documents(user.id, [file_id])
+    if failed:
+        missing = failed[0]['error'] == DOCUMENT_MISSING_ERROR
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if missing else status.HTTP_400_BAD_REQUEST,
+            detail=failed[0]['error'],
+        )
+
+    saved, failed = await save_stored_documents_to_drive({'Authorization': f'Bearer {access_token}'}, documents)
+    if failed:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=failed[0]['error'])
+    card = drive_document_card(saved[0])
+
+    # The card keeps its Drive link after a reload, and a later rename in Drive can still find it
+    if form_data.chat_id and await Chats.get_chat_by_id_and_user_id(form_data.chat_id, user.id):
+        try:
+            await upsert_document_card(form_data.chat_id, '', card, update_only=True)
+        except Exception as e:
+            log.exception(f'Updating the document card in chat {form_data.chat_id} failed: {e}')
+    return card
 
 
 async def get_valid_access_token(user_id: str) -> str | None:
