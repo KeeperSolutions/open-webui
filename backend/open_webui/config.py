@@ -25,6 +25,7 @@ from open_webui.env import (
     FRONTEND_BUILD_DIR,
     OFFLINE_MODE,
     OPEN_WEBUI_DIR,
+    PII_ACTIVE,
     REDIS_KEY_PREFIX,
     REDIS_SENTINEL_HOSTS,
     REDIS_SENTINEL_PORT,
@@ -891,6 +892,15 @@ USER_PERMISSIONS_CHAT_PII_MASKING_ENFORCED = (
 # (routers/users.py) both read it, and a router importing another router to get
 # a constant is an import cycle waiting for its third caller.
 PII_MASKING_ENFORCED_PERMISSION = 'chat.pii_masking_enforced'
+
+
+# Masking for users who never chose a preference. PII_ACTIVE sets the value
+# until an admin changes it from the PII dashboard.
+PII_MASKING_DEFAULT_ENABLED = ConfigVar(
+    'PII_MASKING_DEFAULT_ENABLED',
+    'pii.masking_default_enabled',
+    PII_ACTIVE,
+)
 
 
 USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS = (

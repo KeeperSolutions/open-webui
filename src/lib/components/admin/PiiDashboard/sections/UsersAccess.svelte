@@ -6,6 +6,7 @@
 	import SectionHeader from '../parts/SectionHeader.svelte';
 	import Pill from '../parts/Pill.svelte';
 	import Button from '../parts/Button.svelte';
+	import Toggle from '../parts/Toggle.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
@@ -14,16 +15,18 @@
 	import { formatCostDisplay } from '$lib/apis/langfuse/tableUtils';
 	import { toast } from 'svelte-sonner';
 	import { addUserToGroup, removeUserFromGroup } from '$lib/apis/groups';
-	import { getPiiMaskingDefault } from '$lib/utils/pii';
+	import { setUserPiiMasking } from '$lib/apis/users';
+	import { config } from '$lib/stores';
+	import type { PiiMaskingPreference } from '$lib/utils/pii';
 	import {
 		buildRows,
 		unattributedCost,
 		maskingRank,
 		pageOf,
 		pageRange,
+		RELOAD_NOTE,
 		ROWS_PER_PAGE,
 		rowActionFor,
-		type MaskingState,
 		type AccessUser,
 		type PolicyGroup,
 		type UserRow,
@@ -201,6 +204,30 @@
 		}
 	};
 
+	/**
+	 * Masking for users who never chose. Read from `$config`, so the labels and
+	 * the rows follow a change to the default without a reload. Anything but an
+	 * explicit `false` reads as ON.
+	 */
+	$: instanceDefault = $config?.features?.pii_masking_default !== false;
+
+	let savingPreference: string | null = null;
+
+	const changePreference = async (row: UserRow, preference: PiiMaskingPreference) => {
+		savingPreference = row.id;
+		try {
+			await setUserPiiMasking(localStorage.token, row.id, preference);
+			toast.success(
+				`${$i18n.t('PII masking for {{name}} updated.', { name: row.name })} ${$i18n.t(RELOAD_NOTE)}`
+			);
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			savingPreference = null;
+		}
+		onPolicyChanged();
+	};
+
 	// One place, so the heading and the accessible name cannot drift apart.
 	$: dialogTitle = !pending
 		? ''
@@ -285,10 +312,7 @@
 	// `buildRows` keeps the parameter and its default, so
 	// `grantedCount`/`allModels` stay computed-from-nothing rather than deleted —
 	// the next thing to report model access resolves them the same way.
-	// `getPiiMaskingDefault({})` with no stored valve resolves straight to the
-	// served PII_ACTIVE default, same value a user with no preference would start
-	// with — so an "unset" row is reported as actually protected or not.
-	$: rows = buildRows(users, metricRows, undefined, getPiiMaskingDefault({}));
+	$: rows = buildRows(users, metricRows, undefined, instanceDefault);
 
 	$: sorted = sortRows(rows, orderBy, direction);
 
@@ -523,24 +547,44 @@
 								</td>
 								<td class="px-2.5 py-2.5 align-middle">
 									<!--
-										No Toggle here: a switch shape is an affordance for
-										changing, and this column is a read-only report. The Pill
-										carries the whole statement in all five states.
+										Admins choose a user's preference here. Everyone else sees the
+										read-only pill; an enforced row is always read-only.
 									-->
-									{#if row.masking === 'enforced'}
+									{#if mayAct && row.masking !== 'enforced'}
+										{@const maskedNow = row.masking === 'on' || row.masking === 'default-on'}
+										<div
+											data-testid={`pii-preference-${row.id}`}
+											class="flex items-center gap-2 text-[12px] whitespace-nowrap"
+										>
+											<!-- The toggle shows what applies now and stores an explicit
+											     choice. "Reset to default" removes that choice. -->
+											<Toggle
+												on={maskedNow}
+												disabled={savingPreference === row.id}
+												ariaLabel={$i18n.t('PII masking for {{name}}', { name: row.name })}
+												on:click={() => changePreference(row, maskedNow ? 'off' : 'on')}
+											/>
+											{#if row.preference === 'default'}
+												<span class="text-pii-muted">{$i18n.t('Default')}</span>
+											{:else}
+												<button
+													type="button"
+													class="text-pii-blue hover:underline disabled:opacity-60"
+													disabled={savingPreference === row.id}
+													on:click={() => changePreference(row, 'default')}
+												>
+													{$i18n.t('Reset to default')}
+												</button>
+											{/if}
+										</div>
+									{:else if row.masking === 'enforced'}
 										<Pill kind="ok">🔒 {$i18n.t('On — enforced')}</Pill>
-									{:else if row.masking === 'default'}
+									{:else if row.masking === 'default-on'}
 										<Pill kind="ok">{$i18n.t('On — default')}</Pill>
-									{:else if row.masking === 'on'}
-										<!-- Qualified like the other three: a bare "On" was the only
-										     state that did not say where it came from, which made it
-										     read as "the normal one" rather than as one of four
-										     distinct answers. -->
-										<Pill kind="ok">{$i18n.t('On — by user')}</Pill>
-									{:else if row.masking === 'default_off'}
-										<!-- Same risk tier as 'off' (see maskingRank), but the user
-										     never chose this - the served PII_ACTIVE default did. -->
+									{:else if row.masking === 'default-off'}
 										<Pill kind="warn">{$i18n.t('Off — default')}</Pill>
+									{:else if row.masking === 'on'}
+										<Pill kind="ok">{$i18n.t('On — by user')}</Pill>
 									{:else}
 										<Pill kind="warn">{$i18n.t('Off — flagged')}</Pill>
 									{/if}

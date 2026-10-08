@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { createEventDispatcher, getContext, onMount } from 'svelte';
 	import { settings, user } from '$lib/stores';
-	import { updateUserSettings } from '$lib/apis/users';
+	import { toast } from 'svelte-sonner';
+	import { setOwnPiiMasking } from '$lib/apis/users';
 	import { getSessionUser } from '$lib/apis/auths';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import { getPiiMaskingDefault, isPiiPipelineConfigured, piiFilterIds } from '$lib/utils/pii';
+	import { getPiiMaskingDefault, isPiiPipelineConfigured } from '$lib/utils/pii';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -44,22 +45,17 @@
 	];
 
 	/**
-	 * The user's OWN stored preference — and the only value this form ever
-	 * persists.
+	 * Whether masking applies to this user: their stored choice, or the instance
+	 * default when they never chose. The only value this form persists.
 	 *
-	 * ⚠️ The team policy must never reach this variable. It is assigned in
-	 * exactly two places: from the stored settings on mount, and by the user's
-	 * own toggle — which is bound only in the unlocked branch of the markup
-	 * below. The locked branch renders a display-only Switch with no binding at
-	 * all, so there is no code path by which the policy can turn a stored `false`
-	 * into a persisted `true`.
-	 *
-	 * That is the structural half of the invariant. The `submit` handler additionally
-	 * skips the masking valves entirely while locked, but the invariant does not
-	 * depend on that guard surviving: delete it and Save merely writes the stored
-	 * value back unchanged.
+	 * The team policy never assigns to it. The locked branch below renders a
+	 * display-only switch with no binding, and Save skips the write while locked,
+	 * so the policy cannot turn a stored choice into a different one.
 	 */
 	let piiMaskingEnabled = true;
+	// The value shown on open. Save writes only when the user changed it, so a
+	// user who follows the instance default keeps following it.
+	let loadedPiiMaskingEnabled = true;
 
 	// Team policy. Read-only overlay: it decides what is DISPLAYED and
 	// whether the control is locked; it never decides what is STORED.
@@ -75,7 +71,8 @@
 		isAdmin && piiCheckDone && (policyEnforced || piiMaskingEnabled) && !piiPipelineConfigured;
 
 	onMount(async () => {
-		piiMaskingEnabled = getPiiMaskingDefault($settings);
+		piiMaskingEnabled = getPiiMaskingDefault($settings ?? {});
+		loadedPiiMaskingEnabled = piiMaskingEnabled;
 
 		// `$user.permissions` is only refilled on a full page load, so a tab
 		// left open carries a stale policy for hours. Refresh it here — but ONLY
@@ -101,40 +98,24 @@
 	id="tab-privacy"
 	class="flex flex-col h-full justify-between space-y-3 text-sm"
 	on:submit|preventDefault={async () => {
-		const s = ($settings ?? {}) as any;
-		const pipelines = (s.pipelines ?? {}) as Record<string, any>;
-		const existingValves = (pipelines.valves ?? {}) as Record<string, any>;
-
-		const valves: Record<string, any> = { ...existingValves };
-		// ⚠️ While the policy locks the control, Save must not touch a single
-		// masking valve. Otherwise a user whose stored value is `false`, shown a
-		// locked `ON` switch, would destroy their own preference by pressing Save
-		// — and the policy would have written into user.settings by proxy, which
-		// is exactly what the policy-never-writes invariant forbids.
-		if (!policyEnforced) {
-			// The same list the reader uses. If the writer stayed on the built-in
-			// constant, an operator who adds an id would leave that filter without a
-			// stored valve — the backend would fall back to its default and the
-			// user's "off" would be silently ignored for it.
-			for (const id of piiFilterIds()) {
-				valves[id] = {
-					...(existingValves[id] ?? {}),
-					pii_masking_enabled: piiMaskingEnabled
-				};
+		// While the policy locks the control, Save writes nothing, so the stored
+		// choice underneath the policy stays as the user left it.
+		if (!policyEnforced && piiMaskingEnabled !== loadedPiiMaskingEnabled) {
+			// The value sent, not the switch afterwards: the user can flip it while the
+			// request is in flight.
+			const submitted = piiMaskingEnabled;
+			try {
+				const saved = await setOwnPiiMasking(localStorage.token, submitted ? 'on' : 'off');
+				// Server first, store second: the PII dashboard re-reads the server when
+				// `$settings` changes, and would otherwise cache the old value.
+				await settings.set((saved?.ui ?? $settings) as any);
+				// The form stays mounted, so the next Save compares against this value.
+				loadedPiiMaskingEnabled = submitted;
+			} catch (error) {
+				toast.error(`${error}`);
+				return;
 			}
 		}
-
-		// Persist directly to avoid the shared saveSettings model refresh, which
-		// blocks on /api/models and stalls the toast when a provider (e.g. Ollama)
-		// is unreachable.
-		const next = { ...s, pipelines: { ...pipelines, valves } };
-		// ⚠️ Server first, store second. The switch is driven by local state, so
-		// nothing on screen waits for this — but anything watching `$settings` as a
-		// signal to re-read the server (the PII dashboard does) would otherwise
-		// fire against the OLD value and cache it. Store-then-persist looks
-		// optimistic; here it is just a race with no upside.
-		await updateUserSettings(localStorage.token, { ui: next });
-		await settings.set(next);
 		dispatch('save');
 	}}
 >
@@ -145,7 +126,10 @@
 					{$i18n.t('Enable PII masking')}
 				</div>
 
-				<div class="">
+				<!-- The shared Switch is 28x16px. It is scaled up here rather than resized
+				     in the upstream component, which other settings also use. The margin
+				     makes room for the scaled height. -->
+				<div class="my-1 flex origin-right scale-150">
 					{#if policyEnforced}
 						<!--
 							Locked by team policy. `inert` blocks pointer AND keyboard and

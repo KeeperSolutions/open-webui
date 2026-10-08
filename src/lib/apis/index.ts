@@ -1025,7 +1025,8 @@ export const generateAutoCompletion = async (
 	prompt: string,
 	messages?: object[],
 	type: string = 'search query',
-	chat_id?: string
+	chat_id?: string,
+	piiMasking?: boolean
 ) => {
 	const controller = new AbortController();
 	let error = null;
@@ -1044,7 +1045,8 @@ export const generateAutoCompletion = async (
 			...(messages && { messages: messages }),
 			type: type,
 			stream: false,
-			...(chat_id && { chat_id: chat_id })
+			...(chat_id && { chat_id: chat_id }),
+			...(typeof piiMasking === 'boolean' && { features: { pii_masking: piiMasking } })
 		})
 	})
 		.then(async (res) => {

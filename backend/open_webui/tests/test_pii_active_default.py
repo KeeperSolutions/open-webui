@@ -1,9 +1,9 @@
 """
-Tests for the global PII_ACTIVE default in _resolve_pii_masking_decision
+Tests for the instance masking default (seeded by PII_ACTIVE) in _resolve_pii_masking_decision
 (utils/middleware.py). Mirrors getPiiMaskingDefault() on the frontend: when a
 request carries no explicit features.pii_masking choice at all (request_pii is
 None - a non-browser caller that omits the field; the chat web UI always sends
-an explicit value), PII_ACTIVE decides. A team/group policy always wins first,
+an explicit value), the instance default decides. A team/group policy always wins first,
 and an explicit client choice (True or False) is always respected as-is.
 """
 
@@ -28,11 +28,12 @@ def _make_user():
 
 def _resolve(features, *, policy_enforced, pii_active):
     request = MagicMock()
+    request.app.state.config.PII_MASKING_DEFAULT_ENABLED = pii_active
     user = _make_user()
     with patch(
         "open_webui.utils.middleware.resolve_pii_masking_enforced",
         AsyncMock(return_value=policy_enforced),
-    ), patch("open_webui.utils.middleware.PII_ACTIVE", pii_active):
+    ):
         return _run(_resolve_pii_masking_decision(request, user, features))
 
 
@@ -71,7 +72,7 @@ class TestPiiActiveFallback:
 
     def test_policy_enforced_wins_over_explicit_false(self):
         """A mandated policy overrides even an explicit opt-out, same as before
-        this change - PII_ACTIVE must not weaken that guarantee."""
+        this change - the instance default must not weaken that guarantee."""
         policy_enforced, pii_expected = _resolve(
             {"pii_masking": False}, policy_enforced=True, pii_active=False
         )

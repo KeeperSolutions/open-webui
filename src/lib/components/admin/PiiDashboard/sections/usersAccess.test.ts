@@ -8,6 +8,7 @@ import {
 	buildRows,
 	unattributedCost,
 	modelsCountKey,
+	defaultOffCountKey,
 	maskingStateOf,
 	maskingRank,
 	pageOf,
@@ -153,30 +154,41 @@ describe('buildRows', () => {
 		ui: { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } }
 	};
 
-	it("reads masking as 'default' when the user never touched the setting and the served default is on", () => {
-		// Absent key means the pipeline masks only when PII_ACTIVE (the 4th
-		// param, defaulted true here) says so - protected, not at risk.
-		expect(buildRows([user()], [])[0].masking).toBe('default');
-		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default');
-		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default');
+	it("reads masking as 'default-on' when the user never touched the setting", () => {
+		// No stored value follows the instance default, which is ON unless set otherwise.
+		expect(buildRows([user()], [])[0].masking).toBe('default-on');
+		expect(buildRows([user({ settings: null })], [])[0].masking).toBe('default-on');
+		expect(buildRows([user({ settings: { ui: {} } })], [])[0].masking).toBe('default-on');
 	});
 
-	it("reads masking as 'default_off' when the user never touched the setting and the served default is off", () => {
-		// Copilot review finding: buildRows must reflect the served PII_ACTIVE
-		// default, not assume an unset user is always protected.
-		expect(buildRows([user()], [], undefined, false)[0].masking).toBe('default_off');
+	it('buildRows carries the preference and the instance default', () => {
+		const rows = buildRows(
+			[{ id: 'u1', name: 'A', email: 'a@x', role: 'user', settings: { ui: {} } }],
+			[],
+			undefined,
+			false
+		);
+		expect(rows[0].masking).toBe('default-off');
+		expect(rows[0].preference).toBe('default');
+	});
+
+	it('buildRows reports a stored choice as the preference', () => {
+		expect(buildRows([user({ settings: storedOn })], [])[0].preference).toBe('on');
+		expect(buildRows([user({ settings: storedOff })], [])[0].preference).toBe('off');
+	});
+
+	it("reads masking as 'default-off' when the user never touched the setting and the served default is off", () => {
+		// buildRows must reflect the instance default, not assume an unset user is
+		// always protected.
+		expect(buildRows([user()], [], undefined, false)[0].masking).toBe('default-off');
 		expect(buildRows([user({ settings: null })], [], undefined, false)[0].masking).toBe(
-			'default_off'
+			'default-off'
 		);
 	});
 
 	it('an explicitly stored value is unaffected by the served default either way', () => {
-		expect(buildRows([user({ settings: storedOn })], [], undefined, false)[0].masking).toBe(
-			'on'
-		);
-		expect(buildRows([user({ settings: storedOff })], [], undefined, true)[0].masking).toBe(
-			'off'
-		);
+		expect(buildRows([user({ settings: storedOn })], [], undefined, false)[0].masking).toBe('on');
+		expect(buildRows([user({ settings: storedOff })], [], undefined, true)[0].masking).toBe('off');
 	});
 
 	it("reads masking as 'on' when the user chose it", () => {
@@ -378,25 +390,29 @@ describe('reconciliation with section 3', () => {
 });
 
 describe('maskingStateOf', () => {
-	it('policy wins over anything stored, regardless of the served default', () => {
+	it('policy wins over anything stored', () => {
 		expect(maskingStateOf(true, false, true)).toBe('enforced');
 		expect(maskingStateOf(true, true, true)).toBe('enforced');
 		expect(maskingStateOf(true, 'unset', true)).toBe('enforced');
-		expect(maskingStateOf(true, 'unset', false)).toBe('enforced');
 	});
 
-	it("maps 'unset' to default when the served default is on, never to off", () => {
-		expect(maskingStateOf(false, 'unset', true)).toBe('default');
+	it('enforcement wins over every stored value and default', () => {
+		expect(maskingStateOf(true, false, false)).toBe('enforced');
+	});
+
+	it("maps 'unset' to default-on under an instance default of ON, never to off", () => {
+		expect(maskingStateOf(false, 'unset', true)).toBe('default-on');
 		expect(maskingStateOf(false, 'unset', true)).not.toBe('off');
 	});
 
-	it("maps 'unset' to default_off when the served default is off, never to default or on", () => {
-		// Copilot review finding: an 'unset' user is only protected when the
-		// served PII_ACTIVE default says so - with PII_ACTIVE=false this must
-		// read as a risk state, not as "On — default".
-		expect(maskingStateOf(false, 'unset', false)).toBe('default_off');
-		expect(maskingStateOf(false, 'unset', false)).not.toBe('default');
-		expect(maskingStateOf(false, 'unset', false)).not.toBe('on');
+	it('an unset user follows an instance default of OFF', () => {
+		expect(maskingStateOf(false, 'unset', false)).toBe('default-off');
+	});
+
+	it('maps stored booleans straight through when unenforced', () => {
+		expect(maskingStateOf(false, true, true)).toBe('on');
+		expect(maskingStateOf(false, false, true)).toBe('off');
+		expect(maskingStateOf(false, true, false)).toBe('on');
 	});
 
 	it('maps stored booleans straight through when unenforced, regardless of the served default', () => {
@@ -406,7 +422,7 @@ describe('maskingStateOf', () => {
 		expect(maskingStateOf(false, false, false)).toBe('off');
 	});
 
-	it('produces a risk state (off or default_off) in exactly the unenforced, unprotected combinations', () => {
+	it('produces a risk state (off or default-off) in exactly the unenforced, unprotected combinations', () => {
 		const combos: [boolean, boolean | 'unset', boolean][] = [
 			[true, true, true],
 			[true, false, true],
@@ -420,7 +436,7 @@ describe('maskingStateOf', () => {
 			[false, 'unset', false]
 		];
 		const risky = combos.filter(([e, s, d]) =>
-			['off', 'default_off'].includes(maskingStateOf(e, s, d))
+			['off', 'default-off'].includes(maskingStateOf(e, s, d))
 		);
 		expect(risky).toEqual([
 			[false, false, true],
@@ -431,11 +447,11 @@ describe('maskingStateOf', () => {
 });
 
 describe('maskingRank', () => {
-	it('sorts risk first, so ascending surfaces off', () => {
-		const order = (['enforced', 'on', 'default', 'off'] as const)
+	it('sorts risk first', () => {
+		const order = (['enforced', 'on', 'default-on', 'default-off', 'off'] as const)
 			.slice()
 			.sort((a, b) => maskingRank(a) - maskingRank(b));
-		expect(order).toEqual(['off', 'default', 'on', 'enforced']);
+		expect(order).toEqual(['off', 'default-off', 'default-on', 'on', 'enforced']);
 	});
 });
 
@@ -1394,5 +1410,25 @@ describe('rowActionFor — a team owner with the power to act', () => {
 		expect(
 			rowActionFor(row([TEAM_GROUP.id]), { naming: [TEAM_GROUP], targets: [] }, admin)
 		).toEqual({ kind: 'remove', group: TEAM_GROUP });
+	});
+});
+
+describe('defaultOffCountKey', () => {
+	it('uses the singular for one user', () => {
+		expect(defaultOffCountKey(1, false)).toBe(
+			'1 user who has not chosen will send personal data to the AI model unmasked.'
+		);
+		expect(defaultOffCountKey(2, false)).toBe(
+			'{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.'
+		);
+	});
+
+	it('states a lower bound when the directory is truncated', () => {
+		expect(defaultOffCountKey(1, true)).toBe(
+			'At least 1 user who has not chosen will send personal data to the AI model unmasked.'
+		);
+		expect(defaultOffCountKey(5, true)).toBe(
+			'At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.'
+		);
 	});
 });

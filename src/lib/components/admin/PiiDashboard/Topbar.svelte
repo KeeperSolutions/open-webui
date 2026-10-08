@@ -64,14 +64,8 @@
 			{/if}
 		</div>
 
-		<!--
-			The disabled "PII Masking" toggle that used to sit here is gone.
-			It claimed the decision had not been made, and it had:
-			masking is enforced per group, its value is edited in the group's
-			Permissions tab, and who falls under it is changed row by row in
-			section 4. A dead control next to live ones reads as a broken feature,
-			and an instance-wide switch would have contradicted the per-group model
-			the policy actually uses.
-		-->
+		<!-- Controls the dashboard places beside the period, such as the masking
+		     default for users who never chose. Enforcement is set per group. -->
+		<slot name="controls" />
 	</div>
 </div>

@@ -3242,5 +3242,18 @@
 	"{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.": "{{name}} will be removed from your team's policy. Another group still enforces masking for them, so they will stay masked.",
 	"{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.": "{{name}} will be removed from {{group}}, which belongs to a team. Their masking comes from that team, and they will be able to turn it off again.",
 	"{{user}}'s Chats": "",
-	"{{webUIName}} Backend Required": ""
+	"{{webUIName}} Backend Required": "",
+	"PII masking for {{name}} updated.": "",
+	"Off — default": "",
+	"PII Masking": "",
+	"Reset to default": "",
+	"PII masking for users who have not chosen a setting": "",
+	"Default PII masking updated.": "",
+	"Turn off PII masking by default?": "",
+	"1 user who has not chosen will send personal data to the AI model unmasked.": "",
+	"{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.": "",
+	"At least 1 user who has not chosen will send personal data to the AI model unmasked.": "",
+	"At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.": "",
+	"Users can still turn masking on themselves, and enforced users stay masked.": "",
+	"Users with the app already open get the change after they reload.": ""
 }

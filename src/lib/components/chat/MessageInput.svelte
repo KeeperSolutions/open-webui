@@ -57,6 +57,7 @@
 	} from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
+	import { piiMaskingForRequest } from '$lib/utils/pii';
 
 	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
@@ -1809,7 +1810,10 @@
 															text,
 															history?.currentId
 																? createMessagesList(history, history.currentId)
-																: null
+																: null,
+															undefined,
+															undefined,
+															piiMaskingForRequest(piiMaskingLocked, piiMaskingEnabled)
 														).catch((error) => {
 															console.log(error);
 

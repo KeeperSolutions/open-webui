@@ -307,6 +307,7 @@ from open_webui.config import (
     PERPLEXITY_MODEL,
     PERPLEXITY_SEARCH_API_URL,
     PERPLEXITY_SEARCH_CONTEXT_USAGE,
+    PII_MASKING_DEFAULT_ENABLED,
     PLAYWRIGHT_TIMEOUT,
     PLAYWRIGHT_WS_URL,
     QUERY_GENERATION_PROMPT_TEMPLATE,
@@ -444,7 +445,6 @@ from open_webui.env import (
     LICENSE_KEY,
     LOG_FORMAT,
     MAX_BODY_LOG_SIZE,
-    PII_ACTIVE,
     PII_FILTER_IDS,
     # Redis
     REDIS_CLUSTER,
@@ -1272,6 +1272,7 @@ app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
 app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
 app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
 app.state.config.ENABLE_MEMORIES = ENABLE_MEMORIES
+app.state.config.PII_MASKING_DEFAULT_ENABLED = PII_MASKING_DEFAULT_ENABLED
 
 app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
 app.state.config.IMAGE_SIZE = IMAGE_SIZE
@@ -2960,9 +2961,9 @@ async def get_app_config(request: Request):
                     # polls for that scan's result, and each poll re-fetches the file's
                     # whole content — so it has to know when no scan is coming.
                     'pii_ingest_scan': ENABLE_INGEST_PII_SCAN,
-                    # Global default for PII masking - the frontend's getPiiMaskingDefault()
-                    # falls back to this when no per-user valve value is stored yet.
-                    'pii_active': PII_ACTIVE,
+                    # Masking for users who never chose. The frontend seeds the
+                    # Privacy tab and the chat toggle from it.
+                    'pii_masking_default': app.state.config.PII_MASKING_DEFAULT_ENABLED,
                     'enable_trustminder_feedback': ENABLE_TRUSTMINDER_FEEDBACK,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,

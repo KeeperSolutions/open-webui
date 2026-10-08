@@ -537,13 +537,13 @@ def test_unenforced_stored_setting_off_still_reaches_pipeline_as_false():
     assert _valves_for(captured)["pii_masking_enabled"] is False
 
 
-def test_unenforced_user_without_any_setting_sends_no_valve_key():
-    """Absent key means the pipeline applies its own default (ON)."""
+def test_unenforced_user_without_any_setting_sends_the_instance_default():
+    """Without a stored choice the instance default is sent, never the pipeline's own default."""
     payload = {"model": "gpt-4"}
     _, captured = _run_inlet(
         payload, _inlet_user(), _inlet_models(PII_FILTER_ID), groups=[]
     )
-    assert "pii_masking_enabled" not in _valves_for(captured)
+    assert _valves_for(captured)["pii_masking_enabled"] is True
 
 
 # --- Scope: the policy must not widen the pre-existing override leak --------

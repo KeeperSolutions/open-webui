@@ -18,7 +18,11 @@ from open_webui.config import (
 )
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.routers.billing import check_billing_access
-from open_webui.routers.pipelines import process_pipeline_inlet_filter, process_pipeline_outlet_filter
+from open_webui.routers.pipelines import (
+    process_pipeline_inlet_filter,
+    process_pipeline_outlet_filter,
+    resolve_request_pii_masking,
+)
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat import generate_chat_completion
 from open_webui.utils.task import (
@@ -786,6 +790,16 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
             'chat_id': form_data.get('chat_id', None),
         },
     }
+
+    # The inlet reads the chat's masking toggle from `metadata.features`. Without
+    # it the inlet falls back to the stored preference or the instance default.
+    request_pii = resolve_request_pii_masking(form_data)
+    if request_pii is not None:
+        features = payload['metadata'].get('features')
+        payload['metadata']['features'] = {
+            **(features if isinstance(features, dict) else {}),
+            'pii_masking': request_pii,
+        }
 
     # Process the payload through the pipeline
     try:

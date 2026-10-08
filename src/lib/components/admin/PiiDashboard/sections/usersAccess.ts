@@ -1,5 +1,10 @@
 import type { MetricRow } from '$lib/apis/langfuse';
-import { getStoredPiiMasking, type StoredPiiMasking } from '$lib/utils/pii';
+import {
+	getStoredPiiMasking,
+	preferenceOf,
+	type PiiMaskingPreference,
+	type StoredPiiMasking
+} from '$lib/utils/pii';
 import { grantedModelIds, type ModelRecord } from '../modelAccess';
 import { normalizeUserKey } from './costAnalytics';
 
@@ -194,12 +199,11 @@ export function broadPolicyGroupCount(groups: GroupRecord[]): number {
 /**
  * What the masking column states about one user.
  *
- * `default` / `default_off` both mean the user never chose — which one applies
- * depends on the served `PII_ACTIVE` default (see `maskingStateOf`), not a fixed
- * "unset is always protected" assumption. Only `off` and `default_off` are a
- * risk; `enforced`, `default` and `on` are not.
+ * `default-on` and `default-off` mean the user never chose and follows the
+ * instance default. `off` and `default-off` are the states that leave a user
+ * unmasked.
  */
-export type MaskingState = 'enforced' | 'default' | 'default_off' | 'on' | 'off';
+export type MaskingState = 'enforced' | 'default-on' | 'default-off' | 'on' | 'off';
 
 export type UserRow = {
 	id: string;
@@ -213,6 +217,8 @@ export type UserRow = {
 	/** Masked by something other than the addressed team's policy. See `AccessUser`. */
 	maskedByOtherPolicy: boolean;
 	masking: MaskingState;
+	/** What the user stored, as the three choices an admin can set. */
+	preference: PiiMaskingPreference;
 	cost: number;
 	grantedCount: number;
 	allModels: boolean;
@@ -439,10 +445,7 @@ export function buildRows(
 	users: AccessUser[],
 	metricRows: MetricRow[],
 	catalogue: ModelCatalogue = { models: [], truncated: false },
-	// The served PII_ACTIVE default (same value getPiiMaskingDefault() falls
-	// back to on the frontend) — an explicit parameter, not a config-store
-	// read, so this module stays pure and unit-testable without a store mock.
-	servedDefault = true
+	instanceDefault: boolean = true
 ): UserRow[] {
 	const owner = claimKeys(users);
 	const cost = new Array<number>(users.length).fill(0);
@@ -461,6 +464,7 @@ export function buildRows(
 
 	return users.map((u, index) => {
 		const grantedCount = grantedModelIds(u, catalogue.models).size;
+		const stored = getStoredPiiMasking(u.settings?.ui ?? {});
 		return {
 			id: u.id,
 			name: u.name,
@@ -470,11 +474,8 @@ export function buildRows(
 			enforced: u.pii_masking_enforced === true,
 			policyGroupIds: u.pii_policy_group_ids ?? [],
 			maskedByOtherPolicy: u.masked_by_other_policy === true,
-			masking: maskingStateOf(
-				u.pii_masking_enforced === true,
-				getStoredPiiMasking(u.settings?.ui ?? {}),
-				servedDefault
-			),
+			masking: maskingStateOf(u.pii_masking_enforced === true, stored, instanceDefault),
+			preference: preferenceOf(stored),
 			cost: cost[index],
 			grantedCount,
 			allModels: !catalogue.truncated && total > 0 && grantedCount === total
@@ -486,35 +487,31 @@ export function buildRows(
  * The masking state shown for one user.
  *
  * ⚠️ Policy is checked FIRST and unconditionally. Under an enforced policy the
- * effective value is ON no matter what the user stored, so `off`/`default_off`
+ * effective value is ON no matter what the user stored, so `off`/`default-off`
  * must be unreachable — otherwise the governance table reports a risk that does
  * not exist, which is exactly the contradiction this column was rebuilt to remove.
  *
- * `unset` maps to `default` or `default_off` depending on `servedDefault`
- * (the backend's `PII_ACTIVE`, same source `getPiiMaskingDefault()` reads on
- * the frontend and `_resolve_pii_masking_decision()` falls back to on the
- * backend) — an absent valve means the backend sends no key, and the pipeline
- * masks or doesn't depending on that served default, not unconditionally on.
+ * `unset` follows the instance default and maps to `default-on` or
+ * `default-off`, never to `off`.
  */
 export function maskingStateOf(
 	enforced: boolean,
 	stored: StoredPiiMasking,
-	servedDefault: boolean
+	instanceDefault: boolean
 ): MaskingState {
 	if (enforced) return 'enforced';
-	if (stored === 'unset') return servedDefault ? 'default' : 'default_off';
+	if (stored === 'unset') return instanceDefault ? 'default-on' : 'default-off';
 	return stored ? 'on' : 'off';
 }
 
 /**
  * Sort rank for the masking column: risk first.
  *
- * Ascending puts `off` and `default_off` at the top — both are states an admin
- * needs to look at, tied for the same risk tier. Mirrors the previous boolean
- * ordering, where `false` sorted first.
+ * Ascending puts the unmasked states at the top, a user's own `off` before an
+ * inherited `default-off`.
  */
 export function maskingRank(state: MaskingState): number {
-	return { off: 0, default_off: 0, default: 1, on: 2, enforced: 3 }[state];
+	return { off: 0, 'default-off': 1, 'default-on': 2, on: 3, enforced: 4 }[state];
 }
 
 /** How many rows one page of the table shows. */
@@ -596,6 +593,24 @@ export function pageRange(
  */
 export function modelsCountKey(count: number): string {
 	return count === 1 ? '1 model' : '{{count}} models';
+}
+
+/** Shown after an admin changes masking: an open tab reads the setting only on load. */
+export const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
+
+/**
+ * The i18n key that counts who a default of Off unmasks. A truncated directory
+ * lists only some users, so the count is stated as a lower bound.
+ */
+export function defaultOffCountKey(count: number, truncated: boolean): string {
+	if (truncated) {
+		return count === 1
+			? 'At least 1 user who has not chosen will send personal data to the AI model unmasked.'
+			: 'At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.';
+	}
+	return count === 1
+		? '1 user who has not chosen will send personal data to the AI model unmasked.'
+		: '{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.';
 }
 
 /**

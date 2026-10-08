@@ -40,6 +40,12 @@ from open_webui.models.users import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
+from open_webui.models.pii_policy_audit import (
+    EVENT_DEFAULT_DISABLED,
+    EVENT_DEFAULT_ENABLED,
+    EVENT_PREFERENCE_SET,
+    PiiPolicyAudits,
+)
 from open_webui.models.tools import Tools
 from open_webui.socket.main import disconnect_user_sessions
 from open_webui.utils.access_control import (
@@ -49,6 +55,13 @@ from open_webui.utils.access_control import (
 )
 from open_webui.config import PII_MASKING_ENFORCED_PERMISSION
 from open_webui.utils.pii_policy import group_enforces_pii_masking
+from open_webui.routers.pipelines import resolve_pii_masking_enforced
+from open_webui.utils.pii_masking_preference import (
+    PiiMaskingPreference,
+    settings_dict,
+    ui_keeping_stored_pii,
+    ui_with_pii_preference,
+)
 from open_webui.utils.auth import (
     get_admin_user,
     get_password_hash,
@@ -690,6 +703,10 @@ async def update_user_settings_by_session_user(
         if isinstance(ui_notifications, dict):
             ui_notifications.pop('webhook_url', None)
 
+    # The masking preference changes only through the dedicated routes below.
+    ui = updated_user_settings.get('ui')
+    updated_user_settings['ui'] = ui_keeping_stored_pii(ui if isinstance(ui, dict) else {}, user.settings)
+
     user = await Users.update_user_settings_by_id(user.id, updated_user_settings, db=db)
     if user:
         await publish_event(
@@ -704,6 +721,91 @@ async def update_user_settings_by_session_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.USER_NOT_FOUND,
         )
+
+
+############################
+# PII masking default and preference
+############################
+
+
+class PiiMaskingPreferenceForm(BaseModel):
+    preference: PiiMaskingPreference
+
+
+class PiiMaskingDefaultForm(BaseModel):
+    enabled: bool
+
+
+def _pii_enforced_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=ERROR_MESSAGES.DEFAULT('PII masking is enforced for this user by a group policy.'),
+    )
+
+
+async def _write_pii_preference(request: Request, actor, subject, preference, db: AsyncSession) -> UserSettings:
+    """Store one user's preference. Callers check enforcement first."""
+    ui = ui_with_pii_preference(settings_dict(subject.settings).get('ui'), preference)
+    updated = await Users.update_user_settings_by_id(subject.id, {'ui': ui}, db=db)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.USER_NOT_FOUND)
+    await publish_event(request, EVENTS.USER_SETTINGS_UPDATED, actor=actor, subject_id=subject.id)
+    return updated.settings
+
+
+@router.post('/pii-masking/default')
+async def set_pii_masking_default(
+    request: Request,
+    form_data: PiiMaskingDefaultForm,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    # The audit row is written first; if it fails, the default is not changed.
+    await PiiPolicyAudits.insert_event(
+        event_type=EVENT_DEFAULT_ENABLED if form_data.enabled else EVENT_DEFAULT_DISABLED,
+        actor_user_id=user.id,
+        actor_email=user.email,
+        db=db,
+    )
+    request.app.state.config.PII_MASKING_DEFAULT_ENABLED = form_data.enabled
+    return {'enabled': form_data.enabled}
+
+
+@router.post('/user/pii-masking', response_model=UserSettings)
+async def set_own_pii_masking(
+    request: Request,
+    form_data: PiiMaskingPreferenceForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    if await resolve_pii_masking_enforced(request, user):
+        raise _pii_enforced_error()
+    return await _write_pii_preference(request, user, user, form_data.preference, db)
+
+
+@router.post('/{user_id}/pii-masking', response_model=UserSettings)
+async def set_user_pii_masking(
+    request: Request,
+    user_id: str,
+    form_data: PiiMaskingPreferenceForm,
+    user=Depends(get_admin_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    subject = await Users.get_user_by_id(user_id, db=db)
+    if not subject:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.USER_NOT_FOUND)
+    if await resolve_pii_masking_enforced(request, subject):
+        raise _pii_enforced_error()
+    # No record, no change: the audit write runs before the settings write.
+    await PiiPolicyAudits.insert_event(
+        event_type=EVENT_PREFERENCE_SET,
+        user_id=subject.id,
+        value=form_data.preference,
+        actor_user_id=user.id,
+        actor_email=user.email,
+        db=db,
+    )
+    return await _write_pii_preference(request, user, subject, form_data.preference, db)
 
 
 ############################

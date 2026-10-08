@@ -1,5 +1,8 @@
 """Audit log for administrative mutations of the team PII masking policy.
 
+The table also records changes to the instance-wide masking default and an
+admin setting one user's masking preference. Those rows have no group.
+
 ⚠️ This is deliberately NOT the PII *detection* audit trail. That one records PII
 events (what was masked, when, in which chat) and lives with the pipeline; this
 one records *administrative mutations* (who turned enforcement on, for which
@@ -40,11 +43,20 @@ EVENT_POLICY_DISABLED = 'policy_disabled'
 EVENT_MEMBER_ADDED = 'member_added'
 EVENT_MEMBER_REMOVED = 'member_removed'
 
+# Changes to masking for users who are not enforced: the instance default, and
+# an admin setting one user's preference. Neither belongs to a group.
+EVENT_DEFAULT_ENABLED = 'default_enabled'
+EVENT_DEFAULT_DISABLED = 'default_disabled'
+EVENT_PREFERENCE_SET = 'preference_set'
+
 # The policy events are about a group; the member events are about one person's
 # membership of it. `user_id` is required for exactly the latter pair.
 POLICY_EVENT_TYPES = frozenset({EVENT_POLICY_ENABLED, EVENT_POLICY_DISABLED})
 MEMBER_EVENT_TYPES = frozenset({EVENT_MEMBER_ADDED, EVENT_MEMBER_REMOVED})
-EVENT_TYPES = POLICY_EVENT_TYPES | MEMBER_EVENT_TYPES
+DEFAULT_EVENT_TYPES = frozenset({EVENT_DEFAULT_ENABLED, EVENT_DEFAULT_DISABLED})
+GROUP_EVENT_TYPES = POLICY_EVENT_TYPES | MEMBER_EVENT_TYPES
+PREFERENCE_VALUES = frozenset({'default', 'on', 'off'})
+EVENT_TYPES = GROUP_EVENT_TYPES | DEFAULT_EVENT_TYPES | {EVENT_PREFERENCE_SET}
 
 # Both are removals from protection, so both must say why. Turning protection ON
 # exposes nobody, so there `reason` is free.
@@ -80,11 +92,12 @@ REASON_LEFT_TEAM = (
 
 def validate_pii_policy_event(
     event_type: str,
-    group_id: str,
+    group_id: Optional[str],
     actor_user_id: str,
     actor_email: str,
     user_id: Optional[str] = None,
     reason: Optional[str] = None,
+    value: Optional[str] = None,
 ) -> None:
     """Check the invariants of one audit row. Raises `ValueError` on a violation.
 
@@ -106,8 +119,20 @@ def validate_pii_policy_event(
     if event_type in REASON_REQUIRED_EVENT_TYPES and not (reason or '').strip():
         raise ValueError(f'{event_type} requires a reason')
 
-    if not group_id:
+    if event_type in GROUP_EVENT_TYPES and not group_id:
         raise ValueError('group_id is required')
+
+    if event_type not in GROUP_EVENT_TYPES and group_id:
+        raise ValueError(f'{event_type} must not carry group_id')
+
+    if event_type in DEFAULT_EVENT_TYPES and user_id:
+        raise ValueError(f'{event_type} must not carry user_id')
+
+    if event_type == EVENT_PREFERENCE_SET:
+        if not user_id:
+            raise ValueError(f'{event_type} requires user_id')
+        if value not in PREFERENCE_VALUES:
+            raise ValueError(f'{event_type} requires value in {sorted(PREFERENCE_VALUES)}')
 
     if not actor_user_id or not actor_email:
         raise ValueError('actor_user_id and actor_email are required')
@@ -125,11 +150,11 @@ class PiiPolicyAudit(Base):
 
     event_type = Column(Text, nullable=False)
 
-    group_id = Column(Text, nullable=False)
-    # NULL for policy_*, required for member_* — enforced by insert_event, not
-    # by the DDL: a partial constraint is not portable across the databases this
-    # runs on, so the invariant is guarded at the single writer and covered by
-    # tests.
+    # NULL for events that are not about a group.
+    group_id = Column(Text, nullable=True)
+    # NULL for policy_* and default_*, required for member_* and preference_set.
+    # `insert_event` enforces this, not the DDL: a partial constraint is not
+    # portable across the databases this runs on.
     user_id = Column(Text, nullable=True)
 
     actor_user_id = Column(Text, nullable=False)
@@ -138,6 +163,8 @@ class PiiPolicyAudit(Base):
     actor_email = Column(Text, nullable=False)
 
     reason = Column(Text, nullable=True)
+    # The preference written by `preference_set`; NULL otherwise.
+    value = Column(Text, nullable=True)
 
     event_ts = Column(BigInteger, nullable=False)
 
@@ -149,11 +176,12 @@ class PiiPolicyAudit(Base):
 class PiiPolicyAuditModel(BaseModel):
     id: str
     event_type: str
-    group_id: str
+    group_id: Optional[str] = None
     user_id: Optional[str] = None
     actor_user_id: str
     actor_email: str
     reason: Optional[str] = None
+    value: Optional[str] = None
     event_ts: int
 
     model_config = ConfigDict(from_attributes=True)
@@ -168,11 +196,12 @@ class PiiPolicyAuditTable:
     async def insert_event(
         self,
         event_type: str,
-        group_id: str,
         actor_user_id: str,
         actor_email: str,
+        group_id: Optional[str] = None,
         user_id: Optional[str] = None,
         reason: Optional[str] = None,
+        value: Optional[str] = None,
         db: Optional[AsyncSession] = None,
     ) -> PiiPolicyAuditModel:
         """Record one administrative mutation. Raises rather than returning None.
@@ -192,6 +221,7 @@ class PiiPolicyAuditTable:
             actor_email=actor_email,
             user_id=user_id,
             reason=reason,
+            value=value,
         )
 
         row = PiiPolicyAudit(
@@ -202,6 +232,7 @@ class PiiPolicyAuditTable:
             actor_user_id=actor_user_id,
             actor_email=actor_email,
             reason=(reason or '').strip() or None,
+            value=value,
             event_ts=int(time.time()),
         )
 

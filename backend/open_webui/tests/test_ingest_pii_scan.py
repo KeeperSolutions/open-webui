@@ -512,23 +512,75 @@ def _user_with_valve(pii_masking_enabled=None, filter_id='pii_filter'):
 
 class TestUserPiiMaskingEnabledFallback:
     """_user_pii_masking_enabled() mirrors getPiiMaskingDefault() on the frontend,
-    including its PII_ACTIVE fallback for a user with no stored valve value yet."""
+    including its instance-default fallback for a user with no stored valve value yet."""
 
-    def test_falls_back_to_pii_active_true(self, monkeypatch):
+    @staticmethod
+    def _request(default):
+        request = MagicMock()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        return request
+
+    def test_falls_back_to_the_instance_default_true(self):
         import open_webui.routers.retrieval as R
 
-        monkeypatch.setattr(R, 'PII_ACTIVE', True)
-        assert R._user_pii_masking_enabled(_user_with_valve()) is True
+        assert R._user_pii_masking_enabled(self._request(True), _user_with_valve()) is True
 
-    def test_falls_back_to_pii_active_false(self, monkeypatch):
+    def test_falls_back_to_the_instance_default_false(self):
         import open_webui.routers.retrieval as R
 
-        monkeypatch.setattr(R, 'PII_ACTIVE', False)
-        assert R._user_pii_masking_enabled(_user_with_valve()) is False
+        assert R._user_pii_masking_enabled(self._request(False), _user_with_valve()) is False
 
-    def test_stored_valve_value_wins_over_pii_active(self, monkeypatch):
+    def test_stored_valve_value_wins_over_the_instance_default(self):
         import open_webui.routers.retrieval as R
 
-        monkeypatch.setattr(R, 'PII_ACTIVE', False)
         user = _user_with_valve(pii_masking_enabled=True)
-        assert R._user_pii_masking_enabled(user) is True
+        assert R._user_pii_masking_enabled(self._request(False), user) is True
+
+
+class TestIngestScanFollowsEnforcement:
+    """The scan runs when masking applies to the user. Group enforcement wins over
+    an explicit OFF (the locked chat toggle still sends its underlying value) and
+    over an instance default of OFF."""
+
+    @staticmethod
+    def _scans(monkeypatch, *, enforced, flag, default):
+        import open_webui.routers.retrieval as R
+
+        scans = []
+
+        async def fake_update(file_id, data, db=None):
+            return SimpleNamespace(id=file_id)
+
+        async def fake_scan(request, content, *, file_id, user, models=None, features=None):
+            scans.append(file_id)
+            return []
+
+        monkeypatch.setattr(R.Files, 'update_file_data_by_id', staticmethod(fake_update))
+        monkeypatch.setattr(R, 'scan_file_content_for_pii', fake_scan)
+        request = MagicMock()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        with patch(
+            'open_webui.routers.pipelines.resolve_pii_masking_enforced',
+            AsyncMock(return_value=enforced),
+        ):
+            asyncio.run(
+                R._store_ingest_pii_detections(
+                    request, 'f1', 'OIB 11111111111', _user(), pii_masking_enabled=flag
+                )
+            )
+        return scans
+
+    def test_enforced_user_is_scanned_when_the_default_is_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=True, flag=None, default=False) == ['f1']
+
+    def test_enforced_user_is_scanned_when_the_locked_toggle_sends_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=True, flag=False, default=True) == ['f1']
+
+    def test_unenforced_user_with_an_explicit_off_is_not_scanned(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=False, default=True) == []
+
+    def test_unenforced_user_follows_an_instance_default_of_off(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=None, default=False) == []
+
+    def test_unenforced_user_follows_an_instance_default_of_on(self, monkeypatch):
+        assert self._scans(monkeypatch, enforced=False, flag=None, default=True) == ['f1']

@@ -367,3 +367,55 @@ class TestGenerateTitlePersistedValue:
         content = res["choices"][0]["message"]["content"]
         # Outlet hung → bounded out → masked title returned, no crash.
         assert json.loads(content)["title"] == "Chat with [PERSON_1]"
+
+
+def _autocomplete_request():
+    request = MagicMock()
+    request.app.state.config.ENABLE_AUTOCOMPLETE_GENERATION = True
+    request.app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = 0
+    request.app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = ""
+    request.app.state.MODELS = {"gpt-4": {"id": "gpt-4"}}
+    request.state = SimpleNamespace()
+    return request
+
+
+def _autocomplete_inlet_payload(form_data):
+    captured = []
+
+    async def _inlet(request, payload, user, models):
+        captured.append(payload)
+        return payload
+
+    async def _gen(request, form_data, user):
+        return {"choices": [{"message": {"role": "assistant", "content": "{}"}}]}
+
+    patches = [
+        patch.object(tasks, "process_pipeline_inlet_filter", AsyncMock(side_effect=_inlet)),
+        patch.object(tasks, "generate_chat_completion", AsyncMock(side_effect=_gen)),
+        patch.object(tasks, "get_task_model_id", MagicMock(return_value="gpt-4")),
+        patch.object(tasks, "autocomplete_generation_template", AsyncMock(return_value="prompt")),
+        patch.object(tasks, "_report_task_usage_and_restore", AsyncMock(return_value=None)),
+    ]
+    _apply_patches(patches, lambda: _run(
+        tasks.generate_autocompletion(_autocomplete_request(), form_data, _user())
+    ))
+    return captured[0]
+
+
+class TestAutocompleteMaskingFlag:
+    """Autocomplete passes the chat's masking toggle to the inlet, which reads it from the payload."""
+
+    def test_chat_flag_reaches_the_inlet(self):
+        from open_webui.routers.pipelines import resolve_request_pii_masking
+
+        for flag in (True, False):
+            payload = _autocomplete_inlet_payload(
+                {"model": "gpt-4", "prompt": "Hi", "features": {"pii_masking": flag}}
+            )
+            assert resolve_request_pii_masking(payload) is flag
+
+    def test_missing_flag_leaves_the_fallback_to_the_inlet(self):
+        from open_webui.routers.pipelines import resolve_request_pii_masking
+
+        payload = _autocomplete_inlet_payload({"model": "gpt-4", "prompt": "Hi"})
+        assert resolve_request_pii_masking(payload) is None

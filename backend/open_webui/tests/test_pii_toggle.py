@@ -155,18 +155,20 @@ class TestStoredSettingResolution:
         assert len(captured) == 1
         assert captured[0]["user"]["valves"]["pii_masking_enabled"] is False
 
-    def test_no_stored_setting_sends_empty_valves(self):
+    def test_no_stored_setting_sends_the_instance_default(self):
         captured = []
         payload = {"model": "gpt-4"}
         user = _make_user()  # settings=None
+        request = _make_request()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = True
 
         with _patch_session(captured):
             _run(process_pipeline_inlet_filter(
-                _make_request(), payload, user, _make_models()
+                request, payload, user, _make_models()
             ))
 
         assert len(captured) == 1
-        assert captured[0]["user"]["valves"] == {}
+        assert captured[0]["user"]["valves"] == {"pii_masking_enabled": True}
 
 
 # ---------------------------------------------------------------------------
@@ -480,7 +482,7 @@ class TestMetadataFeaturesFallback:
 
 
 # ---------------------------------------------------------------------------
-# PII_ACTIVE fallback — fail-closed connection-error check, when neither the
+# Instance default fallback — fail-closed connection-error check, when neither the
 # per-request override nor a stored valve sets pii_masking_enabled
 # ---------------------------------------------------------------------------
 
@@ -497,36 +499,37 @@ def _patch_session_raises(exc):
     return patch("open_webui.routers.pipelines.aiohttp.ClientSession", return_value=session_cm)
 
 
-class TestPiiActiveFallbackOnConnectionError:
+class TestInstanceDefaultFallbackOnConnectionError:
     """No explicit per-request choice (features omitted) and no stored valve -
-    the fail-closed connection-error guard must consult PII_ACTIVE, not a
-    hardcoded True, for whether masking was expected to begin with."""
+    the fail-closed connection-error guard must follow the instance default,
+    not a hardcoded True, for whether masking was expected to begin with."""
 
-    def test_refuses_when_pii_active_true(self):
-        import open_webui.routers.pipelines as P
+    @staticmethod
+    def _request(default):
+        request = _make_request()
+        request.app.state.config.PII_MASKING_DEFAULT_ENABLED = default
+        return request
+
+    def test_refuses_when_the_instance_default_is_on(self):
         from open_webui.routers.pipelines import PiiMaskingUnavailableError
 
         payload = {"model": "gpt-4"}  # no features at all
         user = _make_user()  # no stored setting either
 
-        with patch.object(P, "PII_ACTIVE", True), \
-             _patch_session_raises(ConnectionError("refused")):
+        with _patch_session_raises(ConnectionError("refused")):
             with pytest.raises(PiiMaskingUnavailableError):
                 _run(process_pipeline_inlet_filter(
-                    _make_request(), payload, user, _make_models()
+                    self._request(True), payload, user, _make_models()
                 ))
 
-    def test_passes_through_when_pii_active_false(self):
-        import open_webui.routers.pipelines as P
-
+    def test_passes_through_when_the_instance_default_is_off(self):
         payload = {"model": "gpt-4"}
         user = _make_user()
 
-        with patch.object(P, "PII_ACTIVE", False), \
-             _patch_session_raises(ConnectionError("refused")):
+        with _patch_session_raises(ConnectionError("refused")):
             # Must not raise - masking was never expected by default, so a
             # connection error has nothing to fail closed on.
             result = _run(process_pipeline_inlet_filter(
-                _make_request(), payload, user, _make_models()
+                self._request(False), payload, user, _make_models()
             ))
         assert result == payload

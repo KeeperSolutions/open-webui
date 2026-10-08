@@ -9,6 +9,8 @@ import { getPipelines, getPipelinesList } from '$lib/apis';
 import { config } from '$lib/stores';
 import {
 	getPiiMaskingDefault,
+	piiMaskingInstanceDefault,
+	preferenceOf,
 	isPiiPipelineConfigured,
 	resetPiiPipelineConfiguredCache,
 	scopeCardDetections,
@@ -173,11 +175,11 @@ describe('getPiiMaskingDefault', () => {
 	});
 });
 
-describe('getPiiMaskingDefault falls back to the served pii_active flag', () => {
+describe('getPiiMaskingDefault falls back to the served instance default', () => {
 	beforeEach(() => config.set(undefined));
 	afterEach(() => config.set(undefined));
 
-	it('defaults to true when pii_active is absent (older cached /api/config)', () => {
+	it('defaults to true when pii_masking_default is absent (older cached /api/config)', () => {
 		setConfig({});
 		expect(getPiiMaskingDefault({})).toBe(true);
 	});
@@ -186,18 +188,18 @@ describe('getPiiMaskingDefault falls back to the served pii_active flag', () => 
 		expect(getPiiMaskingDefault({})).toBe(true);
 	});
 
-	it('reads true from the served pii_active flag', () => {
-		setConfig({ pii_active: true });
+	it('reads true from the served instance default', () => {
+		setConfig({ pii_masking_default: true });
 		expect(getPiiMaskingDefault({})).toBe(true);
 	});
 
-	it('reads false from the served pii_active flag', () => {
-		setConfig({ pii_active: false });
+	it('reads false from the served instance default', () => {
+		setConfig({ pii_masking_default: false });
 		expect(getPiiMaskingDefault({})).toBe(false);
 	});
 
-	it('a stored valve value still wins over pii_active', () => {
-		setConfig({ pii_active: false });
+	it('a stored valve value still wins over the instance default', () => {
+		setConfig({ pii_masking_default: false });
 		expect(
 			getPiiMaskingDefault({
 				pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } }
@@ -485,5 +487,30 @@ describe('piiIngestScanEnabled', () => {
 		// times waiting for a scan that never runs.
 		setConfig({ pii_ingest_scan: 'yes' });
 		expect(piiIngestScanEnabled()).toBe(false);
+	});
+});
+
+describe('instance default', () => {
+	beforeEach(() => config.set(undefined as any));
+
+	it('is ON unless the config says false', () => {
+		expect(piiMaskingInstanceDefault()).toBe(true);
+		config.set({ features: { pii_masking_default: false } } as any);
+		expect(piiMaskingInstanceDefault()).toBe(false);
+		config.set({ features: { pii_masking_default: 'no' } } as any);
+		expect(piiMaskingInstanceDefault()).toBe(true);
+	});
+
+	it('applies only to users who never chose', () => {
+		config.set({ features: { pii_masking_default: false } } as any);
+		expect(getPiiMaskingDefault({})).toBe(false);
+		const on = { pipelines: { valves: { pii_filter: { pii_masking_enabled: true } } } };
+		expect(getPiiMaskingDefault(on)).toBe(true);
+	});
+
+	it('maps stored values to the three preferences', () => {
+		expect(preferenceOf('unset')).toBe('default');
+		expect(preferenceOf(true)).toBe('on');
+		expect(preferenceOf(false)).toBe('off');
 	});
 });

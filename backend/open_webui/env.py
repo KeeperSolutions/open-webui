@@ -996,11 +996,19 @@ PII_FILTER_IDS = {
     if fid.strip()
 }
 
-# Global default for PII masking. False turns masking OFF by default for every
-# user who hasn't made an explicit choice (team/group policy, if any, still
-# overrides this; an explicit per-chat toggle is always respected). Mirrors
-# the frontend fallback in getPiiMaskingDefault() (src/lib/utils/pii.ts).
-PII_ACTIVE = os.getenv("PII_ACTIVE", "True").lower() == "true"
+def parse_pii_masking_default(value: str) -> bool:
+    """Read the masking default from the environment. Must be "true" or "false" (any case)."""
+    normalized = value.strip().lower()
+    if normalized not in ("true", "false"):
+        raise ValueError(f'PII_ACTIVE must be "true" or "false" (case-insensitive), got {value!r}.')
+    return normalized == "true"
+
+
+# Initial value of the masking default for users who never chose. Admins change
+# it later from the PII dashboard; the saved value then replaces this one.
+# Enforced masking and a per-chat toggle still take precedence over it.
+# Any other value stops the server at startup.
+PII_ACTIVE = parse_pii_masking_default(os.getenv("PII_ACTIVE", "True"))
 
 
 ####################################
