@@ -9,7 +9,12 @@
 	import { config } from '$lib/stores';
 	import { getStoredPiiMasking } from '$lib/utils/pii';
 	import Toggle from './parts/Toggle.svelte';
-	import { defaultOffCountKey, maskingStateOf, type AccessUser } from './sections/usersAccess';
+	import {
+		defaultOffCountKey,
+		maskingStateOf,
+		RELOAD_NOTE,
+		type AccessUser
+	} from './sections/usersAccess';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
@@ -24,9 +29,6 @@
 
 	// Anything but an explicit `false` reads as ON.
 	$: enabled = $config?.features?.pii_masking_default !== false;
-
-	// An open tab reads the default only on load.
-	const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
 
 	let saving = false;
 	let confirmOff = false;
@@ -66,7 +68,7 @@
 
 <div
 	data-testid="pii-default-control"
-	title={$i18n.t('PII masking for users who have not chosen')}
+	title={$i18n.t('PII masking for users who have not chosen a setting')}
 	class="flex items-center gap-2 rounded-full border border-pii-line bg-pii-white py-[7px] pr-2 pl-3 text-[13px] font-medium leading-[1.55] whitespace-nowrap text-pii-ink"
 >
 	<!-- Same padding, border and line height as PeriodPill, so both are the same
@@ -78,7 +80,7 @@
 		<Toggle
 			on={enabled}
 			disabled={saving || disabled}
-			ariaLabel={$i18n.t('PII masking for users who have not chosen')}
+			ariaLabel={$i18n.t('PII masking for users who have not chosen a setting')}
 			on:click={toggle}
 		/>
 	</span>

@@ -595,6 +595,9 @@ export function modelsCountKey(count: number): string {
 	return count === 1 ? '1 model' : '{{count}} models';
 }
 
+/** Shown after an admin changes masking: an open tab reads the setting only on load. */
+export const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
+
 /**
  * The i18n key that counts who a default of Off unmasks. A truncated directory
  * lists only some users, so the count is stated as a lower bound.
@@ -603,11 +606,11 @@ export function defaultOffCountKey(count: number, truncated: boolean): string {
 	if (truncated) {
 		return count === 1
 			? 'At least 1 user who has not chosen will send personal data to the AI model unmasked.'
-			: 'At least {{count}} users who have not chosen will send personal data to the AI model unmasked.';
+			: 'At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.';
 	}
 	return count === 1
 		? '1 user who has not chosen will send personal data to the AI model unmasked.'
-		: '{{count}} users who have not chosen will send personal data to the AI model unmasked.';
+		: '{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.';
 }
 
 /**

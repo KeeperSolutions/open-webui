@@ -738,7 +738,7 @@ class PiiMaskingDefaultForm(BaseModel):
 
 def _pii_enforced_error() -> HTTPException:
     return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
+        status_code=status.HTTP_403_FORBIDDEN,
         detail=ERROR_MESSAGES.DEFAULT('PII masking is enforced for this user by a group policy.'),
     )
 

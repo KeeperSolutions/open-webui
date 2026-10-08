@@ -130,7 +130,7 @@ async def test_enforced_user_is_refused_and_nothing_is_written(env):
         await users_router.set_user_pii_masking(
             _request(), "u1", users_router.PiiMaskingPreferenceForm(preference="off"), user=ADMIN, db=env
         )
-    assert exc.value.status_code == 409
+    assert exc.value.status_code == 403
     assert stored_pii_masking((await _row(env, "u1")).settings) is None
     assert await _audit_rows(env) == []
 
@@ -139,7 +139,7 @@ async def test_enforced_user_is_refused_and_nothing_is_written(env):
         await users_router.set_own_pii_masking(
             _request(), users_router.PiiMaskingPreferenceForm(preference="off"), user=own, db=env
         )
-    assert exc.value.status_code == 409
+    assert exc.value.status_code == 403
     assert stored_pii_masking((await _row(env, "u1")).settings) is None
 
 

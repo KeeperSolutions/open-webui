@@ -3247,13 +3247,13 @@
 	"Off — default": "",
 	"PII Masking": "",
 	"Reset to default": "",
-	"PII masking for users who have not chosen": "",
+	"PII masking for users who have not chosen a setting": "",
 	"Default PII masking updated.": "",
 	"Turn off PII masking by default?": "",
 	"1 user who has not chosen will send personal data to the AI model unmasked.": "",
-	"{{count}} users who have not chosen will send personal data to the AI model unmasked.": "",
+	"{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.": "",
 	"At least 1 user who has not chosen will send personal data to the AI model unmasked.": "",
-	"At least {{count}} users who have not chosen will send personal data to the AI model unmasked.": "",
+	"At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.": "",
 	"Users can still turn masking on themselves, and enforced users stay masked.": "",
 	"Users with the app already open get the change after they reload.": ""
 }

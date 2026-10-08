@@ -19,14 +19,12 @@ import { config } from '$lib/stores';
 import { toast } from 'svelte-sonner';
 
 import DefaultMaskingToggle from './DefaultMaskingToggle.svelte';
-import type { AccessUser } from './sections/usersAccess';
+import { RELOAD_NOTE, type AccessUser } from './sections/usersAccess';
 
 const i18n = readable({
 	t: (k: string, vars?: Record<string, unknown>) =>
 		vars ? k.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? '')) : k
 });
-
-const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
 
 const account = (over: Partial<AccessUser> = {}): AccessUser => ({
 	id: 'u1',
@@ -117,7 +115,9 @@ describe('the masking default toggle', () => {
 		toggle().click();
 		await flush();
 
-		expect(document.body.textContent).toContain('At least 2 users who have not chosen');
+		expect(document.body.textContent).toContain(
+			'At least 2 users who have not chosen a masking setting will send personal data'
+		);
 	});
 
 	it('changes nothing when the confirmation is cancelled', async () => {

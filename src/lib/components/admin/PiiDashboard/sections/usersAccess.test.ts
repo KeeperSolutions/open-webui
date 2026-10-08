@@ -1419,7 +1419,7 @@ describe('defaultOffCountKey', () => {
 			'1 user who has not chosen will send personal data to the AI model unmasked.'
 		);
 		expect(defaultOffCountKey(2, false)).toBe(
-			'{{count}} users who have not chosen will send personal data to the AI model unmasked.'
+			'{{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.'
 		);
 	});
 
@@ -1428,7 +1428,7 @@ describe('defaultOffCountKey', () => {
 			'At least 1 user who has not chosen will send personal data to the AI model unmasked.'
 		);
 		expect(defaultOffCountKey(5, true)).toBe(
-			'At least {{count}} users who have not chosen will send personal data to the AI model unmasked.'
+			'At least {{count}} users who have not chosen a masking setting will send personal data to the AI model unmasked.'
 		);
 	});
 });

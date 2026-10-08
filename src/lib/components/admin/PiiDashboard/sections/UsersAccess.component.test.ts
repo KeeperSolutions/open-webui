@@ -22,7 +22,7 @@ import { config } from '$lib/stores';
 import { toast } from 'svelte-sonner';
 
 import UsersAccess from './UsersAccess.svelte';
-import type { AccessUser } from './usersAccess';
+import { RELOAD_NOTE, type AccessUser } from './usersAccess';
 
 // Interpolates, because a stub that returns the raw key would hide group names
 // rendered through placeholders such as `Enforced via {{groups}}`.
@@ -30,8 +30,6 @@ const i18n = readable({
 	t: (k: string, vars?: Record<string, unknown>) =>
 		vars ? k.replace(/\{\{(\w+)\}\}/g, (_m, name) => String(vars[name] ?? '')) : k
 });
-
-const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
 
 const account = (over: Partial<AccessUser> = {}): AccessUser => ({
 	id: 'u1',

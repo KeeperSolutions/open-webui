@@ -24,6 +24,7 @@
 		maskingRank,
 		pageOf,
 		pageRange,
+		RELOAD_NOTE,
 		ROWS_PER_PAGE,
 		rowActionFor,
 		type AccessUser,
@@ -209,9 +210,6 @@
 	 * explicit `false` reads as ON.
 	 */
 	$: instanceDefault = $config?.features?.pii_masking_default !== false;
-
-	// An open tab reads the default and the user's preference only on load.
-	const RELOAD_NOTE = 'Users with the app already open get the change after they reload.';
 
 	let savingPreference: string | null = null;
 

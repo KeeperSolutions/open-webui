@@ -74,14 +74,17 @@ def test_ingest_scan_uses_the_instance_default():
     assert retrieval._user_pii_masking_enabled(request, _make_user()) is False
 
 
-def test_only_false_turns_the_env_default_off():
-    """Any value other than "false" keeps masking on, so a typo cannot disable it."""
+def test_the_env_default_must_be_true_or_false():
+    """Only "true" and "false" (any case, trimmed) are accepted, so a typo stops startup."""
     from open_webui.env import parse_pii_masking_default
 
-    for value in ("True", "true", "1", "yes", "on", " True ", ""):
+    for value in ("true", "TRUE", " True "):
         assert parse_pii_masking_default(value) is True
     for value in ("false", "FALSE", " False "):
         assert parse_pii_masking_default(value) is False
+    for value in ("", "1", "0", "yes", "no", "on", "flase", "tru"):
+        with pytest.raises(ValueError, match="PII_ACTIVE"):
+            parse_pii_masking_default(value)
 
 
 def _inlet_enforced(user, default, payload=None):
