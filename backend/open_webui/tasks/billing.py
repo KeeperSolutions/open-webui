@@ -19,6 +19,27 @@ def _seconds_until_next_midnight_utc() -> float:
     return (tomorrow - now).total_seconds()
 
 
+def _sync_and_log(since: datetime.datetime, *, deep_rescan: bool = False) -> int:
+    """Run one ledger sync and log how many fetched observations were inserted and how many ignored.
+
+    An ignored observation was already in the ledger. Only counts are logged.
+    """
+    from open_webui.langfuse import observations
+
+    observations.reset_fetch_stats()
+    inserted = _sync_observations(since, deep_rescan=deep_rescan)
+    fetched = observations.last_fetch_count()
+    if fetched is not None:
+        log.info(
+            "[ledger-poller] %s: fetched=%d inserted=%d ignored=%d",
+            "rescan" if deep_rescan else "poll",
+            fetched,
+            inserted,
+            max(fetched - inserted, 0),
+        )
+    return inserted
+
+
 async def periodic_nightly_deep_rescan():
     """
     Async task that wakes daily at UTC midnight and runs a 7-day deep rescan of
@@ -40,7 +61,7 @@ async def periodic_nightly_deep_rescan():
             loop = asyncio.get_running_loop()
             rescan_since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
             log.info("[nightly-rescan] Starting deep rescan from %s.", rescan_since.isoformat())
-            await loop.run_in_executor(None, lambda: _sync_observations(rescan_since, deep_rescan=True))
+            await loop.run_in_executor(None, lambda: _sync_and_log(rescan_since, deep_rescan=True))
         except Exception as e:
             log.error(f"[nightly-rescan] Deep rescan failed: {e}")
 
@@ -383,7 +404,7 @@ async def periodic_ledger_poller():
 
             # 2-minute overlap to catch late-arriving Langfuse writes
             since = watermark - datetime.timedelta(minutes=2)
-            await loop.run_in_executor(None, _sync_observations, since)
+            await loop.run_in_executor(None, _sync_and_log, since)
 
             # Reload watermark from DB after sync
             max_ts = UsageLedgerDB.get_max_observed_at()

@@ -79,13 +79,22 @@ def patch_environment():
         yield
 
 
+def _reset_module_state():
+    for cache in (obs_module._missing_user_id_seen, obs_module._bad_cost_seen, obs_module._bad_start_time_seen):
+        cache.clear()
+    obs_module._missing_user_id_total = 0
+    obs_module._bad_cost_total = 0
+    obs_module._bad_start_time_total = 0
+    obs_module._rate_limit_giveups_total = 0
+    obs_module._usage_group_missing_total = 0
+    obs_module.reset_fetch_stats()
+
+
 @pytest.fixture(autouse=True)
-def reset_missing_user_id_state():
-    obs_module._missing_user_id_seen.clear()
-    obs_module._missing_user_id_total = 0
+def reset_module_state():
+    _reset_module_state()
     yield
-    obs_module._missing_user_id_seen.clear()
-    obs_module._missing_user_id_total = 0
+    _reset_module_state()
 
 
 class TestRequest:
@@ -446,6 +455,9 @@ class TestUserIdFromRow:
         spec.loader.exec_module(fresh)
         assert fresh._missing_user_id_total == 0
         assert len(fresh._missing_user_id_seen) == 0
+        assert (fresh._bad_cost_total, fresh._bad_start_time_total) == (0, 0)
+        assert (fresh._rate_limit_giveups_total, fresh._usage_group_missing_total) == (0, 0)
+        assert fresh.last_fetch_count() is None
 
     def test_counter_is_exact_under_concurrent_use(self):
         """Eight threads reporting distinct observations do not lose counts."""
@@ -502,10 +514,13 @@ class TestLedgerSyncReadsMappedRows:
         assert len(ledger.bulk_insert_ignore.call_args.args[0]) == 2
 
     def test_missing_usage_and_cost_reach_the_ledger_as_zero_tokens_and_no_cost(self):
-        row = make_v2_row(1)
-        del row["usageDetails"], row["totalCost"]
-        inserted = _run_sync(FakeLangfuse([make_v2_page([row])])).bulk_insert_ignore.call_args.args[0]
-        assert inserted[0]["tokens_total"] == 0 and inserted[0]["cost_usd"] is None and inserted[0]["cost_eur"] is None
+        """A row without usage fields among rows that have them is stored as before."""
+        bare = make_v2_row(1)
+        del bare["usageDetails"], bare["totalCost"]
+        page = make_v2_page([bare, make_v2_row(2)])
+        inserted = _run_sync(FakeLangfuse([page])).bulk_insert_ignore.call_args.args[0]
+        stored = {r["langfuse_observation_id"]: r for r in inserted}["0000000000000001"]
+        assert stored["tokens_total"] == 0 and stored["cost_usd"] is None and stored["cost_eur"] is None
 
     def test_cost_string_reaches_the_ledger_as_float(self):
         row = make_v2_row(1, totalCost="0.020292499999")
@@ -556,6 +571,278 @@ class TestLedgerSyncReadsMappedRows:
             with pytest.raises(RuntimeError, match="repeated cursor"):
                 tasks_mod._sync_observations(SINCE)
         ledger.bulk_insert_ignore.assert_not_called()
+
+
+class TestUsageGroupDriftGuard:
+    def _bare(self, n: int) -> dict:
+        row = make_v2_row(n)
+        del row["usageDetails"], row["totalCost"]
+        return row
+
+    def test_raises_when_no_row_has_usage_fields(self, caplog):
+        """A result where every row lacks usageDetails and totalCost means the group was not returned."""
+        fake = FakeLangfuse([make_v2_page([self._bare(1), self._bare(2)])])
+        with caplog.at_level("ERROR", logger="open_webui.langfuse.observations"):
+            expected = r"^Langfuse v2 response has no usage fields on any of 2 observations$"
+            with pytest.raises(RuntimeError, match=expected):
+                _fetch(fake)
+        assert obs_module._usage_group_missing_total == 1
+        assert "no usage fields on any of 2 observations (occurrences since start: 1)" in caplog.text
+
+    def test_counts_rows_over_all_pages(self):
+        fake = FakeLangfuse([make_v2_page([self._bare(1)], cursor="c1"), make_v2_page([self._bare(2), self._bare(3)])])
+        with pytest.raises(RuntimeError, match="any of 3 observations"):
+            _fetch(fake)
+
+    def test_one_row_with_usage_fields_is_enough(self):
+        assert len(_fetch(FakeLangfuse([make_v2_page([self._bare(1), make_v2_row(2)])]))) == 2
+
+    @pytest.mark.parametrize("keep", ["usageDetails", "totalCost"])
+    def test_either_key_alone_is_enough(self, keep):
+        row = self._bare(1)
+        row[keep] = {} if keep == "usageDetails" else None
+        assert len(_fetch(FakeLangfuse([make_v2_page([row])]))) == 1
+
+    def test_empty_result_does_not_raise(self):
+        assert _fetch(FakeLangfuse([make_v2_page([])])) == []
+        assert obs_module._usage_group_missing_total == 0
+
+    def test_the_request_asks_for_the_usage_group(self):
+        """The guard is only meaningful while the usage group is requested."""
+        fake = FakeLangfuse([make_v2_page([])])
+        _fetch(fake)
+        assert "usage" in fake.params(0)["fields"].split(",")
+
+    def test_nothing_is_inserted_when_the_guard_raises(self):
+        import open_webui.tasks.billing as tasks_mod
+
+        ledger = MagicMock()
+        fake = FakeLangfuse([make_v2_page([self._bare(1), self._bare(2)])])
+        with patch("open_webui.models.usage_ledger.UsageLedgerDB", ledger), \
+             patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=2.0), \
+             patch(GET, side_effect=fake.get):
+            with pytest.raises(RuntimeError):
+                tasks_mod._sync_observations(SINCE)
+        ledger.bulk_insert_ignore.assert_not_called()
+
+
+BAD_START_TIMES = [
+    "2026-11-16T16:31:18+00:00",
+    "1763310678",
+    "",
+    "not a time",
+    "2026-13-45T99:00:00Z",
+    "2026-01-01T10:00:01X",
+]
+
+
+class TestUnusableValueReports:
+    def test_non_numeric_cost_warns_with_counts_and_keeps_the_value(self, caplog):
+        """The report names counts only; the row is returned unchanged so the ledger result is the same."""
+        rows = [make_v2_row(1, totalCost="n/a"), make_v2_row(2), make_v2_row(3)]
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            results = _fetch(FakeLangfuse([make_v2_page(rows)]))
+        assert results[0]["calculatedTotalCost"] == "n/a"
+        assert "1 of 3 observations have a cost that is not a number" in caplog.text
+        assert "total since start: 1" in caplog.text
+        assert obs_module._bad_cost_total == 1 and obs_module._bad_start_time_total == 0
+
+    @pytest.mark.parametrize("cost", [None, 0, 0.5, "0.25", "5e-06"])
+    def test_numbers_and_null_cost_do_not_warn(self, cost, caplog):
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([make_v2_row(1, totalCost=cost)])]))
+        assert "not a number" not in caplog.text and obs_module._bad_cost_total == 0
+
+    @pytest.mark.parametrize("value", BAD_START_TIMES + [None, 7, ["x"]], ids=repr)
+    def test_unparseable_start_time_warns_with_counts_and_keeps_the_value(self, value, caplog):
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            results = _fetch(FakeLangfuse([make_v2_page([make_v2_row(1, startTime=value), make_v2_row(2)])]))
+        assert results[0]["startTime"] == value
+        assert "1 of 2 observations have a startTime that cannot be parsed" in caplog.text
+        assert obs_module._bad_start_time_total == 1 and obs_module._bad_cost_total == 0
+
+    def test_absent_start_time_warns(self, caplog):
+        row = make_v2_row(1)
+        del row["startTime"]
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert "cannot be parsed" in caplog.text and obs_module._bad_start_time_total == 1
+
+    @pytest.mark.parametrize(
+        "value",
+        ["2026-01-01T10:00:01.250Z", "2026-01-01T10:00:01Z", "2026-01-01T10:00:01.250123Z"],
+    )
+    def test_valid_start_times_do_not_warn(self, value, caplog):
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([make_v2_row(1, startTime=value)])]))
+        assert "cannot be parsed" not in caplog.text and obs_module._bad_start_time_total == 0
+
+    def test_the_same_observation_is_counted_once_across_fetches(self, caplog):
+        row = make_v2_row(1, totalCost="n/a", startTime="")
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert caplog.text.count("not a number") == 1 and caplog.text.count("cannot be parsed") == 1
+        assert obs_module._bad_cost_total == 1 and obs_module._bad_start_time_total == 1
+
+    def test_reports_contain_no_ids_or_user_ids(self, caplog):
+        row = make_v2_row(1, totalCost="n/a", startTime="", userId="someone@example.test")
+        with caplog.at_level("DEBUG", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+        messages = [r.getMessage() for r in caplog.records]
+        reports = "\n".join(m for m in messages if "not a number" in m or "cannot be parsed" in m)
+        assert reports and row["id"] not in reports and "example.test" not in reports and row["traceId"] not in reports
+
+    @pytest.mark.parametrize("value", BAD_START_TIMES + ["2026-01-01T10:00:01.250Z", "2026-01-01T10:00:01Z"], ids=repr)
+    def test_start_time_check_agrees_with_what_the_ledger_sync_does(self, value):
+        """_start_time_parses is true exactly when the ledger sync keeps the row's own time."""
+        fallback = 1_900_000_000
+        row = make_v2_row(1, startTime=value)
+        with patch("open_webui.tasks.billing.time.time", return_value=fallback):
+            inserted = _run_sync(FakeLangfuse([make_v2_page([row])])).bulk_insert_ignore.call_args.args[0]
+        used_fallback = inserted[0]["observed_at"] == fallback
+        assert used_fallback == (not obs_module._start_time_parses(row))
+
+    def test_values_stored_in_the_ledger_are_unchanged_by_the_report(self):
+        """A bad cost is stored as no cost and a bad startTime as the current time, as without the report."""
+        row = make_v2_row(1, totalCost="n/a", startTime="")
+        with patch("open_webui.tasks.billing.time.time", return_value=1_900_000_000):
+            inserted = _run_sync(FakeLangfuse([make_v2_page([row])])).bulk_insert_ignore.call_args.args[0]
+        assert inserted[0]["cost_usd"] is None and inserted[0]["cost_eur"] is None
+        assert inserted[0]["observed_at"] == 1_900_000_000
+
+
+class TestRateLimitCap:
+    def _limited(self, n: int) -> list:
+        return [_response({}, status=429, headers={"Retry-After": "3"}) for _ in range(n)]
+
+    def test_five_rate_limited_responses_then_success_returns_the_rows(self):
+        fake = FakeLangfuse(self._limited(5) + [make_v2_page([make_v2_row(1)])])
+        with patch("open_webui.langfuse.observations.time.sleep") as sleep:
+            assert len(_fetch(fake)) == 1
+        assert sleep.call_count == 5 and obs_module._rate_limit_giveups_total == 0
+
+    def test_a_sixth_consecutive_429_raises(self, caplog):
+        fake = FakeLangfuse(self._limited(6) + [make_v2_page([make_v2_row(1)])])
+        with patch("open_webui.langfuse.observations.time.sleep") as sleep, \
+             caplog.at_level("ERROR", logger="open_webui.langfuse.observations"):
+            with pytest.raises(RuntimeError, match=r"^Langfuse rate limit: gave up after 5 retries \(page 1\)$"):
+                _fetch(fake)
+        assert sleep.call_count == 5 and len(fake.observation_calls) == 6
+        assert obs_module._rate_limit_giveups_total == 1
+        assert "giving up on page 1 after 5 retries (give-ups since start: 1)" in caplog.text
+
+    def test_the_retry_count_starts_again_after_a_successful_page(self):
+        pages = (
+            self._limited(5)
+            + [make_v2_page([make_v2_row(1)], cursor="c1")]
+            + self._limited(5)
+            + [make_v2_page([make_v2_row(2)])]
+        )
+        with patch("open_webui.langfuse.observations.time.sleep") as sleep:
+            assert len(_fetch(FakeLangfuse(pages))) == 2
+        assert sleep.call_count == 10
+
+    def test_the_failing_page_is_reported(self):
+        fake = FakeLangfuse([make_v2_page([make_v2_row(1)], cursor="c1")] + self._limited(6))
+        with patch("open_webui.langfuse.observations.time.sleep"):
+            with pytest.raises(RuntimeError, match=r"\(page 2\)$"):
+                _fetch(fake)
+
+    def test_nothing_is_inserted_when_the_fetch_gives_up(self):
+        import open_webui.tasks.billing as tasks_mod
+
+        ledger = MagicMock()
+        fake = FakeLangfuse([make_v2_page([make_v2_row(1)], cursor="c1")] + self._limited(6))
+        with patch("open_webui.models.usage_ledger.UsageLedgerDB", ledger), \
+             patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=2.0), \
+             patch("open_webui.langfuse.observations.time.sleep"), \
+             patch(GET, side_effect=fake.get):
+            with pytest.raises(RuntimeError):
+                tasks_mod._sync_observations(SINCE)
+        ledger.bulk_insert_ignore.assert_not_called()
+
+
+class TestTickLog:
+    """The sync wrapper logs counts of fetched, inserted and ignored observations."""
+
+    def _rows(self) -> list:
+        return [make_v2_row(n, userId=f"user-{n}@example.test") for n in (1, 2, 3)]
+
+    def _sync(self, pages: list, inserted: int, deep_rescan: bool | None = None, fetch: bool = True):
+        """Run _sync_and_log with a sync that reads the real fetch and reports `inserted` new rows.
+
+        Returns the value from _sync_and_log and the keyword arguments the sync received.
+        """
+        import open_webui.tasks.billing as tasks_mod
+
+        received: list = []
+
+        def sync(since, *, deep_rescan=False):
+            received.append((since, deep_rescan))
+            if fetch:
+                list(fetch_observations_since(since))
+            return inserted
+
+        kwargs = {} if deep_rescan is None else {"deep_rescan": deep_rescan}
+        with patch.object(tasks_mod, "_sync_observations", sync), patch(GET, side_effect=FakeLangfuse(pages).get):
+            return tasks_mod._sync_and_log(SINCE, **kwargs), received
+
+    def test_logs_fetched_inserted_and_ignored(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            self._sync([make_v2_page(self._rows())], inserted=1)
+        assert "[ledger-poller] poll: fetched=3 inserted=1 ignored=2" in caplog.text
+
+    def test_everything_inserted_means_nothing_ignored(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            self._sync([make_v2_page(self._rows())], inserted=3)
+        assert "poll: fetched=3 inserted=3 ignored=0" in caplog.text
+
+    def test_rescan_is_labelled_and_the_flag_is_passed_on(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            _, received = self._sync([make_v2_page(self._rows())], inserted=3, deep_rescan=True)
+        assert "rescan: fetched=3 inserted=3 ignored=0" in caplog.text
+        assert received == [(SINCE, True)]
+
+    def test_the_line_has_counts_only(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            self._sync([make_v2_page(self._rows())], inserted=3)
+        line = next(r.getMessage() for r in caplog.records if "fetched=" in r.getMessage())
+        assert "example.test" not in line and "0000000000000001" not in line
+
+    def test_an_empty_fetch_is_logged_as_zero(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            self._sync([make_v2_page([])], inserted=0)
+        assert "poll: fetched=0 inserted=0 ignored=0" in caplog.text
+
+    def test_returns_the_inserted_count_and_defaults_to_the_poll_path(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            result, received = self._sync([make_v2_page(self._rows())], inserted=1)
+        assert result == 1
+        assert received == [(SINCE, False)]
+        assert "poll: fetched=3 inserted=1 ignored=2" in caplog.text
+
+    def test_ignored_is_never_negative(self, caplog):
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            self._sync([make_v2_page(self._rows())], inserted=5)
+        assert "inserted=5 ignored=0" in caplog.text
+
+    def test_a_sync_that_fetches_nothing_does_not_reuse_the_previous_count(self, caplog):
+        """The count of an earlier sync in the same thread is cleared before the next one starts."""
+        self._sync([make_v2_page(self._rows())], inserted=3)
+        assert obs_module.last_fetch_count() == 3
+        with caplog.at_level("INFO", logger="open_webui.tasks.billing"):
+            caplog.clear()
+            self._sync([], inserted=0, fetch=False)
+        assert "fetched=" not in caplog.text
+
+    def test_the_poller_and_the_nightly_rescan_use_the_wrapper(self):
+        import inspect
+
+        import open_webui.tasks.billing as tasks_mod
+
+        assert "_sync_and_log" in inspect.getsource(tasks_mod.periodic_ledger_poller)
+        assert "_sync_and_log" in inspect.getsource(tasks_mod.periodic_nightly_deep_rescan)
 
 
 class TestRealSnapshots:

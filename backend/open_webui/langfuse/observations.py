@@ -2,7 +2,7 @@ import datetime as dt
 import logging
 import threading
 import time
-from typing import Generator, Dict, Any
+from typing import Generator, Dict, Any, List
 
 import requests
 from cachetools import TTLCache
@@ -19,12 +19,31 @@ _FIELDS = "core,basic,model,usage"
 # toStartTime is exclusive, so it is set slightly ahead of now to tolerate clock skew.
 _TO_START_TIME_MARGIN = dt.timedelta(seconds=60)
 _USAGE_KEYS = ("input", "output", "total")
+# Consecutive 429 responses for one request before the fetch gives up and raises.
+_MAX_RATE_LIMIT_RETRIES = 5
 
-# Observation ids already reported as having no userId, so rows re-read by the
-# overlapping poll window or the nightly rescan are reported once, not on every read.
+# Observation ids already reported, so rows re-read by the overlapping poll window or the
+# nightly rescan are reported once, not on every read. Counters are totals since process start.
 _missing_user_id_seen: TTLCache[str, bool] = TTLCache(maxsize=10_000, ttl=7200)
 _missing_user_id_total = 0
-_missing_user_id_lock = threading.Lock()
+_bad_cost_seen: TTLCache[str, bool] = TTLCache(maxsize=10_000, ttl=7200)
+_bad_cost_total = 0
+_bad_start_time_seen: TTLCache[str, bool] = TTLCache(maxsize=10_000, ttl=7200)
+_bad_start_time_total = 0
+_rate_limit_giveups_total = 0
+_usage_group_missing_total = 0
+_state_lock = threading.Lock()
+
+_fetch_stats = threading.local()
+
+
+def last_fetch_count() -> int | None:
+    """Number of observations returned by the last completed fetch in this thread, or None."""
+    return getattr(_fetch_stats, "fetched", None)
+
+
+def reset_fetch_stats() -> None:
+    _fetch_stats.fetched = None
 
 
 def _now_utc() -> dt.datetime:
@@ -33,6 +52,17 @@ def _now_utc() -> dt.datetime:
 
 def _format_ts(ts: dt.datetime) -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _first_sighting(cache: TTLCache, row: Dict[str, Any]) -> bool:
+    """True the first time this row's id is seen; a row without a string id is always new."""
+    obs_id = row.get("id")
+    with _state_lock:
+        if isinstance(obs_id, str):
+            if obs_id in cache:
+                return False
+            cache[obs_id] = True
+        return True
 
 
 def _to_v1_shape(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -69,13 +99,10 @@ def _user_id_from_row(row: Dict[str, Any]) -> str:
         return user_id
 
     obs_id = row.get("id")
-    key = obs_id if isinstance(obs_id, str) else None
     global _missing_user_id_total
-    with _missing_user_id_lock:
-        if key is not None and key in _missing_user_id_seen:
-            return ""
-        if key is not None:
-            _missing_user_id_seen[key] = True
+    if not _first_sighting(_missing_user_id_seen, row):
+        return ""
+    with _state_lock:
         _missing_user_id_total += 1
         total = _missing_user_id_total
     log.warning(
@@ -86,28 +113,89 @@ def _user_id_from_row(row: Dict[str, Any]) -> str:
     return ""
 
 
-def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], None, None]:
-    """Yield GENERATION observations with the userId stored on each observation.
+def _cost_is_number(row: Dict[str, Any]) -> bool:
+    """False only when totalCost is present, not null, and cannot be converted to a float."""
+    cost = row.get("totalCost")
+    if cost is None:
+        return True
+    try:
+        float(cost)
+        return True
+    except (TypeError, ValueError):
+        return False
 
-    Reads /api/public/v2/observations page by page, following meta.cursor until the
-    response has none. The window is [since, now + 60 s); its upper bound is computed
-    once so every page belongs to the same query. A page can be empty while a cursor is
-    still present, so only a missing cursor ends the loop. A cursor that repeats raises.
-    Rows are mapped to the field names the ledger sync reads (see _to_v1_shape).
+
+def _start_time_parses(row: Dict[str, Any]) -> bool:
+    """Same normalisation the ledger sync applies to startTime; a failure there stores the current time."""
+    value = row.get("startTime")
+    if not isinstance(value, str):
+        return False
+    try:
+        dt.datetime.strptime(value.rstrip("Z").split(".")[0], "%Y-%m-%dT%H:%M:%S")
+        return True
+    except ValueError:
+        return False
+
+
+def _report_unusable_values(rows: List[Dict[str, Any]]) -> None:
+    """Warn, with counts only, about costs and start times the ledger sync silently replaces.
+
+    A cost that is not a number is stored as no cost. A startTime that does not parse is stored
+    as the current time. Neither value is changed here, so ledger rows are the same as without
+    this report. Each observation is counted once while it stays in the seen-cache.
     """
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    base_params = {
-        "type": "GENERATION",
-        "fromStartTime": _format_ts(since),
-        "toStartTime": _format_ts(_now_utc() + _TO_START_TIME_MARGIN),
-        "fields": _FIELDS,
-        "limit": _PAGE_SIZE,
-    }
+    global _bad_cost_total, _bad_start_time_total
+    new_bad_cost = sum(1 for r in rows if not _cost_is_number(r) and _first_sighting(_bad_cost_seen, r))
+    new_bad_start = sum(1 for r in rows if not _start_time_parses(r) and _first_sighting(_bad_start_time_seen, r))
+    with _state_lock:
+        _bad_cost_total += new_bad_cost
+        _bad_start_time_total += new_bad_start
+        cost_total, start_total = _bad_cost_total, _bad_start_time_total
+    if new_bad_cost:
+        log.warning(
+            "[ledger-poller] %d of %d observations have a cost that is not a number; "
+            "they are stored without a cost (total since start: %d)",
+            new_bad_cost,
+            len(rows),
+            cost_total,
+        )
+    if new_bad_start:
+        log.warning(
+            "[ledger-poller] %d of %d observations have a startTime that cannot be parsed; "
+            "they are stored with the current time (total since start: %d)",
+            new_bad_start,
+            len(rows),
+            start_total,
+        )
 
+
+def _check_usage_group(rows: List[Dict[str, Any]]) -> None:
+    """Raise when a non-empty result carries neither usageDetails nor totalCost on any row.
+
+    The usage field group is requested, so a response without those keys on every row means the
+    group was not returned. Syncing it would store every observation with zero tokens and no cost.
+    """
+    global _usage_group_missing_total
+    if rows and not any("usageDetails" in r or "totalCost" in r for r in rows):
+        with _state_lock:
+            _usage_group_missing_total += 1
+            total = _usage_group_missing_total
+        log.error(
+            "[ledger-poller] v2 response has no usage fields on any of %d observations (occurrences since start: %d)",
+            len(rows),
+            total,
+        )
+        raise RuntimeError(f"Langfuse v2 response has no usage fields on any of {len(rows)} observations")
+
+
+def _fetch_raw_rows(host: str, headers: Dict[str, str], base_params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return the raw v2 rows of every page, following meta.cursor until the response has none."""
+    global _rate_limit_giveups_total
+    rows: List[Dict[str, Any]] = []
     page = 1
     cursor = None
     used_cursors: set = set()
+    rate_limited = 0
     while True:
         params = dict(base_params)
         if cursor is not None:
@@ -120,11 +208,31 @@ def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], No
                 timeout=30,
             )
             if resp.status_code == 429:
+                rate_limited += 1
+                if rate_limited > _MAX_RATE_LIMIT_RETRIES:
+                    with _state_lock:
+                        _rate_limit_giveups_total += 1
+                        giveups = _rate_limit_giveups_total
+                    log.error(
+                        "Langfuse rate limit: giving up on page %d after %d retries (give-ups since start: %d)",
+                        page,
+                        _MAX_RATE_LIMIT_RETRIES,
+                        giveups,
+                    )
+                    raise RuntimeError(
+                        f"Langfuse rate limit: gave up after {_MAX_RATE_LIMIT_RETRIES} retries (page {page})"
+                    )
                 try:
                     wait = int(resp.headers.get("Retry-After", "60"))
                 except (ValueError, TypeError):
                     wait = 60
-                log.warning("Langfuse rate limit hit (page %d), retrying in %ds", page, wait)
+                log.warning(
+                    "Langfuse rate limit hit (page %d), retry %d of %d in %ds",
+                    page,
+                    rate_limited,
+                    _MAX_RATE_LIMIT_RETRIES,
+                    wait,
+                )
                 time.sleep(wait)
                 continue
             resp.raise_for_status()
@@ -132,19 +240,49 @@ def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], No
         except Exception as exc:
             log.error("Langfuse observations fetch failed (page %d): %s", page, exc)
             raise
+        rate_limited = 0
 
-        data = body.get("data", [])
+        rows.extend(body.get("data", []))
         next_cursor = (body.get("meta") or {}).get("cursor")
-
-        for row in data:
-            obs = _to_v1_shape(row)
-            obs["userId"] = _user_id_from_row(row)
-            yield obs
-
         if not next_cursor:
-            break
+            return rows
         if next_cursor in used_cursors:
             raise RuntimeError(f"Langfuse observations returned a repeated cursor (page {page})")
         used_cursors.add(next_cursor)
         cursor = next_cursor
         page += 1
+
+
+def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], None, None]:
+    """Yield GENERATION observations with the userId stored on each observation.
+
+    Reads /api/public/v2/observations page by page, following meta.cursor until the
+    response has none. The window is [since, now + 60 s); its upper bound is computed
+    once so every page belongs to the same query. A page can be empty while a cursor is
+    still present, so only a missing cursor ends the loop. A cursor that repeats raises.
+    All pages are read before the first row is returned, so a failure on any page
+    returns nothing. Rows are mapped to the field names the ledger sync reads
+    (see _to_v1_shape).
+    """
+    pk, sk, host = load_env()
+    headers = auth_header(pk, sk)
+    base_params = {
+        "type": "GENERATION",
+        "fromStartTime": _format_ts(since),
+        "toStartTime": _format_ts(_now_utc() + _TO_START_TIME_MARGIN),
+        "fields": _FIELDS,
+        "limit": _PAGE_SIZE,
+    }
+
+    raw_rows = _fetch_raw_rows(host, headers, base_params)
+    _check_usage_group(raw_rows)
+    _report_unusable_values(raw_rows)
+
+    rows = []
+    for row in raw_rows:
+        obs = _to_v1_shape(row)
+        obs["userId"] = _user_id_from_row(row)
+        rows.append(obs)
+
+    _fetch_stats.fetched = len(rows)
+    yield from rows
