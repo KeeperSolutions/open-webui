@@ -6,6 +6,7 @@ directory named by LANGFUSE_SNAPSHOT_DIR and are skipped when it is not set.
 """
 import copy
 import datetime
+import importlib.util
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +14,7 @@ import pytest
 import requests
 
 import open_webui.langfuse.observations as obs_module
-from open_webui.langfuse.observations import _resolve_user_ids, _to_v1_shape, fetch_observations_since
+from open_webui.langfuse.observations import _to_v1_shape, _user_id_from_row, fetch_observations_since
 from open_webui.tests.langfuse.test_v2_observations_shape import (  # noqa: F401  (snapshot_dir is a fixture)
     _load_snapshot,
     make_v2_page,
@@ -25,13 +26,6 @@ SINCE = datetime.datetime(2026, 6, 19, 0, 0, 0, tzinfo=datetime.timezone.utc)
 NOW = datetime.datetime(2026, 6, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
 GET = "open_webui.langfuse.observations.requests.get"
 V2_URL = "https://host/api/public/v2/observations"
-
-
-def _make_trace_response(user_id: str) -> MagicMock:
-    mock_resp = MagicMock()
-    mock_resp.ok = True
-    mock_resp.json.return_value = {"userId": user_id}
-    return mock_resp
 
 
 def _response(body: dict, status: int = 200, headers: dict | None = None) -> MagicMock:
@@ -46,11 +40,10 @@ def _response(body: dict, status: int = 200, headers: dict | None = None) -> Mag
 
 
 class FakeLangfuse:
-    """Serves queued v2 pages and per-trace user lookups, and records every request."""
+    """Serves queued v2 pages and records every request. Any other URL fails the test."""
 
-    def __init__(self, pages: list, users: dict | None = None):
+    def __init__(self, pages: list):
         self.pages = list(pages)
-        self.users = users or {}
         self.calls: list = []
 
     def get(self, url, **kwargs):
@@ -60,8 +53,6 @@ class FakeLangfuse:
             if isinstance(item, Exception):
                 raise item
             return item if isinstance(item, MagicMock) else _response(item)
-        if "/api/public/traces/" in url:
-            return _make_trace_response(self.users.get(url.rsplit("/", 1)[1], ""))
         raise AssertionError(f"unexpected url: {url}")
 
     @property
@@ -72,8 +63,8 @@ class FakeLangfuse:
         return self.observation_calls[i][1]["params"]
 
     @property
-    def trace_urls(self) -> list:
-        return [u for u, _ in self.calls if "/api/public/traces/" in u]
+    def urls(self) -> list:
+        return [u for u, _ in self.calls]
 
 
 def _fetch(fake: FakeLangfuse, since: datetime.datetime = SINCE) -> list:
@@ -89,94 +80,12 @@ def patch_environment():
 
 
 @pytest.fixture(autouse=True)
-def clear_trace_cache():
-    obs_module._trace_user_cache.clear()
+def reset_missing_user_id_state():
+    obs_module._missing_user_id_seen.clear()
+    obs_module._missing_user_id_total = 0
     yield
-    obs_module._trace_user_cache.clear()
-
-
-class TestResolveUserIds:
-    def test_returns_empty_dict_for_no_trace_ids(self):
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            result = _resolve_user_ids("https://host", {}, [], pool)
-        assert result == {}
-
-    def test_resolves_single_trace(self):
-        mock_resp = _make_trace_response("user@example.com")
-        with patch("open_webui.langfuse.observations.requests.get", return_value=mock_resp):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result == {"trace_aaa": "user@example.com"}
-
-    def test_resolves_multiple_traces_concurrently(self):
-        def side_effect(url, **kwargs):
-            if "trace_aaa" in url:
-                return _make_trace_response("alice@example.com")
-            if "trace_bbb" in url:
-                return _make_trace_response("bob@example.com")
-            raise ValueError(f"unexpected url: {url}")
-
-        with patch("open_webui.langfuse.observations.requests.get", side_effect=side_effect):
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa", "trace_bbb"], pool)
-        assert result["trace_aaa"] == "alice@example.com"
-        assert result["trace_bbb"] == "bob@example.com"
-
-    def test_returns_empty_string_on_http_failure(self):
-        mock_resp = MagicMock()
-        mock_resp.ok = False
-        with patch("open_webui.langfuse.observations.requests.get", return_value=mock_resp):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result == {"trace_aaa": ""}
-
-    def test_returns_empty_string_on_exception(self):
-        with patch("open_webui.langfuse.observations.requests.get", side_effect=Exception("timeout")):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result == {"trace_aaa": ""}
-
-    def test_handles_none_user_id_in_trace(self):
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.json.return_value = {"userId": None}
-        with patch("open_webui.langfuse.observations.requests.get", return_value=mock_resp):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result["trace_aaa"] == ""
-
-    def test_cache_miss_fetches_and_stores(self):
-        mock_resp = _make_trace_response("user@example.com")
-        with patch("open_webui.langfuse.observations.requests.get", return_value=mock_resp) as mock_get:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result == {"trace_aaa": "user@example.com"}
-        assert mock_get.call_count == 1
-        assert obs_module._trace_user_cache["trace_aaa"] == "user@example.com"
-
-    def test_cache_hit_skips_fetch(self):
-        obs_module._trace_user_cache["trace_aaa"] = "cached@example.com"
-        with patch("open_webui.langfuse.observations.requests.get") as mock_get:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa"], pool)
-        assert result == {"trace_aaa": "cached@example.com"}
-        mock_get.assert_not_called()
-
-    def test_cache_partial_hit_only_fetches_misses(self):
-        obs_module._trace_user_cache["trace_aaa"] = "alice@example.com"
-
-        def side_effect(url, **kwargs):
-            if "trace_bbb" in url:
-                return _make_trace_response("bob@example.com")
-            raise ValueError(f"unexpected url: {url}")
-
-        with patch("open_webui.langfuse.observations.requests.get", side_effect=side_effect) as mock_get:
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                result = _resolve_user_ids("https://host", {}, ["trace_aaa", "trace_bbb"], pool)
-
-        assert result["trace_aaa"] == "alice@example.com"
-        assert result["trace_bbb"] == "bob@example.com"
-        assert mock_get.call_count == 1  # only trace_bbb fetched
+    obs_module._missing_user_id_seen.clear()
+    obs_module._missing_user_id_total = 0
 
 
 class TestRequest:
@@ -446,31 +355,108 @@ class TestRowMapping:
         assert row == before
 
 
-class TestUserIdFromTrace:
-    def test_user_id_comes_from_the_trace_lookup(self):
-        """userId is still resolved through /api/public/traces/{id}; the row's own userId is not used yet."""
+class TestUserIdFromRow:
+    def test_user_id_is_taken_from_the_row(self):
+        """The userId of each observation row is returned as is."""
+        rows = [make_v2_row(1, userId="alice@example.test"), make_v2_row(2, userId="bob@example.test")]
+        results = _fetch(FakeLangfuse([make_v2_page(rows)]))
+        assert [r["userId"] for r in results] == ["alice@example.test", "bob@example.test"]
+
+    def test_only_the_observations_endpoint_is_called(self):
+        """No request goes to /api/public/traces; FakeLangfuse fails on any other URL."""
+        fake = FakeLangfuse([make_v2_page([make_v2_row(1)], cursor="c1"), make_v2_page([make_v2_row(2)])])
+        _fetch(fake)
+        assert set(fake.urls) == {V2_URL} and len(fake.urls) == 2
+
+    def test_row_user_id_is_used_even_when_traces_differ(self):
+        """Rows of the same trace keep their own userId; nothing is looked up per trace."""
+        trace = make_v2_row(1)["traceId"]
+        rows = [make_v2_row(1, userId="a@example.test"), make_v2_row(2, traceId=trace, userId="b@example.test")]
+        assert [r["userId"] for r in _fetch(FakeLangfuse([make_v2_page(rows)]))] == ["a@example.test", "b@example.test"]
+
+    @pytest.mark.parametrize("value", [None, "", 0, 7, ["a@example.test"], {"id": "x"}], ids=repr)
+    def test_missing_or_invalid_user_id_becomes_empty_string_with_warning_and_count(self, value, caplog):
+        """A userId that is null, empty or not a string yields "", one warning and one count."""
+        row = make_v2_row(1, userId=value)
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            results = _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert results[0]["userId"] == ""
+        warnings = [r for r in caplog.records if "observation without userId" in r.getMessage()]
+        assert len(warnings) == 1 and warnings[0].levelname == "WARNING"
+        assert obs_module._missing_user_id_total == 1
+
+    def test_absent_user_id_key_is_handled_like_a_missing_value(self, caplog):
         row = make_v2_row(1)
-        fake = FakeLangfuse([make_v2_page([row])], users={row["traceId"]: "trace-user@example.test"})
-        results = _fetch(fake)
-        assert results[0]["userId"] == "trace-user@example.test"
-        assert row["userId"] != "trace-user@example.test"
+        del row["userId"]
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            results = _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert results[0]["userId"] == "" and obs_module._missing_user_id_total == 1
+        assert "observation without userId" in caplog.text
 
-    def test_user_id_is_empty_when_the_trace_has_none(self):
-        assert _fetch(FakeLangfuse([make_v2_page([make_v2_row(1)])]))[0]["userId"] == ""
+    def test_a_missing_user_id_does_not_drop_or_change_the_rest_of_the_row(self):
+        row = make_v2_row(1, userId=None)
+        out = _fetch(FakeLangfuse([make_v2_page([row])]))[0]
+        assert {k: v for k, v in out.items() if k != "userId"} == _to_v1_shape(row)
 
-    def test_a_trace_shared_by_several_rows_is_looked_up_once(self):
-        rows = [make_v2_row(1), make_v2_row(2, traceId=make_v2_row(1)["traceId"])]
-        fake = FakeLangfuse([make_v2_page(rows)])
-        _fetch(fake)
-        assert len(fake.trace_urls) == 1
+    def test_warning_names_the_observation_and_the_running_total(self, caplog):
+        rows = [make_v2_row(1, userId=None), make_v2_row(2, userId="")]
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page(rows)]))
+        messages = [r.getMessage() for r in caplog.records if "without userId" in r.getMessage()]
+        assert "observation=0000000000000001" in messages[0] and "since start: 1" in messages[0]
+        assert "observation=0000000000000002" in messages[1] and "since start: 2" in messages[1]
 
-    def test_no_trace_lookup_for_an_empty_page(self):
-        fake = FakeLangfuse([make_v2_page([], cursor="c1"), make_v2_page([])])
-        _fetch(fake)
-        assert fake.trace_urls == []
+    def test_the_same_observation_is_reported_once_across_fetches(self, caplog):
+        """Overlapping poll windows re-read rows, so a known observation does not warn or count again."""
+        row = make_v2_row(1, userId=None)
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert caplog.text.count("observation without userId") == 1
+        assert obs_module._missing_user_id_total == 1
+
+    def test_a_different_observation_is_reported_again(self, caplog):
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([make_v2_row(1, userId=None)])]))
+            _fetch(FakeLangfuse([make_v2_page([make_v2_row(2, userId=None)])]))
+        assert caplog.text.count("observation without userId") == 2
+        assert obs_module._missing_user_id_total == 2
+
+    def test_a_row_without_a_usable_id_is_counted_every_time(self, caplog):
+        """Without an id there is nothing to remember, so each read warns and counts."""
+        row = make_v2_row(1, userId=None)
+        del row["id"]
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+            _fetch(FakeLangfuse([make_v2_page([row])]))
+        assert caplog.text.count("observation without userId") == 2
+        assert obs_module._missing_user_id_total == 2
+
+    def test_rows_with_a_user_id_neither_warn_nor_count_nor_log_the_user(self, caplog):
+        rows = [make_v2_row(1, userId="alice@example.test"), make_v2_row(2, userId="bob@example.test")]
+        with caplog.at_level("DEBUG", logger="open_webui.langfuse.observations"):
+            _fetch(FakeLangfuse([make_v2_page(rows)]))
+        assert obs_module._missing_user_id_total == 0
+        assert "without userId" not in caplog.text and "example.test" not in caplog.text
+
+    def test_counter_and_seen_set_start_empty_in_a_new_process(self):
+        """A freshly imported module has counted nothing yet (the autouse fixture resets the shared one)."""
+        spec = importlib.util.spec_from_file_location("observations_fresh", obs_module.__file__)
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+        assert fresh._missing_user_id_total == 0
+        assert len(fresh._missing_user_id_seen) == 0
+
+    def test_counter_is_exact_under_concurrent_use(self):
+        """Eight threads reporting distinct observations do not lose counts."""
+        rows = [make_v2_row(n, userId=None) for n in range(1, 201)]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            assert list(pool.map(_user_id_from_row, rows)) == [""] * 200
+        assert obs_module._missing_user_id_total == 200
+        assert len(obs_module._missing_user_id_seen) == 200
 
 
-def _run_sync(fake: FakeLangfuse):
+def _run_sync(fake: FakeLangfuse, deep_rescan: bool = False):
     """Run the real _sync_observations over fake Langfuse pages; return the ledger mock."""
     import open_webui.tasks.billing as tasks_mod
 
@@ -488,15 +474,15 @@ def _run_sync(fake: FakeLangfuse):
          patch("open_webui.langfuse.ecb_rates.get_eur_usd_rate", return_value=2.0), \
          patch("open_webui.models.users.Users.get_super_admin_user", return_value=None), \
          patch(GET, side_effect=fake.get):
-        tasks_mod._sync_observations(SINCE)
+        tasks_mod._sync_observations(SINCE, deep_rescan=deep_rescan)
     return ledger
 
 
 class TestLedgerSyncReadsMappedRows:
     def test_values_reach_the_ledger_rows(self):
         """Tokens, cost, model, time and user in the inserted rows equal the values in the v2 rows."""
-        rows = [make_v2_row(1, totalCost=0.5), make_v2_row(2, totalCost=0.25)]
-        fake = FakeLangfuse([make_v2_page(rows)], users={rows[0]["traceId"]: "u1@example.test"})
+        rows = [make_v2_row(1, totalCost=0.5, userId="u1@example.test"), make_v2_row(2, totalCost=0.25, userId=None)]
+        fake = FakeLangfuse([make_v2_page(rows)])
         inserted = _run_sync(fake).bulk_insert_ignore.call_args.args[0]
         by_id = {r["langfuse_observation_id"]: r for r in inserted}
         first = by_id["0000000000000001"]
@@ -525,6 +511,26 @@ class TestLedgerSyncReadsMappedRows:
         row = make_v2_row(1, totalCost="0.020292499999")
         inserted = _run_sync(FakeLangfuse([make_v2_page([row])])).bulk_insert_ignore.call_args.args[0]
         assert inserted[0]["cost_usd"] == 0.020292499999
+
+    def test_missing_user_id_is_inserted_as_empty_string(self):
+        """A row without a userId is still inserted, with user_id "" as before."""
+        row = make_v2_row(1, userId=None)
+        inserted = _run_sync(FakeLangfuse([make_v2_page([row])])).bulk_insert_ignore.call_args.args[0]
+        assert len(inserted) == 1 and inserted[0]["user_id"] == ""
+
+    def test_deep_rescan_passes_user_ids_to_the_backfill(self):
+        """The nightly rescan hands the same rows, with user ids from the v2 rows, to the user-id backfill."""
+        rows = [make_v2_row(1, userId="u1@example.test"), make_v2_row(2, userId=None)]
+        ledger = _run_sync(FakeLangfuse([make_v2_page(rows)]), deep_rescan=True)
+        backfilled = ledger.bulk_upsert_user_ids.call_args.args[0]
+        assert [(r["langfuse_observation_id"], r["user_id"]) for r in backfilled] == [
+            ("0000000000000001", "u1@example.test"),
+            ("0000000000000002", ""),
+        ]
+
+    def test_hot_path_does_not_run_the_backfill(self):
+        ledger = _run_sync(FakeLangfuse([make_v2_page([make_v2_row(1)])]))
+        ledger.bulk_upsert_user_ids.assert_not_called()
 
     def test_error_on_a_later_page_inserts_nothing(self):
         """Rows from earlier pages are not written when a later page fails."""
@@ -587,3 +593,17 @@ class TestRealSnapshots:
             for key in ("input", "output", "total"):
                 assert mapped["usage"][key] == old["usage"][key], f"usage.{key}"
             assert mapped["calculatedTotalCost"] == old["calculatedTotalCost"]
+
+    def test_recorded_rows_carry_a_user_id(self, snapshot_dir):
+        """Every recorded v2 row yields a non-empty userId and none is reported as missing."""
+        pages = [_load_snapshot(snapshot_dir, name) for name in ("v2_page1.json", "v2_page2.json")]
+        results = _fetch(FakeLangfuse(pages))
+        assert len(results) == 4
+        assert all(isinstance(r["userId"], str) and r["userId"] for r in results)
+        assert obs_module._missing_user_id_total == 0
+
+    def test_recorded_user_ids_come_from_the_rows(self, snapshot_dir):
+        """The userId returned for each recorded row equals the userId stored in that row."""
+        body = _load_snapshot(snapshot_dir, "v2_observations.json")
+        results = _fetch(FakeLangfuse([body]))
+        assert [r["userId"] for r in results] == [row["userId"] for row in body["data"]]
