@@ -75,7 +75,8 @@ def _fetch(fake: FakeLangfuse, since: datetime.datetime = SINCE) -> list:
 @pytest.fixture(autouse=True)
 def patch_environment():
     with patch("open_webui.langfuse.observations.load_env", return_value=("pk", "sk", "https://host")), \
-         patch("open_webui.langfuse.observations._now_utc", return_value=NOW):
+         patch("open_webui.langfuse.observations._now_utc", return_value=NOW), \
+         patch("open_webui.langfuse.ledger_guard.ledger_ids_between", return_value=set()):
         yield
 
 
