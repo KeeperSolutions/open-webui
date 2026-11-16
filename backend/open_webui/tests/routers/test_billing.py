@@ -213,7 +213,8 @@ class TestRetryAfterParsing:
         with patch("open_webui.langfuse.observations.requests.get", side_effect=[resp_429, resp_ok]), \
              patch("open_webui.langfuse.observations.time.sleep") as mock_sleep, \
              patch("open_webui.langfuse.observations.load_env", return_value=("pk", "sk", "https://host")), \
-             patch("open_webui.langfuse.observations.auth_header", return_value={}):
+             patch("open_webui.langfuse.observations.auth_header", return_value={}), \
+             patch("open_webui.langfuse.ledger_guard.ledger_ids_between", return_value=set()):
             list(obs_module.fetch_observations_since(datetime.datetime(2024, 1, 1)))
             return mock_sleep
 

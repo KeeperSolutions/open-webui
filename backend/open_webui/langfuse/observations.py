@@ -7,6 +7,7 @@ from typing import Generator, Dict, Any, List
 import requests
 from cachetools import TTLCache
 
+from open_webui.langfuse import ledger_guard
 from open_webui.langfuse.metrics import auth_header, load_env
 
 log = logging.getLogger(__name__)
@@ -261,21 +262,24 @@ def fetch_observations_since(since: dt.datetime) -> Generator[Dict[str, Any], No
     once so every page belongs to the same query. A page can be empty while a cursor is
     still present, so only a missing cursor ends the loop. A cursor that repeats raises.
     All pages are read before the first row is returned, so a failure on any page
-    returns nothing. Rows are mapped to the field names the ledger sync reads
-    (see _to_v1_shape).
+    returns nothing. Before any row is returned, the fetched ids are compared with the ledger rows
+    stored for the same window (see ledger_guard); a mismatch raises. Rows are mapped to the field
+    names the ledger sync reads (see _to_v1_shape).
     """
     pk, sk, host = load_env()
     headers = auth_header(pk, sk)
+    until = _now_utc() + _TO_START_TIME_MARGIN
     base_params = {
         "type": "GENERATION",
         "fromStartTime": _format_ts(since),
-        "toStartTime": _format_ts(_now_utc() + _TO_START_TIME_MARGIN),
+        "toStartTime": _format_ts(until),
         "fields": _FIELDS,
         "limit": _PAGE_SIZE,
     }
 
     raw_rows = _fetch_raw_rows(host, headers, base_params)
     _check_usage_group(raw_rows)
+    ledger_guard.check_ledger_overlap([r["id"] for r in raw_rows if isinstance(r.get("id"), str)], since, until)
     _report_unusable_values(raw_rows)
 
     rows = []
