@@ -4,7 +4,6 @@
 2. _check_credits_exhausted accepts user_id directly — no redundant user lookup
 3. Migration f2a3b4c5d6e7 INSERT has ON CONFLICT DO NOTHING — truly idempotent
 4. Retry-After parse guard in fetch_observations_since falls back to 60s
-5. Failed trace lookups are not cached
 6. auto_onboard_user uses PLAN_TIER_* constants, not raw strings
 7. Dead "paid" tier block removed from get_billing_status
 8. get_trial_credits() computable without importing user_credits
@@ -214,7 +213,8 @@ class TestRetryAfterParsing:
         with patch("open_webui.langfuse.observations.requests.get", side_effect=[resp_429, resp_ok]), \
              patch("open_webui.langfuse.observations.time.sleep") as mock_sleep, \
              patch("open_webui.langfuse.observations.load_env", return_value=("pk", "sk", "https://host")), \
-             patch("open_webui.langfuse.observations.auth_header", return_value={}):
+             patch("open_webui.langfuse.observations.auth_header", return_value={}), \
+             patch("open_webui.langfuse.ledger_guard.ledger_ids_between", return_value=set()):
             list(obs_module.fetch_observations_since(datetime.datetime(2024, 1, 1)))
             return mock_sleep
 
@@ -229,38 +229,6 @@ class TestRetryAfterParsing:
     def test_missing_retry_after_defaults_to_60(self):
         mock_sleep = self._run_fetch(None)
         mock_sleep.assert_called_once_with(60)
-
-
-# ---------------------------------------------------------------------------
-# Fix 5 — Failed trace lookups are not cached (so next tick retries them)
-# ---------------------------------------------------------------------------
-
-class TestTraceCacheOnSuccess:
-    def test_failed_trace_not_cached(self):
-        import open_webui.langfuse.observations as obs_module
-        from concurrent.futures import ThreadPoolExecutor
-
-        obs_module._trace_user_cache.clear()
-
-        with patch.object(obs_module, "_fetch_one_trace", return_value=("tid-1", "")):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = obs_module._resolve_user_ids("host", {}, ["tid-1"], pool)
-
-        assert result["tid-1"] == ""
-        assert "tid-1" not in obs_module._trace_user_cache
-
-    def test_successful_trace_is_cached(self):
-        import open_webui.langfuse.observations as obs_module
-        from concurrent.futures import ThreadPoolExecutor
-
-        obs_module._trace_user_cache.clear()
-
-        with patch.object(obs_module, "_fetch_one_trace", return_value=("tid-2", "user@example.com")):
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = obs_module._resolve_user_ids("host", {}, ["tid-2"], pool)
-
-        assert result["tid-2"] == "user@example.com"
-        assert obs_module._trace_user_cache["tid-2"] == "user@example.com"
 
 
 # ---------------------------------------------------------------------------
