@@ -33,7 +33,7 @@ def ids(n: int, prefix: str = "led") -> list:
 
 @pytest.fixture(autouse=True)
 def reset_state(monkeypatch):
-    for name in ("LEDGER_ID_GUARD_MIN_ROWS", "LEDGER_ID_GUARD_MIN_RATIO"):
+    for name in ("LEDGER_ID_GUARD_MIN_ROWS", "LEDGER_ID_GUARD_MIN_RATIO", "LEDGER_ID_GUARD_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     guard._trips_total = 0
     guard._warned_values.clear()
@@ -236,6 +236,91 @@ class TestEnvironmentParsing:
             check(ids(25), [])
 
 
+OFF_WARNING = "[ledger-poller] LEDGER_ID_GUARD_ENABLED={raw}: the id guard is off; duplicate rows are not prevented."
+
+
+class TestEnabledSwitch:
+    @pytest.mark.parametrize("raw", ["false", "0", "no", "off", "FALSE", "Off", " false ", "NO"])
+    def test_switched_off_does_not_read_the_ledger_and_does_not_raise(self, monkeypatch, raw):
+        """With the guard off, a total mismatch passes and the ledger is not read."""
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", raw)
+        with patch(LEDGER_IDS, return_value=set(ids(100))) as read:
+            guard.check_ledger_overlap([], WINDOW_START, WINDOW_END)
+        read.assert_not_called()
+        assert guard._trips_total == 0
+
+    @pytest.mark.parametrize("raw", ["true", "1", "yes", "on", "TRUE", " On "])
+    def test_explicitly_on_keeps_the_check(self, monkeypatch, raw, caplog):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", raw)
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.ledger_guard"):
+            with pytest.raises(guard.LedgerIdMismatch):
+                check(ids(30), [])
+        assert "LEDGER_ID_GUARD_ENABLED" not in caplog.text
+
+    @pytest.mark.parametrize("raw", ["", "   "])
+    def test_empty_value_is_the_same_as_unset(self, monkeypatch, raw, caplog):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", raw)
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.ledger_guard"):
+            with pytest.raises(guard.LedgerIdMismatch):
+                check(ids(30), [])
+        assert "LEDGER_ID_GUARD_ENABLED" not in caplog.text
+
+    def test_unset_keeps_the_check(self):
+        with pytest.raises(guard.LedgerIdMismatch):
+            check(ids(30), [])
+
+    @pytest.mark.parametrize("raw", ["maybe", "2", "disabled", "falsee", "nope", "f", "n"])
+    def test_an_unrecognised_value_keeps_the_check_on_and_warns_once(self, monkeypatch, raw, caplog):
+        """A typo must not switch the guard off."""
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", raw)
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.ledger_guard"):
+            for _ in range(2):
+                with pytest.raises(guard.LedgerIdMismatch):
+                    check(ids(30), [])
+        assert caplog.text.count(f"[ledger-poller] LEDGER_ID_GUARD_ENABLED={raw!r} is not valid; using true.") == 1
+
+    def test_switching_off_warns_once_per_process_with_the_value(self, monkeypatch, caplog):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "false")
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.ledger_guard"):
+            for _ in range(3):
+                guard.check_ledger_overlap([], WINDOW_START, WINDOW_END)
+        assert caplog.text.count("the id guard is off") == 1
+        assert OFF_WARNING.format(raw="false") in caplog.text
+
+    def test_a_failing_ledger_read_does_not_stop_the_sync_when_switched_off(self, monkeypatch):
+        """The case the switch exists for: the guard's own ledger read fails."""
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "false")
+        error = OperationalError("select", {}, Exception("no such table"))
+        with patch(LEDGER_IDS, side_effect=error):
+            guard.check_ledger_overlap(ids(30), WINDOW_START, WINDOW_END)
+
+    def test_a_failing_ledger_read_still_raises_when_on(self, monkeypatch):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "true")
+        error = OperationalError("select", {}, Exception("no such table"))
+        with patch(LEDGER_IDS, side_effect=error):
+            with pytest.raises(OperationalError):
+                guard.check_ledger_overlap(ids(30), WINDOW_START, WINDOW_END)
+
+    def test_the_switch_is_read_on_every_call(self, monkeypatch):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "false")
+        check(ids(30), [])
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "true")
+        with pytest.raises(guard.LedgerIdMismatch):
+            check(ids(30), [])
+
+    def test_the_other_settings_are_not_consulted_when_off(self, monkeypatch, caplog):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "off")
+        monkeypatch.setenv("LEDGER_ID_GUARD_MIN_ROWS", "abc")
+        monkeypatch.setenv("LEDGER_ID_GUARD_MIN_RATIO", "abc")
+        with caplog.at_level("WARNING", logger="open_webui.langfuse.ledger_guard"):
+            guard.check_ledger_overlap([], WINDOW_START, WINDOW_END)
+        assert "MIN_ROWS" not in caplog.text and "MIN_RATIO" not in caplog.text
+
+    def test_the_name_and_accepted_values_are_fixed(self):
+        assert guard._FALSE_VALUES == ("false", "0", "no", "off")
+        assert guard._TRUE_VALUES == ("true", "1", "yes", "on")
+
+
 class TestWindow:
     def test_the_ledger_is_read_for_since_to_until_minus_15_minutes(self):
         with patch(LEDGER_IDS, return_value=set()) as read:
@@ -409,6 +494,27 @@ def run_sync(pages, ledger_ids: list, deep_rescan: bool = False):
         except guard.LedgerIdMismatch as exc:
             error = exc
     return ledger, error
+
+
+class TestSwitchedOffThroughFetchAndSync:
+    def test_shifted_ids_are_returned_and_inserted_when_the_guard_is_off(self, monkeypatch):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "false")
+        ledger, error = run_sync([v2_page("new", 25)], ids(25))
+        assert error is None
+        assert len(ledger.bulk_insert_ignore.call_args.args[0]) == 25
+
+    def test_the_same_input_is_blocked_when_the_guard_is_on(self, monkeypatch):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "true")
+        ledger, error = run_sync([v2_page("new", 25)], ids(25))
+        assert isinstance(error, guard.LedgerIdMismatch)
+        ledger.bulk_insert_ignore.assert_not_called()
+
+    def test_the_ledger_is_not_read_by_a_fetch_when_the_guard_is_off(self, monkeypatch):
+        monkeypatch.setenv("LEDGER_ID_GUARD_ENABLED", "false")
+        fake = FakeLangfuse([v2_page("new", 25)])
+        with patch(LEDGER_IDS) as read, patch(GET, side_effect=fake.get):
+            assert len(list(obs_module.fetch_observations_since(SINCE))) == 25
+        read.assert_not_called()
 
 
 class TestThroughTheLedgerSync:

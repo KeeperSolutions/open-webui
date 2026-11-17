@@ -5,6 +5,9 @@ observations the ledger already contains, those rows would be inserted a second 
 Before a set of observations is returned for insertion, the ids of the ledger rows in the query window are
 compared with the fetched ids. When too few of the ledger rows are found among the fetched ids, nothing is
 inserted and the sync fails. The ledger is not modified, so the next poll reads the same window again.
+
+LEDGER_ID_GUARD_ENABLED=false turns the check off without reading the ledger, for the case where the
+check itself prevents syncing. Duplicate rows are then not prevented.
 """
 
 import datetime as dt
@@ -27,6 +30,9 @@ _DEFAULT_MIN_RATIO = 0.8
 # in the v2 API yet (up to about 15 minutes for langfuse-python before 4.7.0).
 _SETTLE = dt.timedelta(minutes=15)
 
+_FALSE_VALUES = ("false", "0", "no", "off")
+_TRUE_VALUES = ("true", "1", "yes", "on")
+
 _state_lock = threading.Lock()
 _trips_total = 0
 _warned_values: Set[str] = set()
@@ -43,6 +49,31 @@ def _warn_invalid(name: str, raw: str, default) -> None:
             return
         _warned_values.add(key)
     log.warning("[ledger-poller] %s=%r is not valid; using %s.", name, raw, default)
+
+
+def _enabled() -> bool:
+    """False only when LEDGER_ID_GUARD_ENABLED is false, 0, no or off (any case).
+
+    An unset or empty value, or a value that is not recognised, keeps the check on.
+    """
+    raw = os.environ.get("LEDGER_ID_GUARD_ENABLED")
+    if raw is None or not raw.strip():
+        return True
+    value = raw.strip().lower()
+    if value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES:
+        with _state_lock:
+            first = "LEDGER_ID_GUARD_ENABLED=off" not in _warned_values
+            _warned_values.add("LEDGER_ID_GUARD_ENABLED=off")
+        if first:
+            log.warning(
+                "[ledger-poller] LEDGER_ID_GUARD_ENABLED=%s: the id guard is off; duplicate rows are not prevented.",
+                raw,
+            )
+        return False
+    _warn_invalid("LEDGER_ID_GUARD_ENABLED", raw, "true")
+    return True
 
 
 def _min_rows() -> int:
@@ -91,8 +122,11 @@ def check_ledger_overlap(fetched_ids: Iterable[str], since: dt.datetime, until: 
 
     The window is [since, until - 15 minutes). The check does nothing when the ledger holds fewer than
     the minimum number of rows for it. A failed ledger read raises, so an unverified set is never inserted.
+    With the check switched off (see _enabled) it returns before reading the ledger.
     The error log contains counts and the window only.
     """
+    if not _enabled():
+        return
     start = int(since.timestamp())
     end = int((until - _SETTLE).timestamp())
     if end <= start:
