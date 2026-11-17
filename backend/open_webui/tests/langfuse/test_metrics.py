@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 from unittest.mock import patch
 import pytest
 
@@ -464,3 +465,332 @@ def test_metrics_response_serialises_from_as_json_key():
     assert payload["from"] == "2026-07-01T00:00:00Z"
     assert payload["to"] == "2026-07-31T23:59:59Z"
     assert payload["rows"] == []
+
+
+# ---------- Langfuse v2 metrics: query rules, request and response ----------
+
+_V2_VIEWS = {"observations", "scores-numeric", "scores-categorical", "scores-boolean"}
+_V2_AGGREGATIONS = {"sum", "avg", "count", "max", "min", "p50", "p75", "p90", "p95", "p99", "histogram"}
+_V2_HIGH_CARDINALITY = {"id", "traceId", "userId", "sessionId", "parentObservationId"}
+_V2_MAX_ROW_LIMIT = 1000
+
+
+def assert_v2_query_accepted(query):
+    """Check a query against the rules Langfuse enforces on GET /api/public/v2/metrics.
+
+    A query that groups by a high-cardinality dimension must be a top-N query: a row limit of at most 1000,
+    a descending order on one of its metrics, and no time dimension.
+    """
+    assert query["view"] in _V2_VIEWS
+    assert query["metrics"], "at least one metric is required"
+    for metric in query["metrics"]:
+        assert metric["aggregation"] in _V2_AGGREGATIONS
+    assert query["fromTimestamp"] < query["toTimestamp"]
+    dimensions = {d["field"] for d in query.get("dimensions", [])}
+    if not dimensions & _V2_HIGH_CARDINALITY:
+        return
+    row_limit = (query.get("config") or {}).get("row_limit")
+    assert isinstance(row_limit, int) and 1 <= row_limit <= _V2_MAX_ROW_LIMIT, "row_limit must be 1 to 1000"
+    metric_names = {f"{m['aggregation']}_{m['measure']}" for m in query["metrics"]}
+    descending = [o for o in query.get("orderBy") or [] if o["direction"] == "desc" and o["field"] in metric_names]
+    assert descending, "orderBy must be descending on one of the query's metrics"
+    assert not query.get("timeDimension"), "a time dimension cannot be combined with a high-cardinality dimension"
+
+
+def make_v2_metrics_row(user="u1", model="gpt-4", tokens=100, cost=0.5, count=1):
+    return {
+        "userId": user,
+        "providedModelName": model,
+        "sum_totalTokens": tokens,
+        "sum_totalCost": cost,
+        "count_count": count,
+    }
+
+
+class FakeMetricsResponse:
+    def __init__(self, status_code=200, body=None, text=""):
+        self.status_code = status_code
+        self._body = {"data": []} if body is None else body
+        self.text = text
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        if not self.ok:
+            import requests
+
+            raise requests.HTTPError(f"{self.status_code} Client Error: test")
+
+
+def _fetch(query, response):
+    from open_webui.langfuse import metrics as m
+
+    with patch.object(m.requests, "get", return_value=response) as get:
+        rows = m.fetch_metrics("https://h", {"Authorization": "Basic x"}, query, timeout=7)
+    return rows, get
+
+
+def _query():
+    from open_webui.langfuse.metrics import build_metrics_query
+
+    return build_metrics_query("2026-11-01T00:00:00Z", "2026-11-07T23:59:59Z")
+
+
+def test_built_query_is_accepted_by_the_top_n_rules():
+    assert_v2_query_accepted(_query())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda q: q.pop("config"),
+        lambda q: q["config"].update(row_limit=1001),
+        lambda q: q["config"].update(row_limit=0),
+        lambda q: q["config"].update(row_limit="1000"),
+        lambda q: q.pop("orderBy"),
+        lambda q: q["orderBy"][0].update(direction="asc"),
+        lambda q: q["orderBy"][0].update(field="userId"),
+        lambda q: q.update(timeDimension={"granularity": "day"}),
+        lambda q: q.update(view="traces"),
+    ],
+)
+def test_rule_check_rejects_a_query_langfuse_would_refuse(change):
+    q = _query()
+    change(q)
+    with pytest.raises(AssertionError):
+        assert_v2_query_accepted(q)
+
+
+def test_query_orders_by_total_cost_descending_with_the_maximum_row_limit():
+    q = _query()
+    assert q["orderBy"] == [{"field": "sum_totalCost", "direction": "desc"}]
+    assert q["config"] == {"row_limit": 1000}
+    assert "timeDimension" not in q
+
+
+def test_request_goes_to_the_v2_endpoint_with_the_query_as_json():
+    q = _query()
+    _, get = _fetch(q, FakeMetricsResponse(body={"data": [make_v2_metrics_row()]}))
+    args, kwargs = get.call_args
+    assert args == ("https://h/api/public/v2/metrics",)
+    assert json.loads(kwargs["params"]["query"]) == q
+    assert kwargs["headers"] == {"Authorization": "Basic x"}
+    assert kwargs["timeout"] == 7
+
+
+def test_rows_are_returned_from_the_data_key():
+    rows, _ = _fetch(_query(), FakeMetricsResponse(body={"data": [make_v2_metrics_row(user="a")]}))
+    assert rows == [make_v2_metrics_row(user="a")]
+
+
+def test_a_response_without_data_gives_no_rows():
+    rows, _ = _fetch(_query(), FakeMetricsResponse(body={}))
+    assert rows == []
+
+
+def _rows(count, user_format="secret-user-{}@example.test"):
+    return [make_v2_metrics_row(user=user_format.format(i)) for i in range(count)]
+
+
+@pytest.fixture
+def fresh_counter():
+    from open_webui.langfuse import metrics as m
+
+    previous = m._truncated_total
+    m._truncated_total = 0
+    yield m
+    m._truncated_total = previous
+
+
+def test_a_result_below_the_row_limit_is_returned(caplog):
+    with caplog.at_level("DEBUG", logger="open_webui.langfuse.metrics"):
+        rows, _ = _fetch(_query(), FakeMetricsResponse(body={"data": _rows(999)}))
+    assert len(rows) == 999
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("count", [1000, 1001])
+def test_a_result_at_or_above_the_row_limit_raises(count):
+    from open_webui.langfuse.metrics import MetricsTruncated
+
+    with pytest.raises(MetricsTruncated) as exc:
+        _fetch(_query(), FakeMetricsResponse(body={"data": _rows(count)}))
+    assert str(exc.value) == (
+        f"Langfuse metrics returned {count} rows, the row limit of 1000; the result may be incomplete."
+    )
+
+
+def test_the_row_limit_comes_from_the_query_not_from_a_constant():
+    from open_webui.langfuse.metrics import MetricsTruncated
+
+    q = _query()
+    q["config"]["row_limit"] = 5
+    rows, _ = _fetch(q, FakeMetricsResponse(body={"data": _rows(4)}))
+    assert len(rows) == 4
+    with pytest.raises(MetricsTruncated, match="5 rows, the row limit of 5"):
+        _fetch(q, FakeMetricsResponse(body={"data": _rows(5)}))
+
+
+def test_the_log_names_the_returned_count_and_the_limit_separately(caplog, fresh_counter):
+    from open_webui.langfuse.metrics import MetricsTruncated
+
+    q = _query()
+    q["config"]["row_limit"] = 5
+    with caplog.at_level("ERROR", logger="open_webui.langfuse.metrics"):
+        with pytest.raises(MetricsTruncated):
+            _fetch(q, FakeMetricsResponse(body={"data": _rows(7)}))
+    assert "returned 7 rows, the row limit of 5, for the window" in caplog.text
+
+
+def test_a_query_without_a_row_limit_never_raises():
+    q = _query()
+    q.pop("config")
+    rows, _ = _fetch(q, FakeMetricsResponse(body={"data": _rows(1000)}))
+    assert len(rows) == 1000
+
+
+def test_the_error_log_has_counts_and_the_window_but_no_user_ids(caplog, fresh_counter):
+    from open_webui.langfuse.metrics import MetricsTruncated
+
+    with caplog.at_level("ERROR", logger="open_webui.langfuse.metrics"):
+        with pytest.raises(MetricsTruncated):
+            _fetch(_query(), FakeMetricsResponse(body={"data": _rows(1000)}))
+    assert caplog.text.count("returned 1000 rows, the row limit of 1000") == 1
+    assert "for the window 2026-11-01T00:00:00Z to 2026-11-07T23:59:59Z" in caplog.text
+    assert "the result is not used (occurrences since start: 1)" in caplog.text
+    assert "secret-user" not in caplog.text and "example.test" not in caplog.text
+
+
+def test_each_truncated_result_increments_the_counter(caplog, fresh_counter):
+    from open_webui.langfuse.metrics import MetricsTruncated
+
+    assert fresh_counter._truncated_total == 0
+    for expected in (1, 2, 3):
+        with caplog.at_level("ERROR", logger="open_webui.langfuse.metrics"):
+            with pytest.raises(MetricsTruncated):
+                _fetch(_query(), FakeMetricsResponse(body={"data": _rows(1000)}))
+        assert fresh_counter._truncated_total == expected
+        assert f"(occurrences since start: {expected})" in caplog.text
+
+
+def test_a_result_below_the_limit_does_not_touch_the_counter(fresh_counter):
+    _fetch(_query(), FakeMetricsResponse(body={"data": _rows(999)}))
+    assert fresh_counter._truncated_total == 0
+
+
+def _admin():
+    return type("C", (), {"role": "admin", "id": "a1", "email": "admin@example.test"})()
+
+
+def _truncating_langfuse():
+    from open_webui.langfuse import metrics as m
+
+    return (
+        patch.object(m, "load_env", return_value=("pk", "sk", "https://h")),
+        patch.object(m.requests, "get", return_value=FakeMetricsResponse(body={"data": _rows(1000)})),
+    )
+
+
+def test_the_metrics_route_answers_502_with_a_general_message_when_the_result_is_truncated(caplog):
+    import asyncio
+
+    from fastapi import HTTPException
+    from open_webui.routers.langfuse import get_langfuse_metrics
+
+    env, get = _truncating_langfuse()
+    with env, get, caplog.at_level("ERROR"):
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(get_langfuse_metrics(period="week", days=None, team_id=None, user=_admin(), db=None))
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == (
+        "Failed to fetch Langfuse metrics: Langfuse metrics returned 1000 rows, the row limit of 1000; "
+        "the result may be incomplete."
+    )
+    assert "secret-user" not in exc.value.detail and "secret-user" not in caplog.text
+
+
+def test_the_my_usage_route_also_answers_502_when_the_result_is_truncated():
+    import asyncio
+
+    from fastapi import HTTPException
+    from open_webui.routers.langfuse import get_my_langfuse_usage
+
+    env, get = _truncating_langfuse()
+    with env, get:
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(get_my_langfuse_usage(user=_admin()))
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail.startswith("Failed to fetch Langfuse usage: Langfuse metrics returned 1000 rows")
+    assert "secret-user" not in exc.value.detail
+
+
+@pytest.mark.parametrize("status", [400, 401, 410, 429, 500])
+def test_an_error_status_raises(status):
+    import requests
+
+    with pytest.raises(requests.HTTPError, match=str(status)):
+        _fetch(_query(), FakeMetricsResponse(status_code=status, text="x"))
+
+
+def test_an_error_response_body_is_logged_truncated(caplog):
+    text = "High cardinality dimension(s) 'userId' require both 'config.row_limit' and 'orderBy'." + "z" * 500
+    with caplog.at_level("ERROR", logger="open_webui.langfuse.metrics"):
+        with pytest.raises(Exception):
+            _fetch(_query(), FakeMetricsResponse(status_code=400, text=text))
+    assert "failed: 400 High cardinality dimension(s) 'userId'" in caplog.text
+    assert text[:300] in caplog.text
+    assert text[:301] not in caplog.text
+
+
+def test_a_successful_response_logs_no_error(caplog):
+    with caplog.at_level("DEBUG", logger="open_webui.langfuse.metrics"):
+        _fetch(_query(), FakeMetricsResponse(body={"data": [make_v2_metrics_row()]}))
+    assert caplog.text == ""
+
+
+def test_parse_rows_handles_the_v2_row_shapes():
+    raw = [
+        make_v2_metrics_row(user="a", model="gpt-4", tokens=10, cost=0, count=2),
+        make_v2_metrics_row(user="a", model=None, tokens=0, cost=0, count=4),
+        make_v2_metrics_row(user="b", model="m", tokens=5, cost=None, count=1),
+    ]
+    assert parse_rows(raw) == [
+        {"user": "a", "model": "gpt-4", "tokens": 10, "cost": 0.0, "observations": 2},
+        {"user": "b", "model": "m", "tokens": 5, "cost": 0.0, "observations": 1},
+    ]
+
+
+def test_a_period_getter_sends_a_valid_v2_query_and_returns_parsed_rows():
+    from open_webui.langfuse import metrics as m
+
+    response = FakeMetricsResponse(body={"data": [make_v2_metrics_row(user="a", tokens=7, cost=1, count=3)]})
+    with patch.object(m, "load_env", return_value=("pk", "sk", "https://h")), \
+         patch.object(m.requests, "get", return_value=response) as get:
+        from_ts, to_ts, rows = m.get_last_week()
+
+    sent = json.loads(get.call_args.kwargs["params"]["query"])
+    assert_v2_query_accepted(sent)
+    assert (sent["fromTimestamp"], sent["toTimestamp"]) == (from_ts, to_ts)
+    assert get.call_args.args == ("https://h/api/public/v2/metrics",)
+    assert rows == [{"user": "a", "model": "gpt-4", "tokens": 7, "cost": 1.0, "observations": 3}]
+
+
+def test_the_request_timeout_defaults_to_30_seconds():
+    from open_webui.langfuse import metrics as m
+
+    with patch.object(m.requests, "get", return_value=FakeMetricsResponse()) as get:
+        m.fetch_metrics("https://h", {}, _query())
+    assert get.call_args.kwargs["timeout"] == 30
+
+
+@pytest.mark.parametrize("count", [{}, {"count_count": None}])
+def test_a_row_without_an_observation_count_reports_zero(count):
+    raw = [{"userId": "u", "providedModelName": "m", "sum_totalTokens": 5, "sum_totalCost": 0.1, **count}]
+    assert parse_rows(raw)[0]["observations"] == 0

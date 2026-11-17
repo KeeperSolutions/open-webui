@@ -1,10 +1,27 @@
 import os
 import json
 import base64
+import logging
+import threading
 import datetime as dt
 import requests
 from typing import Dict, Any, List, Tuple
 from dotenv import load_dotenv
+
+log = logging.getLogger(__name__)
+
+_METRICS_PATH = "/api/public/v2/metrics"
+# Langfuse accepts a query grouped by userId only as a top-N query: an explicit row limit (at most 1000),
+# a descending order on a metric, and no time dimension. Users and models beyond the limit are not returned.
+_ROW_LIMIT = 1000
+_ERROR_BODY_CHARS = 300
+
+_state_lock = threading.Lock()
+_truncated_total = 0
+
+
+class MetricsTruncated(RuntimeError):
+    """The result reached the row limit, so users and models beyond it may be missing."""
 
 # ---------- env & auth ----------
 
@@ -98,6 +115,8 @@ def build_metrics_query(from_ts: str, to_ts: str) -> Dict[str, Any]:
         ],
         "fromTimestamp": from_ts,
         "toTimestamp": to_ts,
+        "orderBy": [{"field": "sum_totalCost", "direction": "desc"}],
+        "config": {"row_limit": _ROW_LIMIT},
     }
 
 
@@ -105,21 +124,41 @@ def fetch_metrics(
     host: str, headers: Dict[str, str], query: Dict[str, Any], timeout: int = 30
 ) -> List[Dict[str, Any]]:
     resp = requests.get(
-        f"{host}/api/public/metrics",
+        f"{host}{_METRICS_PATH}",
         headers=headers,
         params={"query": json.dumps(query)},
         timeout=timeout,
     )
+    if not resp.ok:
+        log.error("Langfuse metrics request failed: %s %s", resp.status_code, resp.text[:_ERROR_BODY_CHARS])
     resp.raise_for_status()
-    return resp.json().get("data", [])
+    rows = resp.json().get("data", [])
+    row_limit = (query.get("config") or {}).get("row_limit")
+    if row_limit and len(rows) >= row_limit:
+        global _truncated_total
+        with _state_lock:
+            _truncated_total += 1
+            occurrences = _truncated_total
+        window = f"{query.get('fromTimestamp')} to {query.get('toTimestamp')}"
+        log.error(
+            "Langfuse metrics returned %d rows, the row limit of %d, for the window %s; "
+            "the result is not used (occurrences since start: %d)",
+            len(rows),
+            row_limit,
+            window,
+            occurrences,
+        )
+        raise MetricsTruncated(
+            f"Langfuse metrics returned {len(rows)} rows, the row limit of {row_limit}; the result may be incomplete."
+        )
+    return rows
 
 
 _COST_EPSILON = 1e-9  # treat sub-nanodollar values as zero (API rounding noise)
 
 
 def parse_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    # Filters out zero-activity cross-product rows the Langfuse metrics API
-    # emits for every userId × model combination, even unused ones.
+    # Drops rows with no tokens and no cost, such as observations that have no model.
     # Negative costs (refunds) are intentionally kept.
     out = []
     for row in rows:
