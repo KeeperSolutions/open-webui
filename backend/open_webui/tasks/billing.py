@@ -19,6 +19,60 @@ def _seconds_until_next_midnight_utc() -> float:
     return (tomorrow - now).total_seconds()
 
 
+def _sync_and_log(since: datetime.datetime, *, deep_rescan: bool = False) -> int:
+    """Run one ledger sync and log how many fetched observations were inserted and how many ignored.
+
+    An ignored observation was already in the ledger. Only counts are logged.
+    """
+    from open_webui.langfuse import observations
+
+    observations.reset_fetch_stats()
+    inserted = _sync_observations(since, deep_rescan=deep_rescan)
+    fetched = observations.last_fetch_count()
+    if fetched is not None:
+        log.info(
+            "[ledger-poller] %s: fetched=%d inserted=%d ignored=%d",
+            "rescan" if deep_rescan else "poll",
+            fetched,
+            inserted,
+            max(fetched - inserted, 0),
+        )
+    return inserted
+
+
+# Each poll re-reads observations from this many minutes before the newest stored one. An observation
+# can become visible in Langfuse after a newer one is already stored (up to about 15 minutes for
+# langfuse-python before 4.7.0), so a shorter overlap would skip it.
+_DEFAULT_OVERLAP_MINUTES = 30
+_MAX_OVERLAP_MINUTES = 7 * 24 * 60
+_warned_overlap_values: Set[str] = set()
+
+
+def _overlap_minutes() -> int:
+    """Return LEDGER_OVERLAP_MINUTES, or the default when it is unset or not an integer from 1 to 10080.
+
+    An invalid value is reported once per distinct value and does not stop the poller.
+    """
+    raw = os.environ.get("LEDGER_OVERLAP_MINUTES")
+    if raw is None or not raw.strip():
+        return _DEFAULT_OVERLAP_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if 1 <= value <= _MAX_OVERLAP_MINUTES:
+        return value
+    if raw not in _warned_overlap_values:
+        _warned_overlap_values.add(raw)
+        log.warning(
+            "[ledger-poller] LEDGER_OVERLAP_MINUTES=%r is not an integer from 1 to %d; using %d.",
+            raw,
+            _MAX_OVERLAP_MINUTES,
+            _DEFAULT_OVERLAP_MINUTES,
+        )
+    return _DEFAULT_OVERLAP_MINUTES
+
+
 async def periodic_nightly_deep_rescan():
     """
     Async task that wakes daily at UTC midnight and runs a 7-day deep rescan of
@@ -40,7 +94,7 @@ async def periodic_nightly_deep_rescan():
             loop = asyncio.get_running_loop()
             rescan_since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
             log.info("[nightly-rescan] Starting deep rescan from %s.", rescan_since.isoformat())
-            await loop.run_in_executor(None, lambda: _sync_observations(rescan_since, deep_rescan=True))
+            await loop.run_in_executor(None, lambda: _sync_and_log(rescan_since, deep_rescan=True))
         except Exception as e:
             log.error(f"[nightly-rescan] Deep rescan failed: {e}")
 
@@ -340,9 +394,8 @@ async def periodic_ledger_poller():
                     )
                 log.info("[ledger-poller] Watermark initialised: %s", watermark.isoformat())
 
-            # 2-minute overlap to catch late-arriving Langfuse writes
-            since = watermark - datetime.timedelta(minutes=2)
-            await loop.run_in_executor(None, _sync_observations, since)
+            since = watermark - datetime.timedelta(minutes=_overlap_minutes())
+            await loop.run_in_executor(None, _sync_and_log, since)
 
             # Reload watermark from DB after sync
             max_ts = UsageLedgerDB.get_max_observed_at()
