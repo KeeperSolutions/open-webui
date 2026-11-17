@@ -216,12 +216,3 @@ def get_custom_days(days: int) -> PeriodResult:
 
 def get_current_month() -> PeriodResult:
     return _fetch_window(*current_month_window())
-
-
-def get_alltime_since(since: dt.datetime) -> List[Dict[str, Any]]:
-    """Fetch all Langfuse metrics from `since` up to now."""
-    pk, sk, host = load_env()
-    headers = auth_header(pk, sk)
-    from_ts = _isoformat_utc(since)
-    to_ts = _isoformat_utc(_now_utc_naive())
-    return parse_rows(fetch_metrics(host, headers, build_metrics_query(from_ts, to_ts)))
